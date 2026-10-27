@@ -18,9 +18,5 @@ public class ModularMachineClient {
     }
 
     @SubscribeEvent
-    static void onClientSetup(FMLClientSetupEvent event) {
-        // Some client setup code
-        ModularMachine.LOGGER.info("HELLO FROM CLIENT SETUP");
-        ModularMachine.LOGGER.info("MINECRAFT NAME >> {}", Minecraft.getInstance().getUser().getName());
-    }
+    static void onClientSetup(FMLClientSetupEvent event) {}
 }

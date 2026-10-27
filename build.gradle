@@ -20,6 +20,37 @@ sourceSets.main.resources {
 }
 
 repositories {
+    maven {
+        name = 'BlameJared'
+        url = 'https://maven.blamejared.com'
+    }
+
+    maven {
+        name = 'Curios'
+        url = 'https://maven.theillusivec4.top/'
+        content {
+            includeGroup 'top.theillusivec4.curios'
+        }
+    }
+
+    maven {
+        name = 'LatvianMods'
+        url = 'https://maven.latvian.dev/releases'
+        content {
+            includeGroup 'dev.latvian.mods'
+        }
+    }
+
+    exclusiveContent {
+        forRepository {
+            maven {
+                url = 'https://cursemaven.com/'
+            }
+        }
+        filter {
+            includeGroup 'curse.maven'
+        }
+    }
 }
 
 base {
@@ -76,27 +107,33 @@ configurations {
 }
 
 dependencies {
-    // Example optional mod dependency with JEI
-    // The JEI API is declared for compile time use, while the full JEI artifact is used at runtime
-    // compileOnly "mezz.jei:jei-${mc_version}-common-api:${jei_version}"
-    // compileOnly "mezz.jei:jei-${mc_version}-neoforge-api:${jei_version}"
-    // We add the full version to localRuntime, not runtimeOnly, so that we do not publish a dependency on it
-    // localRuntime "mezz.jei:jei-${mc_version}-neoforge:${jei_version}"
+    // Required tooltip integration, present at compile time and runtime.
+    implementation "curse.maven:jade-324717:${jade_file_id}"
+    implementation "curse.maven:kubejs-238086:${kubejs_file_id}"
 
-    // Example mod dependency using a mod jar from ./libs with a flat dir repository
-    // This maps to ./libs/coolmod-${mc_version}-${coolmod_version}.jar
-    // The group id is ignored when searching -- in this case, it is "blank"
-    // implementation "blank:coolmod-${mc_version}:${coolmod_version}"
+    compileOnly "mezz.jei:jei-1.21.1-neoforge-api:${jei_version}"
+    compileOnly "dev.latvian.mods:rhino:${rhino_version}"
+    compileOnly "curse.maven:applied-energistics-2-223794:${ae2_file_id}"
+    compileOnly "curse.maven:guideme-1173950:${guideme_file_id}"
+    compileOnly "curse.maven:neovitae-1404763:${neovitae_file_id}"
+    compileOnly "curse.maven:natures-aura-306626:${natures_aura_file_id}"
+    compileOnly "curse.maven:astral-sorcery-241721:${astral_sorcery_file_id}"
+    compileOnly "curse.maven:geckolib-388172:${geckolib_file_id}"
+    compileOnly "curse.maven:modonomicon-538392:${modonomicon_file_id}"
+    compileOnly "curse.maven:observerlib-316833:${observerlib_file_id}"
+    compileOnly("vazkii.botania:botania-neoforge-1.21.1:${botania_version}") {exclude group: 'mezz.jei'}
 
-    // Example mod dependency using a file as dependency
-    // implementation files("libs/coolmod-${mc_version}-${coolmod_version}.jar")
-
-    // Example project dependency using a sister or child project:
-    // implementation project(":myproject")
-
-    // For more info:
-    // http://www.gradle.org/docs/current/userguide/artifact_dependencies_tutorial.html
-    // http://www.gradle.org/docs/current/userguide/dependency_management.html
+    localRuntime "mezz.jei:jei-1.21.1-neoforge:${jei_version}"
+    localRuntime "dev.latvian.mods:rhino:${rhino_version}"
+    localRuntime "curse.maven:applied-energistics-2-223794:${ae2_file_id}"
+    localRuntime "curse.maven:guideme-1173950:${guideme_file_id}"
+    localRuntime "curse.maven:neovitae-1404763:${neovitae_file_id}"
+    localRuntime "curse.maven:natures-aura-306626:${natures_aura_file_id}"
+    localRuntime "curse.maven:astral-sorcery-241721:${astral_sorcery_file_id}"
+    localRuntime "curse.maven:geckolib-388172:${geckolib_file_id}"
+    localRuntime "curse.maven:modonomicon-538392:${modonomicon_file_id}"
+    localRuntime "curse.maven:observerlib-316833:${observerlib_file_id}"
+    localRuntime("vazkii.botania:botania-neoforge-1.21.1:${botania_version}") {exclude group: 'mezz.jei'}
 }
 
 tasks.named('processResources', ProcessResources).configure {

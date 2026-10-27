@@ -24,3 +24,61 @@ Retain Its Original Flavor MMCE
     versionRange="${minecraft_version_range}"
     ordering="NONE"
     side="BOTH"
+
+# Required integrations. JEI is required on clients, not on dedicated servers.
+[[dependencies.${mod_id}]]
+    modId="ae2"
+    type="required"
+    versionRange="[19.2.18,)"
+    ordering="AFTER"
+    side="BOTH"
+
+[[dependencies.${mod_id}]]
+    modId="kubejs"
+    type="required"
+    versionRange="[2101.7.2-build.377,)"
+    ordering="AFTER"
+    side="BOTH"
+
+[[dependencies.${mod_id}]]
+    modId="jei"
+    type="required"
+    versionRange="[19.70.0.460,)"
+    ordering="AFTER"
+    side="CLIENT"
+
+[[dependencies.${mod_id}]]
+    modId="jade"
+    type="required"
+    versionRange="*"
+    ordering="AFTER"
+    side="BOTH"
+
+# Optional integrations remain available through compileOnly + localRuntime in Gradle.
+[[dependencies.${mod_id}]]
+    modId="botania"
+    type="optional"
+    versionRange="[454-SNAPSHOT,)"
+    ordering="AFTER"
+    side="BOTH"
+
+[[dependencies.${mod_id}]]
+    modId="neovitae"
+    type="optional"
+    versionRange="[1.1.48,)"
+    ordering="AFTER"
+    side="BOTH"
+
+[[dependencies.${mod_id}]]
+    modId="naturesaura"
+    type="optional"
+    versionRange="[41.10,)"
+    ordering="AFTER"
+    side="BOTH"
+
+[[dependencies.${mod_id}]]
+    modId="astralsorcery"
+    type="optional"
+    versionRange="[2.0.3,)"
+    ordering="AFTER"
+    side="BOTH"
