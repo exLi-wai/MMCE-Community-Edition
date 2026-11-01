@@ -1,0 +1,9 @@
+{
+  "schema_version": 1,
+  "parts": [
+    { "offset": [-1, 0, 1], "port": "energy_input" },
+    { "offset": [1, 0, 1], "port": "energy_output" },
+    { "offset": [0, 1, 1], "block": "mmcece:test_reentrant_predicate", "properties": { "facing": "north" } }
+  ],
+  "operation": { "type": "energy_transfer", "energy_per_tick": 128 }
+}

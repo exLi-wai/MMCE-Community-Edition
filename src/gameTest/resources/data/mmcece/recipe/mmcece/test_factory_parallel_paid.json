@@ -1,0 +1,9 @@
+{
+  "type": "mmcece:machine_item",
+  "schema_version": 2,
+  "machine": "mmcece:test_factory_parallel_paid",
+  "duration": 5,
+  "energy_per_tick": 1,
+  "inputs": [{"stack": {"id": "minecraft:dirt"}, "amount": 1}],
+  "outputs": [{"stack": {"id": "minecraft:iron_ingot"}, "amount": 1}]
+}

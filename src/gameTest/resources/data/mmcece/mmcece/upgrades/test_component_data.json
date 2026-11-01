@@ -1,0 +1,6 @@
+{
+  "schema_version": 1,
+  "item": "minecraft:paper",
+  "components": {"minecraft:custom_data": "{variant:1}"},
+  "parallel_add": 2
+}

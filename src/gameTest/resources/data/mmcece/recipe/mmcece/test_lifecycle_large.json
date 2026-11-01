@@ -1,0 +1,8 @@
+{
+  "type": "mmcece:machine_item",
+  "schema_version": 2,
+  "machine": "mmcece:test_recipe_lifecycle",
+  "duration": 8,
+  "inputs": [{"stack": {"id": "minecraft:gravel"}, "amount": 1}],
+  "outputs": [{"stack": {"id": "minecraft:iron_ingot"}, "amount": 70}]
+}

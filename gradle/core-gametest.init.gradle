@@ -1,0 +1,26 @@
+// Test-only runtime profile. Default development runs still load optional integrations.
+allprojects {
+    afterEvaluate {
+        if (extensions.findByName('neoForge') != null) {
+            def optionalMods = [
+                'curse.maven:neovitae-1404763',
+                'curse.maven:natures-aura-306626',
+                'curse.maven:astral-sorcery-241721',
+                'curse.maven:geckolib-388172',
+                'curse.maven:modonomicon-538392',
+                'curse.maven:observerlib-316833',
+                'vazkii.botania:botania-neoforge-1.21.1'
+            ] as Set
+            configurations.named('localRuntime') {
+                withDependencies { dependencies ->
+                    dependencies.removeAll { dependency -> optionalMods.contains(dependency.group + ':' + dependency.name) }
+                }
+            }
+            neoForge.runs.named('gameTestServer') {
+                gameDirectory = project.file(providers.gradleProperty('paidRunRestartPhase').isPresent()
+                    ? 'build/gametest-restart' : 'build/gametest-core')
+                logLevel = org.slf4j.event.Level.INFO
+            }
+        }
+    }
+}

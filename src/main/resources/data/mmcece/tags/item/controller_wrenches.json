@@ -1,0 +1,9 @@
+{
+  "replace": false,
+  "values": [ "mmcece:machine_wrench",
+    {
+      "id": "#mmcece:controller_wrench_extensions",
+      "required": false
+    }
+  ]
+}

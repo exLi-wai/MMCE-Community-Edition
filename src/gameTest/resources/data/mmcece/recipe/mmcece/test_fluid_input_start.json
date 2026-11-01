@@ -1,0 +1,12 @@
+{
+  "type": "mmcece:machine_item",
+  "schema_version": 2,
+  "machine": "mmcece:test_recipe_energy_lifecycle",
+  "duration": 1,
+  "fluid_inputs": [
+    {"id": "minecraft:water", "amount": 20},
+    {"id": "minecraft:water", "amount": 20}
+  ],
+  "inputs": [{"stack": {"id": "minecraft:ender_pearl"}, "amount": 1}],
+  "outputs": [{"stack": {"id": "minecraft:quartz"}, "amount": 1}]
+}

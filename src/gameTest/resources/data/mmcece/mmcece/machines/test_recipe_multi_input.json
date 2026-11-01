@@ -1,0 +1,9 @@
+{
+  "schema_version": 2,
+  "orientation": {"policy": "all_24"},
+  "parts": [
+    {"part_id": "input_a", "offset": [-1, 0, 1], "port": "item_input"},
+    {"part_id": "input_b", "offset": [-1, 1, 1], "port": "item_input"},
+    {"part_id": "output", "offset": [1, 0, 1], "port": "item_output"}
+  ]
+}

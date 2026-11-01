@@ -1,0 +1,7 @@
+{
+  "parent": "mmcece:block/ported_shell",
+  "textures": {
+    "overlay": "mmcece:block/overlay_parallel_controller_super",
+    "casing": "mmcece:block/blockcasing_plain"
+  }
+}

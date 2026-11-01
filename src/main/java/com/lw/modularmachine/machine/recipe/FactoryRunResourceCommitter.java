@@ -1,0 +1,253 @@
+package com.lw.modularmachine.machine.recipe;
+
+import com.lw.modularmachine.ModularMachine;
+import com.lw.modularmachine.blockentity.FactoryControllerBlockEntity;
+import com.lw.modularmachine.blockentity.MachinePortBlockEntity;
+import com.lw.modularmachine.blockentity.UpgradeBusBlockEntity.StartCostLease;
+import com.lw.modularmachine.machine.PortKind;
+import com.lw.modularmachine.machine.factory.FactoryUpgradeEvents;
+import com.lw.modularmachine.machine.factory.FactoryUpgradeRuntimeData.Phase;
+import com.lw.modularmachine.machine.factory.FactoryUpgradeStartCosts;
+import com.lw.modularmachine.machine.factory.FactoryUpgradeTickCosts;
+import java.util.ArrayList;
+import java.util.List;
+import java.util.Optional;
+import net.minecraft.server.level.ServerLevel;
+import net.neoforged.neoforge.fluids.FluidStack;
+
+/** Atomic FE/t and fluid/t fee transaction for one factory run. */
+public final class FactoryRunResourceCommitter {
+  public enum Result {
+    ADVANCED,
+    WAITING_ENERGY,
+    WAITING_FLUID,
+    WAITING_UPGRADE,
+    UPGRADE_ERROR,
+    STALE,
+    UPGRADE_PENDING
+  }
+
+  private FactoryRunResourceCommitter() {
+  }
+
+  public static Result tick(FactoryControllerBlockEntity factory, String threadId, FrozenItemRun run) {
+    if (!(factory.getLevel() instanceof ServerLevel level)
+        || run.pendingOutput()
+        || FactoryUpgradeEvents.isDispatching(factory)) {
+      return Result.STALE;
+    }
+    if (!factory.canCommitStructure() || !run.matchesBindings(factory.registration().pattern.definition)) {
+      return Result.STALE;
+    }
+    if (run.lastProgressTick() == level.getGameTime()) {
+      return Result.STALE;
+    }
+    var tickCosts = factory.upgradeRuntimeWork().prepare(threadId, List.of(run));
+    if (tickCosts.status() == FactoryUpgradeTickCosts.Status.INSUFFICIENT) {
+      return Result.WAITING_UPGRADE;
+    }
+    if (tickCosts.status() == FactoryUpgradeTickCosts.Status.PENDING) {
+      return Result.UPGRADE_PENDING;
+    }
+    if (tickCosts.status() != FactoryUpgradeTickCosts.Status.READY) {
+      return Result.UPGRADE_ERROR;
+    }
+    var beforeTick = run;
+    RecipeExecutionTicket energyTicket = null;
+    RecipeExecutionTicket fluidTicket = null;
+    List<EnergyDebit> energyDebits = List.of();
+    List<FluidDebit> fluidDebits = List.of();
+    if (run.energyPerTick() > 0) {
+      energyTicket = RecipeExecutionTicket.captureEnergyInputs(factory).orElse(null);
+      if (energyTicket == null) {
+        return Result.WAITING_ENERGY;
+      }
+      energyDebits = planEnergyDebits(energyTicket, run.energyPerTick(), run.selectors().energyInput());
+      if (energyDebits == null) {
+        return applyResourceFailure(factory, threadId, run, level.getGameTime(), Result.WAITING_ENERGY);
+      }
+    }
+    var fluidFee = run.fluidPerTick(level.registryAccess());
+    if (!fluidFee.isEmpty()) {
+      fluidTicket = RecipeExecutionTicket.captureFluidInputs(factory).orElse(null);
+      if (fluidTicket == null) {
+        return Result.WAITING_FLUID;
+      }
+      if (!run.matchesInputGroups(fluidTicket)) {
+        return Result.STALE;
+      }
+      fluidTicket = fluidTicket.withInputGroup(run.inputGroup());
+      fluidDebits = planFluidDebits(fluidTicket, fluidFee, run.selectors().fluidPerTick());
+      if (fluidDebits == null) {
+        return applyResourceFailure(factory, threadId, run, level.getGameTime(), Result.WAITING_FLUID);
+      }
+    }
+    if (energyTicket == null && fluidTicket == null && !tickCosts.hasRuntimeWork()) {
+      return Result.STALE;
+    }
+    var energyLeases = new ArrayList<MachinePortBlockEntity.EnergyStartLease>();
+    var fluidLeases = new ArrayList<MachinePortBlockEntity.FluidStartLease>();
+    var tickCostLeases = new ArrayList<StartCostLease>();
+    boolean committed = false;
+    try {
+      if (!tickCosts.current()
+          || energyTicket == null && fluidTicket == null && !factory.revalidateStructure(factory.registration())
+          || energyTicket != null && !RecipeCommitGuard.validate(energyTicket)
+          || fluidTicket != null && !RecipeCommitGuard.validate(fluidTicket)
+          || !tickCosts.versionsCurrent()) {
+        return Result.STALE;
+      }
+      tickCosts.acquireInto(tickCostLeases);
+      for (var debit : energyDebits) {
+        energyLeases.add(debit.port().identity().acquireEnergyStart(debit.port().revision()));
+      }
+      for (int index = 0; index < energyDebits.size(); index++) {
+        var debit = energyDebits.get(index);
+        if (!energyLeases.get(index).extractExact(debit.amount())) {
+          return Result.STALE;
+        }
+      }
+      for (var debit : fluidDebits) {
+        var lease = debit.port().identity().acquireFluidStart(debit.port().revision());
+        fluidLeases.add(lease);
+        if (!lease.drainExact(debit.amount())) {
+          return Result.STALE;
+        }
+      }
+      var advanced = run.advanced(level.getGameTime());
+      if (advanced == run) {
+        return Result.STALE;
+      }
+      if (advanced.progress() == advanced.duration()) {
+        advanced = advanced.finished();
+      }
+      if (!factory.replaceRunIfSame(threadId, run, advanced)) {
+        return Result.STALE;
+      }
+      committed = true;
+      run = advanced;
+      return Result.ADVANCED;
+    } catch (RuntimeException failure) {
+      ModularMachine.LOGGER.warn("Factory run resource commit failed at {}", factory.getBlockPos(), failure);
+      return Result.STALE;
+    } finally {
+      for (var lease : energyLeases) {
+        lease.resolve(committed);
+      }
+      for (var lease : fluidLeases) {
+        lease.resolve(committed);
+      }
+      for (var lease : tickCostLeases) {
+        lease.resolve(committed);
+      }
+      if (committed) {
+        factory.upgradeRuntimeWork().clear(Phase.TICK, threadId);
+        FactoryUpgradeStartCosts.publish(factory, tickCostLeases);
+        if (RecipeLifecycleEvents.hasListeners(RecipeLifecycleEvents.Type.TICK)) {
+          RecipeLifecycleEvents.advanced(factory, threadId, List.of(beforeTick), List.of(run));
+        }
+        energyLeases.forEach(lease -> {
+          try {
+            lease.publish();
+          } catch (RuntimeException failure) {
+            ModularMachine.LOGGER.warn("Factory energy notification failed", failure);
+          }
+        });
+        fluidLeases.forEach(lease -> {
+          try {
+            lease.publish();
+          } catch (RuntimeException failure) {
+            ModularMachine.LOGGER.warn("Factory fluid notification failed", failure);
+          }
+        });
+        factory.setChanged();
+      }
+    }
+  }
+
+  private static Result applyResourceFailure(FactoryControllerBlockEntity factory, String threadId, FrozenItemRun run, long tick, Result waiting) {
+    var resource = waiting == Result.WAITING_ENERGY ? RecipeLifecycleEvents.ResourceFailure.ENERGY : RecipeLifecycleEvents.ResourceFailure.FLUID;
+    var decision = RecipeLifecycleEvents.decideResourceFailure(factory, Optional.of(threadId), run, resource);
+    if (!factory.canCommitStructure()
+        || factory.runSet(threadId).find(run.runId()).orElse(null) != run
+        || !stillUnavailable(factory, run, resource)) {
+      return Result.STALE;
+    }
+    if (decision == RecipeLifecycleEvents.FailureDecision.DISCARD) {
+      if (factory.removeRunIfSame(threadId, run)) {
+        factory.setChanged();
+        RecipeLifecycleEvents.resourceDiscarded(factory, threadId, List.of(run), resource);
+      }
+      return waiting;
+    }
+    var adjusted = RecipeLifecycleEvents.applyFailureDecision(run, tick, decision);
+    if (adjusted != run && factory.replaceRunIfSame(threadId, run, adjusted)) {
+      factory.setChanged();
+      RecipeLifecycleEvents.resourceFailed(factory, threadId, List.of(run), List.of(adjusted), resource);
+    }
+    return waiting;
+  }
+
+  private static boolean stillUnavailable(FactoryControllerBlockEntity factory, FrozenItemRun run, RecipeLifecycleEvents.ResourceFailure resource) {
+    if (resource == RecipeLifecycleEvents.ResourceFailure.ENERGY) {
+      var ticket = RecipeExecutionTicket.captureEnergyInputs(factory).orElse(null);
+      return ticket != null && planEnergyDebits(ticket, run.energyPerTick(), run.selectors().energyInput()) == null;
+    }
+    var ticket = RecipeExecutionTicket.captureFluidInputs(factory).orElse(null);
+    if (ticket == null || !run.matchesInputGroups(ticket)) {
+      return false;
+    }
+
+    return planFluidDebits(
+        ticket.withInputGroup(run.inputGroup()),
+        run.fluidPerTick(((ServerLevel) factory.getLevel()).registryAccess()),
+        run.selectors().fluidPerTick()) == null;
+  }
+
+  private record EnergyDebit(RecipeExecutionTicket.PortSnapshot port, long amount) {
+  }
+
+  private record FluidDebit(RecipeExecutionTicket.PortSnapshot port, FluidStack amount) {
+  }
+
+  private static List<EnergyDebit> planEnergyDebits(RecipeExecutionTicket ticket, long amount, String selector) {
+    long remaining = amount;
+    var result = new ArrayList<EnergyDebit>();
+    for (var port : ticket.ports()) {
+      if (port.kind() != PortKind.ENERGY_INPUT || !port.selector().equals(selector)) {
+        continue;
+      }
+      long available = Math.min(port.energy(), port.energyExtractable());
+      long take = Math.min(remaining, available);
+      if (take > 0) {
+        result.add(new EnergyDebit(port, take));
+        remaining -= take;
+      }
+      if (remaining == 0) {
+        return List.copyOf(result);
+      }
+    }
+    return null;
+  }
+
+  private static List<FluidDebit> planFluidDebits(RecipeExecutionTicket ticket, FluidStack requirement, String selector) {
+    int remaining = requirement.getAmount();
+    var result = new ArrayList<FluidDebit>();
+    for (var port : ticket.ports()) {
+      if (port.kind() != PortKind.FLUID_INPUT
+          || !port.selector().equals(selector)
+          || !FluidStack.isSameFluidSameComponents(port.fluid(), requirement)) {
+        continue;
+      }
+      int take = Math.min(remaining, port.fluid().getAmount());
+      if (take > 0) {
+        result.add(new FluidDebit(port, requirement.copyWithAmount(take)));
+        remaining -= take;
+      }
+      if (remaining == 0) {
+        return List.copyOf(result);
+      }
+    }
+    return null;
+  }
+}

@@ -1,0 +1,9 @@
+{
+  "type": "mmcece:machine_item",
+  "schema_version": 2,
+  "machine": "mmcece:test_recipe_energy_lifecycle",
+  "duration": 1,
+  "fluid_per_tick": {"id": "minecraft:water", "amount": 50},
+  "inputs": [{"stack": {"id": "minecraft:obsidian"}, "amount": 1}],
+  "outputs": [{"stack": {"id": "minecraft:amethyst_shard"}, "amount": 1}]
+}

@@ -1,0 +1,8 @@
+{
+  "schema_version": 1,
+  "parts": [
+    {"offset": [-1, 0, 1], "port": "item_input"},
+    {"offset": [1, 0, 1], "port": "item_output"},
+    {"offset": [0, 1, 1], "port": "energy_input"}
+  ]
+}

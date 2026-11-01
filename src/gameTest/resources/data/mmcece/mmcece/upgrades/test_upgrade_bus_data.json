@@ -1,0 +1,10 @@
+{
+  "schema_version": 1,
+  "item": "minecraft:glow_ink_sac",
+  "parallel_add": 1,
+  "compatible_machines": ["mmcece:test_upgrade_start_costs"],
+  "dynamic_effect": "mmcece:test_bus_data_effect",
+  "start_cost": {"consume": 1},
+  "start_data_handler": "mmcece:test_bus_item_data",
+  "start_bus_data_handler": "mmcece:test_upgrade_bus_data"
+}

@@ -1,0 +1,7 @@
+{
+  "schema_version": 1,
+  "item": "minecraft:blaze_powder",
+  "parallel_add": 1,
+  "compatible_machines": ["mmcece:test_upgrade_bus_binding"],
+  "dynamic_effect": "mmcece:test_dynamic_effect"
+}

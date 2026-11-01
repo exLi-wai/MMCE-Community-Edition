@@ -1,0 +1,7 @@
+{
+  "schema_version": 1,
+  "item": "minecraft:sugar",
+  "parallel_add": 1,
+  "compatible_machines": ["mmcece:test_upgrade_recipe_checks"],
+  "recipe_check_handler": "mmcece:test_upgrade_recipe_gate"
+}

@@ -1,0 +1,13 @@
+{
+  "type": "mmcece:machine_item",
+  "schema_version": 2,
+  "machine": "mmcece:test_recipe_fluid_allocation",
+  "duration": 1,
+  "inputs": [{"stack": {"id": "minecraft:chorus_fruit"}, "amount": 1}],
+  "outputs": [{"stack": {"id": "minecraft:diamond"}, "amount": 1}],
+  "fluid_outputs": [
+    {"id": "minecraft:water", "amount": 60},
+    {"id": "minecraft:water", "amount": 40},
+    {"id": "minecraft:lava", "amount": 1000}
+  ]
+}

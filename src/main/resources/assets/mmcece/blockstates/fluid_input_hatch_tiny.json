@@ -1,0 +1,7 @@
+{
+  "variants": {
+    "": {
+      "model": "mmcece:block/fluid_input_hatch_tiny"
+    }
+  }
+}

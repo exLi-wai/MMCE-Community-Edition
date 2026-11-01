@@ -1,0 +1,6 @@
+{
+  "textures": {
+    "all": "mmcece:block/blockcasing_plain"
+  },
+  "parent": "minecraft:block/cube_all"
+}

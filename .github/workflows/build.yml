@@ -23,3 +23,6 @@ jobs:
 
       - name: Build with Gradle
         run: ./gradlew build
+
+      - name: Run server game tests
+        run: ./gradlew runGameTestServer --init-script gradle/core-gametest.init.gradle --no-configuration-cache --console=plain

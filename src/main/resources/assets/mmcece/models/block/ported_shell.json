@@ -1,0 +1,85 @@
+{
+  "render_type": "minecraft:cutout",
+  "textures": {
+    "particle": "#casing"
+  },
+  "elements": [
+    {
+      "from": [
+        0,
+        0,
+        0
+      ],
+      "to": [
+        16,
+        16,
+        16
+      ],
+      "faces": {
+        "east": {
+          "cullface": "east",
+          "texture": "#casing"
+        },
+        "west": {
+          "cullface": "west",
+          "texture": "#casing"
+        },
+        "up": {
+          "cullface": "up",
+          "texture": "#casing"
+        },
+        "down": {
+          "cullface": "down",
+          "texture": "#casing"
+        },
+        "south": {
+          "cullface": "south",
+          "texture": "#casing"
+        },
+        "north": {
+          "cullface": "north",
+          "texture": "#casing"
+        }
+      }
+    },
+    {
+      "from": [
+        -0.005,
+        -0.005,
+        -0.005
+      ],
+      "to": [
+        16.005,
+        16.005,
+        16.005
+      ],
+      "faces": {
+        "east": {
+          "cullface": "east",
+          "texture": "#overlay"
+        },
+        "west": {
+          "cullface": "west",
+          "texture": "#overlay"
+        },
+        "up": {
+          "cullface": "up",
+          "texture": "#overlay"
+        },
+        "down": {
+          "cullface": "down",
+          "texture": "#overlay"
+        },
+        "south": {
+          "cullface": "south",
+          "texture": "#overlay"
+        },
+        "north": {
+          "cullface": "north",
+          "texture": "#overlay"
+        }
+      }
+    }
+  ],
+  "parent": "minecraft:block/block"
+}

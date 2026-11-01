@@ -1,0 +1,6 @@
+{
+  "schema_version": 1,
+  "item": "minecraft:glowstone_dust",
+  "compatible_machines": ["mmcece:test_upgrade_compatibility_run"],
+  "lifecycle_handler": "mmcece:test_upgrade_observer"
+}

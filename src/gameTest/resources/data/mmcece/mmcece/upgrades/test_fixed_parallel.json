@@ -1,0 +1,9 @@
+{
+  "schema_version": 1,
+  "item": "minecraft:amethyst_shard",
+  "parallel_add": 2,
+  "energy_numerator": 3,
+  "energy_denominator": 2,
+  "fluid_numerator": 1,
+  "fluid_denominator": 2
+}

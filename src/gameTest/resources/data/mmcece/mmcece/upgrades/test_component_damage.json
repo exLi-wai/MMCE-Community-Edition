@@ -1,0 +1,6 @@
+{
+  "schema_version": 1,
+  "item": "minecraft:iron_pickaxe",
+  "components": {"minecraft:damage": 4},
+  "parallel_add": 6
+}

@@ -1,0 +1,9 @@
+{
+  "type": "mmcece:machine_item",
+  "schema_version": 2,
+  "neoforge:conditions": [{"type": "neoforge:mod_loaded", "modid": "mmcece_intentionally_absent"}],
+  "machine": "mmcece:test_recipe_resources",
+  "duration": 1,
+  "inputs": [{"stack": {"id": "intentionally_absent:unknown_item"}, "amount": 1}],
+  "outputs": [{"stack": {"id": "minecraft:diamond"}, "amount": 1}]
+}

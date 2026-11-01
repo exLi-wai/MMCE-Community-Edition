@@ -1,0 +1,156 @@
+package com.lw.modularmachine.integration.jade;
+
+import com.lw.modularmachine.api.MachineControllerApi;
+import com.lw.modularmachine.blockentity.MachineControllerBlockEntity;
+import com.lw.modularmachine.machine.recipe.FrozenItemRun;
+import com.lw.modularmachine.machine.structure.VerificationState;
+import java.util.Locale;
+import net.minecraft.core.BlockPos;
+import net.minecraft.nbt.CompoundTag;
+import net.minecraft.network.chat.Component;
+import net.minecraft.resources.ResourceLocation;
+import snownee.jade.api.BlockAccessor;
+import snownee.jade.api.IBlockComponentProvider;
+import snownee.jade.api.IServerDataProvider;
+import snownee.jade.api.ITooltip;
+import snownee.jade.api.config.IPluginConfig;
+
+final class MachineControllerTooltipProvider implements IBlockComponentProvider, IServerDataProvider<BlockAccessor> {
+  static final MachineControllerTooltipProvider INSTANCE = new MachineControllerTooltipProvider();
+  private static final String PREFIX = "mmcece:";
+  private static final String STRUCTURE = PREFIX + "structure";
+  private static final String FAILURE = PREFIX + "failure";
+  private static final String FRONT = PREFIX + "front";
+  private static final String ROLL = PREFIX + "roll";
+  private static final String PRODUCTION = PREFIX + "production";
+  private static final String RECIPE = PREFIX + "recipe";
+  private static final String RUN_STATE = PREFIX + "run_state";
+  private static final String PROGRESS = PREFIX + "progress";
+  private static final String RUN_STATUS = PREFIX + "run_status";
+  private static final String DEFINITION_EPOCH = PREFIX + "definition_epoch";
+  private static final String DIAGNOSTIC = PREFIX + "diagnostic";
+  private static final String INPUT_DIAGNOSTIC = PREFIX + "input_diagnostic";
+
+  private MachineControllerTooltipProvider() {
+  }
+
+  @Override
+  public ResourceLocation getUid() {
+    return ResourceLocation.fromNamespaceAndPath("mmcece", "controller_status");
+  }
+
+  @Override
+  public boolean shouldRequestData(BlockAccessor accessor) {
+    return accessor.getBlockEntity() instanceof MachineControllerBlockEntity;
+  }
+
+  @Override
+  public void appendServerData(CompoundTag data, BlockAccessor accessor) {
+    if (!(accessor.getBlockEntity() instanceof MachineControllerBlockEntity controller)) {
+      return;
+    }
+    MachineControllerApi.inspect(controller).ifPresent(snapshot -> {
+      data.putString(STRUCTURE, snapshot.structureState().name());
+      data.putString(FAILURE, snapshot.structureFailure().name());
+      data.putString(FRONT, snapshot.orientation().front().getSerializedName());
+      data.putInt(ROLL, snapshot.orientation().roll());
+      data.putBoolean(PRODUCTION, snapshot.productionAllowed());
+      data.putString(RUN_STATUS, snapshot.recipeRunStatus().name());
+      data.putLong(DEFINITION_EPOCH, snapshot.definitionEpoch());
+      snapshot.structureDiagnostic().ifPresent(diagnostic -> {
+        data.putLong(DIAGNOSTIC + "_position", diagnostic.position().asLong());
+        data.putString(DIAGNOSTIC + "_part", diagnostic.partId());
+        data.putString(DIAGNOSTIC + "_expected", diagnostic.expected());
+        data.putString(DIAGNOSTIC + "_actual", diagnostic.actual());
+      });
+      snapshot.recipeInputDiagnostic().ifPresent(diagnostic -> {
+        data.putString(INPUT_DIAGNOSTIC + "_recipe", diagnostic.recipeId().toString());
+        var shortages = diagnostic.shortages();
+        data.putInt(INPUT_DIAGNOSTIC + "_count", shortages.size());
+        for (int i = 0; i < shortages.size(); i++) {
+          var shortage = shortages.get(i);
+          data.putString(INPUT_DIAGNOSTIC + "_key_" + i, shortage.key());
+          data.putLong(INPUT_DIAGNOSTIC + "_missing_" + i, shortage.missing());
+        }
+      });
+      snapshot.runningRun().ifPresentOrElse(run -> {
+        data.putString(RECIPE, run.recipeId().toString());
+        data.putString(RUN_STATE, run.state().name());
+        data.putInt("mmcece:progress_value", run.progress());
+        data.putInt("mmcece:duration_value", run.duration());
+      }, () -> data.putBoolean("mmcece:has_run", false));
+      if (snapshot.runningRun().isPresent()) {
+        data.putBoolean("mmcece:has_run", true);
+      }
+    });
+  }
+
+  @Override
+  public void appendTooltip(ITooltip tooltip, BlockAccessor accessor, IPluginConfig config) {
+    var data = accessor.getServerData();
+    if (!data.contains(STRUCTURE)) {
+      return;
+    }
+    var structure = enumValue(VerificationState.class, data.getString(STRUCTURE));
+    if (structure == null) {
+      return;
+    }
+    tooltip.add(Component.translatable("jade.mmcece.structure." + structure.name().toLowerCase(Locale.ROOT)));
+    tooltip.add(
+        Component.translatable(
+            "jade.mmcece.orientation",
+            Component.translatable("direction." + data.getString(FRONT)),
+            data.getInt(ROLL)));
+    tooltip.add(
+        Component.translatable(
+            data.getBoolean(PRODUCTION) ? "jade.mmcece.production.ready" : "jade.mmcece.production.paused"));
+    tooltip.add(Component.translatable("jade.mmcece.definition_epoch", data.getLong(DEFINITION_EPOCH)));
+    if (structure == VerificationState.INVALID) {
+      tooltip.add(Component.translatable("jade.mmcece.failure." + data.getString(FAILURE).toLowerCase(Locale.ROOT)));
+      if (data.contains(DIAGNOSTIC + "_position")) {
+        tooltip.add(
+            Component.translatable(
+                "jade.mmcece.diagnostic.position",
+                data.getString(DIAGNOSTIC + "_part"),
+                BlockPos.of(data.getLong(DIAGNOSTIC + "_position")).toShortString()));
+        tooltip
+            .add(Component.translatable("jade.mmcece.diagnostic.expected", data.getString(DIAGNOSTIC + "_expected")));
+        tooltip.add(Component.translatable("jade.mmcece.diagnostic.actual", data.getString(DIAGNOSTIC + "_actual")));
+      }
+    }
+    if (data.contains(INPUT_DIAGNOSTIC + "_count")) {
+      tooltip.add(Component.translatable("jade.mmcece.input.recipe", data.getString(INPUT_DIAGNOSTIC + "_recipe")));
+      int count = Math.min(data.getInt(INPUT_DIAGNOSTIC + "_count"), 8);
+      for (int i = 0; i < count; i++) {
+        tooltip.add(
+            Component.translatable(
+                "jade.mmcece.input.shortage",
+                data.getLong(INPUT_DIAGNOSTIC + "_missing_" + i),
+                data.getString(INPUT_DIAGNOSTIC + "_key_" + i)));
+      }
+    }
+    if (data.getBoolean("mmcece:has_run")) {
+      var runState = enumValue(FrozenItemRun.State.class, data.getString(RUN_STATE));
+      if (runState != null) {
+        tooltip.add(Component.translatable("jade.mmcece.recipe", data.getString(RECIPE)));
+        tooltip.add(Component.translatable("jade.mmcece.run." + runState.name().toLowerCase(Locale.ROOT)));
+        tooltip.add(
+            Component.translatable(
+                "jade.mmcece.progress",
+                data.getInt("mmcece:progress_value"),
+                data.getInt("mmcece:duration_value")));
+      }
+    } else {
+      tooltip
+          .add(Component.translatable("jade.mmcece.run_status." + data.getString(RUN_STATUS).toLowerCase(Locale.ROOT)));
+    }
+  }
+
+  private static <E extends Enum<E>> E enumValue(Class<E> type, String name) {
+    try {
+      return Enum.valueOf(type, name);
+    } catch (IllegalArgumentException invalid) {
+      return null;
+    }
+  }
+}

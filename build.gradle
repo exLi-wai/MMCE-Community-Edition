@@ -3,6 +3,7 @@ plugins {
     id 'maven-publish'
     id 'net.neoforged.moddev' version '2.0.148'
     id 'idea'
+    id 'com.diffplug.spotless' version '8.10.4'
 }
 
 tasks.named('wrapper', Wrapper).configure {
@@ -20,6 +21,7 @@ sourceSets.main.resources {
 }
 
 repositories {
+    mavenCentral()
     maven {
         name = 'BlameJared'
         url = 'https://maven.blamejared.com'
@@ -59,6 +61,17 @@ base {
 
 java.toolchain.languageVersion = JavaLanguageVersion.of(21)
 
+sourceSets {
+    gameTest {
+        compileClasspath += sourceSets.main.output + sourceSets.main.compileClasspath
+        runtimeClasspath += sourceSets.main.output + sourceSets.main.runtimeClasspath
+    }
+    test {
+        compileClasspath += sourceSets.main.compileClasspath
+        runtimeClasspath += sourceSets.main.compileClasspath
+    }
+}
+
 neoForge {
     version = project.neo_version
 
@@ -81,7 +94,13 @@ neoForge {
 
         gameTestServer {
             type = "gameTestServer"
-            systemProperty 'neoforge.enabledGameTestNamespaces', project.mod_id
+            def restartPhase = providers.gradleProperty('paidRunRestartPhase').getOrElse('')
+            if (!(restartPhase in ['', 'write', 'read'])) {
+                throw new GradleException('paidRunRestartPhase must be write or read')
+            }
+            gameDirectory = project.file(restartPhase ? 'build/gametest-restart' : 'build/gametest')
+            systemProperty 'neoforge.enabledGameTestNamespaces', restartPhase ? 'mmcece_restart' : project.mod_id
+            systemProperty 'mmcece.lifecycle.restartPhase', restartPhase
         }
 
         data {
@@ -98,6 +117,7 @@ neoForge {
     mods {
         "${mod_id}" {
             sourceSet(sourceSets.main)
+            sourceSet(sourceSets.gameTest)
         }
     }
 }
@@ -107,6 +127,8 @@ configurations {
 }
 
 dependencies {
+    testImplementation 'org.junit.jupiter:junit-jupiter:5.11.4'
+    testRuntimeOnly 'org.junit.platform:junit-platform-launcher:1.11.4'
     // Required tooltip integration, present at compile time and runtime.
     implementation "curse.maven:jade-324717:${jade_file_id}"
     implementation "curse.maven:kubejs-238086:${kubejs_file_id}"
@@ -134,6 +156,10 @@ dependencies {
     localRuntime "curse.maven:modonomicon-538392:${modonomicon_file_id}"
     localRuntime "curse.maven:observerlib-316833:${observerlib_file_id}"
     localRuntime("vazkii.botania:botania-neoforge-1.21.1:${botania_version}") {exclude group: 'mezz.jei'}
+}
+
+tasks.named('test', Test).configure {
+    useJUnitPlatform()
 }
 
 tasks.named('processResources', ProcessResources).configure {
@@ -175,5 +201,17 @@ idea {
     module {
         downloadSources = true
         downloadJavadoc = true
+    }
+}
+
+spotless {
+    java {
+        eclipse('4.35').configProperties(file('eclipse-formatter.properties').text)
+        replaceRegex(
+            'keep class declaration headers on one line',
+            '(?m)^([ \\t]*(?:(?:public|protected|private|abstract|final|static|sealed|non-sealed)\\s+)*(?:class|interface)\\s+[A-Za-z_$][A-Za-z0-9_$]*[^\\r\\n]*)\\r?\\n[ \\t]+(?=(?:extends|implements)\\b)',
+            '$1 ')
+        removeUnusedImports()
+        trimTrailingWhitespace()
     }
 }

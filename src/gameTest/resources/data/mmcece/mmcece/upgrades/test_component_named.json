@@ -1,0 +1,6 @@
+{
+  "schema_version": 1,
+  "item": "minecraft:paper",
+  "components": {"minecraft:custom_name": "{\"text\":\"Exact Upgrade\"}"},
+  "parallel_add": 4
+}

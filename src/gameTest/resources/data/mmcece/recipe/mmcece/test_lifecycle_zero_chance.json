@@ -1,0 +1,9 @@
+{
+  "type": "mmcece:machine_item",
+  "schema_version": 2,
+  "machine": "mmcece:test_recipe_lifecycle",
+  "priority": 9,
+  "duration": 4,
+  "inputs": [{"stack": {"id": "minecraft:clay_ball"}, "amount": 1}],
+  "outputs": [{"stack": {"id": "minecraft:diamond"}, "amount": 1, "chance": 0.0}]
+}

@@ -1,0 +1,9 @@
+{
+  "type": "mmcece:machine_item",
+  "schema_version": 2,
+  "machine": "mmcece:test_recipe_energy_lifecycle",
+  "duration": 1,
+  "energy_per_tick": 5,
+  "inputs": [{"stack": {"id": "minecraft:sand"}, "amount": 1}],
+  "outputs": [{"stack": {"id": "minecraft:gold_ingot"}, "amount": 1}]
+}

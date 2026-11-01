@@ -1,0 +1,65 @@
+{
+  "textures": {
+    "casing": "mmcece:block/blockcasing_plain",
+    "overlay": "mmcece:block/overlay_controller"
+  },
+  "parent": "mmcece:block/ported_shell",
+  "elements": [
+    {
+      "from": [
+        0,
+        0,
+        0
+      ],
+      "to": [
+        16,
+        16,
+        16
+      ],
+      "faces": {
+        "east": {
+          "cullface": "east",
+          "texture": "#casing"
+        },
+        "west": {
+          "cullface": "west",
+          "texture": "#casing"
+        },
+        "up": {
+          "cullface": "up",
+          "texture": "#casing"
+        },
+        "down": {
+          "cullface": "down",
+          "texture": "#casing"
+        },
+        "south": {
+          "cullface": "south",
+          "texture": "#casing"
+        },
+        "north": {
+          "cullface": "north",
+          "texture": "#casing"
+        }
+      }
+    },
+    {
+      "from": [
+        -0.005,
+        -0.005,
+        -0.005
+      ],
+      "to": [
+        16.005,
+        16.005,
+        16.005
+      ],
+      "faces": {
+        "north": {
+          "cullface": "north",
+          "texture": "#overlay"
+        }
+      }
+    }
+  ]
+}

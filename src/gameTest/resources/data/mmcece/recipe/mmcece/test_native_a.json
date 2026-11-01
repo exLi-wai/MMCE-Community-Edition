@@ -1,0 +1,9 @@
+{
+  "type": "mmcece:machine_item",
+  "schema_version": 2,
+  "machine": "mmcece:test_recipe_resources",
+  "priority": 100,
+  "duration": 40,
+  "inputs": [{"stack": {"id": "minecraft:dirt"}, "amount": 2}],
+  "outputs": [{"stack": {"id": "minecraft:iron_ingot"}, "amount": 1}]
+}

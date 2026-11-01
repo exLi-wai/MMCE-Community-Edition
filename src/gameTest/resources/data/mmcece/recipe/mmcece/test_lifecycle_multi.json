@@ -1,0 +1,11 @@
+{
+  "type": "mmcece:machine_item",
+  "schema_version": 2,
+  "machine": "mmcece:test_recipe_lifecycle",
+  "duration": 8,
+  "inputs": [{"stack": {"id": "minecraft:sand"}, "amount": 1}],
+  "outputs": [
+    {"stack": {"id": "minecraft:diamond"}, "amount": 1},
+    {"stack": {"id": "minecraft:emerald"}, "amount": 1}
+  ]
+}

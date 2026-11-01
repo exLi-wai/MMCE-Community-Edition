@@ -1,0 +1,12 @@
+{
+  "type": "mmcece:machine_item",
+  "schema_version": 2,
+  "machine": "mmcece:test_upgrade_recipe_checks",
+  "priority": 10,
+  "duration": 20,
+  "inputs": [{"stack": {"id": "minecraft:dirt"}, "amount": 1}],
+  "outputs": [
+    {"stack": {"id": "minecraft:gold_ingot"}, "amount": 1},
+    {"stack": {"id": "minecraft:diamond"}, "amount": 1, "chance": 0}
+  ]
+}
