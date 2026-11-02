@@ -34,7 +34,7 @@ public final class UpgradeBusMenu extends AbstractContainerMenu {
     super(MachineRegistries.UPGRADE_BUS_MENU.get(), id);
     this.bus = bus;
     viewer = inventory.player;
-    for (int i = 0; i < bus.tier().slots(); i++) {
+    for (int i = 0; i < bus.slotCount(); i++) {
       addSlot(new SlotItemHandler(bus.inventory(), i, 8 + i % 3 * 18, 17 + i / 3 * 18));
     }
     for (int row = 0; row < 3; row++) {

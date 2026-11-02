@@ -220,7 +220,7 @@ public final class FactoryUpgradeTickCosts {
                 bus.busDataSnapshot()));
         continue;
       }
-      var before = NonNullList.withSize(bus.tier().slots(), ItemStack.EMPTY);
+      var before = NonNullList.withSize(bus.slotCount(), ItemStack.EMPTY);
       var prepared = NonNullList.withSize(bus.tier().slots(), ItemStack.EMPTY);
       for (int slot = 0; slot < before.size(); slot++) {
         before.set(slot, ItemStackSnapshots.detached(bus.inventory().getStackInSlot(slot), level.registryAccess()));

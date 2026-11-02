@@ -1,7 +1,10 @@
 package com.lw.modularmachine.config;
 
+import com.lw.modularmachine.machine.HatchTier;
 import com.lw.modularmachine.machine.ParallelControllerTier;
+import com.lw.modularmachine.machine.UpgradeBusTier;
 import java.util.EnumMap;
+import java.util.LinkedHashMap;
 import java.util.Map;
 import net.minecraft.resources.ResourceLocation;
 import net.neoforged.neoforge.common.ModConfigSpec;
@@ -14,6 +17,10 @@ public final class MachineConfig {
   public static final ModConfigSpec.IntValue FACTORY_OUTPUT_WORK;
   public static final ModConfigSpec.ConfigValue<String> ASSEMBLY_ITEM;
   public static final Map<ParallelControllerTier, ModConfigSpec.IntValue> PARALLEL_CONTROLLER_MAXIMA;
+  public static final Map<String, ModConfigSpec.IntValue> FLUID_HATCH_CAPACITY;
+  public static final Map<String, ModConfigSpec.IntValue> ENERGY_HATCH_CAPACITY;
+  public static final Map<String, ModConfigSpec.IntValue> ENERGY_HATCH_TRANSFER;
+  public static final Map<String, ModConfigSpec.IntValue> UPGRADE_BUS_SLOTS;
 
   static {
     ModConfigSpec.Builder builder = new ModConfigSpec.Builder();
@@ -56,9 +63,67 @@ public final class MachineConfig {
             "minecraft:stick",
             value -> value instanceof String name && ResourceLocation.tryParse(name) != null);
     builder.pop();
+
+    FLUID_HATCH_CAPACITY = hatchValues(builder, "fluid_hatch", HatchTier.FLUIDS, false, Integer.MAX_VALUE);
+    ENERGY_HATCH_CAPACITY = hatchValues(builder, "energy_hatch", HatchTier.ENERGY, false, Integer.MAX_VALUE);
+    ENERGY_HATCH_TRANSFER = hatchValues(builder, "energy_hatch_transfer", HatchTier.ENERGY, true, Integer.MAX_VALUE);
+    builder.translation("mmcece.config.upgrade_bus").push("upgrade_bus");
+    var busSlots = new LinkedHashMap<String, ModConfigSpec.IntValue>();
+    for (var tier : UpgradeBusTier.values()) {
+      busSlots.put(
+          tier.path(),
+          builder.translation("mmcece.config.upgrade_bus." + tier.path())
+              .defineInRange(tier.path(), tier.slots(), 1, 18));
+    }
+    UPGRADE_BUS_SLOTS = Map.copyOf(busSlots);
+    builder.pop();
     SPEC = builder.build();
   }
 
   private MachineConfig() {
+  }
+  public static long fluidHatchCapacity(HatchTier tier) {
+    return hatchValue(FLUID_HATCH_CAPACITY, tier.name(), tier.capacity());
+  }
+
+  public static long energyHatchCapacity(HatchTier tier) {
+    return hatchValue(ENERGY_HATCH_CAPACITY, tier.name(), tier.capacity());
+  }
+
+  public static long energyHatchTransfer(HatchTier tier) {
+    return hatchValue(ENERGY_HATCH_TRANSFER, tier.name(), tier.transferLimit());
+  }
+
+  public static int upgradeBusSlots(UpgradeBusTier tier) {
+    var value = UPGRADE_BUS_SLOTS.get(tier.path());
+    int fallback = tier.slots();
+    if (value == null || !SPEC.isLoaded()) {
+      return fallback;
+    }
+    return Math.max(1, Math.min(18, value.get()));
+  }
+
+  private static long hatchValue(Map<String, ModConfigSpec.IntValue> values, String tier, long fallback) {
+    var value = values.get(tier);
+    if (value == null || !SPEC.isLoaded()) {
+      return fallback;
+    }
+    long configured = value.get();
+    return configured <= 0 ? fallback : configured;
+  }
+
+  private static Map<String, ModConfigSpec.IntValue> hatchValues(ModConfigSpec.Builder builder, String section, java.util.List<HatchTier> tiers, boolean transfer, int max) {
+    builder.translation("mmcece.config." + section).push(section);
+    var values = new LinkedHashMap<String, ModConfigSpec.IntValue>();
+    for (var tier : tiers) {
+      long fallback = transfer ? Math.max(1, tier.transferLimit()) : tier.capacity();
+      int value = (int) Math.min(Integer.MAX_VALUE, fallback);
+      values.put(
+          tier.name(),
+          builder.translation("mmcece.config." + section + "." + tier.name())
+              .defineInRange(tier.name(), value, 1, max));
+    }
+    builder.pop();
+    return Map.copyOf(values);
   }
 }

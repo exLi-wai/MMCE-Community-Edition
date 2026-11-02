@@ -1,6 +1,7 @@
 package com.lw.modularmachine.blockentity;
 
 import com.lw.modularmachine.block.MachinePortBlock;
+import com.lw.modularmachine.config.MachineConfig;
 import com.lw.modularmachine.machine.HatchTier;
 import com.lw.modularmachine.machine.PortKind;
 import com.lw.modularmachine.machine.recipe.InputGroup;
@@ -61,13 +62,13 @@ public final class MachinePortBlockEntity extends BlockEntity implements MenuPro
         this::beforeItemWrite,
         this::changed);
     tank = new TransactionalFluidTank(
-        kind.resource() == PortKind.Resource.FLUID ? (int) tier.capacity() : 0,
+        kind.resource() == PortKind.Resource.FLUID ? (int) MachineConfig.fluidHatchCapacity(tier) : 0,
         this::assertMutationThread,
         this::beforeResourceWrite,
         this::changed);
     energy = new LongEnergyBuffer(
-        kind.resource() == PortKind.Resource.ENERGY ? tier.capacity() : 1,
-        kind.resource() == PortKind.Resource.ENERGY ? tier.transferLimit() : 1,
+        kind.resource() == PortKind.Resource.ENERGY ? MachineConfig.energyHatchCapacity(tier) : 1,
+        kind.resource() == PortKind.Resource.ENERGY ? MachineConfig.energyHatchTransfer(tier) : 1,
         kind.isInput(),
         () -> level == null ? 0 : level.getGameTime(),
         this::beforeResourceWrite,

@@ -1,6 +1,7 @@
 package com.lw.modularmachine.blockentity;
 
 import com.lw.modularmachine.block.UpgradeBusBlock;
+import com.lw.modularmachine.config.MachineConfig;
 import com.lw.modularmachine.machine.UpgradeBusTier;
 import com.lw.modularmachine.machine.factory.FactoryUpgradeBusContext;
 import com.lw.modularmachine.machine.factory.FactoryUpgradeBusData;
@@ -57,6 +58,7 @@ public final class UpgradeBusBlockEntity extends BlockEntity implements MenuProv
   public static final String DATA_KEY = "mmcece_upgrade_bus";
   public static final int DATA_SCHEMA = 2;
   private final UpgradeBusTier tier;
+  private final int slots;
   private final TransactionalItemStackHandler inventory;
   private final Map<BlockPos, UpgradeBusBinding> bindings = new LinkedHashMap<>();
   private final Map<ResourceLocation, FactoryUpgradeBusContext> contexts = new HashMap<>();
@@ -70,8 +72,9 @@ public final class UpgradeBusBlockEntity extends BlockEntity implements MenuProv
   public UpgradeBusBlockEntity(BlockPos pos, BlockState state) {
     super(MachineRegistries.UPGRADE_BUS_ENTITY.get(), pos, state);
     tier = ((UpgradeBusBlock) state.getBlock()).tier();
+    slots = MachineConfig.upgradeBusSlots(tier);
     inventory = new TransactionalItemStackHandler(
-        tier.slots(),
+        slots,
         this::requireMutationThread,
         this::beforeInventoryChange,
         this::onInventoryChanged);
@@ -80,6 +83,10 @@ public final class UpgradeBusBlockEntity extends BlockEntity implements MenuProv
 
   public UpgradeBusTier tier() {
     return tier;
+  }
+
+  public int slotCount() {
+    return slots;
   }
 
   public ItemStackHandler inventory() {
@@ -318,7 +325,7 @@ public final class UpgradeBusBlockEntity extends BlockEntity implements MenuProv
     var actualFinishData = new FactoryUpgradeRuntimeData.Subscriptions(FactoryUpgradeRuntimeData.Phase.FINISHED);
     rebuildingCatalog = true;
     try {
-      for (int slot = 0; slot < tier.slots(); slot++) {
+      for (int slot = 0; slot < slots; slot++) {
         var definition = definitions.match(inventory.getStackInSlot(slot)).orElse(null);
         if (definition != null && definition.compatibility().allows(factory.machineId())) {
           if (definition.tickCost().present()) {
@@ -739,7 +746,7 @@ public final class UpgradeBusBlockEntity extends BlockEntity implements MenuProv
         || context.costs().isEmpty() && context.itemData().isEmpty() && context.busData().isEmpty()
         || contents == null
         || preparedData == null
-        || contents.size() != tier.slots()
+        || contents.size() != slots
         || !bindingMutationAllowed()) {
       throw new IllegalStateException("Stale upgrade startup transaction");
     }
@@ -760,7 +767,7 @@ public final class UpgradeBusBlockEntity extends BlockEntity implements MenuProv
         || expectedCosts.isEmpty()
         || !tickCostsReady(factory)
         || contents == null
-        || contents.size() != tier.slots()
+        || contents.size() != slots
         || !bindingMutationAllowed()) {
       throw new IllegalStateException("Stale upgrade tick cost transaction");
     }
@@ -784,7 +791,7 @@ public final class UpgradeBusBlockEntity extends BlockEntity implements MenuProv
         || !tickDataReady(factory)
         || contents == null
         || preparedData == null
-        || contents.size() != tier.slots()
+        || contents.size() != slots
         || !bindingMutationAllowed()) {
       throw new IllegalStateException("Stale runtime upgrade transaction");
     }
@@ -927,7 +934,7 @@ public final class UpgradeBusBlockEntity extends BlockEntity implements MenuProv
             || tag.contains(FactoryUpgradeBusData.NBT_KEY)) {
           throw new IllegalArgumentException("Unsupported unpublished upgrade bus format");
         }
-        for (int slot = 0; slot < tier.slots(); slot++) {
+        for (int slot = 0; slot < slots; slot++) {
           inventory.setStackInSlot(slot, ItemStack.EMPTY);
         }
       } else {
@@ -948,14 +955,14 @@ public final class UpgradeBusBlockEntity extends BlockEntity implements MenuProv
             || data.contains("custom_data") && !data.contains("custom_data", Tag.TAG_COMPOUND)) {
           throw new IllegalArgumentException("Invalid upgrade bus header");
         }
-        var restored = new ItemStackHandler(tier.slots());
+        var restored = new ItemStackHandler(slots);
         var inventoryData = data.getCompound("inventory");
         validateInventory(inventoryData);
         restored.deserializeNBT(registries, inventoryData);
         var restoredBindings = UpgradeBusBinding.read(savedBindings);
         var restoredData = data.contains("custom_data") ? FactoryUpgradeBusData.State
             .load(data.getCompound("custom_data")) : FactoryUpgradeBusData.State.empty();
-        for (int slot = 0; slot < tier.slots(); slot++) {
+        for (int slot = 0; slot < slots; slot++) {
           inventory.setStackInSlot(slot, restored.getStackInSlot(slot));
         }
         bindings.putAll(restoredBindings);
@@ -1013,9 +1020,9 @@ public final class UpgradeBusBlockEntity extends BlockEntity implements MenuProv
 
   private void validateInventory(CompoundTag data) {
     if (!data.contains("Size", Tag.TAG_INT)
-        || data.getInt("Size") != tier.slots()
+        || data.getInt("Size") != slots
         || !(data.get("Items") instanceof ListTag items)
-        || items.size() > tier.slots()
+        || items.size() > slots
         || !items.isEmpty() && items.getElementType() != Tag.TAG_COMPOUND) {
       throw new IllegalArgumentException("Upgrade bus inventory does not match its tier");
     }
@@ -1023,7 +1030,7 @@ public final class UpgradeBusBlockEntity extends BlockEntity implements MenuProv
     for (var item : items) {
       var entry = (CompoundTag) item;
       int slot = entry.getInt("Slot");
-      if (!entry.contains("Slot", Tag.TAG_INT) || slot < 0 || slot >= tier.slots() || !occupied.add(slot)) {
+      if (!entry.contains("Slot", Tag.TAG_INT) || slot < 0 || slot >= slots || !occupied.add(slot)) {
         throw new IllegalArgumentException("Invalid upgrade bus inventory slot");
       }
     }

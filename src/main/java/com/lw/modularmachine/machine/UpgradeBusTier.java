@@ -1,5 +1,7 @@
 package com.lw.modularmachine.machine;
 
+import java.util.Locale;
+
 public enum UpgradeBusTier {
   NORMAL(3),
   REINFORCED(6),
@@ -15,5 +17,9 @@ public enum UpgradeBusTier {
 
   public int slots() {
     return slots;
+  }
+
+  public String path() {
+    return name().toLowerCase(Locale.ROOT);
   }
 }
