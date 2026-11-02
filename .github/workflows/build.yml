@@ -27,6 +27,26 @@ jobs:
       - name: Build with Gradle
         run: ./gradlew build
 
+      - name: Upload build artifact
+        if: success()
+        uses: actions/upload-artifact@v4
+        with:
+          name: mmcece-jar
+          path: build/libs/*.jar
+          if-no-files-found: error
+          retention-days: 3
+
+      - name: Upload build logs
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: build-logs
+          path: |
+            build/reports/**
+            build/test-results/**
+          if-no-files-found: ignore
+          retention-days: 3
+
   gametest:
     runs-on: ubuntu-latest
     continue-on-error: true
@@ -54,7 +74,7 @@ jobs:
         run: ./gradlew runGameTestServer --init-script gradle/core-gametest.init.gradle --no-configuration-cache --console=plain --stacktrace
 
       - name: Upload game test logs
-        if: always()
+        if: failure()
         uses: actions/upload-artifact@v4
         with:
           name: gametest-logs
@@ -63,4 +83,4 @@ jobs:
             build/gametest-core/logs/debug.log
             build/gametest-core/crash-reports/*.txt
           if-no-files-found: ignore
-          retention-days: 7
+          retention-days: 3
