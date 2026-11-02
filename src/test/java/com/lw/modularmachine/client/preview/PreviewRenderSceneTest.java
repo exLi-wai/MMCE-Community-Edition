@@ -12,6 +12,45 @@ import static org.junit.jupiter.api.Assertions.*;
 
 class PreviewRenderSceneTest {
   @Test
+  void largePlanarScenesBuildAcrossAllAxesWithoutLosingLookupOrder() {
+    for (int plane = 0; plane < 3; plane++) {
+      var entries = new ArrayList<ProjectionPayloads.Entry>();
+      for (int u = -198; u <= 213; u++) {
+        for (int v = 1; v <= 247; v++) {
+          var pos = switch (plane) {
+            case 0 -> new BlockPos(6568 + u, 98, 10003 + v);
+            case 1 -> new BlockPos(6568 + u, 98 + v, 10003);
+            default -> new BlockPos(6568, 98 + u, 10003 + v);
+          };
+          entries.add(new ProjectionPayloads.Entry(pos, List.of(), List.of()));
+        }
+      }
+      long started = System.nanoTime();
+      var scene = PreviewRenderScene.create(1, ResourceLocation.parse("minecraft:overworld"), entries);
+      double elapsedMs = (System.nanoTime() - started) / 1_000_000D;
+      System.out.printf("Planar scene axis=%d entries=%d buildMs=%.3f%n", plane, entries.size(), elapsedMs);
+      assertEquals(entries.size(), scene.sections().stream().mapToInt(section -> section.entries().size()).sum());
+      for (int index = 0; index < entries.size(); index++) {
+        assertSame(entries.get(index), scene.at(entries.get(index).position()));
+        assertEquals(index, scene.indexAt(entries.get(index).position()));
+      }
+    }
+  }
+
+  @Test
+  void duplicatePositionsKeepFirstSelectionIndexAndLastEntry() {
+    var first = new ProjectionPayloads.Entry(BlockPos.ZERO, List.of(), List.of());
+    var second = new ProjectionPayloads.Entry(new BlockPos(-17, 98, 10003), List.of(), List.of());
+    var replacement = new ProjectionPayloads.Entry(BlockPos.ZERO, List.of(), List.of());
+    var scene = PreviewRenderScene
+        .create(1, ResourceLocation.parse("minecraft:overworld"), List.of(first, second, replacement));
+    assertSame(replacement, scene.at(BlockPos.ZERO));
+    assertEquals(0, scene.indexAt(BlockPos.ZERO));
+    assertEquals(1, scene.indexAt(second.position()));
+    assertEquals(3, scene.sections().stream().mapToInt(section -> section.entries().size()).sum());
+  }
+
+  @Test
   void largeSceneKeepsEveryEntryWithBoundedBatchesAndSpatialLookup() {
     var entries = new ArrayList<ProjectionPayloads.Entry>();
     for (int x = 0; x < 48; x++) {

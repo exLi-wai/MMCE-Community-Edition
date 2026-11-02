@@ -1,6 +1,12 @@
 package com.lw.modularmachine.client.preview;
 
 import com.lw.modularmachine.network.ProjectionPayloads;
+import it.unimi.dsi.fastutil.longs.Long2IntMap;
+import it.unimi.dsi.fastutil.longs.Long2IntMaps;
+import it.unimi.dsi.fastutil.longs.Long2IntOpenHashMap;
+import it.unimi.dsi.fastutil.longs.Long2ObjectMap;
+import it.unimi.dsi.fastutil.longs.Long2ObjectMaps;
+import it.unimi.dsi.fastutil.longs.Long2ObjectOpenHashMap;
 import java.util.ArrayList;
 import java.util.LinkedHashMap;
 import java.util.List;
@@ -20,9 +26,9 @@ public final class PreviewRenderScene {
   private final ResourceLocation dimension;
   private final List<Section> sections;
   private final Map<Long, List<Section>> spatial;
-  private final Map<BlockPos, ProjectionPayloads.Entry> entries;
+  private final Long2ObjectMap<ProjectionPayloads.Entry> entries;
   private final List<ProjectionPayloads.Entry> animated;
-  private final Map<BlockPos, Integer> indices;
+  private final Long2IntMap indices;
 
   public record Section(
       long key,
@@ -35,20 +41,16 @@ public final class PreviewRenderScene {
     }
   }
 
-  private PreviewRenderScene(long request, ResourceLocation dimension, List<Section> sections, Map<Long, List<Section>> spatial, Map<BlockPos, ProjectionPayloads.Entry> entries, List<ProjectionPayloads.Entry> animated) {
+  private PreviewRenderScene(long request, ResourceLocation dimension, List<Section> sections, Map<Long, List<Section>> spatial, Long2ObjectMap<ProjectionPayloads.Entry> entries, Long2IntMap indices, List<ProjectionPayloads.Entry> animated) {
     this.request = request;
     this.dimension = dimension;
     this.sections = List.copyOf(sections);
     this.spatial = Map.copyOf(spatial);
-    this.entries = Map.copyOf(entries);
+    // These maps are built privately and never mutated after scene publication.
+    // Mixed packed keys avoid BlockPos hash collisions on large planar structures.
+    this.entries = Long2ObjectMaps.unmodifiable(entries);
+    this.indices = Long2IntMaps.unmodifiable(indices);
     this.animated = List.copyOf(animated);
-    var indices = new LinkedHashMap<BlockPos, Integer>();
-    int index = 0;
-    // Preserve caller order for blueprint hit selection.
-    for (var position : entries.keySet()) {
-      indices.put(position, index++);
-    }
-    this.indices = Map.copyOf(indices);
   }
 
   public long request() {
@@ -64,13 +66,13 @@ public final class PreviewRenderScene {
     return spatial.getOrDefault(key, List.of());
   }
   public ProjectionPayloads.Entry at(BlockPos position) {
-    return entries.get(position);
+    return entries.get(position.asLong());
   }
   public List<ProjectionPayloads.Entry> animated() {
     return animated;
   }
   public int indexAt(BlockPos position) {
-    return indices.getOrDefault(position, -1);
+    return indices.get(position.asLong());
   }
 
   public static PreviewRenderScene create(ProjectionPayloads.Snapshot header, List<ProjectionPayloads.Entry> entries) {
@@ -79,11 +81,19 @@ public final class PreviewRenderScene {
 
   public static PreviewRenderScene create(long request, ResourceLocation dimension, List<ProjectionPayloads.Entry> entries) {
     var grouped = new LinkedHashMap<Long, ArrayList<ProjectionPayloads.Entry>>();
-    var positions = new LinkedHashMap<BlockPos, ProjectionPayloads.Entry>();
+    var positions = new Long2ObjectOpenHashMap<ProjectionPayloads.Entry>(entries.size());
+    var indices = new Long2IntOpenHashMap(entries.size());
+    indices.defaultReturnValue(-1);
     var animated = new ArrayList<ProjectionPayloads.Entry>();
     for (var entry : entries) {
       grouped.computeIfAbsent(SectionPos.asLong(entry.position()), ignored -> new ArrayList<>()).add(entry);
-      positions.put(entry.position(), entry);
+      long position = entry.position().asLong();
+      // Preserve first occurrence order for blueprint hit selection, even on
+      // duplicates.
+      if (!indices.containsKey(position)) {
+        indices.put(position, indices.size());
+      }
+      positions.put(position, entry);
       if (entry.states().size() > 1) {
         animated.add(entry);
       }
@@ -116,6 +126,6 @@ public final class PreviewRenderScene {
       }
       spatial.put(entry.getKey(), List.copyOf(batches));
     }
-    return new PreviewRenderScene(request, dimension, sections, spatial, positions, animated);
+    return new PreviewRenderScene(request, dimension, sections, spatial, positions, indices, animated);
   }
 }
