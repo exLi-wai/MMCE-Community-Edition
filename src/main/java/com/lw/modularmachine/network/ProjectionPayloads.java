@@ -22,6 +22,8 @@ import net.neoforged.neoforge.network.event.RegisterPayloadHandlersEvent;
  * authority.
  */
 public final class ProjectionPayloads {
+  private static final int MAX_PACKET_ENTRIES = 256;
+  private static final int PACKET_BYTE_TARGET = 48 * 1024;
   private static final CustomPacketPayload.Type<Snapshot> TYPE = new CustomPacketPayload.Type<>(
       ResourceLocation.fromNamespaceAndPath("mmcece", "projection"));
   private static final CustomPacketPayload.Type<Stop> STOP = new CustomPacketPayload.Type<>(
@@ -89,7 +91,7 @@ public final class ProjectionPayloads {
           || epoch < 0
           || start < -1
           || total < 0
-          || entries.size() > 32
+          || entries.size() > MAX_PACKET_ENTRIES
           || start >= 0 && start + entries.size() > total) {
         throw new IllegalArgumentException("Invalid projection chunk");
       }
@@ -131,7 +133,7 @@ public final class ProjectionPayloads {
 
   /** One bounded packet per call. The caller controls fair per-tick streaming. */
   public static int sendChunk(ServerPlayer player, AssemblyPattern pattern, long request, List<Entry> entries, int start) {
-    int end = Math.min(entries.size(), start + 32);
+    int end = chunkEnd(entries, start);
     PacketDistributor.sendToPlayer(
         player,
         new Snapshot(
@@ -143,6 +145,24 @@ public final class ProjectionPayloads {
             start,
             entries.size(),
             entries.subList(start, end)));
+    return end;
+  }
+
+  static int chunkEnd(List<Entry> entries, int start) {
+    int end = start;
+    int bytes = 512;
+    while (end < entries.size() && end - start < MAX_PACKET_ENTRIES) {
+      var entry = entries.get(end);
+      int cost = 32 + entry.states().size() * 5;
+      for (String property : entry.properties()) {
+        cost += 5 + property.length() * 3;
+      }
+      if (end > start && bytes + cost > PACKET_BYTE_TARGET) {
+        break;
+      }
+      bytes += cost;
+      end++;
+    }
     return end;
   }
   public static void clear(ServerPlayer player, long request) {
@@ -185,7 +205,7 @@ public final class ProjectionPayloads {
     var machine = b.readResourceLocation();
     var origin = b.readBlockPos();
     int start = b.readInt(), total = b.readVarInt(), size = b.readVarInt();
-    if (size < 0 || size > 32) {
+    if (size < 0 || size > MAX_PACKET_ENTRIES) {
       throw new IllegalArgumentException("Too many projection entries");
     }
     var entries = new ArrayList<Entry>();

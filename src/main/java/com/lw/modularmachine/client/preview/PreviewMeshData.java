@@ -8,6 +8,8 @@ import java.util.concurrent.RejectedExecutionException;
 import java.util.concurrent.ThreadPoolExecutor;
 import java.util.concurrent.TimeUnit;
 import java.util.function.Supplier;
+import java.nio.ByteBuffer;
+import java.nio.ByteOrder;
 
 /**
  * CPU-only packing of detached quad data. No models, worlds, native buffers or
@@ -44,7 +46,24 @@ final class PreviewMeshData {
       vertices = vertices.clone();
     }
   }
-  record Page(int[] vertices, boolean translucent) {
+  record Page(int[] vertices, boolean translucent, byte[] uploadBytes) {
+    Page(int[] vertices, boolean translucent) {
+      this(vertices, translucent, encodeUpload(vertices));
+    }
+  }
+
+  private static byte[] encodeUpload(int[] vertices) {
+    var data = ByteBuffer.allocate(vertices.length * Integer.BYTES).order(ByteOrder.nativeOrder());
+    data.asIntBuffer().put(vertices);
+    for (int index = 5; index < vertices.length; index += 6) {
+      int color = vertices[index];
+      int offset = index * Integer.BYTES;
+      data.put(offset, (byte) (color >> 16));
+      data.put(offset + 1, (byte) (color >> 8));
+      data.put(offset + 2, (byte) color);
+      data.put(offset + 3, (byte) (color >>> 24));
+    }
+    return data.array();
   }
 
   private PreviewMeshData() {

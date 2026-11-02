@@ -49,6 +49,11 @@ public final class WorldProjection {
       return;
     }
     if (packet.start() == 0) {
+      ModularMachine.LOGGER.debug(
+          "Projection {} incoming: {} entries, first packet {}",
+          packet.request(),
+          packet.total(),
+          packet.entries().size());
       indexing = null;
       indexingEntries = null;
       indexingHeader = null;
@@ -67,6 +72,7 @@ public final class WorldProjection {
     }
     pending.addAll(packet.entries());
     if (pending.size() == packet.total()) {
+      ModularMachine.LOGGER.debug("Projection {} received completely", packet.request());
       indexingHeader = header;
       indexingEntries = List.copyOf(pending);
       pending.clear();
@@ -92,6 +98,8 @@ public final class WorldProjection {
         activeOrigin = indexingHeader.origin();
         activeRequest = indexingHeader.request();
         CACHE.setScene(scene);
+        ModularMachine.LOGGER
+            .debug("Projection {} scene published: {} batches", activeRequest, scene.sections().size());
       }
     } catch (RuntimeException failure) {
       ModularMachine.LOGGER.warn("Projection scene indexing failed", failure);
@@ -162,7 +170,13 @@ public final class WorldProjection {
   }
   @SubscribeEvent
   public static void render(RenderLevelStageEvent event) {
-    if (event.getStage() != RenderLevelStageEvent.Stage.AFTER_PARTICLES || scene == null) {
+    if (event.getStage() != RenderLevelStageEvent.Stage.AFTER_PARTICLES) {
+      return;
+    }
+    // Client ticks pause with the integrated server; rendering continues.
+    // Publish completed CPU work here as well, without reading world on workers.
+    advanceIndexing();
+    if (scene == null) {
       return;
     }
     CACHE.draw(event);

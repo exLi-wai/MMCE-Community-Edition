@@ -31,32 +31,14 @@ public class ModularMachineClient {
   public ModularMachineClient(ModContainer container) {
     container.registerConfig(ModConfig.Type.CLIENT, MachineClientConfig.SPEC);
     container.registerExtensionPoint(IConfigScreenFactory.class, ConfigurationScreen::new);
-    BlueprintPreviewActions.setClientOpener(
-        (machine, hand) -> Minecraft.getInstance().setScreen(new BlueprintPreviewScreen(machine, hand)));
     MachineJeiPayloads.setReceiver(ClientMachineJeiCatalog::receive);
     ProjectionPayloads.setReceiver(WorldProjection::receive);
     MachinePayloads.setClientReceiver(MachineControllerStatusClient::receive);
     MachinePayloads.setResourceClientReceiver(MachineControllerStatusClient::receiveResource);
     MachinePayloads.setFactoryClientReceiver(MachineControllerStatusClient::receiveFactory);
     UpgradeBusPayloads.setClientReceiver(MachineControllerStatusClient::receiveUpgradeBus);
-    ParallelControllerPayloads.setClientReceiver(payload -> {
-      var player = Minecraft.getInstance().player;
-      if (player != null && player.containerMenu instanceof ParallelControllerMenu menu) {
-        menu.acceptStatus(payload);
-      }
-    });
-    GroupInputPayloads.setClientReceiver(payload -> {
-      var player = Minecraft.getInstance().player;
-      if (player != null && player.containerMenu instanceof GroupInputMenu menu) {
-        menu.acceptStatus(payload);
-      }
-    });
-    SmartInterfacePayloads.setClientReceiver(payload -> {
-      var player = Minecraft.getInstance().player;
-      if (player != null && player.containerMenu instanceof SmartInterfaceMenu menu) {
-        menu.acceptStatus(payload);
-      }
-    });
+    ModularMachineClient.SetClientReceiver();
+    ModularMachineClient.SetClientOpener();
   }
 
   @SubscribeEvent
@@ -82,5 +64,31 @@ public class ModularMachineClient {
     event.register(MachineRegistries.SMART_INTERFACE_MENU.get(), SmartInterfaceScreen::new);
     event.register(MachineRegistries.PARALLEL_CONTROLLER_MENU.get(), ParallelControllerScreen::new);
     event.register(MachineRegistries.GROUP_INPUT_MENU.get(), GroupInputScreen::new);
+  }
+
+  static void SetClientReceiver() {
+    ParallelControllerPayloads.setClientReceiver(payload -> {
+      var player = Minecraft.getInstance().player;
+      if (player != null && player.containerMenu instanceof ParallelControllerMenu menu) {
+        menu.acceptStatus(payload);
+      }
+    });
+    GroupInputPayloads.setClientReceiver(payload -> {
+      var player = Minecraft.getInstance().player;
+      if (player != null && player.containerMenu instanceof GroupInputMenu menu) {
+        menu.acceptStatus(payload);
+      }
+    });
+    SmartInterfacePayloads.setClientReceiver(payload -> {
+      var player = Minecraft.getInstance().player;
+      if (player != null && player.containerMenu instanceof SmartInterfaceMenu menu) {
+        menu.acceptStatus(payload);
+      }
+    });
+  }
+
+  static void SetClientOpener() {
+    BlueprintPreviewActions.setClientOpener(
+        (machine, hand) -> Minecraft.getInstance().setScreen(new BlueprintPreviewScreen(machine, hand)));
   }
 }

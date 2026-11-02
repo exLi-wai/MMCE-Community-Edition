@@ -3,7 +3,6 @@ package com.lw.modularmachine.client.preview;
 import com.lw.modularmachine.network.ProjectionPayloads;
 import com.lw.modularmachine.ModularMachine;
 import com.mojang.blaze3d.systems.RenderSystem;
-import com.mojang.blaze3d.vertex.BufferBuilder;
 import com.mojang.blaze3d.vertex.ByteBufferBuilder;
 import com.mojang.blaze3d.vertex.DefaultVertexFormat;
 import com.mojang.blaze3d.vertex.MeshData;
@@ -38,6 +37,7 @@ import net.neoforged.neoforge.client.model.data.ModelData;
 import org.joml.FrustumIntersection;
 import org.joml.Matrix4f;
 import org.joml.Vector3f;
+import org.lwjgl.system.MemoryUtil;
 
 /**
  * Render-thread model capture / GPU ownership, detached background vertex
@@ -48,18 +48,20 @@ final class SectionMeshCache implements AutoCloseable {
   private static final Direction[] FACES = Direction.values();
   private static final long GPU_BYTES = 96L << 20;
   private static final int UPLOAD_BYTES = 2 << 20;
+  private static final int IN_FLIGHT_BUILDS = 4;
   private final Map<Long, Mesh> meshes = new LinkedHashMap<>(16, .75F, true);
   private final Map<Long, Long> revisions = new HashMap<>();
   private final Map<Long, Long> failed = new HashMap<>();
   private final Map<Long, List<BlockState>> observed = new HashMap<>();
   private final Set<Long> dirty = new HashSet<>();
+  private final Set<Long> worldChecks = new HashSet<>();
   private final List<PreviewRenderScene.Section> visible = new ArrayList<>();
   private final Set<Long> resident = new HashSet<>();
   private PreviewRenderScene scene;
   private boolean preview;
   private int previewLayer = Integer.MIN_VALUE, previewStep, inspect;
   private long usedBytes;
-  private Build build;
+  private final Map<Long, Build> builds = new LinkedHashMap<>();
 
   private static final class Page implements AutoCloseable {
     final VertexBuffer buffer;
@@ -129,7 +131,7 @@ final class SectionMeshCache implements AutoCloseable {
       return;
     }
     for (var section : scene.atSection(SectionPos.asLong(x, y, z))) {
-      invalidate(section);
+      worldChecks.add(section.key());
     }
   }
 
@@ -138,10 +140,7 @@ final class SectionMeshCache implements AutoCloseable {
       return;
     }
     var section = visible.get(Math.floorMod(inspect++, visible.size()));
-    var states = captureStates(section);
-    if (!states.equals(observed.get(section.key())) && !dirty.contains(section.key())) {
-      invalidate(section);
-    }
+    worldChecks.add(section.key());
   }
 
   void setPreviewState(int layer, int step) {
@@ -221,85 +220,117 @@ final class SectionMeshCache implements AutoCloseable {
     }
     long deadline = System.nanoTime() + 2_000_000L;
     int uploadBytes = 0;
-    if (build != null
-        && (build.revision != revisions.getOrDefault(build.section.key(), 0L)
-            || !resident.contains(build.section.key()))) {
-      build.close();
-      build = null;
+    // Lighting and neighbor notifications often repeat without a state change.
+    // Coalesce them, and compare against in-flight capture before discarding it.
+    long validationDeadline = Math.min(deadline, System.nanoTime() + 250_000L);
+    for (var section : visible) {
+      if (System.nanoTime() >= validationDeadline) {
+        break;
+      }
+      if (!worldChecks.remove(section.key())) {
+        continue;
+      }
+      var current = builds.get(section.key());
+      var baseline = current == null ? observed.get(section.key()) : current.states;
+      if (baseline != null && !captureStates(section).equals(baseline)) {
+        invalidate(section);
+      }
+    }
+    var stale = builds.values().iterator();
+    while (stale.hasNext()) {
+      var job = stale.next();
+      if (job.revision != revisions.getOrDefault(job.section.key(), 0L) || !resident.contains(job.section.key())) {
+        job.close();
+        stale.remove();
+      }
     }
     while (System.nanoTime() < deadline) {
-      if (build == null) {
-        for (var section : visible) {
-          if (!resident.contains(section.key())) {
+      boolean progressed = false;
+      var iterator = builds.values().iterator();
+      while (iterator.hasNext() && System.nanoTime() < deadline) {
+        var current = iterator.next();
+        try {
+          if (current.cursor < current.section.entries().size()) {
+            // Small slices let ready uploads and other captures progress together.
+            int end = Math.min(current.cursor + 32, current.section.entries().size());
+            while (current.cursor < end && System.nanoTime() < deadline) {
+              captureModel(current, current.cursor++);
+              progressed = true;
+            }
+          }
+          if (current.cursor < current.section.entries().size()) {
             continue;
           }
-          if (java.util.Objects.equals(failed.get(section.key()), revisions.getOrDefault(section.key(), 0L))) {
+          if (current.packing == null) {
+            current.packing = PreviewMeshData.submit(current.quads);
+            if (current.packing != null) {
+              current.quads.clear();
+              progressed = true;
+            }
+          }
+          if (current.packing == null || !current.packing.isDone()) {
             continue;
           }
-          if (!meshes.containsKey(section.key()) || dirty.contains(section.key())) {
-            build = new Build(section, revisions.getOrDefault(section.key(), 0L), captureStates(section));
-            break;
+          if (current.packed == null) {
+            current.packed = current.packing.join();
           }
-        }
-        if (build == null) {
-          break;
+          if (current.uploadCursor < current.packed.size() && uploadBytes < UPLOAD_BYTES) {
+            var data = current.packed.get(current.uploadCursor++);
+            current.uploaded.add(uploadPage(data, current.origin, eye));
+            int bytes = data.vertices().length * Integer.BYTES + data.vertices().length / 4 * Integer.BYTES;
+            current.bytes += bytes;
+            uploadBytes += bytes;
+            progressed = true;
+          }
+          if (current.uploadCursor < current.packed.size()) {
+            continue;
+          }
+          var mesh = new Mesh(List.copyOf(current.uploaded), current.origin, current.bytes);
+          current.uploaded.clear();
+          var old = meshes.put(current.section.key(), mesh);
+          if (old != null) {
+            usedBytes -= old.bytes();
+            old.close();
+          }
+          usedBytes += mesh.bytes();
+          observed.put(current.section.key(), current.states);
+          dirty.remove(current.section.key());
+          current.close();
+          iterator.remove();
+          evict();
+          progressed = true;
+        } catch (RuntimeException failure) {
+          failed.put(current.section.key(), current.revision);
+          current.close();
+          iterator.remove();
+          ModularMachine.LOGGER.warn(
+              "Preview batch {} failed; keeping its previous mesh until invalidation",
+              current.section.key(),
+              failure);
+          progressed = true;
         }
       }
-      var current = build;
-      try {
-        if (current.cursor < current.section.entries().size()) {
-          captureModel(current, current.cursor++);
-          continue;
-        }
-        if (current.packing == null) {
-          current.packing = PreviewMeshData.submit(current.quads);
-          if (current.packing != null) {
-            current.quads.clear();
-          }
+      for (var section : visible) {
+        if (builds.size() >= IN_FLIGHT_BUILDS || System.nanoTime() >= deadline) {
           break;
         }
-        if (!current.packing.isDone()) {
-          break;
-        }
-        if (current.packed == null) {
-          current.packed = current.packing.join();
-        }
-        if (current.uploadCursor < current.packed.size()) {
-          var data = current.packed.get(current.uploadCursor++);
-          current.uploaded.add(uploadPage(data, current.origin, eye));
-          int bytes = data.vertices().length * Integer.BYTES + data.vertices().length / 4 * Integer.BYTES;
-          current.bytes += bytes;
-          uploadBytes += bytes;
-          if (uploadBytes >= UPLOAD_BYTES) {
-            break;
-          }
+        if (!resident.contains(section.key())
+            || builds.containsKey(section.key())
+            || java.util.Objects.equals(failed.get(section.key()), revisions.getOrDefault(section.key(), 0L))) {
           continue;
         }
-        var mesh = new Mesh(List.copyOf(current.uploaded), current.origin, current.bytes);
-        current.uploaded.clear();
-        var old = meshes.put(current.section.key(), mesh);
-        if (old != null) {
-          usedBytes -= old.bytes();
-          old.close();
+        if (!meshes.containsKey(section.key()) || dirty.contains(section.key())) {
+          builds.put(
+              section.key(),
+              new Build(section, revisions.getOrDefault(section.key(), 0L), captureStates(section)));
+          progressed = true;
         }
-        usedBytes += mesh.bytes();
-        observed.put(current.section.key(), current.states);
-        dirty.remove(current.section.key());
-        build.close();
-        build = null;
-        evict();
-      } catch (RuntimeException failure) {
-        failed.put(current.section.key(), current.revision);
-        current.close();
-        build = null;
-        ModularMachine.LOGGER.warn(
-            "Preview batch {} failed; keeping its previous mesh until invalidation",
-            current.section.key(),
-            failure);
+      }
+      if (!progressed || uploadBytes >= UPLOAD_BYTES) {
+        break;
       }
     }
   }
-
   private void captureModel(Build job, int index) {
     var entry = job.section.entries().get(index);
     var captured = job.states.get(index);
@@ -356,20 +387,19 @@ final class SectionMeshCache implements AutoCloseable {
   }
 
   private static Page uploadPage(PreviewMeshData.Page page, Vec3 origin, Vec3 eye) {
-    try (var bytes = new ByteBufferBuilder(page.vertices().length * 4 + 65536)) {
-      var builder = new BufferBuilder(bytes, VertexFormat.Mode.QUADS, DefaultVertexFormat.POSITION_TEX_COLOR);
-      var vertices = page.vertices();
-      for (int i = 0; i < vertices.length; i += 6) {
-        int color = vertices[i + 5];
-        builder
-            .addVertex(
-                Float.intBitsToFloat(vertices[i]),
-                Float.intBitsToFloat(vertices[i + 1]),
-                Float.intBitsToFloat(vertices[i + 2]))
-            .setUv(Float.intBitsToFloat(vertices[i + 3]), Float.intBitsToFloat(vertices[i + 4]))
-            .setColor(color >> 16 & 255, color >> 8 & 255, color & 255, color >>> 24);
-      }
-      var data = builder.buildOrThrow();
+    try (var bytes = new ByteBufferBuilder(page.uploadBytes().length + 65536)) {
+      MemoryUtil.memByteBuffer(bytes.reserve(page.uploadBytes().length), page.uploadBytes().length)
+          .put(page.uploadBytes());
+      int vertexCount = page.vertices().length / 6;
+      var mode = VertexFormat.Mode.QUADS;
+      var data = new MeshData(
+          bytes.build(),
+          new MeshData.DrawState(
+              DefaultVertexFormat.POSITION_TEX_COLOR,
+              vertexCount,
+              mode.indexCount(vertexCount),
+              mode,
+              VertexFormat.IndexType.least(vertexCount)));
       MeshData.SortState sorting = page.translucent() ? data.sortQuads(
           bytes,
           VertexSorting
@@ -489,16 +519,15 @@ final class SectionMeshCache implements AutoCloseable {
 
   @Override
   public void close() {
-    if (build != null) {
-      build.close();
-      build = null;
-    }
+    builds.values().forEach(Build::close);
+    builds.clear();
     meshes.values().forEach(Mesh::close);
     meshes.clear();
     revisions.clear();
     failed.clear();
     observed.clear();
     dirty.clear();
+    worldChecks.clear();
     visible.clear();
     resident.clear();
     scene = null;

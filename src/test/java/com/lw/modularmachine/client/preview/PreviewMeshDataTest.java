@@ -37,6 +37,14 @@ class PreviewMeshDataTest {
     assertEquals(.25F, Float.intBitsToFloat(data[3]));
     assertEquals(.75F, Float.intBitsToFloat(data[4]));
     assertEquals(0x64FF8040, data[5]);
+    var upload = java.nio.ByteBuffer.wrap(page.uploadBytes()).order(java.nio.ByteOrder.nativeOrder());
+    assertEquals(10F, upload.getFloat(0));
+    assertEquals(.25F, upload.getFloat(12));
+    assertEquals(255, Byte.toUnsignedInt(upload.get(20)));
+    assertEquals(128, Byte.toUnsignedInt(upload.get(21)));
+    assertEquals(64, Byte.toUnsignedInt(upload.get(22)));
+    assertEquals(100, Byte.toUnsignedInt(upload.get(23)));
+    assertEquals(data.length * Integer.BYTES, page.uploadBytes().length);
     assertEquals(13F, Float.intBitsToFloat(data[18]));
   }
 

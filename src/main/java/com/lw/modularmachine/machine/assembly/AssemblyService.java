@@ -381,7 +381,7 @@ public final class AssemblyService {
         advance(player);
       }
     }
-    playerCursor = (start + count) % players.size();
+    playerCursor = (start + 1) % players.size();
   }
 
   private static void prepareProjection(ServerPlayer player, long deadline) {
@@ -405,6 +405,8 @@ public final class AssemblyService {
         var job = new Job(pending.owner, ready.pattern(), pending.level, pending.hand, false);
         job.projectionRequest = pending.request;
         job.projectionEntries = ready.entries();
+        ModularMachine.LOGGER
+            .debug("Projection {} ready: {} entries at {}", pending.request, ready.entries().size(), pending.origin);
         PENDING_PROJECTIONS.remove(player.getUUID());
         PROJECTIONS.put(player.getUUID(), job);
         player.displayClientMessage(
