@@ -106,7 +106,10 @@ public final class FactoryControllerScreen extends AbstractContainerScreen<Facto
     if (menu.status() != null && "INVALID".equals(menu.status().structureState())) {
       graphics.drawString(
           font,
-          Component.translatable("menu.mmcece.factory.structure_failure", menu.status().structureFailure()),
+          Component.translatable(
+              "menu.mmcece.factory.structure_failure",
+              Component
+                  .translatable("jade.mmcece.failure." + menu.status().structureFailure().toLowerCase(Locale.ROOT))),
           infoX,
           50,
           INFO_COLOR,

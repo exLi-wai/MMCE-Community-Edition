@@ -21,6 +21,7 @@ import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Map;
 import java.util.Set;
+import java.util.concurrent.CompletableFuture;
 import java.util.stream.IntStream;
 import net.minecraft.core.BlockPos;
 import net.minecraft.core.SectionPos;
@@ -68,6 +69,12 @@ public final class StructureService {
     return catalog.definitions();
   }
 
+  /** Coarse invalidation for unbound generic discovery, main-thread only. */
+  public static long worldRevision(ServerLevel level) {
+    ServerThreadGuard.require(level, "Structure revision read");
+    return LEVELS.computeIfAbsent(level, ignored -> new LevelState()).revision;
+  }
+
   public static synchronized void replaceDefinitions(Map<ResourceLocation, MachineDefinition> candidate) {
     var server = ServerLifecycleHooks.getCurrentServer();
     if (server != null && !server.isSameThread()) {
@@ -75,6 +82,7 @@ public final class StructureService {
     }
     var next = new Catalog(Math.incrementExact(catalog.epoch()), Map.copyOf(candidate));
     catalog = next;
+    AsyncStructureWork.clearTemplates();
     // Epoch revocation is immediate; expensive rebuilding is deferred to the level
     // queue.
     for (LevelState state : LEVELS.values()) {
@@ -137,10 +145,10 @@ public final class StructureService {
     boolean wasPending = anchor.builder != null
         || anchor.draft != null
         || anchor.registration != null && anchor.registration.verifier.state() == VerificationState.PENDING;
-    boolean coolingDown = !resetEpisode && now < anchor.retryAfter;
     retire(state, anchor.registration);
     retire(state, anchor.draft);
     anchor.builder = null;
+    anchor.preparing = false;
     anchor.generation = state.nextGeneration = Math.incrementExact(state.nextGeneration);
     anchor.epoch = snapshot.epoch();
     anchor.definition = definition;
@@ -167,13 +175,8 @@ public final class StructureService {
       fail(state, anchor, VerificationFailure.ORIENTATION_NOT_ALLOWED, now);
       return;
     }
-    if (coolingDown) {
-      controller.failPreparation(anchor.failure);
-      return;
-    }
     anchor.failure = VerificationFailure.UNVERIFIED;
-    anchor.retryAfter = 0;
-    anchor.builder = CompiledStructure.prepare(definition, controller.structurePosition(), orientation);
+    anchor.preparing = true;
     state.enqueue(anchor);
   }
 
@@ -293,6 +296,7 @@ public final class StructureService {
     if (state == null) {
       return;
     }
+    state.revision = Math.incrementExact(state.revision);
     Anchor anchor = state.anchors.get(pos.asLong());
     if (anchor != null && !anchor.turning && !matchesActual(level, anchor)) {
       request(anchor.controller, false, false);
@@ -318,6 +322,7 @@ public final class StructureService {
     if (state == null) {
       return;
     }
+    state.revision = Math.incrementExact(state.revision);
     Set<Registration> watched = state.sections.get(SectionPos.asLong(pos));
     if (watched == null) {
       return;
@@ -332,9 +337,6 @@ public final class StructureService {
   private static void markDirty(LevelState state, Registration registration, int group, boolean all, long now) {
     Anchor anchor = registration.owner;
     registration.interfacesReady = registration.interfaceParts.length == 0;
-    if (now < anchor.retryAfter) {
-      return;
-    }
     if (registration.verifier.state() != VerificationState.PENDING) {
       anchor.roundStarted = now;
     }
@@ -352,21 +354,18 @@ public final class StructureService {
     state.enqueue(anchor);
   }
 
-  public static void requestAudit(MachineControllerBlockEntity controller) {
-    if (!(controller.getLevel() instanceof ServerLevel level)) {
+  public static void requestAudit(StructureSubject controller) {
+    if (!(controller.structureLevel() instanceof ServerLevel level)) {
       return;
     }
     ServerThreadGuard.require(level, "Structure state accessed");
     LevelState state = LEVELS.get(level);
-    Anchor anchor = state == null ? null : state.anchors.get(controller.getBlockPos().asLong());
+    Anchor anchor = state == null ? null : state.anchors.get(controller.structurePosition().asLong());
     if (anchor == null || anchor.controller != controller) {
       register(controller);
       return;
     }
     long now = level.getGameTime();
-    if (now < anchor.retryAfter) {
-      return;
-    }
     if (anchor.registration != null && matchesActual(level, anchor)) {
       markDirty(state, anchor.registration, -1, true, now);
     } else {
@@ -380,6 +379,7 @@ public final class StructureService {
     if (state == null) {
       return;
     }
+    state.revision = Math.incrementExact(state.revision);
     Set<Registration> watched = state.chunks.get(chunk.toLong());
     if (watched == null) {
       return;
@@ -394,6 +394,7 @@ public final class StructureService {
       } else {
         registration.modifiers.markAllDirty(now);
         registration.verifier.unavailable(now);
+        registration.discardCapture();
       }
     }
   }
@@ -412,13 +413,14 @@ public final class StructureService {
       return 0;
     }
     int used = 0;
-    int visits = state.queue.size();
+    int idle = 0;
     long deadline = System.nanoTime() + timeBudgetNanos;
-    while (visits-- > 0 && used < budget && System.nanoTime() < deadline && !state.queue.isEmpty()) {
+    while (used < budget && System.nanoTime() < deadline && !state.queue.isEmpty()) {
       var iterator = state.queue.iterator();
       Work work = iterator.next();
       iterator.remove();
       int slice = Math.min(perController, budget - used);
+      int before = used;
       if (work instanceof Registration retired) {
         used += clean(state, retired, slice);
       } else {
@@ -433,6 +435,10 @@ public final class StructureService {
           state.enqueue(anchor);
         }
       }
+      idle = used == before ? idle + 1 : 0;
+      if (idle >= state.queue.size()) {
+        break;
+      }
     }
     return used;
   }
@@ -446,16 +452,20 @@ public final class StructureService {
       return 0;
     }
     long now = level.getGameTime();
-    if (now - anchor.roundStarted > MachineConfig.ROUND_TIMEOUT_TICKS.get()) {
-      fail(state, anchor, VerificationFailure.VERIFICATION_TIMEOUT, now);
-      return 1;
-    }
     int used = 0;
-    if (anchor.builder != null) {
-      used += anchor.builder.advance(budget);
-      if (anchor.builder.complete() && used < budget && anchor.retired == null) {
-        anchor.draft = new Registration(anchor, anchor.builder.result());
+    if (anchor.preparing) {
+      if (anchor.builder == null) {
+        long started = anchor.roundStarted;
+        anchor.builder = AsyncStructureWork.prepare(
+            anchor.definition,
+            anchor.controller.structurePosition(),
+            anchor.orientation,
+            pattern -> new Prepared(pattern, started));
+      }
+      if (anchor.builder != null && anchor.builder.isDone() && anchor.retired == null) {
+        anchor.draft = new Registration(anchor, anchor.builder.join());
         anchor.builder = null;
+        anchor.preparing = false;
         used++;
       }
     }
@@ -486,19 +496,7 @@ public final class StructureService {
     }
     Registration registration = anchor.registration;
     if (registration != null && used < budget && registration.verifier.state() == VerificationState.PENDING) {
-      used += registration.modifiers.advance(level, budget - used, now, MachineConfig.ROUND_TIMEOUT_TICKS.get());
-      if (registration.modifiers.invalid()) {
-        registration.verifier.rejectProof(registration.modifiers.failure(), registration.modifiers.failedPart(), now);
-      } else if (registration.modifiers.canCommit() && used < budget) {
-        used += registration.verifier.advance(
-            budget - used,
-            now,
-            MachineConfig.ROUND_TIMEOUT_TICKS.get(),
-            index -> registration.check(level, index));
-      }
-      if (anchor.registration == registration && registration.verifier.failure() == VerificationFailure.CHECK_ERROR) {
-        anchor.retryAfter = now + MachineConfig.AUDIT_INTERVAL_TICKS.get();
-      }
+      used += registration.advanceSnapshot(level, budget - used, now);
       if (registration.verifier.canCommit() && registration.modifiers.canCommit() && !registration.interfacesReady) {
         try {
           registration.establishInterfaces(level);
@@ -514,10 +512,8 @@ public final class StructureService {
     retire(state, anchor.registration);
     retire(state, anchor.draft);
     anchor.builder = null;
+    anchor.preparing = false;
     anchor.failure = failure;
-    if (failure == VerificationFailure.VERIFICATION_TIMEOUT || failure == VerificationFailure.CHECK_ERROR) {
-      anchor.retryAfter = now + MachineConfig.AUDIT_INTERVAL_TICKS.get();
-    }
     anchor.controller.failPreparation(failure);
   }
 
@@ -526,6 +522,7 @@ public final class StructureService {
       return;
     }
     registration.valid = false;
+    registration.discardCapture();
     registration.verifier.rejectProof(VerificationFailure.STALE_BINDING, -1, registration.owner.roundStarted);
     Anchor owner = registration.owner;
     if (owner.registration == registration) {
@@ -588,6 +585,7 @@ public final class StructureService {
     retire(state, anchor.registration);
     retire(state, anchor.draft);
     anchor.builder = null;
+    anchor.preparing = false;
     anchor.controller.failPreparation(VerificationFailure.UNVERIFIED);
   }
 
@@ -662,16 +660,15 @@ public final class StructureService {
   public static void onServerStopped(ServerStoppedEvent event) {
     LEVELS.values().forEach(LevelState::clear);
     LEVELS.clear();
+    AsyncStructureWork.stop();
   }
 
   @SubscribeEvent
   public static void onLevelTick(LevelTickEvent.Post event) {
     if (event.getLevel() instanceof ServerLevel level) {
-      advance(
-          level,
-          MachineConfig.CHECKS_PER_LEVEL.get(),
-          MachineConfig.CHECKS_PER_CONTROLLER.get(),
-          MachineConfig.TIME_BUDGET_MICROS.get() * 1000L);
+      // Internal time slicing protects the server; work can revisit the same
+      // controller while time remains instead of imposing a per-tick count cap.
+      advance(level, Integer.MAX_VALUE, 512, 3_000_000L);
     }
   }
 
@@ -708,12 +705,12 @@ public final class StructureService {
 
   private static final class Anchor implements Work {
     final StructureSubject controller;
-    boolean alive = true, turning, schemaSupported;
-    long epoch = -1, generation, roundStarted, retryAfter;
+    boolean alive = true, turning, schemaSupported, preparing;
+    long epoch = -1, generation, roundStarted;
     ResourceLocation machineId;
     MachineDefinition definition;
     MachineOrientation orientation;
-    CompiledStructure.Builder builder;
+    CompletableFuture<Prepared> builder;
     Registration registration, draft, retired;
     VerificationFailure failure = VerificationFailure.UNVERIFIED;
 
@@ -722,9 +719,39 @@ public final class StructureService {
     }
 
     boolean needsWork() {
-      return builder != null
+      return preparing
           || draft != null
           || registration != null && registration.verifier.state() == VerificationState.PENDING;
+    }
+  }
+
+  /**
+   * Pure metadata built alongside the layout; transferred to the main thread
+   * once.
+   */
+  private static final class Prepared {
+    final CompiledStructure pattern;
+    final IncrementalVerifier verifier;
+    final StructureModifierTracker modifiers;
+    final int[] interfaceParts, parallelParts;
+    final Map<BlockPos, Integer> interfaceIndices;
+
+    Prepared(CompiledStructure pattern, long started) {
+      this.pattern = pattern;
+      verifier = new IncrementalVerifier(pattern.groups(), started);
+      modifiers = new StructureModifierTracker(pattern, started);
+      interfaceParts = IntStream.range(0, pattern.definition.parts().size())
+          .filter(index -> !pattern.definition.parts().get(index).interfaceType().isEmpty()).toArray();
+      var indices = new HashMap<BlockPos, Integer>();
+      for (int index : interfaceParts) {
+        indices.put(pattern.position(index), index);
+      }
+      interfaceIndices = Map.copyOf(indices);
+      parallelParts = IntStream.range(0, pattern.definition.parts().size())
+          .filter(
+              index -> pattern.definition.parts().get(index).rule().alternatives().stream()
+                  .anyMatch(alternative -> alternative.block() instanceof ParallelControllerBlock))
+          .toArray();
     }
   }
 
@@ -744,34 +771,93 @@ public final class StructureService {
     private boolean interfacesReady;
     private Map<Integer, String> interfaceAssignments = Map.of();
     private int subscribed, cleaned;
+    private StructureSnapshot.Capture capture;
+    private AsyncStructureWork.Permit capturePermit;
+    private CompletableFuture<StructureSnapshot.Result> matching;
+    private long captureRevision;
 
-    private Registration(Anchor owner, CompiledStructure pattern) {
+    private Registration(Anchor owner, Prepared prepared) {
+      var pattern = prepared.pattern;
       this.owner = owner;
       controller = owner.controller;
       this.pattern = pattern;
       epoch = owner.epoch;
       generation = owner.generation;
       sections = List.copyOf(pattern.sections());
-      // Final bounded initialization: at most 4096 predicates.
-      verifier = new IncrementalVerifier(pattern.groups(), owner.roundStarted);
-      modifiers = new StructureModifierTracker(pattern, owner.roundStarted);
-      interfaceParts = IntStream.range(0, pattern.definition.parts().size())
-          .filter(index -> !pattern.definition.parts().get(index).interfaceType().isEmpty()).toArray();
-      var indexedInterfaces = new HashMap<BlockPos, Integer>();
-      for (int index : interfaceParts) {
-        indexedInterfaces.put(pattern.position(index).immutable(), index);
-      }
-      interfaceIndices = Map.copyOf(indexedInterfaces);
+      verifier = prepared.verifier;
+      modifiers = prepared.modifiers;
+      interfaceParts = prepared.interfaceParts;
+      interfaceIndices = prepared.interfaceIndices;
       interfacesReady = interfaceParts.length == 0;
-      parallelParts = IntStream.range(0, pattern.definition.parts().size())
-          .filter(
-              index -> pattern.definition.parts().get(index).rule().alternatives().stream()
-                  .anyMatch(alternative -> alternative.block() instanceof ParallelControllerBlock))
-          .toArray();
+      parallelParts = prepared.parallelParts;
     }
 
     public int[] parallelParts() {
       return parallelParts.clone();
+    }
+
+    private void discardCapture() {
+      capture = null;
+      if (capturePermit != null) {
+        capturePermit.close();
+        capturePermit = null;
+      }
+      // A running pure task owns its permit until completion. Never cancel a
+      // future and release its memory allowance while its worker still runs.
+    }
+
+    private int advanceSnapshot(ServerLevel level, int budget, long now) {
+      if (matching != null) {
+        if (!matching.isDone()) {
+          return 0;
+        }
+        var completed = matching;
+        matching = null;
+        if (!valid || captureRevision != verifier.revision() || !matchesActual(level, owner)) {
+          return 1;
+        }
+        try {
+          var result = completed.join();
+          if (result.matched()) {
+            modifiers.acceptSnapshot(result.modifiers());
+          }
+          verifier.applySnapshot(captureRevision, result.failure(), result.failedIndex(), now);
+        } catch (RuntimeException failure) {
+          LOGGER.warn("Async structure matching failed at {}", controller.structurePosition(), failure);
+          verifier.rejectProof(VerificationFailure.CHECK_ERROR, -1, now);
+        }
+        return 1;
+      }
+      if (capture != null && captureRevision != verifier.revision()) {
+        discardCapture();
+      }
+      if (capture == null) {
+        capturePermit = AsyncStructureWork.acquireSnapshot();
+        if (capturePermit == null) {
+          return 0;
+        }
+        captureRevision = verifier.revision();
+        capture = new StructureSnapshot.Capture(pattern, verifier.pendingIndices());
+      }
+      var currentCapture = capture;
+      int used = currentCapture.advance(level, budget);
+      if (!valid || capture != currentCapture || captureRevision != verifier.revision()) {
+        discardCapture();
+        return used;
+      }
+      if (currentCapture.complete()) {
+        var detached = currentCapture.finish();
+        var future = AsyncStructureWork.submit(detached::match);
+        if (future != null) {
+          var permit = capturePermit;
+          future.whenComplete((result, failure) -> permit.close());
+          capturePermit = null;
+          capture = null;
+          matching = future;
+          used = Math.max(used, 1);
+        }
+      }
+      return used;
     }
 
     public int[] interfaceParts() {
@@ -906,7 +992,7 @@ public final class StructureService {
     final Map<Long, Set<Registration>> sections = new HashMap<>();
     final Map<Long, Set<Registration>> chunks = new HashMap<>();
     final LinkedHashSet<Work> queue = new LinkedHashSet<>();
-    long nextGeneration;
+    long nextGeneration, revision;
 
     void enqueue(Anchor anchor) {
       if (anchor.alive && anchor.needsWork()) {
@@ -924,6 +1010,13 @@ public final class StructureService {
           anchor.draft.valid = false;
         }
         anchor.builder = null;
+        anchor.preparing = false;
+        if (anchor.registration != null) {
+          anchor.registration.discardCapture();
+        }
+        if (anchor.draft != null) {
+          anchor.draft.discardCapture();
+        }
         anchor.controller.failPreparation(VerificationFailure.UNVERIFIED);
       }
       anchors.clear();

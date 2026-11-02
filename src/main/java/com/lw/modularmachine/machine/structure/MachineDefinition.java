@@ -4,6 +4,7 @@ import com.google.gson.JsonArray;
 import com.google.gson.JsonElement;
 import com.google.gson.JsonObject;
 import com.google.gson.JsonParseException;
+import com.mojang.logging.LogUtils;
 import com.lw.modularmachine.block.MachinePortBlock;
 import com.lw.modularmachine.block.ParallelControllerBlock;
 import com.lw.modularmachine.block.SmartInterfaceBlock;
@@ -30,6 +31,7 @@ import java.util.Objects;
 import java.util.Set;
 import net.minecraft.core.BlockPos;
 import net.minecraft.resources.ResourceLocation;
+import org.slf4j.Logger;
 import net.minecraft.world.level.block.Block;
 import net.minecraft.world.level.block.state.BlockState;
 import net.minecraft.world.level.block.state.properties.Property;
@@ -55,7 +57,11 @@ public record MachineDefinition(
     boolean requiresBlueprint,
     boolean factoryOnly) {
 
-  public static final int MAX_PARTS = 4096;
+  /**
+   * In Laozi's world, Laozi builds it however he wants.
+   */
+  private static final Logger LOGGER = LogUtils.getLogger();
+  public static final int MAX_PARTS = Integer.MAX_VALUE;
 
   public MachineDefinition(ResourceLocation id, String translationKey, List<Part> parts, long energyPerTick, int schemaVersion, OrientationPolicy orientationPolicy, OrientationCompilation orientationCompilation, FactoryThreadPreset factoryPreset, List<RecipeModifier> recipeModifiers, List<StructureModifierDefinition> structureModifiers, Map<String, SmartInterfaceType> interfaceTypes, int internalParallelism, int maxParallelism) {
     this(id, translationKey, parts, energyPerTick, schemaVersion, orientationPolicy, orientationCompilation,
@@ -168,10 +174,7 @@ public record MachineDefinition(
       throw new IllegalArgumentException("Too many structure modifier conditions");
     }
     new RecipeModifiers(structuralRules);
-    if (parts.isEmpty()
-        || parts.size() > MAX_PARTS
-        || energyPerTick < 0
-        || (schemaVersion != 1 && schemaVersion != 2)) {
+    if (parts.isEmpty() || energyPerTick < 0 || (schemaVersion != 1 && schemaVersion != 2)) {
       throw new IllegalArgumentException("Invalid fixed definition");
     }
   }
@@ -204,6 +207,7 @@ public record MachineDefinition(
     }
     JsonArray elements = parts(root, path);
     List<Part> parts = new ArrayList<>();
+    int skippedParts = 0;
     Set<BlockPos> offsets = new HashSet<>();
     Set<String> partIds = new HashSet<>();
     for (int index = 0; index < elements.size(); index++) {
@@ -217,8 +221,8 @@ public record MachineDefinition(
       int[] values = new int[3];
       for (int axis = 0; axis < 3; axis++) {
         long value = integer(xyz.get(axis), partPath + ".offset[" + axis + "]");
-        if (value < -128 || value > 128) {
-          throw error(partPath + ".offset[" + axis + "]", "Coordinate outside [-128, 128]");
+        if (value < Integer.MIN_VALUE || value > Integer.MAX_VALUE) {
+          throw error(partPath + ".offset[" + axis + "]", "Offset outside the 32-bit coordinate range");
         }
         values[axis] = (int) value;
       }
@@ -258,7 +262,12 @@ public record MachineDefinition(
         JsonObject properties = part
             .has("properties") ? object(part.get("properties"), partPath + ".properties") : new JsonObject();
         for (String name : blockNames(part, partPath)) {
-          var block = snapshot.block(blockId(name, partPath), partPath);
+          ResourceLocation blockId = blockId(name, partPath);
+          if (!snapshot.has(blockId)) {
+            LOGGER.debug("{}: skipping unknown block {}", partPath, blockId);
+            continue;
+          }
+          var block = snapshot.block(blockId, partPath);
           Map<Property<?>, Comparable<?>> required = new HashMap<>();
           for (var entry : properties.entrySet()) {
             String propertyPath = partPath + ".properties." + entry.getKey();
@@ -266,6 +275,13 @@ public record MachineDefinition(
             required.put(property.property(), property.value(literal(entry.getValue(), propertyPath), propertyPath));
           }
           alternatives.add(new Alternative(block, required));
+        }
+        if (alternatives.isEmpty()) {
+          offsets.remove(offset);
+          partIds.remove(partId);
+          skippedParts++;
+          LOGGER.debug("{}: no loadable blocks left; skipping the whole part", partPath);
+          continue;
         }
       }
       FieldCondition condition = null;
@@ -295,6 +311,12 @@ public record MachineDefinition(
       String selector = part.has("selector") ? string(part.get("selector"), partPath + ".selector") : "";
       String interfaceType = part.has("interface") ? string(part.get("interface"), partPath + ".interface") : "";
       parts.add(new Part(partId, offset, new Rule(port, alternatives), condition, space, selector, interfaceType));
+    }
+    if (skippedParts > 0) {
+      LOGGER.warn(
+          "{}: skipped {} part(s) whose blocks are missing from the registry (definition loads without them)",
+          id,
+          skippedParts);
     }
     long transfer = 0;
     if (root.has("operation")) {
@@ -371,8 +393,8 @@ public record MachineDefinition(
       declared.forEach(parts::add);
       parts.addAll(StructureModifierDefinition.captureParts(root, path));
       totalParts += parts.size();
-      if (totalParts > 65536) {
-        throw error(path + ".parts", "Reload exceeds 65536 total parts");
+      if (totalParts > 4_194_304) {
+        throw error(path + ".parts", "Reload exceeds 4194304 total parts");
       }
       for (int index = 0; index < parts.size(); index++) {
         String partPath = path + ".parts[" + index + "]";
@@ -394,8 +416,8 @@ public record MachineDefinition(
           }
         }
         for (String name : blockNames(part, partPath)) {
-          if (result.size() >= 131072) {
-            throw error(partPath, "Reload exceeds 131072 block alternatives");
+          if (result.size() >= 4_194_304) {
+            throw error(partPath, "Reload exceeds 4194304 block alternatives");
           }
           result.add(new StateOrientationAdapters.BlockReference(blockId(name, partPath), partPath, properties));
         }
@@ -455,8 +477,8 @@ public record MachineDefinition(
 
   private static JsonArray parts(JsonObject root, String path) {
     JsonArray parts = array(root.get("parts"), path + ".parts");
-    if (parts.isEmpty() || parts.size() > MAX_PARTS) {
-      throw error(path + ".parts", "Expected 1.." + MAX_PARTS + " parts");
+    if (parts.isEmpty()) {
+      throw error(path + ".parts", "Expected at least 1 part");
     }
     return parts;
   }

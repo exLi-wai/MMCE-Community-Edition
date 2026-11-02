@@ -126,12 +126,7 @@ public final class MachineCommands {
             controller.conservativeChecks()),
         false);
     source.sendSuccess(
-        () -> Component.translatable(
-            "commands.mmcece.performance.budget",
-            MachineConfig.CHECKS_PER_LEVEL.get(),
-            MachineConfig.CHECKS_PER_CONTROLLER.get(),
-            MachineConfig.TIME_BUDGET_MICROS.get(),
-            MachineConfig.RECIPE_OUTPUT_WORK.get()),
+        () -> Component.translatable("commands.mmcece.performance.budget", MachineConfig.RECIPE_OUTPUT_WORK.get()),
         false);
     return 1;
   }

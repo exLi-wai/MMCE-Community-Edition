@@ -150,12 +150,15 @@ class MachineDefinitionSchemaTest {
   }
 
   @Test
-  void offsetsRejectFractionsRangeErrorsDuplicatesAndControllerOrigin() {
-    for (String offset : List.of("[0,0,0]", "[1.5,0,0]", "[129,0,0]", "[-129,0,0]", "[1,0]", "[\"1\",0,0]")) {
+  void offsetsRejectFractionsDuplicatesAndControllerOrigin() {
+    for (String offset : List.of("[0,0,0]", "[1.5,0,0]", "[1,0]", "[\"1\",0,0]")) {
       JsonObject root = json(PORTS);
       root.getAsJsonArray("parts").get(0).getAsJsonObject().add("offset", JsonParser.parseString(offset));
       assertPath(root, "$.parts[0].offset");
     }
+    JsonObject far = json(PORTS);
+    far.getAsJsonArray("parts").get(0).getAsJsonObject().add("offset", JsonParser.parseString("[500,0,0]"));
+    assertDoesNotThrow(() -> parse(far));
     JsonObject root = json(PORTS);
     root.getAsJsonArray("parts").get(0).getAsJsonObject().add("offset", JsonParser.parseString("[-1,0,0]"));
     assertPath(root, "$.parts[1].offset");

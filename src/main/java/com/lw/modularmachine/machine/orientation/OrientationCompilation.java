@@ -19,7 +19,7 @@ import net.minecraft.world.level.block.state.properties.Property;
  * descriptors.
  */
 public final class OrientationCompilation {
-  private static final int MAX_WORK = 1_000_000;
+  private static final int MAX_WORK = 100_000_000;
   private static final int MAX_DIAGNOSTICS = 256;
 
   public record Diagnostic(String orientation, String partId, String path, String reason) {

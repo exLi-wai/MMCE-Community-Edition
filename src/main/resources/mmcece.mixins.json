@@ -6,5 +6,8 @@
   "mixins": [
     "LevelChunkMixin"
   ],
+  "client": [
+    "PreviewLevelRendererMixin"
+  ],
   "injectors": {"defaultRequire": 1}
 }

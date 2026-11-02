@@ -2,7 +2,7 @@ package com.lw.modularmachine.gametest;
 
 import com.lw.modularmachine.blockentity.MachineControllerBlockEntity;
 import com.lw.modularmachine.blockentity.MachinePortBlockEntity;
-import com.lw.modularmachine.config.MachineConfig;
+
 import com.lw.modularmachine.machine.orientation.MachineOrientation;
 import com.lw.modularmachine.machine.recipe.ItemRecipeCatalog;
 import com.lw.modularmachine.machine.recipe.ItemRecipePlan;
@@ -216,21 +216,7 @@ public final class ComponentRecipePlanningGameTests {
 
   @GameTest(template = "empty16", batch = "component_plan_resume", timeoutTicks = 80)
   public static void unchanged_item_admission_can_be_revalidated_on_a_new_tick_without_reusing_an_old_tick_proof(GameTestHelper helper) {
-    int audit = MachineConfig.AUDIT_INTERVAL_TICKS.get();
     var origin = helper.absolutePos(new BlockPos(7, 5, 3));
-    for (int z = 3; z < 11; z++) {
-      var p = helper.absolutePos(new BlockPos(7, 5, z));
-      boolean quiet = true;
-      for (int offset = 0; offset <= 5; offset++) {
-        if (Math.floorMod(helper.getLevel().getGameTime() + offset + p.asLong(), audit) == 0) {
-          quiet = false;
-        }
-      }
-      if (quiet) {
-        origin = p;
-        break;
-      }
-    }
     var controller = RecipeResourceTicketGameTests.build(helper, origin, MachineOrientation.IDENTITY);
     var in = port(helper, controller, "item_in");
     in.inventory().setStackInSlot(0, new ItemStack(Items.DIRT, 2));

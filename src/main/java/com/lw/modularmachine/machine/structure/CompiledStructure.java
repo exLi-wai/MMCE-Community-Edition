@@ -83,6 +83,9 @@ public final class CompiledStructure {
   private static Data prepareFully(MachineDefinition definition, BlockPos origin, MachineOrientation orientation) {
     Builder builder = new Builder(definition, origin, orientation);
     while (!builder.complete()) {
+      if (Thread.currentThread().isInterrupted()) {
+        throw new java.util.concurrent.CancellationException();
+      }
       builder.advance(4096);
     }
 
@@ -91,6 +94,89 @@ public final class CompiledStructure {
 
   public static Builder prepare(MachineDefinition definition, BlockPos origin, MachineOrientation orientation) {
     return new Builder(definition, origin, orientation);
+  }
+
+  /**
+   * Pure relocation of a shared origin template; no rule preparation or world
+   * access.
+   */
+  CompiledStructure relocate(BlockPos target) {
+    if (target.equals(origin)) {
+      return this;
+    }
+    var shifted = new ArrayList<BlockPos>(positions.size());
+    var sections = new LinkedHashMap<Long, Integer>();
+    var contents = new LinkedHashMap<BlockPos, Integer>();
+    var indices = new ArrayList<List<Integer>>();
+    int lowX = Integer.MAX_VALUE, lowY = Integer.MAX_VALUE, lowZ = Integer.MAX_VALUE;
+    int highX = Integer.MIN_VALUE, highY = Integer.MIN_VALUE, highZ = Integer.MIN_VALUE;
+    BlockPos input = null, output = null;
+    for (int index = 0; index < positions.size(); index++) {
+      if ((index & 4095) == 0 && Thread.currentThread().isInterrupted()) {
+        throw new java.util.concurrent.CancellationException();
+      }
+      var local = positions.get(index).subtract(origin);
+      var pos = new BlockPos(
+          Math.addExact(target.getX(), local.getX()),
+          Math.addExact(target.getY(), local.getY()),
+          Math.addExact(target.getZ(), local.getZ()));
+      shifted.add(pos);
+      long section = SectionPos.asLong(pos);
+      Integer group = sections.get(section);
+      if (group == null) {
+        group = indices.size();
+        sections.put(section, group);
+        indices.add(new ArrayList<>());
+      }
+      indices.get(group).add(index);
+      var part = definition.parts().get(index);
+      if (part.field() != null) {
+        contents.put(pos, group);
+      }
+      if (part.rule().port() == PortKind.ENERGY_INPUT) {
+        input = pos;
+      }
+      if (part.rule().port() == PortKind.ENERGY_OUTPUT) {
+        output = pos;
+      }
+      lowX = Math.min(lowX, pos.getX());
+      lowY = Math.min(lowY, pos.getY());
+      lowZ = Math.min(lowZ, pos.getZ());
+      highX = Math.max(highX, pos.getX());
+      highY = Math.max(highY, pos.getY());
+      highZ = Math.max(highZ, pos.getZ());
+    }
+    return new CompiledStructure(
+        new Data(
+            definition,
+            target.immutable(),
+            orientation,
+            List.copyOf(shifted),
+            Map.copyOf(sections),
+            Map.copyOf(contents),
+            indices.stream().map(values -> values.stream().mapToInt(Integer::intValue).toArray()).toArray(int[][]::new),
+            input,
+            output,
+            rotateProperties,
+            resolvedRules,
+            modifierPlan,
+            lowX,
+            lowY,
+            lowZ,
+            highX,
+            highY,
+            highZ));
+  }
+
+  net.minecraft.world.level.block.state.BlockState snapshotState(int index, net.minecraft.world.level.block.state.BlockState state) {
+    return rotateProperties[index] ? state.rotate(inverseRotation) : state;
+  }
+
+  CheckResult matchSnapshot(int index, net.minecraft.world.level.block.state.BlockState state, CheckResult details) {
+    if (state == null) {
+      return CheckResult.UNAVAILABLE;
+    }
+    return resolvedRules.get(index).matches(state) ? details : CheckResult.MISMATCH;
   }
 
   private record Data(

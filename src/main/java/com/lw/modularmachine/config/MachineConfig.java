@@ -8,11 +8,6 @@ import net.neoforged.neoforge.common.ModConfigSpec;
 
 public final class MachineConfig {
   public static final ModConfigSpec SPEC;
-  public static final ModConfigSpec.IntValue CHECKS_PER_LEVEL;
-  public static final ModConfigSpec.IntValue CHECKS_PER_CONTROLLER;
-  public static final ModConfigSpec.IntValue TIME_BUDGET_MICROS;
-  public static final ModConfigSpec.IntValue ROUND_TIMEOUT_TICKS;
-  public static final ModConfigSpec.IntValue AUDIT_INTERVAL_TICKS;
   public static final ModConfigSpec.BooleanValue CONSERVATIVE_COMMIT_CHECK;
   public static final ModConfigSpec.IntValue RECIPE_OUTPUT_WORK;
   public static final ModConfigSpec.IntValue FACTORY_THREADS_PER_TICK;
@@ -23,20 +18,6 @@ public final class MachineConfig {
   static {
     ModConfigSpec.Builder builder = new ModConfigSpec.Builder();
     builder.translation("mmcece.config.structure_detection").push("structure_detection");
-    CHECKS_PER_LEVEL = builder.translation("mmcece.config.structure_detection.checksPerLevelTick")
-        .comment("Global work-unit budget shared by preparation, subscriptions and predicates per level tick.")
-        .defineInRange("checksPerLevelTick", 512, 1, 65536);
-    CHECKS_PER_CONTROLLER = builder.translation("mmcece.config.structure_detection.checksPerControllerTick")
-        .comment("Fair round-robin slice for one controller per tick.")
-        .defineInRange("checksPerControllerTick", 64, 1, 4096);
-    TIME_BUDGET_MICROS = builder.translation("mmcece.config.structure_detection.timeBudgetMicros")
-        .comment("Soft main-thread budget; individual bounded predicates are not preempted.")
-        .defineInRange("timeBudgetMicros", 2000, 50, 50000);
-    ROUND_TIMEOUT_TICKS = builder.translation("mmcece.config.structure_detection.roundTimeoutTicks")
-        .defineInRange("roundTimeoutTicks", 200, 1, 12000);
-    AUDIT_INTERVAL_TICKS = builder.translation("mmcece.config.structure_detection.auditIntervalTicks")
-        .comment("Staggered full audit and unavailable/invalid retry.")
-        .defineInRange("auditIntervalTicks", 200, 20, 12000);
     CONSERVATIVE_COMMIT_CHECK = builder.translation("mmcece.config.structure_detection.conservativeProductionCheck")
         .comment(
             "Keep enabled until all external mutation paths are audited; a full check precedes actual production, not idle ticks.")

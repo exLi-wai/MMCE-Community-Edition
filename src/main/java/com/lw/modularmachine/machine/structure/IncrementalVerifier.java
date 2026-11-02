@@ -178,6 +178,50 @@ public final class IncrementalVerifier {
     return state == VerificationState.CONFIRMED && verifiedRevision == revision;
   }
 
+  public int[] pendingIndices() {
+    return dirty.stream().flatMap(group -> Arrays.stream(groups[group])).toArray();
+  }
+
+  boolean applySnapshot(long expectedRevision, VerificationFailure result, int failedIndex, long now) {
+    if (state != VerificationState.PENDING || revision != expectedRevision) {
+      return false;
+    }
+    if (result == VerificationFailure.NONE) {
+      for (int group = dirty.nextSetBit(0); group >= 0; group = dirty.nextSetBit(group + 1)) {
+        checkedPredicates += groups[group].length;
+        mismatched.clear(group);
+        failurePositions[group] = -1;
+      }
+      dirty.clear();
+      activeGroup = -1;
+      cursor = 0;
+      if (mismatched.isEmpty()) {
+        state = VerificationState.CONFIRMED;
+        failure = VerificationFailure.NONE;
+        failurePosition = -1;
+        verifiedRevision = revision;
+      } else {
+        invalidate(VerificationFailure.MISMATCH, failurePositions[mismatched.nextSetBit(0)]);
+      }
+    } else {
+      // Keep the failed group dirty so any repair rechecks the failed position.
+      rejectProof(result, failedIndex, now);
+    }
+    return true;
+  }
+
+  void confirmSnapshot() {
+    dirty.clear();
+    mismatched.clear();
+    Arrays.fill(failurePositions, -1);
+    activeGroup = -1;
+    cursor = 0;
+    state = VerificationState.CONFIRMED;
+    failure = VerificationFailure.NONE;
+    failurePosition = -1;
+    verifiedRevision = revision;
+  }
+
   public VerificationState state() {
     return state;
   }

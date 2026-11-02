@@ -1,6 +1,7 @@
 package com.lw.modularmachine.machine.orientation;
 
 import com.google.gson.JsonParseException;
+import com.mojang.logging.LogUtils;
 import java.util.ArrayList;
 import java.util.HashMap;
 import java.util.LinkedHashMap;
@@ -15,12 +16,14 @@ import net.minecraft.world.level.block.RotatedPillarBlock;
 import net.minecraft.world.level.block.state.properties.BlockStateProperties;
 import net.minecraft.world.level.block.state.properties.Property;
 import net.neoforged.neoforge.server.ServerLifecycleHooks;
+import org.slf4j.Logger;
 
 /**
  * Captures only requested registry/property data on the server executor, before
  * pure compilation.
  */
 public final class StateOrientationAdapters {
+  private static final Logger LOGGER = LogUtils.getLogger();
   private StateOrientationAdapters() {
   }
 
@@ -78,6 +81,10 @@ public final class StateOrientationAdapters {
       blocks = Map.copyOf(blocks);
     }
 
+    public boolean has(ResourceLocation id) {
+      return blocks.containsKey(id);
+    }
+
     public BlockSnapshot block(ResourceLocation id, String path) {
       BlockSnapshot result = blocks.get(id);
       if (result == null) {
@@ -100,35 +107,45 @@ public final class StateOrientationAdapters {
     for (var entry : grouped.entrySet()) {
       ResourceLocation id = entry.getKey();
       if (!BuiltInRegistries.BLOCK.containsKey(id)) {
-        throw new JsonParseException(entry.getValue().getFirst().path() + ": Unknown block: " + id);
+        // A definition may come from another pack (or a removed mod); skip the
+        // block instead of failing the whole reload.
+        LOGGER.warn(
+            "Machine definition references unknown block {} ({}); skipping that block",
+            id,
+            entry.getValue().getFirst().path());
+        continue;
       }
-      Block block = BuiltInRegistries.BLOCK.get(id);
-      Map<Property<?>, TransformKind> audited = auditedProperties(id, block);
-      Map<String, Map<String, Comparable<?>>> literals = new LinkedHashMap<>();
-      Map<String, Property<?>> properties = new LinkedHashMap<>();
-      for (BlockReference reference : entry.getValue()) {
-        for (PropertyReference required : reference.properties()) {
-          Property<?> property = block.getStateDefinition().getProperty(required.name());
-          if (property == null) {
-            throw new JsonParseException(required.path() + ": Unknown block property: " + required.name());
+      try {
+        Block block = BuiltInRegistries.BLOCK.get(id);
+        Map<Property<?>, TransformKind> audited = auditedProperties(id, block);
+        Map<String, Map<String, Comparable<?>>> literals = new LinkedHashMap<>();
+        Map<String, Property<?>> properties = new LinkedHashMap<>();
+        for (BlockReference reference : entry.getValue()) {
+          for (PropertyReference required : reference.properties()) {
+            Property<?> property = block.getStateDefinition().getProperty(required.name());
+            if (property == null) {
+              throw new JsonParseException(required.path() + ": Unknown block property: " + required.name());
+            }
+            Comparable<?> parsed = property.getValue(required.literal()).orElseThrow(
+                () -> new JsonParseException(required.path() + ": Invalid property value: " + required.literal()));
+            properties.put(required.name(), property);
+            literals.computeIfAbsent(required.name(), ignored -> new LinkedHashMap<>()).put(required.literal(), parsed);
           }
-          Comparable<?> parsed = property.getValue(required.literal()).orElseThrow(
-              () -> new JsonParseException(required.path() + ": Invalid property value: " + required.literal()));
-          properties.put(required.name(), property);
-          literals.computeIfAbsent(required.name(), ignored -> new LinkedHashMap<>()).put(required.literal(), parsed);
         }
+        Map<String, PropertySnapshot> snapshots = new LinkedHashMap<>();
+        properties.forEach((name, property) -> {
+          TransformKind kind = audited.getOrDefault(property, TransformKind.UNSUPPORTED);
+          // Direction/axis adapters have at most six values. Opaque/scalar domains are
+          // never
+          // enumerated.
+          Set<Comparable<?>> domain = kind == TransformKind.DIRECTION || kind == TransformKind.AXIS ? Set
+              .copyOf(property.getPossibleValues()) : Set.copyOf(literals.get(name).values());
+          snapshots.put(name, new PropertySnapshot(property, literals.get(name), domain, kind));
+        });
+        blocks.put(id, new BlockSnapshot(id, block, snapshots));
+      } catch (JsonParseException | IllegalArgumentException invalid) {
+        LOGGER.warn("Machine definition block {} is unusable ({}); skipping that block", id, invalid.getMessage());
       }
-      Map<String, PropertySnapshot> snapshots = new LinkedHashMap<>();
-      properties.forEach((name, property) -> {
-        TransformKind kind = audited.getOrDefault(property, TransformKind.UNSUPPORTED);
-        // Direction/axis adapters have at most six values. Opaque/scalar domains are
-        // never
-        // enumerated.
-        Set<Comparable<?>> domain = kind == TransformKind.DIRECTION || kind == TransformKind.AXIS ? Set
-            .copyOf(property.getPossibleValues()) : Set.copyOf(literals.get(name).values());
-        snapshots.put(name, new PropertySnapshot(property, literals.get(name), domain, kind));
-      });
-      blocks.put(id, new BlockSnapshot(id, block, snapshots));
     }
     return new RegistrySnapshot(blocks);
   }

@@ -1,6 +1,7 @@
 package com.lw.modularmachine.network;
 
 import com.lw.modularmachine.machine.assembly.AssemblyPattern;
+import com.lw.modularmachine.machine.assembly.AssemblyService;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Objects;
@@ -23,6 +24,21 @@ import net.neoforged.neoforge.network.event.RegisterPayloadHandlersEvent;
 public final class ProjectionPayloads {
   private static final CustomPacketPayload.Type<Snapshot> TYPE = new CustomPacketPayload.Type<>(
       ResourceLocation.fromNamespaceAndPath("mmcece", "projection"));
+  private static final CustomPacketPayload.Type<Stop> STOP = new CustomPacketPayload.Type<>(
+      ResourceLocation.fromNamespaceAndPath("mmcece", "projection_stop"));
+
+  public record Stop(long request) implements CustomPacketPayload {
+    public Stop {
+      if (request < 0) {
+        throw new IllegalArgumentException("Invalid projection request");
+      }
+    }
+
+    @Override
+    public Type<Stop> type() {
+      return STOP;
+    }
+  }
   private static Consumer<Snapshot> receiver = ignored -> {
   };
   public record Entry(BlockPos position, List<BlockState> states, List<String> properties) {
@@ -73,7 +89,6 @@ public final class ProjectionPayloads {
           || epoch < 0
           || start < -1
           || total < 0
-          || total > 4096
           || entries.size() > 32
           || start >= 0 && start + entries.size() > total) {
         throw new IllegalArgumentException("Invalid projection chunk");
@@ -94,29 +109,41 @@ public final class ProjectionPayloads {
         TYPE,
         StreamCodec.of(ProjectionPayloads::write, ProjectionPayloads::read),
         (packet, context) -> context.enqueueWork(() -> receiver.accept(packet)));
+    event.registrar("1").playToServer(
+        STOP,
+        StreamCodec
+            .of((buffer, value) -> buffer.writeVarLong(value.request()), buffer -> new Stop(buffer.readVarLong())),
+        (packet, context) -> context.enqueueWork(() -> {
+          if (context.player() instanceof ServerPlayer player) {
+            AssemblyService.stopProjection(player, packet.request());
+          }
+        }));
   }
-  public static void send(ServerPlayer player, AssemblyPattern pattern, long request) {
-    var entries = pattern.parts().stream()
-        .map(
-            part -> new Entry(
-                part.position(),
-                part.states(),
-                part.rule().alternatives().isEmpty() ? List.of() : part.rule().alternatives().getFirst().properties()
-                    .keySet().stream().map(property -> property.getName()).sorted().toList()))
-        .toList();
-    for (int start = 0; start < entries.size(); start += 32) {
-      PacketDistributor.sendToPlayer(
-          player,
-          new Snapshot(
-              request,
-              pattern.epoch(),
-              player.level().dimension().location(),
-              pattern.machine(),
-              pattern.origin(),
-              start,
-              entries.size(),
-              entries.subList(start, Math.min(entries.size(), start + 32))));
-    }
+
+  public static void stop(long request) {
+    PacketDistributor.sendToServer(new Stop(request));
+  }
+  public static void begin(ServerPlayer player, long request, long epoch, ResourceLocation machine, BlockPos origin, int total) {
+    PacketDistributor.sendToPlayer(
+        player,
+        new Snapshot(request, epoch, player.level().dimension().location(), machine, origin, 0, total, List.of()));
+  }
+
+  /** One bounded packet per call. The caller controls fair per-tick streaming. */
+  public static int sendChunk(ServerPlayer player, AssemblyPattern pattern, long request, List<Entry> entries, int start) {
+    int end = Math.min(entries.size(), start + 32);
+    PacketDistributor.sendToPlayer(
+        player,
+        new Snapshot(
+            request,
+            pattern.epoch(),
+            player.level().dimension().location(),
+            pattern.machine(),
+            pattern.origin(),
+            start,
+            entries.size(),
+            entries.subList(start, end)));
+    return end;
   }
   public static void clear(ServerPlayer player, long request) {
     PacketDistributor.sendToPlayer(

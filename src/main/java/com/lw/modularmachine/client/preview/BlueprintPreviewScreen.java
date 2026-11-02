@@ -36,6 +36,9 @@ public final class BlueprintPreviewScreen extends Screen {
   private final SectionMeshCache cache = new SectionMeshCache();
   private List<ProjectionPayloads.Entry> entries = List.of();
   private List<ItemStack> materials = List.of();
+  private final LinkedHashMap<Item, Integer> materialCounts = new LinkedHashMap<>();
+  private int materialStep;
+  private boolean materialsInitialized;
   private PreviewRenderScene scene;
   private Matrix4f inverse;
   private float centerX, centerY, centerZ, baseScale = 1, yaw = -135, pitch = 25, zoom = 1, panX, panY;
@@ -72,9 +75,8 @@ public final class BlueprintPreviewScreen extends Screen {
     centerX = (minX + maxX + 1) / 2;
     centerY = (minY + maxY + 1) / 2F;
     centerZ = (minZ + maxZ + 1) / 2;
-    baseScale = Math.max(
-        1F,
-        Math.min(24F, Math.round(95F / Math.max(maxX - minX + 1, Math.max(maxY - minY + 1, maxZ - minZ + 1)))));
+    baseScale = Math
+        .max(.01F, Math.min(24F, 95F / Math.max(maxX - minX + 1, Math.max(maxY - minY + 1, maxZ - minZ + 1))));
     scene = PreviewRenderScene.create(0, minecraft.level.dimension().location(), entries);
     cache.setPreviewScene(scene);
     updateMaterials();
@@ -84,17 +86,25 @@ public final class BlueprintPreviewScreen extends Screen {
     return entry.states().get(Math.floorMod(step, entry.states().size()));
   }
   private void updateMaterials() {
-    var counts = new LinkedHashMap<Item, Integer>();
-    for (var entry : entries) {
+    var changed = materialsInitialized ? scene.animated() : entries;
+    for (var entry : changed) {
       if (entry.states().isEmpty()) {
         continue;
       }
+      if (materialsInitialized) {
+        var previous = entry.states().get(Math.floorMod(materialStep, entry.states().size())).getBlock().asItem();
+        if (previous != Items.AIR) {
+          materialCounts.computeIfPresent(previous, (item, count) -> count == 1 ? null : count - 1);
+        }
+      }
       var item = shown(entry).getBlock().asItem();
       if (item != Items.AIR) {
-        counts.merge(item, 1, Integer::sum);
+        materialCounts.merge(item, 1, Integer::sum);
       }
     }
-    materials = counts.entrySet().stream().sorted(Entry.<Item, Integer>comparingByValue().reversed())
+    materialStep = step;
+    materialsInitialized = true;
+    materials = materialCounts.entrySet().stream().sorted(Entry.<Item, Integer>comparingByValue().reversed())
         .map(entry -> new ItemStack(entry.getKey(), entry.getValue())).toList();
     page = Math.min(page, Math.max(0, (materials.size() - 1) / 18));
   }
@@ -142,13 +152,12 @@ public final class BlueprintPreviewScreen extends Screen {
           true);
       return;
     }
-    if (cycle && Util.getMillis() - lastCycle >= 1500) {
+    if (cycle && !scene.animated().isEmpty() && Util.getMillis() - lastCycle >= 1500) {
       step++;
       lastCycle = Util.getMillis();
       updateMaterials();
     }
     cache.setPreviewState(layers ? layer : Integer.MIN_VALUE, step);
-    cache.upload();
     graphics.flush();
     graphics.enableScissor(left + 6, top + 26, left + 178, top + 176);
     graphics.pose().pushPose();
@@ -312,15 +321,20 @@ public final class BlueprintPreviewScreen extends Screen {
       var end = new Vec3(to.x, to.y, to.z);
       double nearest = Double.MAX_VALUE;
       selected = -1;
-      for (int index = 0; index < entries.size(); index++) {
-        var entry = entries.get(index);
-        if (layers && entry.position().getY() != layer) {
+      for (var section : scene.sections()) {
+        if (layers && (layer < section.bounds().minY || layer >= section.bounds().maxY)
+            || section.bounds().clip(start, end).isEmpty()) {
           continue;
         }
-        var hit = new AABB(entry.position()).clip(start, end);
-        if (hit.isPresent() && hit.get().distanceToSqr(start) < nearest) {
-          nearest = hit.get().distanceToSqr(start);
-          selected = index;
+        for (var entry : section.entries()) {
+          if (layers && entry.position().getY() != layer) {
+            continue;
+          }
+          var hit = new AABB(entry.position()).clip(start, end);
+          if (hit.isPresent() && hit.get().distanceToSqr(start) < nearest) {
+            nearest = hit.get().distanceToSqr(start);
+            selected = scene.indexAt(entry.position());
+          }
         }
       }
     }

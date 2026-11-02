@@ -3,7 +3,7 @@ package com.lw.modularmachine.gametest;
 import com.lw.modularmachine.block.MachineControllerBlock;
 import com.lw.modularmachine.blockentity.MachineControllerBlockEntity;
 import com.lw.modularmachine.blockentity.MachinePortBlockEntity;
-import com.lw.modularmachine.config.MachineConfig;
+
 import com.lw.modularmachine.machine.orientation.MachineOrientation;
 import com.lw.modularmachine.machine.structure.StructureService;
 import com.lw.modularmachine.machine.structure.VerificationFailure;
@@ -13,13 +13,13 @@ import java.util.concurrent.atomic.AtomicBoolean;
 import net.minecraft.core.BlockPos;
 import net.minecraft.core.Direction;
 import net.minecraft.core.registries.Registries;
-import net.minecraft.gametest.framework.AfterBatch;
+
 import net.minecraft.gametest.framework.GameTest;
 import net.minecraft.gametest.framework.GameTestHelper;
 import net.minecraft.nbt.CompoundTag;
 import net.minecraft.nbt.NbtUtils;
 import net.minecraft.resources.ResourceLocation;
-import net.minecraft.server.level.ServerLevel;
+
 import net.minecraft.world.level.block.Blocks;
 import net.minecraft.world.level.block.Mirror;
 import net.minecraft.world.level.block.Rotation;
@@ -74,23 +74,6 @@ public final class OrientationLifecycleGameTests {
         "Out-of-height position was treated as a normal block");
     helper.getLevel().setBlockAndUpdate(origin, Blocks.AIR.defaultBlockState());
     helper.succeed();
-  }
-
-  private static int savedSlice = -1, savedTimeout = -1;
-
-  @AfterBatch(batch = "orientation_timeout")
-  public static void restoreTimeoutBatch(ServerLevel level) {
-    restoreTimeoutConfig();
-  }
-
-  private static void restoreTimeoutConfig() {
-    if (savedSlice >= 0) {
-      MachineConfig.CHECKS_PER_CONTROLLER.set(savedSlice);
-    }
-    if (savedTimeout >= 0) {
-      MachineConfig.ROUND_TIMEOUT_TICKS.set(savedTimeout);
-    }
-    savedSlice = savedTimeout = -1;
   }
 
   private static final ResourceLocation MACHINE = id("test_orientation_machine");
@@ -308,40 +291,23 @@ public final class OrientationLifecycleGameTests {
     helper.succeed();
   }
 
-  @GameTest(template = "empty16", batch = "orientation_timeout", timeoutTicks = 80)
-  public static void continuous_turns_do_not_extend_the_round_deadline_or_bypass_cooldown(GameTestHelper helper) {
-    var controller = build(helper, helper.absolutePos(new BlockPos(7, 5, 7)), MachineOrientation.IDENTITY);
-    confirm(helper, controller);
-    savedSlice = MachineConfig.CHECKS_PER_CONTROLLER.get();
-    savedTimeout = MachineConfig.ROUND_TIMEOUT_TICKS.get();
-    MachineConfig.CHECKS_PER_CONTROLLER.set(1);
-    MachineConfig.ROUND_TIMEOUT_TICKS.set(3);
-    // GameTestInfo keys scheduled work by Runnable identity. Use distinct
-    // fixed-time callbacks.
+  @GameTest(template = "empty16", timeoutTicks = 120)
+  public static void continuous_turns_revoke_old_async_results_and_final_pose_recovers(GameTestHelper helper) {
+    var origin = helper.absolutePos(new BlockPos(7, 5, 7));
+    var controller = build(helper, origin, MachineOrientation.IDENTITY);
     for (int tick = 1; tick <= 9; tick++) {
       final int step = tick;
       helper.runAfterDelay(step, () -> {
-        try {
-          StructureService.reorient(controller, MachineOrientation.all().get(step % 24));
-          if (step == 9) {
-            helper.assertTrue(
-                controller.verificationState() == VerificationState.INVALID
-                    && controller.verificationFailure() == VerificationFailure.VERIFICATION_TIMEOUT,
-                "Repeated turns reset the deadline/cooldown");
-            helper.assertTrue(
-                !controller.canCommitProduction() && StructureService.pendingWorkCount(controller) <= 1,
-                "Timed-out machine kept producing/queueing");
-            restoreTimeoutConfig();
-            helper.succeed();
-          }
-        } catch (RuntimeException | AssertionError error) {
-          restoreTimeoutConfig();
-          throw error;
+        var old = controller.registration();
+        StructureService.reorient(controller, MachineOrientation.all().get(step));
+        helper.assertTrue(old == null || !old.canCommit(helper.getLevel()), "Retired async result retained authority");
+        if (step == 9) {
+          StructureService.reorient(controller, MachineOrientation.IDENTITY);
+          helper.succeedWhen(() -> helper.assertTrue(controller.canCommitProduction(), "Final pose did not recover"));
         }
       });
     }
   }
-
   @GameTest(template = "empty16", batch = "orientation_reentrant", timeoutTicks = 80)
   public static void an_opaque_legacy_rotation_callback_cannot_commit_a_retired_resource_ticket(GameTestHelper helper) {
     BlockPos origin = helper.absolutePos(new BlockPos(7, 5, 7));

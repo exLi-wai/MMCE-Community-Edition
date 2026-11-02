@@ -3,6 +3,7 @@ package com.lw.modularmachine;
 import com.lw.modularmachine.client.*;
 import com.lw.modularmachine.client.preview.BlueprintPreviewScreen;
 import com.lw.modularmachine.client.preview.WorldProjection;
+import com.lw.modularmachine.config.MachineClientConfig;
 import com.lw.modularmachine.integration.jei.ClientMachineJeiCatalog;
 import com.lw.modularmachine.machine.blueprint.BlueprintPreviewActions;
 import com.lw.modularmachine.menu.GroupInputMenu;
@@ -17,6 +18,7 @@ import net.neoforged.bus.api.SubscribeEvent;
 import net.neoforged.fml.ModContainer;
 import net.neoforged.fml.common.EventBusSubscriber;
 import net.neoforged.fml.common.Mod;
+import net.neoforged.fml.config.ModConfig;
 import net.neoforged.fml.event.lifecycle.FMLClientSetupEvent;
 import net.neoforged.neoforge.client.event.RegisterClientReloadListenersEvent;
 import net.neoforged.neoforge.client.event.RegisterMenuScreensEvent;
@@ -27,6 +29,7 @@ import net.neoforged.neoforge.client.gui.IConfigScreenFactory;
 @EventBusSubscriber(modid = ModularMachine.MODID, value = Dist.CLIENT)
 public class ModularMachineClient {
   public ModularMachineClient(ModContainer container) {
+    container.registerConfig(ModConfig.Type.CLIENT, MachineClientConfig.SPEC);
     container.registerExtensionPoint(IConfigScreenFactory.class, ConfigurationScreen::new);
     BlueprintPreviewActions.setClientOpener(
         (machine, hand) -> Minecraft.getInstance().setScreen(new BlueprintPreviewScreen(machine, hand)));
@@ -58,7 +61,12 @@ public class ModularMachineClient {
 
   @SubscribeEvent
   static void registerPreviewReload(RegisterClientReloadListenersEvent event) {
-    event.registerReloadListener((ResourceManagerReloadListener) resources -> WorldProjection.invalidateMeshes());
+    event.registerReloadListener((ResourceManagerReloadListener) resources -> {
+      WorldProjection.invalidateMeshes();
+      if (Minecraft.getInstance().screen instanceof BlueprintPreviewScreen screen) {
+        screen.invalidateMeshes();
+      }
+    });
   }
   @SubscribeEvent
   static void onClientSetup(FMLClientSetupEvent event) {

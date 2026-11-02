@@ -629,11 +629,6 @@ public final class MachineControllerBlockEntity extends BlockEntity implements M
     StructureService.register(this);
     refreshUpgradeSources();
     broadcastObserverStatus(server);
-    int auditInterval = MachineConfig.AUDIT_INTERVAL_TICKS.get();
-    if (verificationState() != VerificationState.PENDING
-        && Math.floorMod(server.getGameTime() + worldPosition.asLong(), auditInterval) == 0) {
-      StructureService.requestAudit(this);
-    }
     if (runningRecipe != null) {
       recipeEngine.tick(this, server);
       broadcastObserverStatus(server);
@@ -651,7 +646,7 @@ public final class MachineControllerBlockEntity extends BlockEntity implements M
         } catch (RuntimeException failure) {
           recipeSearch = null;
           preparedRecipe = null;
-          recipeRetryAfter = server.getGameTime() + MachineConfig.AUDIT_INTERVAL_TICKS.get();
+          recipeRetryAfter = server.getGameTime() + 20;
           if (!failure.toString().equals(lastRecipeFailure)) {
             lastRecipeFailure = failure.toString();
             ModularMachine.LOGGER.warn("Ordinary recipe preparation failed at {}", worldPosition, failure);

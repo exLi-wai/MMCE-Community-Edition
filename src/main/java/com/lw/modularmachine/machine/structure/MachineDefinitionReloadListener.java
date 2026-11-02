@@ -93,10 +93,7 @@ public final class MachineDefinitionReloadListener extends ContextAwareReloadLis
     var converter = new FileToIdConverter("mmcece/machines", ".json");
     Map<ResourceLocation, JsonElement> result = new LinkedHashMap<>();
     readGameTestFixtures(resources, converter, result);
-    Path root = MachineDefinitionConfig.directory();
-    if (!Files.isDirectory(root)) {
-      throw new JsonParseException("Machine definition directory is missing: " + root);
-    }
+    Path root = MachineDefinitionConfig.ensureDirectory();
     try (var paths = Files.walk(root)) {
       var files = paths.filter(path -> Files.isRegularFile(path, LinkOption.NOFOLLOW_LINKS))
           .filter(path -> path.getFileName().toString().endsWith(".json"))
@@ -108,7 +105,7 @@ public final class MachineDefinitionReloadListener extends ContextAwareReloadLis
       long totalBytes = 0;
       for (Path file : files) {
         long size = Files.size(file);
-        if (size > 1_048_576L || (totalBytes = Math.addExact(totalBytes, size)) > 32_000_000L) {
+        if (size > 67_108_864L || (totalBytes = Math.addExact(totalBytes, size)) > 1_073_741_824L) {
           throw new JsonParseException(file + ": Machine definition size limit exceeded");
         }
         ResourceLocation id = MachineDefinitionConfig.id(root.relativize(file));

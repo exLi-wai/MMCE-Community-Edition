@@ -17,7 +17,7 @@ import net.minecraft.server.level.ServerLevel;
  * mismatches mean inactive, not invalid.
  */
 public final class StructureModifierTracker {
-  private record Condition(int part, int group, MachineDefinition.Rule rule) {
+  record Condition(int part, int group, MachineDefinition.Rule rule) {
   }
 
   static final class Plan {
@@ -73,6 +73,34 @@ public final class StructureModifierTracker {
               checks);
         }
         active[condition.group()] &= result == CheckResult.MATCH;
+      }
+      var rules = new ArrayList<RecipeModifier>();
+      for (int index = 0; index < groups.size(); index++) {
+        if (active[index]) {
+          rules.addAll(groups.get(index).modifiers());
+        }
+      }
+
+      return new Reference(this, active, List.copyOf(rules), VerificationFailure.NONE, -1, checks);
+    }
+
+    Reference referenceSnapshot(java.util.function.IntFunction<net.minecraft.world.level.block.state.BlockState> states) {
+      var active = new boolean[groups.size()];
+      Arrays.fill(active, true);
+      int checks = 0;
+      for (var condition : conditions) {
+        var state = states.apply(condition.part());
+        checks++;
+        if (state == null) {
+          return new Reference(
+              this,
+              active,
+              List.of(),
+              VerificationFailure.CHUNK_UNAVAILABLE,
+              condition.part(),
+              checks);
+        }
+        active[condition.group()] &= condition.rule() != null && condition.rule().matches(state);
       }
       var rules = new ArrayList<RecipeModifier>();
       for (int index = 0; index < groups.size(); index++) {
@@ -299,6 +327,24 @@ public final class StructureModifierTracker {
 
   boolean canCommit() {
     return verifier == null || verifier.canCommit();
+  }
+
+  void acceptSnapshot(Reference reference) {
+    if (!reference.belongsTo(plan) || reference.failure() != VerificationFailure.NONE) {
+      throw new IllegalArgumentException("Invalid structure modifier snapshot");
+    }
+    active = reference.active.clone();
+    rules = reference.rules();
+    Arrays.fill(missing, 0);
+    for (int index = 0; index < matched.length; index++) {
+      matched[index] = active[plan.conditions.get(index).group()];
+      if (!matched[index]) {
+        missing[plan.conditions.get(index).group()]++;
+      }
+    }
+    if (verifier != null) {
+      verifier.confirmSnapshot();
+    }
   }
 
   VerificationFailure failure() {

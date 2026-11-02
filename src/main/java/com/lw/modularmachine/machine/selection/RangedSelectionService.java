@@ -29,10 +29,6 @@ import net.minecraft.world.level.block.state.BlockState;
  * role; other blocks are exported as plain block parts.
  */
 public final class RangedSelectionService {
-  public static final int MAX_AXIS = 32;
-  public static final int MAX_POSITIONS = 32768;
-  public static final int MAX_PARTS = 4096;
-
   public record Result(Path file, ResourceLocation machine, int parts, int missingChunks) {
   }
 
@@ -53,13 +49,6 @@ public final class RangedSelectionService {
         Math.max(first.getZ(), second.getZ()));
   }
 
-  public static boolean isBounded(BlockPos min, BlockPos max) {
-    long x = (long) max.getX() - min.getX() + 1;
-    long y = (long) max.getY() - min.getY() + 1;
-    long z = (long) max.getZ() - min.getZ() + 1;
-    return x <= MAX_AXIS && y <= MAX_AXIS && z <= MAX_AXIS && x * y * z <= MAX_POSITIONS;
-  }
-
   /**
    * Writes a definition into {@code config/modularmachinery/machinery/mmcece/}.
    */
@@ -67,9 +56,6 @@ public final class RangedSelectionService {
       throws IOException {
     BlockPos min = min(first, second);
     BlockPos max = max(first, second);
-    if (!isBounded(min, max)) {
-      throw new IllegalArgumentException("Selection is too large");
-    }
     record Part(BlockPos offset, String json) {
     }
     List<Part> parts = new ArrayList<>();
@@ -99,12 +85,9 @@ public final class RangedSelectionService {
         part.addProperty("block", BuiltInRegistries.BLOCK.getKey(state.getBlock()).toString());
       }
       parts.add(new Part(offset, part.toString()));
-      if (parts.size() > MAX_PARTS) {
-        throw new IllegalArgumentException("Selection has too many parts");
-      }
     }
     if (parts.isEmpty()) {
-      throw new IllegalArgumentException("Selection has no blocks other than the controller");
+      throw new IllegalArgumentException("选区里除控制器外没有方块");
     }
     parts.sort(
         Comparator.comparingInt((Part part) -> part.offset().getY()).thenComparingInt(part -> part.offset().getX())

@@ -9,12 +9,15 @@ import com.lw.modularmachine.machine.factory.FactoryUpgradeEvents;
 import com.lw.modularmachine.machine.recipe.RecipeLifecycleEvents;
 import com.lw.modularmachine.machine.smart.SmartInterfaceEvents;
 import com.lw.modularmachine.machine.structure.StructureService;
+import com.lw.modularmachine.machine.structure.MachineDefinition;
+import com.lw.modularmachine.machine.orientation.MachineOrientation;
 import com.lw.modularmachine.network.ProjectionPayloads;
 import com.lw.modularmachine.util.thread.ServerThreadGuard;
 import java.util.ArrayList;
 import java.util.HashMap;
 import java.util.LinkedHashSet;
 import java.util.Map;
+import java.util.List;
 import java.util.UUID;
 import net.minecraft.core.BlockPos;
 import net.minecraft.core.Direction;
@@ -49,6 +52,7 @@ import net.neoforged.neoforge.event.tick.ServerTickEvent.Post;
 public final class AssemblyService {
   private static final Map<UUID, Job> JOBS = new HashMap<>();
   private static final Map<UUID, Job> PROJECTIONS = new HashMap<>();
+  private static final Map<UUID, PendingProjection> PENDING_PROJECTIONS = new HashMap<>();
   private static final int BULK_FLAGS = Block.UPDATE_KNOWN_SHAPE | Block.UPDATE_SUPPRESS_DROPS;
   private static long request;
   private static boolean placing;
@@ -64,6 +68,9 @@ public final class AssemblyService {
     final boolean build;
     int cursor, matched, placed;
     long nextPass;
+    long projectionRequest = -1;
+    List<ProjectionPayloads.Entry> projectionEntries = List.of();
+    int sent;
     Job(StructureService.StructureSubject owner, AssemblyPattern pattern, ServerLevel level, InteractionHand hand, boolean build) {
       this.owner = owner;
       this.pattern = pattern;
@@ -73,6 +80,28 @@ public final class AssemblyService {
     }
   }
   private AssemblyService() {
+  }
+
+  private static final class PendingProjection {
+    final StructureService.StructureSubject owner;
+    final ServerLevel level;
+    final MachineDefinition definition;
+    final MachineOrientation orientation;
+    final BlockPos origin;
+    final long epoch, request;
+    final InteractionHand hand;
+    final ProjectionPreparation preparation;
+    PendingProjection(StructureService.StructureSubject owner, ServerLevel level, MachineDefinition definition, MachineOrientation orientation, long request, InteractionHand hand) {
+      this.owner = owner;
+      this.level = level;
+      this.definition = definition;
+      this.orientation = orientation;
+      this.request = request;
+      this.hand = hand;
+      origin = owner.structurePosition().immutable();
+      epoch = StructureService.definitionEpoch();
+      preparation = new ProjectionPreparation(definition, epoch, origin, orientation);
+    }
   }
 
   public static void request(ServerPlayer player, StructureService.StructureSubject owner, boolean build, InteractionHand hand) {
@@ -99,6 +128,39 @@ public final class AssemblyService {
     if (!definition.allows(orientation)) {
       return;
     }
+    if (!build) {
+      var id = player.getUUID();
+      var pending = PENDING_PROJECTIONS.get(id);
+      if (pending != null
+          && pending.owner == owner
+          && pending.definition == definition
+          && pending.orientation == orientation
+          && pending.epoch == StructureService.definitionEpoch()) {
+        return;
+      }
+      var previous = PROJECTIONS.get(id);
+      if (previous != null
+          && previous.owner == owner
+          && previous.pattern.machine().equals(machine)
+          && previous.pattern.orientation() == orientation
+          && previous.pattern.epoch() == StructureService.definitionEpoch()) {
+        return;
+      }
+      PROJECTIONS.remove(id);
+      ProjectionPayloads.clear(player, request = Math.incrementExact(request));
+      long selectedRequest = request = Math.incrementExact(request);
+      PENDING_PROJECTIONS
+          .put(id, new PendingProjection(owner, player.serverLevel(), definition, orientation, selectedRequest, hand));
+      // Header lets the client cancel by distance even during preparation.
+      ProjectionPayloads.begin(
+          player,
+          selectedRequest,
+          StructureService.definitionEpoch(),
+          machine,
+          owner.structurePosition(),
+          definition.parts().size());
+      return;
+    }
     var pattern = AssemblyPattern
         .compile(definition, StructureService.definitionEpoch(), owner.structurePosition(), orientation);
     if (build && player.isCreative()) {
@@ -117,19 +179,14 @@ public final class AssemblyService {
       }
       return;
     }
-    var jobs = build ? JOBS : PROJECTIONS;
-    var previous = jobs.get(player.getUUID());
+    var previous = JOBS.get(player.getUUID());
     if (previous != null && previous.owner == owner && previous.pattern.equals(pattern)) {
       return;
     }
-    jobs.put(player.getUUID(), new Job(owner, pattern, player.serverLevel(), hand, build));
-    if (!build) {
-      ProjectionPayloads.send(player, pattern, request = Math.incrementExact(request));
-    }
+    var job = new Job(owner, pattern, player.serverLevel(), hand, build);
+    JOBS.put(player.getUUID(), job);
     player.displayClientMessage(
-        Component.translatable(
-            build ? "message.mmcece.assembly.started" : "message.mmcece.assembly.projected",
-            pattern.machine().toString()),
+        Component.translatable("message.mmcece.assembly.started", pattern.machine().toString()),
         true);
   }
 
@@ -147,6 +204,7 @@ public final class AssemblyService {
       return;
     }
     PROJECTIONS.remove(player.getUUID());
+    PENDING_PROJECTIONS.remove(player.getUUID());
     ProjectionPayloads.clear(player, request = Math.incrementExact(request));
     player.displayClientMessage(Component.translatable("message.mmcece.projection.cancelled"), true);
   }
@@ -154,6 +212,21 @@ public final class AssemblyService {
   private static void cancelConstruction(ServerPlayer player) {
     JOBS.remove(player.getUUID());
     player.displayClientMessage(Component.translatable("message.mmcece.assembly.cancelled"), true);
+  }
+
+  /**
+   * Client may release only its own exact projection; no world or build writes.
+   */
+  public static void stopProjection(ServerPlayer player, long expectedRequest) {
+    ServerThreadGuard.require(player.serverLevel(), "Projection cancelled");
+    var job = PROJECTIONS.get(player.getUUID());
+    if (job != null && job.projectionRequest == expectedRequest) {
+      PROJECTIONS.remove(player.getUUID());
+    }
+    var pending = PENDING_PROJECTIONS.get(player.getUUID());
+    if (pending != null && pending.request == expectedRequest) {
+      PENDING_PROJECTIONS.remove(player.getUUID());
+    }
   }
 
   /** Legacy assembly selects the slotted blueprint, then the dedicated parent. */
@@ -257,7 +330,7 @@ public final class AssemblyService {
         || job.pattern.epoch() != StructureService.definitionEpoch()
         || !job.level.hasChunkAt(job.pattern.origin())
         || !job.level.mayInteract(player, job.pattern.origin())
-        || !player.canInteractWithBlock(job.pattern.origin(), 0)) {
+        || job.build && !player.canInteractWithBlock(job.pattern.origin(), 0)) {
       return false;
     }
     return !job.owner.structureRemoved()
@@ -271,27 +344,91 @@ public final class AssemblyService {
   public static void tick(Post event) {
     var identities = new LinkedHashSet<>(JOBS.keySet());
     identities.addAll(PROJECTIONS.keySet());
+    identities.addAll(PENDING_PROJECTIONS.keySet());
     var players = new ArrayList<>(identities);
     if (players.isEmpty()) {
       return;
     }
     int start = Math.floorMod(playerCursor, players.size());
     int count = Math.min(players.size(), 8);
+    long projectionDeadline = System.nanoTime() + 2_000_000L;
+    int packets = 0;
     for (int index = 0; index < count; index++) {
       var id = players.get((start + index) % players.size());
       var player = event.getServer().getPlayerList().getPlayer(id);
       if (player == null) {
         JOBS.remove(id);
         PROJECTIONS.remove(id);
+        PENDING_PROJECTIONS.remove(id);
       } else {
+        prepareProjection(player, projectionDeadline);
         var projection = PROJECTIONS.get(id);
         if (projection != null && !current(player, projection)) {
           cancelProjection(player);
+        } else if (projection != null) {
+          for (int sent = 0; sent < 32
+              && packets < 64
+              && projection.sent < projection.projectionEntries.size()
+              && System.nanoTime() < projectionDeadline; sent++, packets++) {
+            projection.sent = ProjectionPayloads.sendChunk(
+                player,
+                projection.pattern,
+                projection.projectionRequest,
+                projection.projectionEntries,
+                projection.sent);
+          }
         }
         advance(player);
       }
     }
     playerCursor = (start + count) % players.size();
+  }
+
+  private static void prepareProjection(ServerPlayer player, long deadline) {
+    var pending = PENDING_PROJECTIONS.get(player.getUUID());
+    if (pending == null) {
+      return;
+    }
+    if (!current(player, pending)) {
+      cancelProjection(player);
+      return;
+    }
+    if (System.nanoTime() >= deadline) {
+      return;
+    }
+    try {
+      var ready = pending.preparation.advance(deadline);
+      if (!current(player, pending) || PENDING_PROJECTIONS.get(player.getUUID()) != pending) {
+        return;
+      }
+      if (ready != null) {
+        var job = new Job(pending.owner, ready.pattern(), pending.level, pending.hand, false);
+        job.projectionRequest = pending.request;
+        job.projectionEntries = ready.entries();
+        PENDING_PROJECTIONS.remove(player.getUUID());
+        PROJECTIONS.put(player.getUUID(), job);
+        player.displayClientMessage(
+            Component.translatable("message.mmcece.assembly.projected", pending.definition.id().toString()),
+            true);
+      }
+    } catch (RuntimeException failure) {
+      ModularMachine.LOGGER.warn("Projection preparation failed at {}", pending.origin, failure);
+      cancelProjection(player);
+    }
+  }
+
+  private static boolean current(ServerPlayer player, PendingProjection pending) {
+    return validPlayer(player)
+        && player.level() == pending.level
+        && pending.epoch == StructureService.definitionEpoch()
+        && pending.definition == StructureService.definition(pending.definition.id())
+        && !pending.owner.structureRemoved()
+        && pending.owner.structureSchemaSupported()
+        && pending.level.hasChunkAt(pending.origin)
+        && pending.level.getBlockEntity(pending.origin) == pending.owner
+        && pending.level.mayInteract(player, pending.origin)
+        && pending.definition.id().equals(selectedMachine(pending.owner, false))
+        && pending.orientation == pending.owner.structureOrientation(pending.level);
   }
 
   private static void advance(ServerPlayer player) {
@@ -473,11 +610,14 @@ public final class AssemblyService {
   public static void logout(PlayerEvent.PlayerLoggedOutEvent event) {
     JOBS.remove(event.getEntity().getUUID());
     PROJECTIONS.remove(event.getEntity().getUUID());
+    PENDING_PROJECTIONS.remove(event.getEntity().getUUID());
   }
   @SubscribeEvent
   public static void stopped(ServerStoppedEvent event) {
     JOBS.clear();
     PROJECTIONS.clear();
+    PENDING_PROJECTIONS.clear();
+    ProjectionPreparation.clearCache();
     placing = false;
     budgetTick = -1;
     budget = 0;

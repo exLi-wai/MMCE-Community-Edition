@@ -70,7 +70,7 @@ public final class ClientMachineJeiCatalog {
     }
     var previous = pending.get(packet.machine());
     int size = previous == null ? 0 : previous.parts().size();
-    if (size != packet.start() || (positions += packet.parts().size()) > 66560) {
+    if (size != packet.start() || (positions += packet.parts().size()) > 4_194_304) {
       throw new IllegalArgumentException("Invalid preview chunk ordering/size");
     }
     var parts = new ArrayList<MachineJeiPayloads.Part>();

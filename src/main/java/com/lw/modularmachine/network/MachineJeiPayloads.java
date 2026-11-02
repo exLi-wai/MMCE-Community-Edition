@@ -59,7 +59,6 @@ public final class MachineJeiPayloads {
           || translation.length() > 512
           || start < -2
           || total < 0
-          || total > 4097
           || parts.size() > CHUNK_PARTS
           || start >= 0 && start + parts.size() > total) {
         throw new IllegalArgumentException("Invalid JEI snapshot");

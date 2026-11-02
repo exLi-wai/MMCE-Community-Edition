@@ -2,7 +2,9 @@ package com.lw.modularmachine.machine.controller;
 
 import com.google.gson.JsonElement;
 import com.google.gson.JsonObject;
+import com.google.gson.JsonParseException;
 import com.google.gson.JsonParser;
+import com.lw.modularmachine.ModularMachine;
 import com.lw.modularmachine.machine.structure.MachineDefinitionConfig;
 import java.io.IOException;
 import java.nio.charset.StandardCharsets;
@@ -26,6 +28,11 @@ import net.neoforged.fml.loading.FMLPaths;
 
 /** Registration-only manifest, frozen before deferred block registration. */
 public final class DedicatedControllerCatalog {
+
+  private static final long MAX_FILE_BYTES = 67_108_864L;
+  private static final long MAX_TOTAL_BYTES = 1_073_741_824L;
+  private static final int MAX_MACHINE_FILES = 1024;
+
   public record Entry(
       String id,
       ResourceLocation machine,
@@ -77,32 +84,75 @@ public final class DedicatedControllerCatalog {
   }
 
   private static List<Machine> scanMachines() {
-    var directory = MachineDefinitionConfig.directory();
+    var directory = MachineDefinitionConfig.ensureDirectory();
     var machines = new TreeMap<ResourceLocation, Machine>();
+    var skipped = new ArrayList<String>();
+
+    List<Path> files;
     try (var paths = Files.walk(directory)) {
-      var files = paths.filter(path -> Files.isRegularFile(path, LinkOption.NOFOLLOW_LINKS))
-          .filter(path -> path.toString().endsWith(".json") && !path.toString().endsWith(".var.json")).limit(1025)
-          .toList();
-      if (files.size() > 1024) {
-        throw new IllegalArgumentException("At most 1024 startup machines");
+      files = paths.filter(path -> Files.isRegularFile(path, LinkOption.NOFOLLOW_LINKS))
+          .filter(path -> path.toString().endsWith(".json") && !path.toString().endsWith(".var.json"))
+          .limit(MAX_MACHINE_FILES + 1L).toList();
+    } catch (IOException failure) {
+      throw new IllegalStateException("Cannot discover startup machines under " + directory, failure);
+    }
+    if (files.size() > MAX_MACHINE_FILES) {
+      throw new IllegalStateException("At most " + MAX_MACHINE_FILES + " startup machines");
+    }
+
+    long total = 0;
+    for (var file : files) {
+      var relative = directory.relativize(file);
+      long size;
+      try {
+        size = Files.size(file);
+      } catch (IOException io) {
+        skipped.add(relative + ": I/O " + io.getMessage());
+        ModularMachine.LOGGER.error("Failed to stat machine definition {}", relative, io);
+        continue;
       }
-      long total = 0;
-      for (var file : files) {
-        long size = Files.size(file);
-        if (size > 1048576 || (total = Math.addExact(total, size)) > 32000000) {
-          throw new IllegalArgumentException("Machine registration input size exceeded");
-        }
-        var id = MachineDefinitionConfig.id(directory.relativize(file));
+      if (size > MAX_FILE_BYTES) {
+        skipped.add(relative + ": file exceeds " + MAX_FILE_BYTES + " bytes");
+        ModularMachine.LOGGER.error("Skipping oversized machine definition {} ({} bytes)", relative, size);
+        continue;
+      }
+      try {
+        total = Math.addExact(total, size);
+      } catch (ArithmeticException overflow) {
+        throw new IllegalStateException("Total machine definition size overflowed", overflow);
+      }
+      if (total > MAX_TOTAL_BYTES) {
+        throw new IllegalStateException(
+            "Total machine definition size exceeded " + MAX_TOTAL_BYTES + " bytes; refusing to load");
+      }
+
+      try {
+        var id = MachineDefinitionConfig.id(relative);
         var root = JsonParser.parseString(Files.readString(file, StandardCharsets.UTF_8)).getAsJsonObject();
         String translation = text(root, "translation_key", "machine." + id.getNamespace() + "." + id.getPath());
         if (machines.putIfAbsent(id, new Machine(id, translation)) != null) {
-          throw new IllegalArgumentException("Duplicate startup machine " + id);
+          skipped.add(relative + ": duplicate machine id " + id);
+          ModularMachine.LOGGER.error("Skipping duplicate machine definition {} (id {})", relative, id);
         }
+      } catch (JsonParseException | IllegalArgumentException invalid) {
+        skipped.add(relative + ": " + invalid.getMessage());
+        ModularMachine.LOGGER.error("Skipping invalid machine definition {}: {}", relative, invalid.getMessage());
+      } catch (IOException io) {
+        skipped.add(relative + ": I/O " + io.getMessage());
+        ModularMachine.LOGGER.error("Failed to read machine definition {}", relative, io);
+      } catch (RuntimeException unexpected) {
+        skipped.add(relative + ": " + unexpected);
+        ModularMachine.LOGGER.error("Failed to load machine definition {}", relative, unexpected);
       }
-      return List.copyOf(machines.values());
-    } catch (IOException failure) {
-      throw new IllegalStateException("Cannot discover startup machines", failure);
     }
+
+    if (!skipped.isEmpty()) {
+      ModularMachine.LOGGER.warn("[mmcece] {} invalid machine definition(s) skipped:", skipped.size());
+      for (var message : skipped) {
+        ModularMachine.LOGGER.warn("  - {}", message);
+      }
+    }
+    return List.copyOf(machines.values());
   }
 
   private static List<Entry> load() {
@@ -144,38 +194,64 @@ public final class DedicatedControllerCatalog {
     }
     var result = new ArrayList<Entry>();
     var ids = new HashSet<String>();
+    var skipped = new ArrayList<String>();
+
     for (JsonElement value : values) {
-      var source = value.getAsJsonObject();
-      if (!Set.of("id", "machine", "type", "name", "casing", "overlay", "model").containsAll(source.keySet())) {
-        throw new IllegalArgumentException("Unknown controller field");
+      try {
+        var source = value.getAsJsonObject();
+        if (!Set.of("id", "machine", "type", "name", "casing", "overlay", "model").containsAll(source.keySet())) {
+          throw new IllegalArgumentException("Unknown controller field");
+        }
+        String id = text(source, "id", null);
+        String type = text(source, "type", null);
+        String name = text(source, "name", "");
+        if (!id.matches("[a-z0-9_]{1,64}")
+            || !ids.add(id)
+            || !Set.of("ordinary", "factory").contains(type)
+            || name.length() > 128) {
+          throw new IllegalArgumentException("Invalid dedicated controller entry: " + id);
+        }
+        var machine = registeredMachine(text(source, "machine", null));
+        var casing = location(text(source, "casing", "mmcece:block/blockcasing_plain"));
+        var overlay = location(
+            text(
+                source,
+                "overlay",
+                type.equals(
+                    "factory") ? "mmcece:block/overlay_factory_controller" : "mmcece:block/overlay_controller"));
+        var model = source.has("model") ? location(text(source, "model", null)) : null;
+        result.add(new Entry(id, machine, type.equals("factory"), name, casing, overlay, model));
+      } catch (RuntimeException invalid) {
+        // 单条控制器条目失败 -> 跳过并继续
+        skipped.add(invalid.getMessage());
+        ModularMachine.LOGGER.error("Skipping invalid controller entry: {}", invalid.getMessage());
       }
-      String id = text(source, "id", null);
-      String type = text(source, "type", null);
-      String name = text(source, "name", "");
-      if (!id.matches("[a-z0-9_]{1,64}")
-          || !ids.add(id)
-          || !Set.of("ordinary", "factory").contains(type)
-          || name.length() > 128) {
-        throw new IllegalArgumentException("Invalid dedicated controller entry: " + id);
-      }
-      var machine = registeredMachine(text(source, "machine", null));
-      var casing = location(text(source, "casing", "mmcece:block/blockcasing_plain"));
-      var overlay = location(
-          text(
-              source,
-              "overlay",
-              type.equals("factory") ? "mmcece:block/overlay_factory_controller" : "mmcece:block/overlay_controller"));
-      var model = source.has("model") ? location(text(source, "model", null)) : null;
-      result.add(new Entry(id, machine, type.equals("factory"), name, casing, overlay, model));
     }
+
     result.sort(Comparator.comparing(Entry::id));
     var roles = new HashSet<String>();
     var usedIds = new HashSet<String>();
     for (var entry : result) {
       if (!roles.add(entry.factory() + ":" + entry.machine()) || !usedIds.add(entry.id())) {
-        throw new IllegalArgumentException("Duplicate controller role or ID");
+        // 合并后的重复角色/ID：记录后跳过这一条，不再整体失败
+        skipped.add("Duplicate controller role or ID: " + entry.id());
+        ModularMachine.LOGGER.error("Skipping duplicate controller role/ID {}", entry.id());
+        continue;
       }
     }
+    // 用去重后的条目重新组装（上一步只是校验，这一步清理冲突项）
+    if (!skipped.isEmpty()) {
+      var seenRoles = new HashSet<String>();
+      var seenIds = new HashSet<String>();
+      var cleaned = new ArrayList<Entry>(result.size());
+      for (var entry : result) {
+        if (seenRoles.add(entry.factory() + ":" + entry.machine()) && seenIds.add(entry.id())) {
+          cleaned.add(entry);
+        }
+      }
+      result = cleaned;
+    }
+
     for (var machine : MACHINES) {
       for (boolean factory : new boolean[]{false, true}) {
         if (roles.add(factory + ":" + machine.id())) {
@@ -193,6 +269,13 @@ public final class DedicatedControllerCatalog {
       }
     }
     result.sort(Comparator.comparing(Entry::id));
+
+    if (!skipped.isEmpty()) {
+      ModularMachine.LOGGER.warn("[mmcece] {} invalid controller entr(ies) skipped:", skipped.size());
+      for (var message : skipped) {
+        ModularMachine.LOGGER.warn("  - {}", message);
+      }
+    }
     return List.copyOf(result);
   }
 
