@@ -1,6 +1,9 @@
 package com.lw.modularmachine.client.preview;
 
+import java.nio.ByteBuffer;
+import java.nio.ByteOrder;
 import java.util.ArrayList;
+import java.util.Arrays;
 import java.util.List;
 import java.util.concurrent.ArrayBlockingQueue;
 import java.util.concurrent.CompletableFuture;
@@ -8,8 +11,6 @@ import java.util.concurrent.RejectedExecutionException;
 import java.util.concurrent.ThreadPoolExecutor;
 import java.util.concurrent.TimeUnit;
 import java.util.function.Supplier;
-import java.nio.ByteBuffer;
-import java.nio.ByteOrder;
 
 /**
  * CPU-only packing of detached quad data. No models, worlds, native buffers or
@@ -118,7 +119,7 @@ final class PreviewMeshData {
         }
       }
       if (cursor > 0) {
-        pages.add(new Page(java.util.Arrays.copyOf(data, cursor), transparent));
+        pages.add(new Page(Arrays.copyOf(data, cursor), transparent));
       }
     }
     return List.copyOf(pages);

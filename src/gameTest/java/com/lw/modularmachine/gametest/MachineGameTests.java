@@ -224,7 +224,9 @@ public final class MachineGameTests {
           .defaultBlockState() : MachineRegistries.PORTS.get(rule.port().path() + "_normal").get().defaultBlockState();
       level.setBlockAndUpdate(pattern.position(i), state);
     }
-    return (MachineControllerBlockEntity) level.getBlockEntity(origin);
+    var controller = (MachineControllerBlockEntity) level.getBlockEntity(origin);
+    StructureService.advance(level, 512, 64, 50_000_000L);
+    return controller;
   }
 
   private static MachinePortBlockEntity input(GameTestHelper helper, MachineControllerBlockEntity controller) {

@@ -9,7 +9,6 @@ import java.util.HashSet;
 import java.util.Objects;
 import javax.imageio.ImageIO;
 import org.junit.jupiter.api.Test;
-
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 

@@ -11,6 +11,7 @@ import java.util.Comparator;
 import java.util.List;
 import java.util.Objects;
 import java.util.concurrent.CompletableFuture;
+import java.util.stream.IntStream;
 import net.minecraft.core.BlockPos;
 import net.minecraft.resources.ResourceLocation;
 import net.minecraft.server.MinecraftServer;
@@ -105,9 +106,7 @@ public final class GenericControllerDiscovery {
         if (permit == null) {
           return null;
         }
-        capture = new StructureSnapshot.Capture(
-            pattern,
-            java.util.stream.IntStream.range(0, definition.parts().size()).toArray());
+        capture = new StructureSnapshot.Capture(pattern, IntStream.range(0, definition.parts().size()).toArray());
       }
       while (!capture.complete() && System.nanoTime() < deadline) {
         capture.advance(level, 256);

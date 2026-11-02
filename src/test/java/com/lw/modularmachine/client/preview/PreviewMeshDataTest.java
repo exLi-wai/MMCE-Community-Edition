@@ -1,5 +1,7 @@
 package com.lw.modularmachine.client.preview;
 
+import java.nio.ByteBuffer;
+import java.nio.ByteOrder;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.concurrent.TimeUnit;
@@ -37,7 +39,7 @@ class PreviewMeshDataTest {
     assertEquals(.25F, Float.intBitsToFloat(data[3]));
     assertEquals(.75F, Float.intBitsToFloat(data[4]));
     assertEquals(0x64FF8040, data[5]);
-    var upload = java.nio.ByteBuffer.wrap(page.uploadBytes()).order(java.nio.ByteOrder.nativeOrder());
+    var upload = ByteBuffer.wrap(page.uploadBytes()).order(ByteOrder.nativeOrder());
     assertEquals(10F, upload.getFloat(0));
     assertEquals(.25F, upload.getFloat(12));
     assertEquals(255, Byte.toUnsignedInt(upload.get(20)));

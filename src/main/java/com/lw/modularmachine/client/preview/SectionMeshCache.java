@@ -1,7 +1,7 @@
 package com.lw.modularmachine.client.preview;
 
-import com.lw.modularmachine.network.ProjectionPayloads;
 import com.lw.modularmachine.ModularMachine;
+import com.lw.modularmachine.network.ProjectionPayloads;
 import com.mojang.blaze3d.systems.RenderSystem;
 import com.mojang.blaze3d.vertex.ByteBufferBuilder;
 import com.mojang.blaze3d.vertex.DefaultVertexFormat;
@@ -10,12 +10,14 @@ import com.mojang.blaze3d.vertex.VertexBuffer;
 import com.mojang.blaze3d.vertex.VertexFormat;
 import com.mojang.blaze3d.vertex.VertexSorting;
 import java.util.ArrayList;
+import java.util.Collections;
 import java.util.Comparator;
 import java.util.HashMap;
 import java.util.HashSet;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.Objects;
 import java.util.Set;
 import java.util.concurrent.CompletableFuture;
 import java.util.function.Predicate;
@@ -188,7 +190,7 @@ final class SectionMeshCache implements AutoCloseable {
           preview ? shown(entry) : level != null && level.hasChunkAt(entry.position()) ? level
               .getBlockState(entry.position()) : null);
     }
-    return java.util.Collections.unmodifiableList(states);
+    return Collections.unmodifiableList(states);
   }
   private BlockState shown(ProjectionPayloads.Entry entry) {
     return entry.states().isEmpty() ? null : entry.states().get(Math.floorMod(previewStep, entry.states().size()));
@@ -316,7 +318,7 @@ final class SectionMeshCache implements AutoCloseable {
         }
         if (!resident.contains(section.key())
             || builds.containsKey(section.key())
-            || java.util.Objects.equals(failed.get(section.key()), revisions.getOrDefault(section.key(), 0L))) {
+            || Objects.equals(failed.get(section.key()), revisions.getOrDefault(section.key(), 0L))) {
           continue;
         }
         if (!meshes.containsKey(section.key()) || dirty.contains(section.key())) {

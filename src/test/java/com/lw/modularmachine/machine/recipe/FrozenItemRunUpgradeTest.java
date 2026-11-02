@@ -3,7 +3,6 @@ package com.lw.modularmachine.machine.recipe;
 import com.lw.modularmachine.machine.factory.FactoryUpgradeSnapshot;
 import net.minecraft.nbt.CompoundTag;
 import org.junit.jupiter.api.Test;
-
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 

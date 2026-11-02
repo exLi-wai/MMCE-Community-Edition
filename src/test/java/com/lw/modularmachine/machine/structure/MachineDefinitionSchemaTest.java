@@ -28,6 +28,7 @@ import net.minecraft.server.packs.resources.PreparableReloadListener;
 import net.minecraft.server.packs.resources.Resource;
 import net.minecraft.server.packs.resources.ResourceManager;
 import net.minecraft.util.profiling.InactiveProfiler;
+import org.junit.jupiter.api.Disabled;
 import org.junit.jupiter.api.Test;
 
 import static org.junit.jupiter.api.Assertions.*;
@@ -209,7 +210,7 @@ class MachineDefinitionSchemaTest {
   }
 
   @Test
-  @org.junit.jupiter.api.Disabled("machine definitions load from config/modularmachinery/machinery now; reload/barrier is covered by the reload GameTests")
+  @Disabled("machine definitions load from config/modularmachinery/machinery now; reload/barrier is covered by the reload GameTests")
   void aReloadPublishesOnlyAfterTheBarrierAndTheWholeCandidateIsReady() {
     var previous = StructureService.definitionsSnapshot();
     long epoch = StructureService.definitionEpoch();

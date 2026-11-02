@@ -1,14 +1,13 @@
 package com.lw.modularmachine.machine.factory;
 
 import com.lw.modularmachine.machine.recipe.FrozenItemRun;
+import java.util.ArrayList;
+import java.util.HashSet;
+import java.util.UUID;
 import net.minecraft.core.HolderLookup;
 import net.minecraft.nbt.CompoundTag;
 import net.minecraft.nbt.ListTag;
 import net.minecraft.nbt.Tag;
-
-import java.util.ArrayList;
-import java.util.HashSet;
-import java.util.UUID;
 
 /** Strict NBT codec for a parallel factory run set. */
 public final class FactoryRunSetCodec {

@@ -8,6 +8,7 @@ import com.lw.modularmachine.util.thread.ServerThreadGuard;
 import java.util.BitSet;
 import java.util.HashMap;
 import java.util.Map;
+import java.util.concurrent.CancellationException;
 import net.minecraft.core.BlockPos;
 import net.minecraft.server.level.ServerLevel;
 import net.minecraft.world.level.ChunkPos;
@@ -160,7 +161,7 @@ public final class StructureSnapshot {
       }
       for (int index : checks) {
         if (Thread.currentThread().isInterrupted()) {
-          throw new java.util.concurrent.CancellationException();
+          throw new CancellationException();
         }
         var result = pattern.matchSnapshot(index, baseStates[index], details[index]);
         if (result == CheckResult.MISMATCH && plan.allows(index, modifiers)) {

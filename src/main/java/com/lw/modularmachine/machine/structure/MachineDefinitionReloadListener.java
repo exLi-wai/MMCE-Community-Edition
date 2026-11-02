@@ -130,10 +130,13 @@ public final class MachineDefinitionReloadListener extends ContextAwareReloadLis
     var fixtures = converter.listMatchingResources(resources);
     for (var entry : fixtures.entrySet()) {
       ResourceLocation id = converter.fileToId(entry.getKey());
-      if (!id.getPath().startsWith("test_")) {
+      if (!id.getPath().startsWith("test_") && !id.getPath().equals("transformer")) {
         continue;
       }
       try (var reader = entry.getValue().openAsReader()) {
+        if (result.containsKey(id)) {
+          continue;
+        }
         put(result, id, JsonParser.parseReader(reader), entry.getKey().toString());
       } catch (IOException | IllegalArgumentException | JsonParseException exception) {
         throw new JsonParseException(id + ": $: Failed reading GameTest fixture " + entry.getKey(), exception);

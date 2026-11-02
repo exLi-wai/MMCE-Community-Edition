@@ -10,7 +10,9 @@ import java.util.LinkedHashMap;
 import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Map;
+import java.util.function.IntFunction;
 import net.minecraft.server.level.ServerLevel;
+import net.minecraft.world.level.block.state.BlockState;
 
 /**
  * Optional predicates share structure subscriptions and budget; their
@@ -84,7 +86,7 @@ public final class StructureModifierTracker {
       return new Reference(this, active, List.copyOf(rules), VerificationFailure.NONE, -1, checks);
     }
 
-    Reference referenceSnapshot(java.util.function.IntFunction<net.minecraft.world.level.block.state.BlockState> states) {
+    Reference referenceSnapshot(IntFunction<BlockState> states) {
       var active = new boolean[groups.size()];
       Arrays.fill(active, true);
       int checks = 0;

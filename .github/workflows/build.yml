@@ -27,13 +27,34 @@ jobs:
       - name: Build with Gradle
         run: ./gradlew build
 
+  gametest:
+    runs-on: ubuntu-latest
+    continue-on-error: true
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          fetch-tags: true
+
+      - name: Setup JDK 21
+        uses: actions/setup-java@v4
+        with:
+          java-version: '21'
+          distribution: 'temurin'
+
+      - name: Setup Gradle
+        uses: gradle/actions/setup-gradle@v4
+
+      - name: Make Gradle wrapper executable
+        run: chmod +x gradlew
+
       - name: Run server game tests
-        continue-on-error: true
         timeout-minutes: 30
         run: ./gradlew runGameTestServer --init-script gradle/core-gametest.init.gradle --no-configuration-cache --console=plain --stacktrace
 
       - name: Upload game test logs
-        if: failure()
+        if: always()
         uses: actions/upload-artifact@v4
         with:
           name: gametest-logs

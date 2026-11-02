@@ -5,6 +5,7 @@ import com.lw.modularmachine.machine.ParallelControllerTier;
 import com.lw.modularmachine.machine.UpgradeBusTier;
 import java.util.EnumMap;
 import java.util.LinkedHashMap;
+import java.util.List;
 import java.util.Map;
 import net.minecraft.resources.ResourceLocation;
 import net.neoforged.neoforge.common.ModConfigSpec;
@@ -112,7 +113,7 @@ public final class MachineConfig {
     return configured <= 0 ? fallback : configured;
   }
 
-  private static Map<String, ModConfigSpec.IntValue> hatchValues(ModConfigSpec.Builder builder, String section, java.util.List<HatchTier> tiers, boolean transfer, int max) {
+  private static Map<String, ModConfigSpec.IntValue> hatchValues(ModConfigSpec.Builder builder, String section, List<HatchTier> tiers, boolean transfer, int max) {
     builder.translation("mmcece.config." + section).push(section);
     var values = new LinkedHashMap<String, ModConfigSpec.IntValue>();
     for (var tier : tiers) {

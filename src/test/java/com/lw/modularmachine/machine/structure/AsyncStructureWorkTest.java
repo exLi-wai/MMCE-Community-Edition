@@ -1,9 +1,16 @@
 package com.lw.modularmachine.machine.structure;
 
+import com.google.gson.JsonParser;
+import com.lw.modularmachine.machine.orientation.MachineOrientation;
+import com.lw.modularmachine.machine.orientation.StateOrientationAdapters.RegistrySnapshot;
 import java.util.ArrayList;
+import java.util.Map;
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.CountDownLatch;
+import java.util.concurrent.ExecutionException;
 import java.util.concurrent.TimeUnit;
+import net.minecraft.core.BlockPos;
+import net.minecraft.resources.ResourceLocation;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.Test;
 
@@ -12,15 +19,13 @@ import static org.junit.jupiter.api.Assertions.*;
 class AsyncStructureWorkTest {
   @Test
   void layoutPreparationAndRelocationNeedNoWorldAndPreserveIdentity() throws Exception {
-    var json = com.google.gson.JsonParser
+    var json = JsonParser
         .parseString("{\"schema_version\":2,\"parts\":[{\"offset\":[1,0,0],\"port\":\"energy_input\"}]}")
         .getAsJsonObject();
-    var definition = MachineDefinition.parse(
-        net.minecraft.resources.ResourceLocation.parse("mmcece:async_unit"),
-        json,
-        new com.lw.modularmachine.machine.orientation.StateOrientationAdapters.RegistrySnapshot(java.util.Map.of()));
-    var origin = new net.minecraft.core.BlockPos(31, 70, -17);
-    var orientation = com.lw.modularmachine.machine.orientation.MachineOrientation.IDENTITY;
+    var definition = MachineDefinition
+        .parse(ResourceLocation.parse("mmcece:async_unit"), json, new RegistrySnapshot(Map.of()));
+    var origin = new BlockPos(31, 70, -17);
+    var orientation = MachineOrientation.IDENTITY;
     var first = AsyncStructureWork.prepare(definition, origin, orientation).get(3, TimeUnit.SECONDS);
     var second = AsyncStructureWork.prepare(definition, origin.above(), orientation).get(3, TimeUnit.SECONDS);
     assertSame(definition, first.definition);
@@ -84,7 +89,7 @@ class AsyncStructureWorkTest {
       throw new IllegalStateException("predicate failed");
     });
     assertNotNull(failed);
-    assertThrows(java.util.concurrent.ExecutionException.class, () -> failed.get(3, TimeUnit.SECONDS));
+    assertThrows(ExecutionException.class, () -> failed.get(3, TimeUnit.SECONDS));
   }
 
   @Test

@@ -7,7 +7,6 @@ import java.util.List;
 import java.util.Set;
 import net.minecraft.resources.ResourceLocation;
 import org.junit.jupiter.api.Test;
-
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 

@@ -2,7 +2,6 @@ package com.lw.modularmachine.machine.factory;
 
 import net.minecraft.resources.ResourceLocation;
 import org.junit.jupiter.api.Test;
-
 import static org.junit.jupiter.api.Assertions.assertEquals;
 
 class FactoryUpgradeEntryTest {

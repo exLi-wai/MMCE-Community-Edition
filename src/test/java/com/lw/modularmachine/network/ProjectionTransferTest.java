@@ -1,7 +1,9 @@
 package com.lw.modularmachine.network;
 
 import java.util.ArrayList;
+import java.util.Collections;
 import java.util.List;
+import java.util.stream.IntStream;
 import net.minecraft.core.BlockPos;
 import net.minecraft.resources.ResourceLocation;
 import org.junit.jupiter.api.Test;
@@ -37,10 +39,9 @@ class ProjectionTransferTest {
 
   @Test
   void complexEntriesReducePacketCountByByteBudgetAndAlwaysMakeProgress() {
-    var names = java.util.stream.IntStream.range(0, 64).mapToObj(index -> "property_" + index + "_".repeat(48))
-        .toList();
+    var names = IntStream.range(0, 64).mapToObj(index -> "property_" + index + "_".repeat(48)).toList();
     var entry = new ProjectionPayloads.Entry(BlockPos.ZERO, List.of(), names);
-    var entries = java.util.Collections.nCopies(256, entry);
+    var entries = Collections.nCopies(256, entry);
     int end = ProjectionPayloads.chunkEnd(entries, 0);
     assertTrue(end > 0 && end < 256, "Complex rows ignored the payload byte target");
     assertEquals(256, ProjectionPayloads.chunkEnd(entries, 255));
@@ -54,6 +55,6 @@ class ProjectionTransferTest {
             BlockPos.ZERO,
             0,
             257,
-            java.util.Collections.nCopies(257, entry)));
+            Collections.nCopies(257, entry)));
   }
 }

@@ -13,11 +13,13 @@ import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.Set;
+import java.util.concurrent.CancellationException;
 import net.minecraft.core.BlockPos;
 import net.minecraft.core.Direction;
 import net.minecraft.core.SectionPos;
 import net.minecraft.server.level.ServerLevel;
 import net.minecraft.world.level.block.Rotation;
+import net.minecraft.world.level.block.state.BlockState;
 
 /**
  * Immutable absolute layout. Production uses Builder; synchronous constructors
@@ -84,7 +86,7 @@ public final class CompiledStructure {
     Builder builder = new Builder(definition, origin, orientation);
     while (!builder.complete()) {
       if (Thread.currentThread().isInterrupted()) {
-        throw new java.util.concurrent.CancellationException();
+        throw new CancellationException();
       }
       builder.advance(4096);
     }
@@ -113,7 +115,7 @@ public final class CompiledStructure {
     BlockPos input = null, output = null;
     for (int index = 0; index < positions.size(); index++) {
       if ((index & 4095) == 0 && Thread.currentThread().isInterrupted()) {
-        throw new java.util.concurrent.CancellationException();
+        throw new CancellationException();
       }
       var local = positions.get(index).subtract(origin);
       var pos = new BlockPos(
@@ -168,11 +170,11 @@ public final class CompiledStructure {
             highZ));
   }
 
-  net.minecraft.world.level.block.state.BlockState snapshotState(int index, net.minecraft.world.level.block.state.BlockState state) {
+  BlockState snapshotState(int index, BlockState state) {
     return rotateProperties[index] ? state.rotate(inverseRotation) : state;
   }
 
-  CheckResult matchSnapshot(int index, net.minecraft.world.level.block.state.BlockState state, CheckResult details) {
+  CheckResult matchSnapshot(int index, BlockState state, CheckResult details) {
     if (state == null) {
       return CheckResult.UNAVAILABLE;
     }

@@ -48,6 +48,7 @@ import org.slf4j.Logger;
 public final class StructureService {
   private static final Logger LOGGER = LogUtils.getLogger();
   private static final Map<ServerLevel, LevelState> LEVELS = new IdentityHashMap<>();
+  private static final int INLINE_PREPARE_PARTS = 512;
 
   private record Catalog(long epoch, Map<ResourceLocation, MachineDefinition> definitions) {
   }
@@ -456,11 +457,21 @@ public final class StructureService {
     if (anchor.preparing) {
       if (anchor.builder == null) {
         long started = anchor.roundStarted;
-        anchor.builder = AsyncStructureWork.prepare(
-            anchor.definition,
-            anchor.controller.structurePosition(),
-            anchor.orientation,
-            pattern -> new Prepared(pattern, started));
+        if (anchor.definition.parts().size() <= INLINE_PREPARE_PARTS) {
+          anchor.draft = new Registration(
+              anchor,
+              new Prepared(
+                  new CompiledStructure(anchor.definition, anchor.controller.structurePosition(), anchor.orientation),
+                  started));
+          anchor.preparing = false;
+          used++;
+        } else {
+          anchor.builder = AsyncStructureWork.prepare(
+              anchor.definition,
+              anchor.controller.structurePosition(),
+              anchor.orientation,
+              pattern -> new Prepared(pattern, started));
+        }
       }
       if (anchor.builder != null && anchor.builder.isDone() && anchor.retired == null) {
         anchor.draft = new Registration(anchor, anchor.builder.join());

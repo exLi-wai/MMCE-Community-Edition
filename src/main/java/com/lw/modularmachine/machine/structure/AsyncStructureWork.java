@@ -2,16 +2,18 @@ package com.lw.modularmachine.machine.structure;
 
 import com.lw.modularmachine.machine.orientation.MachineOrientation;
 import java.util.LinkedHashMap;
+import java.util.Set;
 import java.util.concurrent.ArrayBlockingQueue;
+import java.util.concurrent.CancellationException;
 import java.util.concurrent.CompletableFuture;
+import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.RejectedExecutionException;
 import java.util.concurrent.Semaphore;
 import java.util.concurrent.ThreadPoolExecutor;
 import java.util.concurrent.TimeUnit;
-import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.atomic.AtomicBoolean;
-import java.util.function.Supplier;
 import java.util.function.Function;
+import java.util.function.Supplier;
 import net.minecraft.core.BlockPos;
 
 /**
@@ -21,7 +23,7 @@ import net.minecraft.core.BlockPos;
 public final class AsyncStructureWork {
   private static ThreadPoolExecutor executor;
   private static final Semaphore SNAPSHOTS = new Semaphore(8);
-  private static final java.util.Set<CompletableFuture<?>> TASKS = ConcurrentHashMap.newKeySet();
+  private static final Set<CompletableFuture<?>> TASKS = ConcurrentHashMap.newKeySet();
   private static long templateEpoch;
   private static final LinkedHashMap<Key, CompiledStructure> TEMPLATES = new LinkedHashMap<>(16, .75F, true);
 
@@ -133,7 +135,7 @@ public final class AsyncStructureWork {
       executor = null;
     }
     for (var task : TASKS.toArray(CompletableFuture[]::new)) {
-      task.completeExceptionally(new java.util.concurrent.CancellationException("Server stopped"));
+      task.completeExceptionally(new CancellationException("Server stopped"));
     }
     clearTemplates();
   }

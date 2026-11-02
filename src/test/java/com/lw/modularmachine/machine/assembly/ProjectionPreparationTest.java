@@ -7,6 +7,7 @@ import com.lw.modularmachine.machine.orientation.PropertySpace;
 import com.lw.modularmachine.machine.structure.AsyncStructureWork;
 import com.lw.modularmachine.machine.structure.MachineDefinition;
 import java.util.List;
+import java.util.concurrent.TimeUnit;
 import net.minecraft.core.BlockPos;
 import net.minecraft.resources.ResourceLocation;
 import org.junit.jupiter.api.AfterEach;
@@ -43,7 +44,7 @@ class ProjectionPreparationTest {
   }
 
   private static ProjectionPreparation.Ready await(ProjectionPreparation task) throws Exception {
-    long deadline = System.nanoTime() + java.util.concurrent.TimeUnit.SECONDS.toNanos(5);
+    long deadline = System.nanoTime() + TimeUnit.SECONDS.toNanos(5);
     ProjectionPreparation.Ready ready;
     while ((ready = task.advance(System.nanoTime() + 2_000_000L)) == null) {
       assertTrue(System.nanoTime() < deadline, "Projection preparation never completed");
