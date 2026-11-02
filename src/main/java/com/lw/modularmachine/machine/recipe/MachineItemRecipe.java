@@ -414,7 +414,7 @@ public final class MachineItemRecipe implements Recipe<RecipeInput> {
           outputs,
           interfaceInputs,
           selectors);
-    } catch (IllegalArgumentException | ArithmeticException invalid) {
+    } catch (IllegalArgumentException | ArithmeticException | IndexOutOfBoundsException invalid) {
       throw new DecoderException("Invalid machine recipe packet", invalid);
     }
   }

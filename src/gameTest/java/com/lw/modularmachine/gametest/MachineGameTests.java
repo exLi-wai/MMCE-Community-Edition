@@ -225,6 +225,7 @@ public final class MachineGameTests {
       level.setBlockAndUpdate(pattern.position(i), state);
     }
     var controller = (MachineControllerBlockEntity) level.getBlockEntity(origin);
+    controller.bindMachine(TRANSFORMER);
     StructureService.advance(level, 512, 64, 50_000_000L);
     return controller;
   }

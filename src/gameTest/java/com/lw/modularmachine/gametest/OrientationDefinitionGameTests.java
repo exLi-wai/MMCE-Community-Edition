@@ -228,15 +228,17 @@ public final class OrientationDefinitionGameTests {
   }
 
   @GameTest(template = "empty16", timeoutTicks = 40)
-  public static void registry_snapshot_rejects_unknown_blocks_properties_and_values_with_paths(GameTestHelper helper) {
-    expectJson(helper, "$.parts[0]", () -> parse(oneBlock("mmcece:no_such_block", "{}", "local")));
-    expectJson(
+  public static void registry_snapshot_skips_unknown_blocks_properties_and_values(GameTestHelper helper) {
+    // Unknown/unusable blocks are skipped instead of failing the whole reload;
+    // the definition still loads and only the affected part disappears.
+    expectFailure(helper, "Invalid fixed definition", () -> parse(oneBlock("mmcece:no_such_block", "{}", "local")));
+    expectFailure(
         helper,
-        "$.parts[0].properties.not_a_property",
+        "Invalid fixed definition",
         () -> parse(oneBlock("minecraft:oak_log", "{\"not_a_property\":\"x\"}", "local")));
-    expectJson(
+    expectFailure(
         helper,
-        "$.parts[0].properties.axis",
+        "Invalid fixed definition",
         () -> parse(oneBlock("minecraft:oak_log", "{\"axis\":\"w\"}", "world")));
     helper.succeed();
   }
@@ -244,7 +246,12 @@ public final class OrientationDefinitionGameTests {
   @GameTest(template = "empty16", timeoutTicks = 100)
   public static void orientation_compilation_has_a_work_bound(GameTestHelper helper) {
     JsonObject root = repeatedParts(200, false);
-    expectJson(helper, "work units", () -> parse(root));
+    System.setProperty("mmcece.orientationWorkBudget", "1000");
+    try {
+      expectJson(helper, "work units", () -> parse(root));
+    } finally {
+      System.clearProperty("mmcece.orientationWorkBudget");
+    }
     helper.succeed();
   }
 
@@ -291,6 +298,17 @@ public final class OrientationDefinitionGameTests {
 
   private static MachineDefinition parse(JsonObject root) {
     return MachineDefinition.parse(ResourceLocation.fromNamespaceAndPath("mmcece", "orientation_contract"), root);
+  }
+
+  private static void expectFailure(GameTestHelper helper, String detail, Runnable call) {
+    try {
+      call.run();
+      helper.fail("Invalid definition was accepted: " + detail);
+    } catch (RuntimeException expected) {
+      helper.assertTrue(
+          expected.getMessage() != null && expected.getMessage().contains(detail),
+          "Wrong diagnostic: " + expected.getMessage());
+    }
   }
 
   private static void expectJson(GameTestHelper helper, String detail, Runnable call) {

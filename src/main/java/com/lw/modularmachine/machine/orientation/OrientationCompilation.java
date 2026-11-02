@@ -20,6 +20,18 @@ import net.minecraft.world.level.block.state.properties.Property;
  */
 public final class OrientationCompilation {
   private static final int MAX_WORK = 100_000_000;
+
+  private static int workBudget() {
+    String override = System.getProperty("mmcece.orientationWorkBudget");
+    if (override != null) {
+      try {
+        return Integer.parseInt(override);
+      } catch (NumberFormatException ignored) {
+        // fall through to the production budget
+      }
+    }
+    return MAX_WORK;
+  }
   private static final int MAX_DIAGNOSTICS = 256;
 
   public record Diagnostic(String orientation, String partId, String path, String reason) {
@@ -72,8 +84,9 @@ public final class OrientationCompilation {
         boolean anyAlternative = part.rule().port() != null || (replacementMasks[index] & orientation.maskBit()) != 0;
         for (var alternative : part.rule().alternatives()) {
           work += 1 + alternative.properties().size();
-          if (work > MAX_WORK) {
-            throw new JsonParseException(id + ": $.parts: Orientation compilation exceeds " + MAX_WORK + " work units");
+          int budget = workBudget();
+          if (work > budget) {
+            throw new JsonParseException(id + ": $.parts: Orientation compilation exceeds " + budget + " work units");
           }
           String path = id + ": $.parts[" + index + "]";
           String failure = representabilityFailure(alternative, part.propertiesSpace(), orientation, path);

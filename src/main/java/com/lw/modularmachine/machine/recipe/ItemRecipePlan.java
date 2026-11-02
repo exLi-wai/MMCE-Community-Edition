@@ -48,7 +48,7 @@ public final class ItemRecipePlan {
     return inputChanceSeed;
   }
 
-  static long inputChanceSeed(MachineItemRecipe definition) {
+  static long newInputChanceSeed() {
     long seed = RandomSource.create().nextLong() & Long.MAX_VALUE;
     return seed == 0 ? 1 : seed;
   }

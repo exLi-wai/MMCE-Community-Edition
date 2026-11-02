@@ -285,11 +285,7 @@ public final class ItemRecipeSearch {
         continue;
       }
       if (pendingFactoryPlan == null) {
-        var definition = catalog.definition(generic.candidate().id());
-        if (definition == null) {
-          throw new IllegalStateException("Selected recipe has no native input chance definition");
-        }
-        long inputChanceSeed = ItemRecipePlan.inputChanceSeed(definition);
+        long inputChanceSeed = ItemRecipePlan.newInputChanceSeed();
         var needed = new HashMap<>(ItemRecipePlan.sampledInputs(generic.candidate(), inputChanceSeed, 1));
         var deductions = new ArrayList<ItemRecipePlan.Deduction>();
         for (var slot : inputs) {
