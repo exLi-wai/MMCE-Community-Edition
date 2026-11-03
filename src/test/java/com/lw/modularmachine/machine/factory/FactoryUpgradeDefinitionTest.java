@@ -41,12 +41,8 @@ class FactoryUpgradeDefinitionTest {
       var json = JsonParser.parseString("{\"schema_version\":1,\"item\":\"minecraft:amethyst_shard\"" + extra + "}");
       assertThrows(JsonParseException.class, () -> FactoryUpgradeDefinition.parse(ID, json), extra);
     }
-    for (String invalid : List.of(
-        "[]",
-        "null",
-        "{}",
-        "{\"schema_version\":2,\"item\":\"minecraft:stone\"}",
-        "{\"schema_version\":1,\"item\":\"BAD ITEM\"}")) {
+    for (String invalid : List
+        .of("[]", "null", "{}", "{\"item\":\"minecraft:stone\"}", "{\"schema_version\":1,\"item\":\"BAD ITEM\"}")) {
       assertThrows(JsonParseException.class, () -> FactoryUpgradeDefinition.parse(ID, JsonParser.parseString(invalid)));
     }
   }

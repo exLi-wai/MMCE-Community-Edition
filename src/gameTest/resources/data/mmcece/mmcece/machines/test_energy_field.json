@@ -1,5 +1,4 @@
 {
-  "schema_version": 1,
   "parts": [
     {"offset": [1, 0, 0], "port": "energy_input", "field": {"name": "energy_stored", "min": 1}}
   ]

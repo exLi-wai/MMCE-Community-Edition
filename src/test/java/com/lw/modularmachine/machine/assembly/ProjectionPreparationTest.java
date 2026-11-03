@@ -27,8 +27,8 @@ class ProjectionPreparationTest {
     var id = ResourceLocation.parse("mmcece:projection_pipeline");
     var rule = new MachineDefinition.Rule(null, List.of());
     var parts = List.of(new MachineDefinition.Part("a", new BlockPos(1, 2, 3), rule, null, PropertySpace.LOCAL));
-    var compilation = OrientationCompilation.compile(id, 1, OrientationPolicy.ALL_24, parts);
-    var definition = new MachineDefinition(id, "test", parts, 0, 1, OrientationPolicy.ALL_24, compilation);
+    var compilation = OrientationCompilation.compile(id, OrientationPolicy.ALL_24, parts);
+    var definition = new MachineDefinition(id, "test", parts, 0, OrientationPolicy.ALL_24, compilation);
     for (var orientation : MachineOrientation.all()) {
       var origin = new BlockPos(100, 70, -100);
       var task = new ProjectionPreparation(definition, 1, origin, orientation);

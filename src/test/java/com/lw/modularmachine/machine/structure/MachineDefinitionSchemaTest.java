@@ -42,21 +42,19 @@ class MachineDefinitionSchemaTest {
   private static final StateOrientationAdapters.RegistrySnapshot EMPTY = new StateOrientationAdapters.RegistrySnapshot(
       Map.of());
   private static final String PORTS = """
-      {"schema_version":2,"parts":[
+      {"parts":[
         {"offset":[1,0,0],"port":"energy_input"},
         {"offset":[-1,0,0],"port":"energy_output"}
       ]}
       """;
 
   @Test
-  void schemaOneKeepsHorizontalDefaultsAndResourceContracts() {
+  void schemaTwoKeepsHorizontalDefaultsAndResourceContracts() {
     JsonObject root = json(PORTS);
-    root.addProperty("schema_version", 1);
     root.getAsJsonArray("parts").get(0).getAsJsonObject()
         .add("field", json("{\"name\":\"energy_stored\",\"min\":9,\"max\":20}"));
     root.add("operation", json("{\"type\":\"energy_transfer\",\"energy_per_tick\":128}"));
     var definition = MachineDefinition.parse(ID, root, EMPTY);
-    assertEquals(1, definition.schemaVersion());
     assertSame(OrientationPolicy.HORIZONTAL, definition.orientationPolicy());
     assertEquals(0x1111, definition.allowedOrientationMask());
     assertEquals("offset:1,0,0", definition.parts().getFirst().id());
@@ -64,6 +62,19 @@ class MachineDefinitionSchemaTest {
     assertEquals(9, definition.parts().getFirst().field().min());
     assertEquals(20, definition.parts().getFirst().field().max());
     assertSame(PropertySpace.LOCAL, definition.parts().getFirst().propertiesSpace());
+  }
+
+  @Test
+  void orientationAloneSelectsThePoseSpace() {
+    var definition = parse(
+        json(
+            "{\"parts\":[{\"offset\":[1,0,0],\"port\":\"energy_input\"},{\"offset\":[-1,0,0],\"port\":\"energy_output\"}]}"));
+    assertSame(OrientationPolicy.HORIZONTAL, definition.orientationPolicy());
+    assertEquals(0x1111, definition.allowedOrientationMask());
+    var posed = parse(
+        json(
+            "{\"orientation\":{\"policy\":\"all_24\"},\"parts\":[{\"offset\":[1,0,0],\"port\":\"energy_input\"},{\"offset\":[-1,0,0],\"port\":\"energy_output\"}]}"));
+    assertEquals(MachineOrientation.ALL_MASK, posed.allowedOrientationMask());
   }
 
   @Test
@@ -119,26 +130,14 @@ class MachineDefinitionSchemaTest {
   }
 
   @Test
-  void schemaOneRejectsAllNewFieldsRatherThanSilentlyEnablingThem() {
+  void leftoverSchemaVersionIsRejectedAsUnknownField() {
     JsonObject root = json(PORTS);
     root.addProperty("schema_version", 1);
-    root.add("orientation", json("{\"policy\":\"all_24\"}"));
-    assertPath(root, "$.orientation");
-    root.remove("orientation");
-    root.getAsJsonArray("parts").get(0).getAsJsonObject().addProperty("part_id", "new");
-    assertPath(root, "$.parts[0].part_id");
-    root.getAsJsonArray("parts").get(0).getAsJsonObject().remove("part_id");
-    root.getAsJsonArray("parts").get(0).getAsJsonObject().addProperty("properties_space", "world");
-    assertPath(root, "$.parts[0].properties_space");
+    assertPath(root, "$.schema_version");
   }
 
   @Test
-  void schemaAndPolicyTypesAreStrictAndUnknownKeysHavePrecisePaths() {
-    for (String version : List.of("1.1", "2.000000000000001", "3", "9223372036854775808", "\"2\"", "null")) {
-      JsonObject root = json(PORTS);
-      root.add("schema_version", JsonParser.parseString(version));
-      assertPath(root, "$.schema_version");
-    }
+  void orientationAndUnknownKeysHavePrecisePaths() {
     for (String orientation : List
         .of("{}", "{\"policy\":\"ALL_24\"}", "{\"policy\":24}", "{\"policy\":\"all_24\",\"mirror\":true}", "null")) {
       JsonObject root = json(PORTS);
@@ -187,7 +186,7 @@ class MachineDefinitionSchemaTest {
   @Test
   void referenceCollectionFreezesLiteralsAndIdentifiesTheirJsonPaths() {
     JsonObject root = json(
-        "{\"schema_version\":2,\"parts\":[{\"offset\":[1,0,0],\"blocks\":[\"minecraft:furnace\",\"minecraft:dispenser\"],\"properties\":{\"facing\":\"north\"}}]}");
+        "{\"parts\":[{\"offset\":[1,0,0],\"blocks\":[\"minecraft:furnace\",\"minecraft:dispenser\"],\"properties\":{\"facing\":\"north\"}}]}");
     var references = MachineDefinition.blockReferences(Map.of(ID, root));
     assertEquals(2, references.size());
     assertEquals("north", references.getFirst().properties().getFirst().literal());
@@ -242,17 +241,13 @@ class MachineDefinitionSchemaTest {
 
   @Test
   void malformedJsonCannotSilentlyDeleteThePreviousDefinitions() {
-    assertFailedReloadKeepsSnapshot(Map.of("valid", PORTS, "bad_json", "{\"schema_version\":"));
+    assertFailedReloadKeepsSnapshot(Map.of("valid", PORTS, "bad_json", "{\"parts\":"));
   }
 
   @Test
   void oneInvalidDefinitionCannotPublishTheOtherValidDefinition() {
     assertFailedReloadKeepsSnapshot(
-        Map.of(
-            "a_valid",
-            PORTS,
-            "z_invalid",
-            "{\"schema_version\":2,\"parts\":[{\"offset\":[1,0,0],\"port\":\"not_a_port\"}]}"));
+        Map.of("a_valid", PORTS, "z_invalid", "{\"parts\":[{\"offset\":[1,0,0],\"port\":\"not_a_port\"}]}"));
   }
 
   private static void assertFailedReloadKeepsSnapshot(Map<String, String> files) {

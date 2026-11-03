@@ -1,5 +1,4 @@
 {
-  "schema_version": 2,
   "orientation": { "policy": "all_24" },
   "parts": [
     { "part_id": "input", "offset": [-1, 0, 1], "port": "energy_input" },

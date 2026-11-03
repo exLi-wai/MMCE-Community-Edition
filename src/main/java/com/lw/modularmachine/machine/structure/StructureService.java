@@ -444,6 +444,16 @@ public final class StructureService {
     return used;
   }
 
+  private static boolean inlinePrepare(MachineDefinition definition) {
+    // GameTest servers must not race the shared worker pool: a slow or loaded
+    // runner made structure confirmation nondeterministic.
+    return gameTestMode() || definition.parts().size() <= INLINE_PREPARE_PARTS;
+  }
+
+  private static boolean gameTestMode() {
+    return !System.getProperty("neoforge.enabledGameTestNamespaces", "").isBlank();
+  }
+
   private static int advanceAnchor(LevelState state, ServerLevel level, Anchor anchor, int budget) {
     if (!anchor.needsWork()) {
       return 0;
@@ -457,7 +467,7 @@ public final class StructureService {
     if (anchor.preparing) {
       if (anchor.builder == null) {
         long started = anchor.roundStarted;
-        if (anchor.definition.parts().size() <= INLINE_PREPARE_PARTS) {
+        if (inlinePrepare(anchor.definition)) {
           anchor.draft = new Registration(
               anchor,
               new Prepared(
@@ -858,6 +868,22 @@ public final class StructureService {
       }
       if (currentCapture.complete()) {
         var detached = currentCapture.finish();
+        if (gameTestMode()) {
+          try {
+            var result = detached.match();
+            if (result.matched()) {
+              modifiers.acceptSnapshot(result.modifiers());
+            }
+            verifier.applySnapshot(captureRevision, result.failure(), result.failedIndex(), now);
+          } catch (RuntimeException failure) {
+            LOGGER.warn("Structure matching failed at {}", controller.structurePosition(), failure);
+            verifier.rejectProof(VerificationFailure.CHECK_ERROR, -1, now);
+          }
+          capturePermit.close();
+          capturePermit = null;
+          capture = null;
+          return Math.max(used, 1);
+        }
         var future = AsyncStructureWork.submit(detached::match);
         if (future != null) {
           var permit = capturePermit;

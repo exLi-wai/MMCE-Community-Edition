@@ -23,7 +23,6 @@ class FrozenItemRunTest {
   static CompoundTag valid() {
     var definition = new CompoundTag();
     definition.putString("type", MachineRecipeJson.TYPE);
-    definition.putInt("schema_version", 2);
     definition.putString("machine", "mmcece:test");
     definition.putInt("duration", 20);
     var inputs = new ListTag();
@@ -72,7 +71,6 @@ class FrozenItemRunTest {
     var source = valid();
     source.putInt("schema", 3);
     source.putLong("last_progress_tick", 40);
-    source.getCompound("definition").putInt("schema_version", 2);
     source.getCompound("definition").putLong("energy_per_tick", 128);
     var run = FrozenItemRun.read(source);
     var restored = FrozenItemRun.read(run.save());
@@ -86,7 +84,6 @@ class FrozenItemRunTest {
     source.putInt("schema", 3);
     source.putLong("last_progress_tick", 40);
     var definition = source.getCompound("definition");
-    definition.putInt("schema_version", 2);
     definition.put("fluid_per_tick", new CompoundTag());
     definition.getCompound("fluid_per_tick").putString("id", "minecraft:water");
     definition.getCompound("fluid_per_tick").putInt("amount", 125);
@@ -111,7 +108,6 @@ class FrozenItemRunTest {
   @Test
   void preservesPendingFluidOutputsAndRejectsAlteredClaims() {
     var source = valid();
-    source.getCompound("definition").putInt("schema_version", 2);
     var fluid = new CompoundTag();
     fluid.putString("id", "minecraft:water");
     fluid.putInt("amount", 40);
@@ -138,7 +134,6 @@ class FrozenItemRunTest {
       source.putLong("last_progress_tick", 10);
       source.putInt("progress", 5);
       var definition = source.getCompound("definition");
-      definition.putInt("schema_version", 2);
       definition.putString("failure_action", entry.getKey());
       var run = FrozenItemRun.read(source);
       assertEquals(entry.getValue(), run.afterResourceFailure(11).progress(), entry.getKey());
@@ -156,7 +151,6 @@ class FrozenItemRunTest {
     source.putLong("last_progress_tick", 10);
     source.putInt("progress", 5);
     var definition = source.getCompound("definition");
-    definition.putInt("schema_version", 2);
     definition.putString("failure_action", "reset");
     var run = FrozenItemRun.read(source);
 
@@ -173,7 +167,6 @@ class FrozenItemRunTest {
     source.putLong("last_progress_tick", 10);
     source.putInt("progress", 5);
     var definition = source.getCompound("definition");
-    definition.putInt("schema_version", 2);
     definition.putString("failure_action", "reset");
     var run = FrozenItemRun.read(source);
 
@@ -192,7 +185,6 @@ class FrozenItemRunTest {
     source.putInt("schema", 3);
     source.putLong("last_progress_tick", 1);
     var definition = source.getCompound("definition");
-    definition.putInt("schema_version", 2);
     definition.putLong("random_seed", Long.MAX_VALUE);
     source.putLong("random_seed", Long.MAX_VALUE);
     var run = FrozenItemRun.read(source);
@@ -207,7 +199,6 @@ class FrozenItemRunTest {
     source.putLong("last_progress_tick", 1);
     source.putLong("random_seed", 7);
     var definition = source.getCompound("definition");
-    definition.putInt("schema_version", 2);
     definition.putLong("random_seed", 7);
     var output = definition.getList("outputs", Tag.TAG_COMPOUND).getCompound(0);
     output.putDouble("chance", 0.0D);

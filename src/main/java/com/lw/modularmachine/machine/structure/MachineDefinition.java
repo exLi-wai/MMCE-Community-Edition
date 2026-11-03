@@ -36,16 +36,12 @@ import net.minecraft.world.level.block.Block;
 import net.minecraft.world.level.block.state.BlockState;
 import net.minecraft.world.level.block.state.properties.Property;
 
-/**
- * Immutable fixed definitions. Schema one retains legacy horizontal state
- * semantics.
- */
+/** Immutable fixed machine definitions. */
 public record MachineDefinition(
     ResourceLocation id,
     String translationKey,
     List<Part> parts,
     long energyPerTick,
-    int schemaVersion,
     OrientationPolicy orientationPolicy,
     OrientationCompilation orientationCompilation,
     FactoryThreadPreset factoryPreset,
@@ -63,35 +59,33 @@ public record MachineDefinition(
   private static final Logger LOGGER = LogUtils.getLogger();
   public static final int MAX_PARTS = Integer.MAX_VALUE;
 
-  public MachineDefinition(ResourceLocation id, String translationKey, List<Part> parts, long energyPerTick, int schemaVersion, OrientationPolicy orientationPolicy, OrientationCompilation orientationCompilation, FactoryThreadPreset factoryPreset, List<RecipeModifier> recipeModifiers, List<StructureModifierDefinition> structureModifiers, Map<String, SmartInterfaceType> interfaceTypes, int internalParallelism, int maxParallelism) {
-    this(id, translationKey, parts, energyPerTick, schemaVersion, orientationPolicy, orientationCompilation,
-        factoryPreset, recipeModifiers, structureModifiers, interfaceTypes, internalParallelism, maxParallelism, false,
-        false);
+  public MachineDefinition(ResourceLocation id, String translationKey, List<Part> parts, long energyPerTick, OrientationPolicy orientationPolicy, OrientationCompilation orientationCompilation, FactoryThreadPreset factoryPreset, List<RecipeModifier> recipeModifiers, List<StructureModifierDefinition> structureModifiers, Map<String, SmartInterfaceType> interfaceTypes, int internalParallelism, int maxParallelism) {
+    this(id, translationKey, parts, energyPerTick, orientationPolicy, orientationCompilation, factoryPreset,
+        recipeModifiers, structureModifiers, interfaceTypes, internalParallelism, maxParallelism, false, false);
   }
 
-  public MachineDefinition(ResourceLocation id, String translationKey, List<Part> parts, long energyPerTick, int schemaVersion, OrientationPolicy orientationPolicy, OrientationCompilation orientationCompilation, FactoryThreadPreset factoryPreset, List<RecipeModifier> recipeModifiers, List<StructureModifierDefinition> structureModifiers, Map<String, SmartInterfaceType> interfaceTypes) {
-    this(id, translationKey, parts, energyPerTick, schemaVersion, orientationPolicy, orientationCompilation,
-        factoryPreset, recipeModifiers, structureModifiers, interfaceTypes, 0, Integer.MAX_VALUE);
+  public MachineDefinition(ResourceLocation id, String translationKey, List<Part> parts, long energyPerTick, OrientationPolicy orientationPolicy, OrientationCompilation orientationCompilation, FactoryThreadPreset factoryPreset, List<RecipeModifier> recipeModifiers, List<StructureModifierDefinition> structureModifiers, Map<String, SmartInterfaceType> interfaceTypes) {
+    this(id, translationKey, parts, energyPerTick, orientationPolicy, orientationCompilation, factoryPreset,
+        recipeModifiers, structureModifiers, interfaceTypes, 0, Integer.MAX_VALUE);
   }
 
-  public MachineDefinition(ResourceLocation id, String translationKey, List<Part> parts, long energyPerTick, int schemaVersion, OrientationPolicy orientationPolicy, OrientationCompilation orientationCompilation, FactoryThreadPreset factoryPreset, List<RecipeModifier> recipeModifiers, List<StructureModifierDefinition> structureModifiers) {
-    this(id, translationKey, parts, energyPerTick, schemaVersion, orientationPolicy, orientationCompilation,
-        factoryPreset, recipeModifiers, structureModifiers, Map.of());
+  public MachineDefinition(ResourceLocation id, String translationKey, List<Part> parts, long energyPerTick, OrientationPolicy orientationPolicy, OrientationCompilation orientationCompilation, FactoryThreadPreset factoryPreset, List<RecipeModifier> recipeModifiers, List<StructureModifierDefinition> structureModifiers) {
+    this(id, translationKey, parts, energyPerTick, orientationPolicy, orientationCompilation, factoryPreset,
+        recipeModifiers, structureModifiers, Map.of());
   }
 
-  public MachineDefinition(ResourceLocation id, String translationKey, List<Part> parts, long energyPerTick, int schemaVersion, OrientationPolicy orientationPolicy, OrientationCompilation orientationCompilation, FactoryThreadPreset factoryPreset, List<RecipeModifier> recipeModifiers) {
-    this(id, translationKey, parts, energyPerTick, schemaVersion, orientationPolicy, orientationCompilation,
-        factoryPreset, recipeModifiers, List.of());
+  public MachineDefinition(ResourceLocation id, String translationKey, List<Part> parts, long energyPerTick, OrientationPolicy orientationPolicy, OrientationCompilation orientationCompilation, FactoryThreadPreset factoryPreset, List<RecipeModifier> recipeModifiers) {
+    this(id, translationKey, parts, energyPerTick, orientationPolicy, orientationCompilation, factoryPreset,
+        recipeModifiers, List.of());
   }
 
-  public MachineDefinition(ResourceLocation id, String translationKey, List<Part> parts, long energyPerTick, int schemaVersion, OrientationPolicy orientationPolicy, OrientationCompilation orientationCompilation) {
-    this(id, translationKey, parts, energyPerTick, schemaVersion, orientationPolicy, orientationCompilation,
+  public MachineDefinition(ResourceLocation id, String translationKey, List<Part> parts, long energyPerTick, OrientationPolicy orientationPolicy, OrientationCompilation orientationCompilation) {
+    this(id, translationKey, parts, energyPerTick, orientationPolicy, orientationCompilation,
         FactoryThreadPreset.defaults(), List.of());
   }
 
-  public MachineDefinition(ResourceLocation id, String translationKey, List<Part> parts, long energyPerTick, int schemaVersion, OrientationPolicy orientationPolicy, OrientationCompilation orientationCompilation, FactoryThreadPreset factoryPreset) {
-    this(id, translationKey, parts, energyPerTick, schemaVersion, orientationPolicy, orientationCompilation,
-        factoryPreset, List.of());
+  public MachineDefinition(ResourceLocation id, String translationKey, List<Part> parts, long energyPerTick, OrientationPolicy orientationPolicy, OrientationCompilation orientationCompilation, FactoryThreadPreset factoryPreset) {
+    this(id, translationKey, parts, energyPerTick, orientationPolicy, orientationCompilation, factoryPreset, List.of());
   }
 
   public MachineDefinition {
@@ -133,8 +127,7 @@ public record MachineDefinition(
             "Smart interface roles require declared types and dedicated interface parts");
       }
     }
-    if (structureModifiers.size() > StructureModifierDefinition.MAX_GROUPS
-        || schemaVersion != 2 && !structureModifiers.isEmpty()) {
+    if (structureModifiers.size() > StructureModifierDefinition.MAX_GROUPS) {
       throw new IllegalArgumentException("Invalid structure modifier count or machine schema");
     }
     var modifierIds = new HashSet<String>();
@@ -174,7 +167,7 @@ public record MachineDefinition(
       throw new IllegalArgumentException("Too many structure modifier conditions");
     }
     new RecipeModifiers(structuralRules);
-    if (parts.isEmpty() || energyPerTick < 0 || (schemaVersion != 1 && schemaVersion != 2)) {
+    if (parts.isEmpty() || energyPerTick < 0) {
       throw new IllegalArgumentException("Invalid fixed definition");
     }
   }
@@ -194,7 +187,7 @@ public record MachineDefinition(
    */
   public static MachineDefinition parse(ResourceLocation id, JsonObject root, StateOrientationAdapters.RegistrySnapshot snapshot) {
     String path = id + ": $";
-    int schema = header(root, path);
+    header(root, path);
     OrientationPolicy policy = OrientationPolicy.HORIZONTAL;
     if (root.has("orientation")) {
       JsonObject orientation = object(root.get("orientation"), path + ".orientation");
@@ -213,7 +206,7 @@ public record MachineDefinition(
     for (int index = 0; index < elements.size(); index++) {
       String partPath = path + ".parts[" + index + "]";
       JsonObject part = object(elements.get(index), partPath);
-      partFields(part, partPath, schema);
+      partFields(part, partPath);
       JsonArray xyz = array(part.get("offset"), partPath + ".offset");
       if (xyz.size() != 3) {
         throw error(partPath + ".offset", "Expected three integer coordinates");
@@ -336,7 +329,7 @@ public record MachineDefinition(
       }
     }
     var structureModifiers = StructureModifierDefinition.parse(id, root, parts, snapshot);
-    var compilation = OrientationCompilation.compile(id, schema, policy, parts, structureModifiers);
+    var compilation = OrientationCompilation.compile(id, policy, parts, structureModifiers);
     String translation = root.has("translation_key") ? string(
         root.get("translation_key"),
         path + ".translation_key") : "machine." + id.getNamespace() + "." + id.getPath();
@@ -361,7 +354,6 @@ public record MachineDefinition(
         translation,
         parts,
         transfer,
-        schema,
         policy,
         compilation,
         factory,
@@ -399,7 +391,7 @@ public record MachineDefinition(
       for (int index = 0; index < parts.size(); index++) {
         String partPath = path + ".parts[" + index + "]";
         JsonObject part = object(parts.get(index), partPath);
-        partFields(part, partPath, schema);
+        partFields(part, partPath);
         if (!part.has("block") && !part.has("blocks")) {
           continue;
         }
@@ -439,40 +431,22 @@ public record MachineDefinition(
   }
 
   private static int header(JsonObject root, String path) {
-    long version = integer(root.get("schema_version"), path + ".schema_version");
-    if (version != 1 && version != 2) {
-      throw error(path + ".schema_version", "Unsupported schema: " + version);
-    }
-    if (version == 1) {
-      fields(
-          root,
-          path,
-          "schema_version",
-          "translation_key",
-          "parts",
-          "operation",
-          "factory",
-          "recipe_modifiers",
-          "requires_blueprint",
-          "factory_only");
-    } else {
-      fields(
-          root,
-          path,
-          "schema_version",
-          "translation_key",
-          "parts",
-          "operation",
-          "orientation",
-          "factory",
-          "recipe_modifiers",
-          "structure_modifiers",
-          "interfaces",
-          "parallel",
-          "requires_blueprint",
-          "factory_only");
-    }
-    return (int) version;
+    // The pose space is selected by the orientation field only.
+    fields(
+        root,
+        path,
+        "translation_key",
+        "parts",
+        "operation",
+        "orientation",
+        "factory",
+        "recipe_modifiers",
+        "structure_modifiers",
+        "interfaces",
+        "parallel",
+        "requires_blueprint",
+        "factory_only");
+    return 2;
   }
 
   private static JsonArray parts(JsonObject root, String path) {
@@ -490,24 +464,20 @@ public record MachineDefinition(
     return element.getAsBoolean();
   }
 
-  private static void partFields(JsonObject part, String path, int schema) {
-    if (schema == 1) {
-      fields(part, path, "offset", "block", "blocks", "port", "properties", "field");
-    } else {
-      fields(
-          part,
-          path,
-          "offset",
-          "block",
-          "blocks",
-          "port",
-          "properties",
-          "field",
-          "part_id",
-          "properties_space",
-          "selector",
-          "interface");
-    }
+  private static void partFields(JsonObject part, String path) {
+    fields(
+        part,
+        path,
+        "offset",
+        "block",
+        "blocks",
+        "port",
+        "properties",
+        "field",
+        "part_id",
+        "properties_space",
+        "selector",
+        "interface");
   }
 
   private static List<String> blockNames(JsonObject part, String path) {

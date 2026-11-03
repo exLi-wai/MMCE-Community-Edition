@@ -49,7 +49,6 @@ jobs:
 
   gametest:
     runs-on: ubuntu-latest
-    continue-on-error: true
     steps:
       - name: Checkout repository
         uses: actions/checkout@v4
@@ -70,11 +69,13 @@ jobs:
         run: chmod +x gradlew
 
       - name: Run server game tests
+        id: gametest
+        continue-on-error: true
         timeout-minutes: 30
         run: ./gradlew runGameTestServer --init-script gradle/core-gametest.init.gradle --no-configuration-cache --console=plain --stacktrace
 
       - name: Upload game test logs
-        if: failure()
+        if: steps.gametest.outcome == 'failure'
         uses: actions/upload-artifact@v4
         with:
           name: gametest-logs

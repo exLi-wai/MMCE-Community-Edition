@@ -1,5 +1,4 @@
 {
-  "schema_version": 2,
   "orientation": {"policy": "all_24"},
   "parts": [
     {"part_id": "upgrade_a", "offset": [0, 0, 1], "block": "mmcece:upgrade_bus_normal"},

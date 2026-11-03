@@ -1,6 +1,5 @@
 {
   "type": "mmcece:machine_item",
-  "schema_version": 2,
   "machine": "mmcece:test_upgrade_recipe_checks",
   "priority": 100,
   "duration": 20,

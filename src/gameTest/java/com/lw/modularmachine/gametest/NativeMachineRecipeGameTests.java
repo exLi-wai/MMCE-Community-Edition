@@ -51,7 +51,7 @@ public final class NativeMachineRecipeGameTests {
 
   private static JsonObject root() {
     return JsonParser.parseString(
-        "{\"type\":\"mmcece:machine_item\",\"schema_version\":2,\"machine\":\"mmcece:test_recipe_resources\",\"priority\":7,\"duration\":40,\"inputs\":[{\"stack\":{\"id\":\"minecraft:dirt\"},\"amount\":2}],\"outputs\":[{\"stack\":{\"id\":\"minecraft:iron_ingot\"},\"amount\":3}]}")
+        "{\"type\":\"mmcece:machine_item\",\"machine\":\"mmcece:test_recipe_resources\",\"priority\":7,\"duration\":40,\"inputs\":[{\"stack\":{\"id\":\"minecraft:dirt\"},\"amount\":2}],\"outputs\":[{\"stack\":{\"id\":\"minecraft:iron_ingot\"},\"amount\":3}]}")
         .getAsJsonObject();
   }
 
@@ -63,7 +63,6 @@ public final class NativeMachineRecipeGameTests {
   @GameTest(template = "empty16", timeoutTicks = 80)
   public static void registered_json_codec_roundtrips_components_long_amounts_and_defensive_previews(GameTestHelper helper) {
     var root = root();
-    root.addProperty("schema_version", 2);
     root.addProperty("energy_per_tick", 128);
     root.add("fluid_per_tick", JsonParser.parseString("{\"id\":\"minecraft:water\",\"amount\":250}"));
     root.add("fluid_inputs", JsonParser.parseString("[{\"id\":\"minecraft:water\",\"amount\":40}]"));
@@ -144,7 +143,6 @@ public final class NativeMachineRecipeGameTests {
   @GameTest(template = "empty16", timeoutTicks = 80)
   public static void registered_recipe_stream_codec_roundtrips_long_counts_and_metadata(GameTestHelper helper) {
     var root = root();
-    root.addProperty("schema_version", 2);
     root.addProperty("energy_per_tick", 128);
     root.add("fluid_per_tick", JsonParser.parseString("{\"id\":\"minecraft:water\",\"amount\":250}"));
     root.add("fluid_inputs", JsonParser.parseString("[{\"id\":\"minecraft:water\",\"amount\":40}]"));
@@ -202,7 +200,7 @@ public final class NativeMachineRecipeGameTests {
     for (int mode = 0; mode < 3; mode++) {
       var buffer = new RegistryFriendlyByteBuf(Unpooled.buffer(), helper.getLevel().registryAccess());
       try {
-        buffer.writeVarInt(mode == 0 ? 9 : 1);
+        buffer.writeVarInt(mode == 0 ? 11 : 1);
         if (mode != 0) {
           buffer.writeResourceLocation(id("test_recipe_resources"));
           buffer.writeVarInt(0);

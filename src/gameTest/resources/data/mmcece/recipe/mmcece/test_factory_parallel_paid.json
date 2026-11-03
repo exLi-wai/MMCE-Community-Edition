@@ -1,6 +1,5 @@
 {
   "type": "mmcece:machine_item",
-  "schema_version": 2,
   "machine": "mmcece:test_factory_parallel_paid",
   "duration": 5,
   "energy_per_tick": 1,

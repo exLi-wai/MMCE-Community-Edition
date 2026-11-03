@@ -1,6 +1,5 @@
 {
   "translation_key": "machine.mmcece.transformer",
-  "schema_version": 2,
   "orientation": { "policy": "all_24" },
   "operation": {
     "type": "energy_transfer",

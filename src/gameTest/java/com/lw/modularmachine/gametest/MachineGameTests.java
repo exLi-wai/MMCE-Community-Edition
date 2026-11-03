@@ -416,7 +416,6 @@ public final class MachineGameTests {
   @GameTest(template = "empty16", timeoutTicks = 40)
   public static void unsupported_definition_is_rejected(GameTestHelper helper) {
     JsonObject root = new JsonObject();
-    root.addProperty("schema_version", 1);
     root.add("dynamic-patterns", new JsonObject());
     try {
       MachineDefinition.parse(ResourceLocation.fromNamespaceAndPath("mmcece", "invalid"), root);

@@ -33,9 +33,7 @@ public final class OrientationDefinitionGameTests {
   public static void default_transformer_allows_all_24_controller_poses(GameTestHelper helper) {
     var definition = StructureService.definition(ResourceLocation.fromNamespaceAndPath("mmcece", "transformer"));
     helper.assertTrue(
-        definition != null
-            && definition.schemaVersion() == 2
-            && definition.allowedOrientationMask() == MachineOrientation.ALL_MASK,
+        definition != null && definition.allowedOrientationMask() == MachineOrientation.ALL_MASK,
         "Default transformer definition must allow all 24 poses");
     helper.succeed();
   }
@@ -56,7 +54,6 @@ public final class OrientationDefinitionGameTests {
           helper.assertTrue(
               current != null
                   && current != previous
-                  && current.schemaVersion() == 2
                   && current.allowedOrientationMask() == 0xFFFFFF
                   && StructureService.definitionEpoch() > epoch,
               "Hot reload did not replace the complete schema two generation");
@@ -167,7 +164,7 @@ public final class OrientationDefinitionGameTests {
   }
 
   @GameTest(template = "empty16", timeoutTicks = 40)
-  public static void opaque_properties_fail_explicitly_without_breaking_legacy_or_world_semantics(GameTestHelper helper) {
+  public static void opaque_properties_fail_explicitly_without_breaking_legacy_field_or_world_semantics(GameTestHelper helper) {
     JsonObject root = oneBlock(
         "minecraft:oak_stairs",
         "{\"facing\":\"north\",\"half\":\"bottom\",\"shape\":\"straight\"}",
@@ -175,11 +172,10 @@ public final class OrientationDefinitionGameTests {
     expectJson(helper, "UNSUPPORTED_ORIENTATION_PROPERTY", () -> parse(root));
     root.getAsJsonArray("parts").get(0).getAsJsonObject().addProperty("properties_space", "world");
     helper.assertTrue(parse(root).allowedOrientationMask() == 0xFFFFFF, "Explicit world semantics should be literal");
-    root.addProperty("schema_version", 1);
     root.remove("orientation");
-    root.getAsJsonArray("parts").get(0).getAsJsonObject().remove("properties_space");
+    root.getAsJsonArray("parts").get(0).getAsJsonObject().addProperty("properties_space", "legacy");
     var legacy = parse(root);
-    helper.assertTrue(legacy.allowedOrientationMask() == 0x1111, "Schema one policy changed");
+    helper.assertTrue(legacy.allowedOrientationMask() == 0x1111, "Legacy property-space policy changed");
     BlockPos origin = helper.absolutePos(new BlockPos(4, 3, 4));
     var pattern = new CompiledStructure(legacy, origin, Direction.EAST);
     helper.getLevel().setBlockAndUpdate(
@@ -187,7 +183,7 @@ public final class OrientationDefinitionGameTests {
         Blocks.OAK_STAIRS.defaultBlockState().setValue(BlockStateProperties.HORIZONTAL_FACING, Direction.EAST));
     helper.assertTrue(
         pattern.check(helper.getLevel(), 0) == CheckResult.MATCH,
-        "Legacy composite Block.rotate path regressed");
+        "Legacy property-space Block.rotate path regressed");
     helper.assertTrue(
         parse(oneBlock("minecraft:oak_stairs", "{}", "local")).allowedOrientationMask() == 0xFFFFFF,
         "Block-ID-only rule gained hidden facing requirements");
@@ -199,7 +195,7 @@ public final class OrientationDefinitionGameTests {
     ResourceLocation id = ResourceLocation.fromNamespaceAndPath("mmcece", "test_schema2_axis");
     var definition = StructureService.definition(id);
     helper.assertTrue(
-        definition != null && definition.schemaVersion() == 2 && definition.allowedOrientationMask() == 0xFFFFFF,
+        definition != null && definition.allowedOrientationMask() == 0xFFFFFF,
         "Schema two resource did not pass the real reload pipeline");
     BlockPos origin = helper.absolutePos(new BlockPos(4, 3, 4));
     helper.getLevel().setBlockAndUpdate(
@@ -292,7 +288,7 @@ public final class OrientationDefinitionGameTests {
 
   private static JsonObject oneBlock(String block, String properties, String space) {
     return JsonParser.parseString(
-        "{\"schema_version\":2,\"orientation\":{\"policy\":\"all_24\"},\"parts\":[{\"offset\":[1,0,0],\"block\":\"" + block + "\",\"properties\":" + properties + ",\"properties_space\":\"" + space + "\"}]}")
+        "{\"orientation\":{\"policy\":\"all_24\"},\"parts\":[{\"offset\":[1,0,0],\"block\":\"" + block + "\",\"properties\":" + properties + ",\"properties_space\":\"" + space + "\"}]}")
         .getAsJsonObject();
   }
 

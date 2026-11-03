@@ -1,6 +1,5 @@
 {
   "type": "mmcece:machine_item",
-  "schema_version": 2,
   "machine": "mmcece:test_recipe_reentrant",
   "duration": 5,
   "inputs": [{"stack": {"id": "minecraft:dirt"}, "amount": 1}],

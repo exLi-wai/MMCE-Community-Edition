@@ -440,7 +440,7 @@ public final class ItemRunLifecycleGameTests {
           MachineDefinition.parse(
               MACHINE,
               JsonParser.parseString(
-                  "{\"schema_version\":2,\"orientation\":{\"policy\":\"all_24\"},\"parts\":[{\"part_id\":\"input\",\"offset\":[-1,0,1],\"port\":\"item_input\"},{\"part_id\":\"replacement_output\",\"offset\":[1,0,1],\"port\":\"item_output\"}]}")
+                  "{\"orientation\":{\"policy\":\"all_24\"},\"parts\":[{\"part_id\":\"input\",\"offset\":[-1,0,1],\"port\":\"item_input\"},{\"part_id\":\"replacement_output\",\"offset\":[1,0,1],\"port\":\"item_output\"}]}")
                   .getAsJsonObject()));
       StructureService.replaceDefinitions(changed);
       confirm(h, controller);
@@ -521,7 +521,7 @@ public final class ItemRunLifecycleGameTests {
         MachineDefinition.parse(
             MACHINE,
             JsonParser.parseString(
-                "{\"schema_version\":2,\"orientation\":{\"policy\":\"all_24\"},\"parts\":[{\"part_id\":\"input\",\"offset\":[-1,0,1],\"port\":\"item_input\"},{\"part_id\":\"different_output\",\"offset\":[1,0,1],\"port\":\"item_output\"}]}")
+                "{\"orientation\":{\"policy\":\"all_24\"},\"parts\":[{\"part_id\":\"input\",\"offset\":[-1,0,1],\"port\":\"item_input\"},{\"part_id\":\"different_output\",\"offset\":[1,0,1],\"port\":\"item_output\"}]}")
                 .getAsJsonObject()));
     StructureService.replaceDefinitions(changed);
     confirm(h, c);

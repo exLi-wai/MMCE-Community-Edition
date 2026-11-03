@@ -3,7 +3,8 @@ package com.lw.modularmachine.machine.orientation;
 /** Coordinate space applies to all explicit state constraints on a part. */
 public enum PropertySpace {
   LOCAL("local"),
-  WORLD("world");
+  WORLD("world"),
+  LEGACY("legacy");
 
   private final String serializedName;
 

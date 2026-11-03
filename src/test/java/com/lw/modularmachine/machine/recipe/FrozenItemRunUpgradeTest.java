@@ -11,7 +11,6 @@ class FrozenItemRunUpgradeTest {
   void freezesDurationAndBothFeesWithoutChangingTheSource() {
     var source = FrozenItemRunTest.valid();
     var definition = source.getCompound("definition");
-    definition.putInt("schema_version", 2);
     definition.putLong("energy_per_tick", 5);
     var fluid = new CompoundTag();
     fluid.putString("id", "minecraft:water");

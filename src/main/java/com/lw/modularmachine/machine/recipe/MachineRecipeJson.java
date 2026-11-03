@@ -17,7 +17,6 @@ public final class MachineRecipeJson {
   public static final int MAX_DEMANDS = 256;
   public static final Set<String> FIELDS = Set.of(
       "type",
-      "schema_version",
       "machine",
       "priority",
       "duration",
@@ -39,7 +38,6 @@ public final class MachineRecipeJson {
 
   public record Header(
       String machine,
-      int schemaVersion,
       int priority,
       int duration,
       long energyPerTick,
@@ -56,10 +54,6 @@ public final class MachineRecipeJson {
     fields(object, FIELDS, "$");
     if (object.has("type") && !TYPE.equals(string(object.get("type"), "$.type"))) {
       throw error("$.type", "Expected " + TYPE);
-    }
-    long schemaVersion = integer(object.get("schema_version"), "$.schema_version");
-    if (schemaVersion != 2) {
-      throw error("$.schema_version", "Unsupported recipe schema");
     }
     String machine = identifier(object.get("machine"), "$.machine");
     long priority = object.has("priority") ? integer(object.get("priority"), "$.priority") : 0;
@@ -136,7 +130,6 @@ public final class MachineRecipeJson {
     }
     return new Header(
         machine,
-        (int) schemaVersion,
         (int) priority,
         (int) duration,
         energyPerTick,

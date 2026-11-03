@@ -37,7 +37,6 @@ public final class OrientationCompilation {
   public record Diagnostic(String orientation, String partId, String path, String reason) {
   }
 
-  private final int schema;
   private final List<MachineDefinition.Part> parts;
   private final int allowedMask;
   private final int[] replacementMasks;
@@ -45,8 +44,7 @@ public final class OrientationCompilation {
   private final boolean diagnosticsTruncated;
   private final Map<MachineOrientation, List<MachineDefinition.Rule>> rules = new ConcurrentHashMap<>();
 
-  private OrientationCompilation(int schema, List<MachineDefinition.Part> parts, int allowedMask, List<Diagnostic> diagnostics, boolean diagnosticsTruncated, int[] replacementMasks) {
-    this.schema = schema;
+  private OrientationCompilation(List<MachineDefinition.Part> parts, int allowedMask, List<Diagnostic> diagnostics, boolean diagnosticsTruncated, int[] replacementMasks) {
     this.parts = List.copyOf(parts);
     this.allowedMask = allowedMask;
     this.replacementMasks = replacementMasks.clone();
@@ -54,18 +52,19 @@ public final class OrientationCompilation {
     this.diagnosticsTruncated = diagnosticsTruncated;
   }
 
-  public static OrientationCompilation compile(ResourceLocation id, int schema, OrientationPolicy policy, List<MachineDefinition.Part> parts) {
-    return compile(id, schema, policy, parts, List.of());
+  public static OrientationCompilation compile(ResourceLocation id, OrientationPolicy policy, List<MachineDefinition.Part> parts) {
+    return compile(id, policy, parts, List.of());
   }
 
-  public static OrientationCompilation compile(ResourceLocation id, int schema, OrientationPolicy policy, List<MachineDefinition.Part> parts, List<StructureModifierDefinition> modifiers) {
-    if (schema == 1) {
-      return new OrientationCompilation(1, parts, policy.requestedMask(), List.of(), false, new int[parts.size()]);
-    }
+  public static OrientationCompilation compile(ResourceLocation id, OrientationPolicy policy, List<MachineDefinition.Part> parts, List<StructureModifierDefinition> modifiers) {
     List<Diagnostic> diagnostics = new ArrayList<>();
     boolean truncated = false;
     int mask = 0;
     int work = 0;
+    boolean legacyProperties = parts.stream().anyMatch(
+        part -> part.propertiesSpace() == PropertySpace.LEGACY
+            && part.rule().alternatives().stream().anyMatch(alternative -> !alternative.properties().isEmpty()));
+    int workBudget = workBudget();
     var replacementMasks = new int[parts.size()];
     for (var modifier : modifiers) {
       if (modifier.allowReplacement()) {
@@ -75,18 +74,22 @@ public final class OrientationCompilation {
       }
     }
     for (MachineOrientation orientation : MachineOrientation.all()) {
-      if (!policy.allows(orientation)) {
+      if (!policy.allows(orientation)
+          || legacyProperties && (orientation.front().getAxis() == Direction.Axis.Y || orientation.roll() != 0)) {
         continue;
       }
       boolean allParts = true;
       for (int index = 0; index < parts.size(); index++) {
         var part = parts.get(index);
         boolean anyAlternative = part.rule().port() != null || (replacementMasks[index] & orientation.maskBit()) != 0;
+        if (part.rule().port() == null && part.rule().alternatives().isEmpty()) {
+          anyAlternative = true;
+        }
         for (var alternative : part.rule().alternatives()) {
           work += 1 + alternative.properties().size();
-          int budget = workBudget();
-          if (work > budget) {
-            throw new JsonParseException(id + ": $.parts: Orientation compilation exceeds " + budget + " work units");
+          if (work > workBudget) {
+            throw new JsonParseException(
+                id + ": $.parts: Orientation compilation exceeds " + workBudget + " work units");
           }
           String path = id + ": $.parts[" + index + "]";
           String failure = representabilityFailure(alternative, part.propertiesSpace(), orientation, path);
@@ -110,7 +113,7 @@ public final class OrientationCompilation {
       throw new JsonParseException(
           id + ": $.orientation: No representable orientation for policy " + policy.serializedName());
     }
-    return new OrientationCompilation(schema, parts, mask, diagnostics, truncated, replacementMasks);
+    return new OrientationCompilation(parts, mask, diagnostics, truncated, replacementMasks);
   }
 
   public int allowedMask() {
@@ -191,7 +194,7 @@ public final class OrientationCompilation {
       while (used < budget && !complete()) {
         var part = parts.get(partIndex);
         used++;
-        if (schema == 1 || part.rule().port() != null) {
+        if (part.rule().port() != null) {
           prepared.add(part.rule());
           partIndex++;
         } else {
@@ -221,7 +224,9 @@ public final class OrientationCompilation {
               properties = active.properties().entrySet().iterator();
               transformed = new HashMap<>();
             } else {
-              if (alternatives.isEmpty() && (replacementMasks[partIndex] & orientation.maskBit()) == 0) {
+              if (alternatives.isEmpty()
+                  && !part.rule().alternatives().isEmpty()
+                  && (replacementMasks[partIndex] & orientation.maskBit()) == 0) {
                 throw new IllegalStateException("Validated orientation lost every alternative");
               }
               prepared.add(new MachineDefinition.Rule(null, alternatives));
@@ -242,7 +247,7 @@ public final class OrientationCompilation {
   }
 
   private static String representabilityFailure(MachineDefinition.Alternative alternative, PropertySpace space, MachineOrientation orientation, String path) {
-    if (space == PropertySpace.WORLD) {
+    if (space != PropertySpace.LOCAL) {
       return null;
     }
     for (var entry : alternative.properties().entrySet()) {
@@ -262,7 +267,7 @@ public final class OrientationCompilation {
   }
 
   private static Comparable<?> transform(Comparable<?> value, StateOrientationAdapters.TransformKind kind, PropertySpace space, MachineOrientation orientation) {
-    if (space == PropertySpace.WORLD) {
+    if (space != PropertySpace.LOCAL) {
       return value;
     }
     return switch (kind) {

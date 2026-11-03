@@ -10,7 +10,7 @@ import static org.junit.jupiter.api.Assertions.*;
 class MachineRecipeJsonTest {
   private static JsonObject valid() {
     return JsonParser.parseString(
-        "{\"type\":\"mmcece:machine_item\",\"schema_version\":2,\"machine\":\"mmcece:processor\",\"duration\":20,\"inputs\":[{\"stack\":{\"id\":\"minecraft:dirt\"},\"amount\":1}],\"outputs\":[{\"stack\":{\"id\":\"minecraft:iron_ingot\"},\"amount\":1}]}")
+        "{\"type\":\"mmcece:machine_item\",\"machine\":\"mmcece:processor\",\"duration\":20,\"inputs\":[{\"stack\":{\"id\":\"minecraft:dirt\"},\"amount\":1}],\"outputs\":[{\"stack\":{\"id\":\"minecraft:iron_ingot\"},\"amount\":1}]}")
         .getAsJsonObject();
   }
 
@@ -50,15 +50,16 @@ class MachineRecipeJsonTest {
   }
 
   @Test
-  void rejectsUnsupportedSchemaAndDuration() {
+  void leftoverSchemaVersionIsRejectedAsUnknownField() {
     var root = valid();
     root.addProperty("schema_version", 1);
     reject(root, "$.schema_version");
-    root = valid();
-    root.addProperty("schema_version", 3);
-    reject(root, "$.schema_version");
+  }
+
+  @Test
+  void rejectsInvalidDurationValues() {
     for (String raw : new String[]{"0", "-1", "1.2", "2147483648"}) {
-      root = valid();
+      var root = valid();
       root.add("duration", JsonParser.parseString(raw));
       reject(root, "$.duration");
     }
@@ -69,7 +70,6 @@ class MachineRecipeJsonTest {
     var root = valid();
     root.addProperty("energy_per_tick", Long.MAX_VALUE);
     var header = MachineRecipeJson.validate(root);
-    assertEquals(2, header.schemaVersion());
     assertEquals(Long.MAX_VALUE, header.energyPerTick());
     assertEquals(0, MachineRecipeJson.validate(valid()).energyPerTick());
     root.addProperty("energy_per_tick", -1);

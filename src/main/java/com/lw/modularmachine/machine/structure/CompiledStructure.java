@@ -7,6 +7,7 @@ import com.lw.modularmachine.blockentity.SmartInterfaceBlockEntity;
 import com.lw.modularmachine.machine.PortKind;
 import com.lw.modularmachine.machine.orientation.MachineOrientation;
 import com.lw.modularmachine.machine.orientation.OrientationCompilation;
+import com.lw.modularmachine.machine.orientation.PropertySpace;
 import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.LinkedHashMap;
@@ -73,13 +74,16 @@ public final class CompiledStructure {
     rotateProperties = data.rotateProperties;
     resolvedRules = data.rules;
     modifierPlan = data.modifiers;
-    inverseRotation = definition.schemaVersion() == 1 ? switch (facing) {
-      case NORTH -> Rotation.NONE;
-      case EAST -> Rotation.COUNTERCLOCKWISE_90;
-      case SOUTH -> Rotation.CLOCKWISE_180;
-      case WEST -> Rotation.CLOCKWISE_90;
-      default -> throw new IllegalArgumentException("Legacy definitions only support horizontal roll zero");
-    } : Rotation.NONE;
+    inverseRotation = definition.parts().stream().anyMatch(
+        part -> part.propertiesSpace() == PropertySpace.LEGACY
+            && part.rule().alternatives().stream()
+                .anyMatch(alternative -> !alternative.properties().isEmpty())) ? switch (facing) {
+                  case NORTH -> Rotation.NONE;
+                  case EAST -> Rotation.COUNTERCLOCKWISE_90;
+                  case SOUTH -> Rotation.CLOCKWISE_180;
+                  case WEST -> Rotation.CLOCKWISE_90;
+                  default -> throw new IllegalArgumentException("Legacy definitions only support horizontal roll zero");
+                } : Rotation.NONE;
   }
 
   private static Data prepareFully(MachineDefinition definition, BlockPos origin, MachineOrientation orientation) {
@@ -285,7 +289,7 @@ public final class CompiledStructure {
         if (part.rule().port() == PortKind.ENERGY_OUTPUT) {
           output = position;
         }
-        rotateProperties[cursor] = definition.schemaVersion() == 1
+        rotateProperties[cursor] = part.propertiesSpace() == PropertySpace.LEGACY
             && orientation != MachineOrientation.IDENTITY
             && part.rule().alternatives().stream().anyMatch(alt -> !alt.properties().isEmpty());
         minX = Math.min(minX, position.getX());

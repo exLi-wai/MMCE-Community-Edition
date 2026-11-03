@@ -92,7 +92,6 @@ class FactoryRunSetTest {
     data.putUUID("run_id", id);
     data.putInt("progress", progress);
     data.putLong("last_progress_tick", lastTick);
-    data.getCompound("definition").putInt("schema_version", 2);
     data.getCompound("definition").putString("failure_action", "still");
 
     return FrozenItemRun.read(data);

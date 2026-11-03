@@ -47,8 +47,6 @@ public final class MachineItemRecipeKubeJSSchema {
           new CustomObjectRecipeComponent.Key("affect_chance", BooleanComponent.BOOLEAN.instance(), true)));
 
   private static final RecipeKey<String> MACHINE = StringComponent.ID.instance().otherKey("machine");
-  private static final RecipeKey<Integer> SCHEMA_VERSION = NumberComponent.POSITIVE_INT.instance()
-      .otherKey("schema_version").optional(2);
   private static final RecipeKey<Integer> PRIORITY = NumberComponent.INT.otherKey("priority").optional(0);
   private static final RecipeKey<Integer> DURATION = NumberComponent.POSITIVE_INT.instance().otherKey("duration");
   private static final RecipeKey<Long> ENERGY = NumberComponent.NON_NEGATIVE_LONG.instance().otherKey("energy_per_tick")
@@ -83,7 +81,6 @@ public final class MachineItemRecipeKubeJSSchema {
       DURATION,
       INPUTS,
       OUTPUTS,
-      SCHEMA_VERSION,
       PRIORITY,
       ENERGY,
       FLUID_PER_TICK,

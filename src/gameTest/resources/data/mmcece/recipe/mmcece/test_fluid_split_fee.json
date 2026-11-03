@@ -1,6 +1,5 @@
 {
   "type": "mmcece:machine_item",
-  "schema_version": 2,
   "machine": "mmcece:test_recipe_energy_lifecycle",
   "duration": 1,
   "fluid_per_tick": {"id": "minecraft:water", "amount": 50},

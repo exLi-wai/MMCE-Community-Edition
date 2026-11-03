@@ -1,6 +1,7 @@
 package com.lw.modularmachine.machine.assembly;
 
 import com.lw.modularmachine.machine.orientation.MachineOrientation;
+import com.lw.modularmachine.machine.orientation.PropertySpace;
 import com.lw.modularmachine.machine.PortKind;
 import com.lw.modularmachine.machine.structure.MachineDefinition;
 import com.lw.modularmachine.registry.MachineRegistries;
@@ -117,7 +118,7 @@ public record AssemblyPattern(
               state = property(state, property.getKey(), property.getValue());
             }
             var properties = alternative.properties();
-            if (definition.schemaVersion() == 1) {
+            if (definition.parts().get(index).propertiesSpace() == PropertySpace.LEGACY) {
               state = state.rotate(rotation);
               var transformed = new HashMap<Property<?>, Comparable<?>>();
               for (var key : properties.keySet()) {

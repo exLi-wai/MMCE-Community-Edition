@@ -101,7 +101,6 @@ public final class RangedSelectionService {
     JsonArray array = new JsonArray();
     parts.forEach(part -> array.add(JsonParser.parseString(part.json())));
     JsonObject rootJson = new JsonObject();
-    rootJson.addProperty("schema_version", 2);
     rootJson.addProperty("translation_key", "machine.mmcece." + stem);
     JsonObject orientationJson = new JsonObject();
     orientationJson.addProperty("policy", "all_24");

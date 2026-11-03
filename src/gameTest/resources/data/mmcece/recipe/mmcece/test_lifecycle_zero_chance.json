@@ -1,6 +1,5 @@
 {
   "type": "mmcece:machine_item",
-  "schema_version": 2,
   "machine": "mmcece:test_recipe_lifecycle",
   "priority": 9,
   "duration": 4,

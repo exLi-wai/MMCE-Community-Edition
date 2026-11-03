@@ -60,7 +60,6 @@ public record StructureModifierDefinition(
     var allRules = new ArrayList<RecipeModifier>();
     for (var source : sources(root, id + ": $")) {
       var synthetic = new JsonObject();
-      synthetic.addProperty("schema_version", 2);
       synthetic.add("parts", source.parts().deepCopy());
       if (root.has("orientation")) {
         synthetic.add("orientation", root.get("orientation").deepCopy());
@@ -111,8 +110,8 @@ public record StructureModifierDefinition(
       return List.of();
     }
     String at = path + ".structure_modifiers";
-    if (root.get("schema_version").getAsInt() != 2 || !root.get("structure_modifiers").isJsonArray()) {
-      throw new JsonParseException(at + ": Requires machine schema 2 and an array");
+    if (!root.get("structure_modifiers").isJsonArray()) {
+      throw new JsonParseException(at + ": Expected an array");
     }
     var groups = root.getAsJsonArray("structure_modifiers");
     if (groups.size() > MAX_GROUPS) {

@@ -85,7 +85,11 @@ public final class MachineControllerBlock extends BaseEntityBlock {
     }
     var definition = binding.opaque() ? null : StructureService.definition(binding.machineId());
     if (definition == null) {
-      return withOrientation(defaultBlockState(), fallback);
+      var preferred = binding.opaque()
+          || !ControllerPlacementData.UNBOUND_MACHINE
+              .equals(binding.machineId()) ? fallback : ControllerOrientationActions
+                  .preferredPlacement(context.getNearestLookingDirection(), horizontal);
+      return withOrientation(defaultBlockState(), preferred);
     }
     var selected = ControllerOrientationActions
         .placement(context.getNearestLookingDirection(), horizontal, definition.allowedOrientationMask());
