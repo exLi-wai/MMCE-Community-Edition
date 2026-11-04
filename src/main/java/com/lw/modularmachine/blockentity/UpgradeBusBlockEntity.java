@@ -54,11 +54,12 @@ import net.neoforged.neoforge.items.ItemStackHandler;
  * Multiple binding intents and catalog interpretations, but exactly one
  * physical inventory.
  */
-public final class UpgradeBusBlockEntity extends BlockEntity implements MenuProvider {
+public final class UpgradeBusBlockEntity extends BlockEntity implements MenuProvider, MachineColorable {
   public static final String DATA_KEY = "mmcece_upgrade_bus";
   public static final int DATA_SCHEMA = 2;
   private final UpgradeBusTier tier;
   private final int slots;
+  private int machineColor = 0xFFFFFF;
   private final TransactionalItemStackHandler inventory;
   private final Map<BlockPos, UpgradeBusBinding> bindings = new LinkedHashMap<>();
   private final Map<ResourceLocation, FactoryUpgradeBusContext> contexts = new HashMap<>();
@@ -95,6 +96,20 @@ public final class UpgradeBusBlockEntity extends BlockEntity implements MenuProv
 
   public boolean schemaSupported() {
     return unsupportedData == null;
+  }
+
+  @Override
+  public int machineColor() {
+    return machineColor;
+  }
+
+  @Override
+  public void setMachineColor(int color) {
+    color &= 0xFFFFFF;
+    if (machineColor != color) {
+      machineColor = color;
+      MachineColorable.update(this);
+    }
   }
 
   public long upgradeRevision() {
@@ -892,6 +907,7 @@ public final class UpgradeBusBlockEntity extends BlockEntity implements MenuProv
   @Override
   protected void saveAdditional(CompoundTag tag, HolderLookup.Provider registries) {
     super.saveAdditional(tag, registries);
+    MachineColorable.save(this, tag, machineColor);
     if (!schemaSupported()) {
       tag.merge(unsupportedData.copy());
       return;
@@ -915,6 +931,7 @@ public final class UpgradeBusBlockEntity extends BlockEntity implements MenuProv
     long previousRevision = upgradeRevision;
     long previousBindingRevision = bindingRevision;
     super.loadAdditional(tag, registries);
+    machineColor = MachineColorable.load(tag);
     withdrawAll();
     unsupportedData = null;
     bindings.clear();

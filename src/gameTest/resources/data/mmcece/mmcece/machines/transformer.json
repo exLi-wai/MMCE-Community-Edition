@@ -1,5 +1,6 @@
 {
   "translation_key": "machine.mmcece.transformer",
+  "color": "#58A6D8",
   "orientation": { "policy": "all_24" },
   "operation": {
     "type": "energy_transfer",

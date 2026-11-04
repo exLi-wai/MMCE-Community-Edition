@@ -65,6 +65,19 @@ class MachineDefinitionSchemaTest {
   }
 
   @Test
+  void machineColorIsOptionalSixDigitRgb() {
+    var defaultColor = parse(json(PORTS));
+    assertEquals(0xFFFFFF, defaultColor.color());
+
+    JsonObject root = json(PORTS);
+    root.addProperty("color", "#12aBef");
+    assertEquals(0x12ABEF, parse(root).color());
+
+    root.addProperty("color", "FFF");
+    assertPath(root, "$.color");
+  }
+
+  @Test
   void orientationAloneSelectsThePoseSpace() {
     var definition = parse(
         json(

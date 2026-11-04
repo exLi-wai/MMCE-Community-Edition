@@ -531,6 +531,15 @@ public final class StructureService {
         }
       }
     }
+    if (registration != null
+        && registration.valid
+        && registration.verifier.canCommit()
+        && registration.modifiers.canCommit()
+        && registration.interfacesReady
+        && used < budget
+        && !registration.colorsComplete) {
+      used += registration.advanceColors(level, budget - used);
+    }
     return used;
   }
 
@@ -747,7 +756,13 @@ public final class StructureService {
     boolean needsWork() {
       return preparing
           || draft != null
-          || registration != null && registration.verifier.state() == VerificationState.PENDING;
+          || registration != null
+              && (registration.verifier.state() == VerificationState.PENDING
+                  || registration.valid
+                      && registration.verifier.canCommit()
+                      && registration.modifiers.canCommit()
+                      && registration.interfacesReady
+                      && !registration.colorsComplete);
     }
   }
 
@@ -797,6 +812,8 @@ public final class StructureService {
     private boolean interfacesReady;
     private Map<Integer, String> interfaceAssignments = Map.of();
     private int subscribed, cleaned;
+    private int colorCursor;
+    private boolean colorsComplete;
     private StructureSnapshot.Capture capture;
     private AsyncStructureWork.Permit capturePermit;
     private CompletableFuture<StructureSnapshot.Result> matching;
@@ -899,6 +916,19 @@ public final class StructureService {
           used = Math.max(used, 1);
         }
       }
+      return used;
+    }
+
+    private int advanceColors(ServerLevel level, int budget) {
+      int used = 0;
+      while (used < budget && colorCursor < pattern.definition.parts().size()) {
+        var position = pattern.position(colorCursor++);
+        if (level.getBlockEntity(position) instanceof com.lw.modularmachine.blockentity.MachineColorable colorable) {
+          colorable.setMachineColor(pattern.definition.color());
+        }
+        used++;
+      }
+      colorsComplete = colorCursor == pattern.definition.parts().size();
       return used;
     }
 

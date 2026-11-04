@@ -63,7 +63,7 @@ public final class FactoryControllerScreen extends AbstractContainerScreen<Facto
           .blit(ELEMENT_TEXTURE, x, y, 0, 0, THREAD_WIDTH, THREAD_HEIGHT, ELEMENT_TEXTURE_SIZE, ELEMENT_TEXTURE_SIZE);
       int progressWidth = progressWidth(thread);
       if (progressWidth > 0) {
-        if ("RUNNING".equals(thread.state())) {
+        if ("RUNNING".equals(thread.state()) || "OUTPUT_PLANNING".equals(thread.reason())) {
           graphics.setColor(.6F, 1F, .75F, 1F);
         } else {
           graphics.setColor(1F, .6F, .6F, 1F);
@@ -158,13 +158,12 @@ public final class FactoryControllerScreen extends AbstractContainerScreen<Facto
     int x = (int) ((THREAD_X + 2) / .72F);
     int y = (int) ((THREAD_Y + row * THREAD_STEP + 2) / .72F);
     graphics.drawString(font, Component.literal(thread.threadId()), x, y, FONT_COLOR, false);
-    graphics.drawString(
-        font,
-        Component.translatable("menu.mmcece.factory.thread_state." + thread.state().toLowerCase(Locale.ROOT)),
-        x,
-        y + 12,
-        FONT_COLOR,
-        false);
+    Component threadState = Component
+        .translatable("menu.mmcece.factory.thread_state." + thread.state().toLowerCase(Locale.ROOT));
+    if (thread.duration() > 0 && "WAITING".equals(thread.state()) && !"NONE".equals(thread.reason())) {
+      threadState = Component.translatable("menu.mmcece.factory.reason." + thread.reason().toLowerCase(Locale.ROOT));
+    }
+    graphics.drawString(font, threadState, x, y + 12, FONT_COLOR, false);
     if (thread.lockedRecipe() != null && thread.duration() == 0) {
       graphics.drawString(font, Component.literal(thread.lockedRecipe().toString()), x, y + 22, FONT_COLOR, false);
     } else if (thread.duration() == 0 && thread.parallelLimit() > 1) {

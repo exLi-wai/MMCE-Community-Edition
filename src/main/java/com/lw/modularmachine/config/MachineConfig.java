@@ -15,6 +15,7 @@ public final class MachineConfig {
   public static final ModConfigSpec.BooleanValue CONSERVATIVE_COMMIT_CHECK;
   public static final ModConfigSpec.IntValue RECIPE_OUTPUT_WORK;
   public static final ModConfigSpec.IntValue FACTORY_THREADS_PER_TICK;
+  public static final ModConfigSpec.IntValue FACTORY_SEARCH_WORK;
   public static final ModConfigSpec.IntValue FACTORY_OUTPUT_WORK;
   public static final ModConfigSpec.ConfigValue<String> ASSEMBLY_ITEM;
   public static final Map<ParallelControllerTier, ModConfigSpec.IntValue> PARALLEL_CONTROLLER_MAXIMA;
@@ -40,6 +41,9 @@ public final class MachineConfig {
     FACTORY_THREADS_PER_TICK = builder.translation("mmcece.config.factory_controller.threadsPerTick")
         .comment("Maximum number of factory recipe channels visited per controller tick.")
         .defineInRange("threadsPerTick", 4, 1, 256);
+    FACTORY_SEARCH_WORK = builder.translation("mmcece.config.factory_controller.searchWorkPerThreadTick")
+        .comment("Maximum recipe search, parallel admission, and startup-check work for one factory thread per tick.")
+        .defineInRange("searchWorkPerThreadTick", 65536, 1, 262144);
     FACTORY_OUTPUT_WORK = builder.translation("mmcece.config.factory_controller.outputWorkPerTick")
         .comment("Maximum pure output-planning work for one factory thread per tick.")
         .defineInRange("outputWorkPerTick", 65536, 1, 262144);

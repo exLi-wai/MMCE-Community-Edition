@@ -46,7 +46,7 @@ public final class DedicatedControllerCatalog {
           .getNamespace() + "/" + machine.getPath() : (factory ? "factory_controller_" : "controller_") + id;
     }
   }
-  public record Machine(ResourceLocation id, String translationKey) {
+  public record Machine(ResourceLocation id, String translationKey, int color) {
   }
   private static final List<Machine> MACHINES = scanMachines();
   private static final List<Entry> ENTRIES = load();
@@ -68,7 +68,7 @@ public final class DedicatedControllerCatalog {
    */
   public static String resourceFingerprint() {
     try {
-      byte[] bytes = ("registered-machines-v4\n" + MACHINES + ENTRIES).getBytes(StandardCharsets.UTF_8);
+      byte[] bytes = ("registered-machines-v5\n" + MACHINES + ENTRIES).getBytes(StandardCharsets.UTF_8);
       return HexFormat.of().formatHex(MessageDigest.getInstance("SHA-256").digest(bytes));
     } catch (NoSuchAlgorithmException impossible) {
       throw new IllegalStateException(impossible);
@@ -130,7 +130,8 @@ public final class DedicatedControllerCatalog {
         var id = MachineDefinitionConfig.id(relative);
         var root = JsonParser.parseString(Files.readString(file, StandardCharsets.UTF_8)).getAsJsonObject();
         String translation = text(root, "translation_key", "machine." + id.getNamespace() + "." + id.getPath());
-        if (machines.putIfAbsent(id, new Machine(id, translation)) != null) {
+        int color = color(root);
+        if (machines.putIfAbsent(id, new Machine(id, translation, color)) != null) {
           skipped.add(relative + ": duplicate machine id " + id);
           ModularMachine.LOGGER.error("Skipping duplicate machine definition {} (id {})", relative, id);
         }
@@ -302,6 +303,11 @@ public final class DedicatedControllerCatalog {
         .orElse("machine." + id.getNamespace() + "." + id.getPath());
   }
 
+  public static int color(ResourceLocation id) {
+    return MACHINES.stream().filter(machine -> machine.id().equals(id)).findFirst().map(Machine::color)
+        .orElse(0xFFFFFF);
+  }
+
   /**
    * Original labels: an ordinary controller is "&lt;machine&gt; Controller" and a
    * factory controller is "&lt;machine&gt; Integration Controller". An explicit
@@ -321,5 +327,23 @@ public final class DedicatedControllerCatalog {
       throw new IllegalArgumentException("Empty controller resource path");
     }
     return location;
+  }
+
+  private static int color(JsonObject root) {
+    var value = root.get("color");
+    if (value == null) {
+      return 0xFFFFFF;
+    }
+    if (!value.isJsonPrimitive() || !value.getAsJsonPrimitive().isString()) {
+      throw new IllegalArgumentException("Machine color must be a six-digit hexadecimal string");
+    }
+    String text = value.getAsString();
+    if (text.startsWith("#")) {
+      text = text.substring(1);
+    }
+    if (!text.matches("[0-9a-fA-F]{6}")) {
+      throw new IllegalArgumentException("Machine color must be a six-digit hexadecimal string");
+    }
+    return Integer.parseInt(text, 16);
   }
 }

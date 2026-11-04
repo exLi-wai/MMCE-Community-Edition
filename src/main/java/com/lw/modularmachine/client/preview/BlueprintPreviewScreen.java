@@ -77,7 +77,7 @@ public final class BlueprintPreviewScreen extends Screen {
     centerZ = (minZ + maxZ + 1) / 2;
     baseScale = Math
         .max(.01F, Math.min(24F, 95F / Math.max(maxX - minX + 1, Math.max(maxY - minY + 1, maxZ - minZ + 1))));
-    scene = PreviewRenderScene.create(0, minecraft.level.dimension().location(), entries);
+    scene = PreviewRenderScene.create(0, minecraft.level.dimension().location(), machine, entries);
     cache.setPreviewScene(scene);
     updateMaterials();
     lastCycle = Util.getMillis();

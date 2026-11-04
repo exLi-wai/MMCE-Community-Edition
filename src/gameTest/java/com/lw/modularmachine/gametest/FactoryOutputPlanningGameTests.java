@@ -65,7 +65,54 @@ public final class FactoryOutputPlanningGameTests {
             var runs = fixture.factory.runSet(THREAD).runs();
 
             return runs.size() == 2 && runs.stream().allMatch(run -> run.pendingOutput());
-          }, () -> blockBothOutputs(helper, fixture));
+          }, () -> {
+            var thread = fixture.factory.scheduler().channel(THREAD);
+            helper.assertTrue(
+                thread.state() == FactoryThreadState.State.WAITING
+                    && thread.reason() == FactoryThreadState.Reason.OUTPUT_PLANNING,
+                "Finished recipe was reported as output blocked before output planning");
+            blockBothOutputs(helper, fixture);
+          });
+        })));
+  }
+
+  @GameTest(template = "empty16", batch = "factory_output_planning", timeoutTicks = 400)
+  public static void available_outputs_commit_and_next_recipe_starts_in_the_completion_tick(GameTestHelper helper) {
+    var server = helper.getLevel().getServer();
+    server.reloadResources(server.getPackRepository().getSelectedIds())
+        .whenComplete((ignored, failure) -> server.execute(() -> after(helper, () -> {
+          if (failure != null) {
+            helper.fail("Factory output reload failed: " + failure);
+            return;
+          }
+          savedBudget = MachineConfig.FACTORY_OUTPUT_WORK.get();
+          MachineConfig.FACTORY_OUTPUT_WORK.set(65_536);
+          var fixture = build(helper);
+          var thread = fixture.factory.scheduler().channel(THREAD);
+          helper.assertTrue(
+              fixture.factory
+                  .updateThread(THREAD, thread.revision(), false, null, null, 1, thread.upgradeRevision() + 1),
+              "Could not set single-run factory throughput for seamless completion test");
+          fixture.input.inventory().setStackInSlot(0, new ItemStack(Items.DIRT, 2));
+          until(helper, 100, () -> {
+            fixture.factory.serverTick();
+            var runs = fixture.factory.runSet(THREAD).runs();
+            return runs.size() == 1 && fixture.input.inventory().getStackInSlot(0).getCount() == 1;
+          }, () -> until(helper, 100, () -> {
+            fixture.factory.serverTick();
+            var runs = fixture.factory.runSet(THREAD).runs();
+            return countIron(fixture) == 1
+                && fixture.fluid.fluidTank().getFluidAmount() == 40
+                && runs.size() == 1
+                && !runs.getFirst().pendingOutput()
+                && fixture.input.inventory().getStackInSlot(0).isEmpty();
+          }, () -> {
+            helper.assertTrue(
+                fixture.factory.scheduler().channel(THREAD).state() == FactoryThreadState.State.RUNNING,
+                "Next recipe did not start after same-tick output commit");
+            cleanup(helper.getLevel());
+            helper.succeed();
+          }));
         })));
   }
 

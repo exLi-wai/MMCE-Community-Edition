@@ -47,7 +47,7 @@ public final class FactoryRecipeStarter {
       if (nativeRecipe.isEmpty()) {
         return Result.UNMANAGED_RECIPE;
       }
-      int checkBudget = MachineConfig.RECIPE_OUTPUT_WORK.get();
+      int checkBudget = MachineConfig.FACTORY_SEARCH_WORK.get();
       var admission = plan.advanceFactoryChecks(factory, threadId, checkBudget);
       checkBudget -= admission.workUsed();
       switch (admission.status()) {

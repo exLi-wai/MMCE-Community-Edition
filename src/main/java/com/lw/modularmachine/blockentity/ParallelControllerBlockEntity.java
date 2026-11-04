@@ -27,8 +27,9 @@ import net.minecraft.world.level.block.state.BlockState;
  * Editable additive parallel contribution; tier capacity is always server
  * configuration.
  */
-public final class ParallelControllerBlockEntity extends BlockEntity implements MenuProvider {
+public final class ParallelControllerBlockEntity extends BlockEntity implements MenuProvider, MachineColorable {
   private final ParallelControllerTier tier;
+  private int machineColor = 0xFFFFFF;
   private UUID instance = UUID.randomUUID();
   private Integer configured;
   private long revision;
@@ -61,6 +62,20 @@ public final class ParallelControllerBlockEntity extends BlockEntity implements 
 
   public int parallelism() {
     return configured == null ? maximum() : Math.min(configured, maximum());
+  }
+
+  @Override
+  public int machineColor() {
+    return machineColor;
+  }
+
+  @Override
+  public void setMachineColor(int color) {
+    color &= 0xFFFFFF;
+    if (machineColor != color) {
+      machineColor = color;
+      MachineColorable.update(this);
+    }
   }
 
   public boolean update(Player player, long expectedRevision, int value) {
@@ -122,6 +137,7 @@ public final class ParallelControllerBlockEntity extends BlockEntity implements 
   @Override
   protected void saveAdditional(CompoundTag tag, HolderLookup.Provider registries) {
     super.saveAdditional(tag, registries);
+    MachineColorable.save(this, tag, machineColor);
     if (opaque != null) {
       tag.put("parallel_controller", opaque.copy());
       return;
@@ -145,6 +161,7 @@ public final class ParallelControllerBlockEntity extends BlockEntity implements 
       }
     }
     super.loadAdditional(tag, registries);
+    machineColor = MachineColorable.load(tag);
     configured = null;
     opaque = null;
     revision = 0;

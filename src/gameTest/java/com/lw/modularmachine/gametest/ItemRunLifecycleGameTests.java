@@ -137,13 +137,45 @@ public final class ItemRunLifecycleGameTests {
       h.assertTrue(
           c.runningRecipe().isEmpty()
               && count(output, Items.IRON_INGOT) == 1
-              && input.inventory().getStackInSlot(0).isEmpty(),
+              && input.inventory().getStackInSlot(0).isEmpty()
+              && c.recipeRunStatus() == ItemRunEngine.Result.IDLE,
           "Simple paid run did not finish: " + c.recipeRunStatus());
       for (int i = 0; i < 5; i++) {
         c.serverTick();
       }
       h.assertTrue(count(output, Items.IRON_INGOT) == 1, "Repeated finish generated another output");
-      runningRunEntityRestore(h, () -> pendingRunEntityRestore(h, next));
+      seamlessNextRecipe(h, () -> runningRunEntityRestore(h, () -> pendingRunEntityRestore(h, next)));
+    });
+  }
+
+  private static void seamlessNextRecipe(GameTestHelper h, Runnable next) {
+    var controller = build(h, MachineOrientation.IDENTITY);
+    var input = port(h, controller, "input");
+    var output = port(h, controller, "output");
+    start(h, controller, Items.DIRT, 2);
+    var firstRun = controller.runningRecipe().orElseThrow().runId();
+    awaitSeamlessNextRecipe(h, controller, input, output, firstRun, 40, next);
+  }
+
+  private static void awaitSeamlessNextRecipe(GameTestHelper h, MachineControllerBlockEntity controller, MachinePortBlockEntity input, MachinePortBlockEntity output, UUID firstRun, int remaining, Runnable next) {
+    after(h, 1, () -> {
+      var current = controller.runningRecipe().orElse(null);
+      if (count(output, Items.IRON_INGOT) == 1
+          && input.inventory().getStackInSlot(0).isEmpty()
+          && current != null
+          && !current.pendingOutput()
+          && !current.runId().equals(firstRun)) {
+        h.assertTrue(
+            current.progress() == 0 && controller.recipeRunStatus() == ItemRunEngine.Result.ADVANCED,
+            "Next ordinary recipe was not started in the output-completion tick");
+        next.run();
+      } else if (remaining <= 0) {
+        h.fail(
+            "Ordinary controller inserted an idle tick after output commit: run=" + current + ", status=" + controller
+                .recipeRunStatus());
+      } else {
+        awaitSeamlessNextRecipe(h, controller, input, output, firstRun, remaining - 1, next);
+      }
     });
   }
 
@@ -593,7 +625,11 @@ public final class ItemRunLifecycleGameTests {
   }
 
   private static void start(GameTestHelper h, MachineControllerBlockEntity c, Item input) {
-    port(h, c, "input").inventory().setStackInSlot(0, new ItemStack(input));
+    start(h, c, input, 1);
+  }
+
+  private static void start(GameTestHelper h, MachineControllerBlockEntity c, Item input, int count) {
+    port(h, c, "input").inventory().setStackInSlot(0, new ItemStack(input, count));
     var search = ItemRecipeSearch.begin(c);
     h.assertTrue(search.isPresent(), "No coordinated lifecycle catalog: " + c.statusMessage().getString());
     var plan = search.orElseThrow().advance(10_000).plan();

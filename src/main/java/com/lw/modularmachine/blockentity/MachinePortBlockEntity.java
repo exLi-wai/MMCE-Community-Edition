@@ -36,7 +36,7 @@ import net.neoforged.neoforge.items.IItemHandler;
 import net.neoforged.neoforge.items.ItemStackHandler;
 import net.neoforged.neoforge.network.PacketDistributor;
 
-public final class MachinePortBlockEntity extends BlockEntity implements MenuProvider {
+public final class MachinePortBlockEntity extends BlockEntity implements MenuProvider, MachineColorable {
   private final PortKind kind;
   private final HatchTier tier;
   private final TransactionalItemStackHandler items;
@@ -50,6 +50,7 @@ public final class MachinePortBlockEntity extends BlockEntity implements MenuPro
   private long groupRevision;
   private int preferredInputGroup = 1;
   private CompoundTag unsupportedData;
+  private int machineColor = 0xFFFFFF;
 
   public MachinePortBlockEntity(BlockPos pos, BlockState state) {
     super(MachineRegistries.PORT_ENTITY.get(), pos, state);
@@ -521,6 +522,20 @@ public final class MachinePortBlockEntity extends BlockEntity implements MenuPro
     return energyCapability;
   }
 
+  @Override
+  public int machineColor() {
+    return machineColor;
+  }
+
+  @Override
+  public void setMachineColor(int color) {
+    color &= 0xFFFFFF;
+    if (machineColor != color) {
+      machineColor = color;
+      MachineColorable.update(this);
+    }
+  }
+
   public IItemHandler itemCapability() {
     return itemCapability;
   }
@@ -540,6 +555,7 @@ public final class MachinePortBlockEntity extends BlockEntity implements MenuPro
   @Override
   protected void saveAdditional(CompoundTag tag, HolderLookup.Provider registries) {
     super.saveAdditional(tag, registries);
+    MachineColorable.save(this, tag, machineColor);
     if (unsupportedData != null) {
       tag.put("mmcece", unsupportedData.copy());
       return;
@@ -570,6 +586,7 @@ public final class MachinePortBlockEntity extends BlockEntity implements MenuPro
       throw new IllegalStateException("Cannot reload a leased input/output port");
     }
     super.loadAdditional(tag, registries);
+    machineColor = MachineColorable.load(tag);
     boolean previouslySupported = schemaSupported();
     CompoundTag data = tag.getCompound("mmcece");
     if (data.getInt("schema") > 1

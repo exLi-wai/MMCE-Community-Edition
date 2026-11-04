@@ -135,6 +135,11 @@ public final class MachineItemRecipe implements Recipe<RecipeInput> {
     public <T> DataResult<MachineItemRecipe> decode(DynamicOps<T> ops, MapLike<T> input) {
       try {
         var source = ops.convertTo(JsonOps.INSTANCE, ops.createMap(input.entries()));
+        if (source.isJsonObject() && source.getAsJsonObject().has(MachineRecipeJson.KUBEJS_CHANGED_MARKER)) {
+          var cleaned = source.getAsJsonObject().deepCopy();
+          cleaned.remove(MachineRecipeJson.KUBEJS_CHANGED_MARKER);
+          source = cleaned;
+        }
         var effective = MachineRecipeJson.normalize(source);
         if (effective == source) {
           return BASE.decode(ops, input);

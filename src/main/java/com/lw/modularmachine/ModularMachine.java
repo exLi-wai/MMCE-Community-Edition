@@ -14,6 +14,7 @@ import com.lw.modularmachine.machine.smart.SmartInterfaceEvents;
 import com.lw.modularmachine.machine.structure.StructureService;
 import com.lw.modularmachine.network.GroupInputPayloads;
 import com.lw.modularmachine.network.MachineJeiPayloads;
+import com.lw.modularmachine.network.MachineColorPayloads;
 import com.lw.modularmachine.network.MachinePayloads;
 import com.lw.modularmachine.network.ParallelControllerPayloads;
 import com.lw.modularmachine.network.ProjectionPayloads;
@@ -54,6 +55,7 @@ public class ModularMachine {
     modEventBus.addListener(UpgradeBusPayloads::register);
     modEventBus.addListener(SmartInterfacePayloads::register);
     modEventBus.addListener(MachineJeiPayloads::register);
+    modEventBus.addListener(MachineColorPayloads::register);
     modEventBus.addListener(ParallelControllerPayloads::register);
     modEventBus.addListener(GroupInputPayloads::register);
     BLOCKS.register(modEventBus);

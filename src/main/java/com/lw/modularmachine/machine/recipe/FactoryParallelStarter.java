@@ -56,7 +56,7 @@ public final class FactoryParallelStarter {
         return Result.UNSUPPORTED;
       }
       var uniquePlans = plans.stream().distinct().toList();
-      int checkBudget = MachineConfig.RECIPE_OUTPUT_WORK.get();
+      int checkBudget = MachineConfig.FACTORY_SEARCH_WORK.get();
       for (var plan : uniquePlans) {
         var checked = plan.advanceFactoryChecks(factory, threadId, checkBudget);
         checkBudget -= checked.workUsed();

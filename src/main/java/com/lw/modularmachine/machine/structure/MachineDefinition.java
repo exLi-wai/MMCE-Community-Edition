@@ -51,7 +51,8 @@ public record MachineDefinition(
     int internalParallelism,
     int maxParallelism,
     boolean requiresBlueprint,
-    boolean factoryOnly) {
+    boolean factoryOnly,
+    int color) {
 
   /**
    * In Laozi's world, Laozi builds it however he wants.
@@ -61,7 +62,8 @@ public record MachineDefinition(
 
   public MachineDefinition(ResourceLocation id, String translationKey, List<Part> parts, long energyPerTick, OrientationPolicy orientationPolicy, OrientationCompilation orientationCompilation, FactoryThreadPreset factoryPreset, List<RecipeModifier> recipeModifiers, List<StructureModifierDefinition> structureModifiers, Map<String, SmartInterfaceType> interfaceTypes, int internalParallelism, int maxParallelism) {
     this(id, translationKey, parts, energyPerTick, orientationPolicy, orientationCompilation, factoryPreset,
-        recipeModifiers, structureModifiers, interfaceTypes, internalParallelism, maxParallelism, false, false);
+        recipeModifiers, structureModifiers, interfaceTypes, internalParallelism, maxParallelism, false, false,
+        0xFFFFFF);
   }
 
   public MachineDefinition(ResourceLocation id, String translationKey, List<Part> parts, long energyPerTick, OrientationPolicy orientationPolicy, OrientationCompilation orientationCompilation, FactoryThreadPreset factoryPreset, List<RecipeModifier> recipeModifiers, List<StructureModifierDefinition> structureModifiers, Map<String, SmartInterfaceType> interfaceTypes) {
@@ -89,6 +91,9 @@ public record MachineDefinition(
   }
 
   public MachineDefinition {
+    if ((color & ~0xFFFFFF) != 0) {
+      throw new IllegalArgumentException("Machine color must be an RGB value");
+    }
     if (internalParallelism < 0 || maxParallelism < 1 || internalParallelism > maxParallelism) {
       throw new IllegalArgumentException("Invalid internal or maximum machine parallelism");
     }
@@ -363,7 +368,8 @@ public record MachineDefinition(
         internalParallelism,
         maxParallelism,
         root.has("requires_blueprint") && bool(root.get("requires_blueprint"), path + ".requires_blueprint"),
-        root.has("factory_only") && bool(root.get("factory_only"), path + ".factory_only"));
+        root.has("factory_only") && bool(root.get("factory_only"), path + ".factory_only"),
+        root.has("color") ? color(root.get("color"), path + ".color") : 0xFFFFFF);
   }
 
   /**
@@ -445,7 +451,8 @@ public record MachineDefinition(
         "interfaces",
         "parallel",
         "requires_blueprint",
-        "factory_only");
+        "factory_only",
+        "color");
     return 2;
   }
 
@@ -462,6 +469,17 @@ public record MachineDefinition(
       throw error(path, "Expected boolean");
     }
     return element.getAsBoolean();
+  }
+
+  private static int color(JsonElement element, String path) {
+    String value = string(element, path);
+    if (value.startsWith("#")) {
+      value = value.substring(1);
+    }
+    if (!value.matches("[0-9a-fA-F]{6}")) {
+      throw error(path, "Expected a six-digit hexadecimal RGB color, for example FFFFFF");
+    }
+    return Integer.parseInt(value, 16);
   }
 
   private static void partFields(JsonObject part, String path) {

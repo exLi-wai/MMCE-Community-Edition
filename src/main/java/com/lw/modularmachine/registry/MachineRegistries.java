@@ -3,12 +3,14 @@ package com.lw.modularmachine.registry;
 import com.lw.modularmachine.ModularMachine;
 import com.lw.modularmachine.block.FactoryControllerBlock;
 import com.lw.modularmachine.block.MachineControllerBlock;
+import com.lw.modularmachine.block.MachineCasingBlock;
 import com.lw.modularmachine.block.MachinePortBlock;
 import com.lw.modularmachine.block.ParallelControllerBlock;
 import com.lw.modularmachine.block.SmartInterfaceBlock;
 import com.lw.modularmachine.block.UpgradeBusBlock;
 import com.lw.modularmachine.blockentity.FactoryControllerBlockEntity;
 import com.lw.modularmachine.blockentity.MachineControllerBlockEntity;
+import com.lw.modularmachine.blockentity.MachineCasingBlockEntity;
 import com.lw.modularmachine.blockentity.MachinePortBlockEntity;
 import com.lw.modularmachine.blockentity.ParallelControllerBlockEntity;
 import com.lw.modularmachine.blockentity.SmartInterfaceBlockEntity;
@@ -69,7 +71,7 @@ public final class MachineRegistries {
   public static final Map<String, DeferredBlock<MachineControllerBlock>> DEDICATED_CONTROLLERS = new LinkedHashMap<>();
   public static final Map<String, DeferredBlock<FactoryControllerBlock>> DEDICATED_FACTORIES = new LinkedHashMap<>();
   public static final Map<ResourceLocation, DeferredItem<MachineBlueprintItem>> BLUEPRINTS = new LinkedHashMap<>();
-  public static final Map<String, DeferredBlock<Block>> CASINGS = new LinkedHashMap<>();
+  public static final Map<String, DeferredBlock<? extends Block>> CASINGS = new LinkedHashMap<>();
   public static final Map<String, DeferredBlock<MachinePortBlock>> PORTS = new LinkedHashMap<>();
   public static final Map<String, DeferredBlock<UpgradeBusBlock>> UPGRADE_BUSES = new LinkedHashMap<>();
   public static final Map<String, DeferredBlock<ParallelControllerBlock>> PARALLEL_CONTROLLERS = new LinkedHashMap<>();
@@ -129,7 +131,8 @@ public final class MachineRegistries {
     }
     for (String name : new String[]{"plain", "vent", "firebox", "gearbox", "reinforced", "circuitry"}) {
       String id = "machine_casing_" + name;
-      DeferredBlock<Block> block = BLOCKS.registerSimpleBlock(id, properties().strength(2F, 10F));
+      DeferredBlock<MachineCasingBlock> block = BLOCKS
+          .register(id, () -> new MachineCasingBlock(properties().strength(2F, 10F)));
       CASINGS.put(name, block);
       ITEMS.registerSimpleBlockItem(block);
     }
@@ -150,6 +153,13 @@ public final class MachineRegistries {
           () -> BlockEntityType.Builder
               .of(MachinePortBlockEntity::new, PORTS.values().stream().map(DeferredBlock::get).toArray(Block[]::new))
               .build(null));
+
+  public static final DeferredHolder<BlockEntityType<?>, BlockEntityType<MachineCasingBlockEntity>> CASING_ENTITY = BLOCK_ENTITIES
+      .register(
+          "machine_casing",
+          () -> BlockEntityType.Builder.of(
+              MachineCasingBlockEntity::new,
+              CASINGS.values().stream().map(DeferredBlock::get).toArray(Block[]::new)).build(null));
 
   public static final DeferredHolder<BlockEntityType<?>, BlockEntityType<MachineControllerBlockEntity>> CONTROLLER_ENTITY = BLOCK_ENTITIES
       .register(

@@ -632,10 +632,13 @@ public final class MachineControllerBlockEntity extends BlockEntity implements M
     broadcastObserverStatus(server);
     if (runningRecipe != null) {
       long tickStarted = System.nanoTime();
-      recipeEngine.tick(this, server);
+      var runResult = recipeEngine.tick(this, server);
       ControllerMetrics.recordTick(System.nanoTime() - tickStarted);
       broadcastObserverStatus(server);
-      return;
+      if (runningRecipe != null || runResult != ItemRunEngine.Result.FINISHED) {
+        return;
+      }
+      recipeEngine.acknowledgeFinish();
     }
     if (!canCommitProduction()) {
       return;
@@ -737,6 +740,9 @@ public final class MachineControllerBlockEntity extends BlockEntity implements M
       }
     }
     var result = preparedRecipe.start();
+    if (result == Result.STARTED) {
+      recipeEngine.started();
+    }
     if (result != Result.BUSY) {
       recipeSearch = null;
       preparedRecipe = null;

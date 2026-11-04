@@ -37,7 +37,7 @@ import net.minecraft.world.level.block.state.BlockState;
  * Server-owned independent values per controller/type. Reads never establish or
  * mutate a binding.
  */
-public final class SmartInterfaceBlockEntity extends BlockEntity implements MenuProvider {
+public final class SmartInterfaceBlockEntity extends BlockEntity implements MenuProvider, MachineColorable {
   public static final int MAX_BINDINGS = 64;
   public record Binding(BlockPos controller, ResourceLocation machine, String type, double value, long revision) {
     public Binding {
@@ -80,6 +80,7 @@ public final class SmartInterfaceBlockEntity extends BlockEntity implements Menu
   private long revision;
   private boolean valid = true;
   private CompoundTag opaque;
+  private int machineColor = 0xFFFFFF;
 
   public SmartInterfaceBlockEntity(BlockPos pos, BlockState state) {
     super(MachineRegistries.SMART_INTERFACE_ENTITY.get(), pos, state);
@@ -95,6 +96,20 @@ public final class SmartInterfaceBlockEntity extends BlockEntity implements Menu
 
   public long revision() {
     return revision;
+  }
+
+  @Override
+  public int machineColor() {
+    return machineColor;
+  }
+
+  @Override
+  public void setMachineColor(int color) {
+    color &= 0xFFFFFF;
+    if (machineColor != color) {
+      machineColor = color;
+      MachineColorable.update(this);
+    }
   }
 
   private ServerLevel server() {
@@ -403,6 +418,7 @@ public final class SmartInterfaceBlockEntity extends BlockEntity implements Menu
   @Override
   protected void saveAdditional(CompoundTag tag, HolderLookup.Provider registries) {
     super.saveAdditional(tag, registries);
+    MachineColorable.save(this, tag, machineColor);
     if (!valid && opaque != null) {
       tag.merge(opaque);
       return;
@@ -432,6 +448,7 @@ public final class SmartInterfaceBlockEntity extends BlockEntity implements Menu
       }
     }
     super.loadAdditional(tag, registries);
+    machineColor = MachineColorable.load(tag);
     valid = false;
     bindings.clear();
     memberships.clear();

@@ -1,6 +1,7 @@
 package com.lw.modularmachine.client.preview;
 
 import com.lw.modularmachine.network.ProjectionPayloads;
+import com.lw.modularmachine.machine.controller.DedicatedControllerCatalog;
 import it.unimi.dsi.fastutil.longs.Long2IntMap;
 import it.unimi.dsi.fastutil.longs.Long2IntMaps;
 import it.unimi.dsi.fastutil.longs.Long2IntOpenHashMap;
@@ -24,6 +25,7 @@ public final class PreviewRenderScene {
   private static final int BATCH_SIZE = 512;
   private final long request;
   private final ResourceLocation dimension;
+  private final int machineColor;
   private final List<Section> sections;
   private final Map<Long, List<Section>> spatial;
   private final Long2ObjectMap<ProjectionPayloads.Entry> entries;
@@ -41,9 +43,10 @@ public final class PreviewRenderScene {
     }
   }
 
-  private PreviewRenderScene(long request, ResourceLocation dimension, List<Section> sections, Map<Long, List<Section>> spatial, Long2ObjectMap<ProjectionPayloads.Entry> entries, Long2IntMap indices, List<ProjectionPayloads.Entry> animated) {
+  private PreviewRenderScene(long request, ResourceLocation dimension, int machineColor, List<Section> sections, Map<Long, List<Section>> spatial, Long2ObjectMap<ProjectionPayloads.Entry> entries, Long2IntMap indices, List<ProjectionPayloads.Entry> animated) {
     this.request = request;
     this.dimension = dimension;
+    this.machineColor = machineColor & 0xFFFFFF;
     this.sections = List.copyOf(sections);
     this.spatial = Map.copyOf(spatial);
     // These maps are built privately and never mutated after scene publication.
@@ -58,6 +61,9 @@ public final class PreviewRenderScene {
   }
   public ResourceLocation dimension() {
     return dimension;
+  }
+  public int machineColor() {
+    return machineColor;
   }
   public List<Section> sections() {
     return sections;
@@ -76,10 +82,15 @@ public final class PreviewRenderScene {
   }
 
   public static PreviewRenderScene create(ProjectionPayloads.Snapshot header, List<ProjectionPayloads.Entry> entries) {
-    return create(header.request(), header.dimension(), entries);
+    return create(header.request(), header.dimension(), header.machine(), entries);
   }
 
   public static PreviewRenderScene create(long request, ResourceLocation dimension, List<ProjectionPayloads.Entry> entries) {
+    return create(request, dimension, ResourceLocation.fromNamespaceAndPath("mmcece", "none"), entries);
+  }
+
+  public static PreviewRenderScene create(long request, ResourceLocation dimension, ResourceLocation machine, List<ProjectionPayloads.Entry> entries) {
+    int machineColor = DedicatedControllerCatalog.color(machine);
     var grouped = new LinkedHashMap<Long, ArrayList<ProjectionPayloads.Entry>>();
     var positions = new Long2ObjectOpenHashMap<ProjectionPayloads.Entry>(entries.size());
     var indices = new Long2IntOpenHashMap(entries.size());
@@ -126,6 +137,6 @@ public final class PreviewRenderScene {
       }
       spatial.put(entry.getKey(), List.copyOf(batches));
     }
-    return new PreviewRenderScene(request, dimension, sections, spatial, positions, indices, animated);
+    return new PreviewRenderScene(request, dimension, machineColor, sections, spatial, positions, indices, animated);
   }
 }

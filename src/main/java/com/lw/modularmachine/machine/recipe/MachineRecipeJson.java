@@ -14,6 +14,11 @@ import java.util.Set;
  */
 public final class MachineRecipeJson {
   public static final String TYPE = "mmcece:machine_item";
+  /**
+   * KubeJS adds this marker to every generated recipe for its own change
+   * tracking.
+   */
+  public static final String KUBEJS_CHANGED_MARKER = "_kubejs_changed_marker";
   public static final int MAX_DEMANDS = 256;
   public static final Set<String> FIELDS = Set.of(
       "type",

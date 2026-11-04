@@ -1077,22 +1077,7 @@ public final class FactoryControllerBlockEntity extends BlockEntity implements M
         continue;
       }
       if (entry.getValue().runs().stream().allMatch(FrozenItemRun::pendingOutput)) {
-        var result = advanceOutput(threadId, entry.getValue());
-        switch (result) {
-          case PLANNING ->
-            updateThreadState(thread, FactoryThreadState.State.WAITING, FactoryThreadState.Reason.OUTPUT_PLANNING);
-          case BLOCKED ->
-            updateThreadState(thread, FactoryThreadState.State.BLOCKED, FactoryThreadState.Reason.OUTPUT_BLOCKED);
-          case STALE ->
-            updateThreadState(thread, FactoryThreadState.State.WAITING, FactoryThreadState.Reason.STALE_RESOURCES);
-          case COMMITTED -> updateThreadState(thread, FactoryThreadState.State.IDLE, FactoryThreadState.Reason.NONE);
-          case UPGRADE_PENDING ->
-            updateThreadState(thread, FactoryThreadState.State.WAITING, FactoryThreadState.Reason.UPGRADE_DATA_PENDING);
-          case WAITING_UPGRADE ->
-            updateThreadState(thread, FactoryThreadState.State.WAITING, FactoryThreadState.Reason.WAITING_UPGRADE_COST);
-          case UPGRADE_ERROR ->
-            updateThreadState(thread, FactoryThreadState.State.WAITING, FactoryThreadState.Reason.UPGRADE_ERROR);
-        }
+        advancePendingOutput(threadId, entry.getValue());
         continue;
       }
       if (entry.getValue().runs().size() > 1
@@ -1114,6 +1099,9 @@ public final class FactoryControllerBlockEntity extends BlockEntity implements M
           case STALE ->
             updateThreadState(thread, FactoryThreadState.State.WAITING, FactoryThreadState.Reason.STALE_RESOURCES);
           case ADVANCED -> updateThreadState(thread, FactoryThreadState.State.RUNNING, FactoryThreadState.Reason.NONE);
+        }
+        if (result == FactoryParallelResourceCommitter.Result.ADVANCED) {
+          advancePendingOutput(threadId, runSet(threadId));
         }
         continue;
       }
@@ -1153,8 +1141,8 @@ public final class FactoryControllerBlockEntity extends BlockEntity implements M
         }
         if (advanced.progress() == advanced.duration()) {
           advanced = advanced.finished();
-          threadState = FactoryThreadState.State.BLOCKED;
-          threadReason = FactoryThreadState.Reason.OUTPUT_BLOCKED;
+          threadState = FactoryThreadState.State.WAITING;
+          threadReason = FactoryThreadState.Reason.OUTPUT_PLANNING;
         }
         replacements.put(run.runId(), advanced);
       }
@@ -1176,9 +1164,40 @@ public final class FactoryControllerBlockEntity extends BlockEntity implements M
         threadState = FactoryThreadState.State.IDLE;
         threadReason = FactoryThreadState.Reason.NONE;
       }
+      var currentSet = runSet(threadId);
+      if (!currentSet.runs().isEmpty() && currentSet.runs().stream().allMatch(FrozenItemRun::pendingOutput)) {
+        advancePendingOutput(threadId, currentSet);
+        continue;
+      }
       var current = scheduler.channels().stream().filter(candidate -> candidate.threadId().equals(threadId)).findFirst()
           .orElse(thread);
       updateThreadState(current, threadState, threadReason);
+    }
+  }
+
+  private void advancePendingOutput(String threadId, FactoryRunSet completed) {
+    var thread = scheduler.channel(threadId);
+    if (thread == null
+        || completed == null
+        || completed.runs().isEmpty()
+        || completed.runs().stream().anyMatch(run -> !run.pendingOutput())) {
+      return;
+    }
+    var result = advanceOutput(threadId, completed);
+    switch (result) {
+      case PLANNING ->
+        updateThreadState(thread, FactoryThreadState.State.WAITING, FactoryThreadState.Reason.OUTPUT_PLANNING);
+      case BLOCKED ->
+        updateThreadState(thread, FactoryThreadState.State.BLOCKED, FactoryThreadState.Reason.OUTPUT_BLOCKED);
+      case STALE ->
+        updateThreadState(thread, FactoryThreadState.State.WAITING, FactoryThreadState.Reason.STALE_RESOURCES);
+      case COMMITTED -> updateThreadState(thread, FactoryThreadState.State.IDLE, FactoryThreadState.Reason.NONE);
+      case UPGRADE_PENDING ->
+        updateThreadState(thread, FactoryThreadState.State.WAITING, FactoryThreadState.Reason.UPGRADE_DATA_PENDING);
+      case WAITING_UPGRADE ->
+        updateThreadState(thread, FactoryThreadState.State.WAITING, FactoryThreadState.Reason.WAITING_UPGRADE_COST);
+      case UPGRADE_ERROR ->
+        updateThreadState(thread, FactoryThreadState.State.WAITING, FactoryThreadState.Reason.UPGRADE_ERROR);
     }
   }
 
@@ -1252,7 +1271,7 @@ public final class FactoryControllerBlockEntity extends BlockEntity implements M
         searches.put(thread.threadId(), search);
       }
       try {
-        var result = search.advance(MachineConfig.RECIPE_OUTPUT_WORK.get());
+        var result = search.advance(MachineConfig.FACTORY_SEARCH_WORK.get());
         switch (result.status()) {
           case SELECTED -> {
             result.plan().ifPresent(plan -> {
@@ -1266,7 +1285,7 @@ public final class FactoryControllerBlockEntity extends BlockEntity implements M
                 return;
               }
               int maxInstances = upper == 0 ? 0 : plan
-                  .prepareParallel(nativeRecipe, upper, MachineConfig.RECIPE_OUTPUT_WORK.get());
+                  .prepareParallel(nativeRecipe, upper, MachineConfig.FACTORY_SEARCH_WORK.get());
               if (maxInstances < 0) {
                 updateThreadState(thread, FactoryThreadState.State.WAITING, FactoryThreadState.Reason.SEARCH_BUDGET);
                 return;

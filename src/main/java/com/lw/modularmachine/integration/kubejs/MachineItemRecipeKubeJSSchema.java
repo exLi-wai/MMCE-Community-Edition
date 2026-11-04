@@ -60,17 +60,17 @@ public final class MachineItemRecipeKubeJSSchema {
   private static final RecipeKey<List<List<CustomObjectRecipeComponent.Value>>> OUTPUTS = ITEM_ROW.asList()
       .withBounds(IntBounds.of(1, 256)).outputKey("outputs");
   private static final RecipeKey<FluidStack> FLUID_PER_TICK = FluidStackComponent.OPTIONAL_FLUID_STACK.instance()
-      .otherKey("fluid_per_tick").optional(FluidStack.EMPTY);
+      .otherKey("fluid_per_tick").defaultOptional();
   private static final RecipeKey<List<FluidStack>> FLUID_INPUTS = FluidStackComponent.FLUID_STACK.instance().asList()
-      .withBounds(IntBounds.of(1, 256)).otherKey("fluid_inputs").optional(List.of());
+      .withBounds(IntBounds.of(1, 256)).otherKey("fluid_inputs").defaultOptional();
   private static final RecipeKey<List<FluidStack>> FLUID_OUTPUTS = FluidStackComponent.FLUID_STACK.instance().asList()
-      .withBounds(IntBounds.of(1, 256)).otherKey("fluid_outputs").optional(List.of());
+      .withBounds(IntBounds.of(1, 256)).otherKey("fluid_outputs").defaultOptional();
   private static final RecipeKey<List<List<CustomObjectRecipeComponent.Value>>> INTERFACE_INPUTS = INTERFACE_INPUT
-      .asList().withBounds(IntBounds.of(0, 16)).otherKey("interface_inputs").optional(List.of());
+      .asList().withBounds(IntBounds.of(0, 16)).otherKey("interface_inputs").defaultOptional();
   private static final RecipeKey<List<CustomObjectRecipeComponent.Value>> SELECTOR_VALUE = SELECTORS
-      .otherKey("selectors").optional(List.of());
+      .otherKey("selectors").defaultOptional();
   private static final RecipeKey<List<List<CustomObjectRecipeComponent.Value>>> MODIFIERS = MODIFIER.asList()
-      .withBounds(IntBounds.of(0, 32)).otherKey("modifiers").optional(List.of());
+      .withBounds(IntBounds.of(0, 32)).otherKey("modifiers").defaultOptional();
 
   /**
    * Required keys must stay ahead of every optional key: KubeJS rejects the

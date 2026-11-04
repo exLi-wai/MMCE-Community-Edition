@@ -90,6 +90,23 @@ public final class ItemRunEngine {
     return status;
   }
 
+  public void started() {
+    work = null;
+    binding = null;
+    bindingRun = null;
+    status = Result.ADVANCED;
+  }
+
+  public void acknowledgeFinish() {
+    if (status != Result.FINISHED) {
+      throw new IllegalStateException("No completed recipe to acknowledge");
+    }
+    work = null;
+    binding = null;
+    bindingRun = null;
+    status = Result.IDLE;
+  }
+
   /**
    * Keep lastAttempt: same-instance loads and topology changes cannot manufacture
    * a second tick.

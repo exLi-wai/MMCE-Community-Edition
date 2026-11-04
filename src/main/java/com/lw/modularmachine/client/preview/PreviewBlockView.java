@@ -13,7 +13,7 @@ import net.minecraft.world.level.lighting.LevelLightEngine;
 import net.minecraft.world.level.material.FluidState;
 
 /** Render-thread schematic neighbors; never passed to packing workers. */
-final class PreviewBlockView implements BlockAndTintGetter {
+public final class PreviewBlockView implements BlockAndTintGetter {
   private final PreviewRenderScene scene;
   private final int layer, step;
 
@@ -21,6 +21,10 @@ final class PreviewBlockView implements BlockAndTintGetter {
     this.scene = scene;
     this.layer = layer;
     this.step = step;
+  }
+
+  public int machineColor() {
+    return scene.machineColor();
   }
 
   @Override

@@ -56,18 +56,21 @@ public final class MachineRecipeService {
       ServerThreadGuard.require(server, "Machine recipe catalog accessed");
     }
     var actual = new LinkedHashMap<ResourceLocation, MachineItemRecipe>();
-    var kubejsSources = MachineItemRecipeKubeJSSources.snapshot();
     for (var holder : manager.getAllRecipesFor(MachineRecipeRegistries.ITEM_TYPE.get())) {
       boolean nativeMachineRecipe = holder.id().getPath().startsWith("mmcece/");
-      boolean kubejsMachineRecipe = holder.id().getNamespace().equals("kubejs")
-          && kubejsSources.containsKey(holder.id());
+      boolean kubejsMachineRecipe = holder.id().getNamespace().equals("kubejs") && sources.containsKey(holder.id());
       if (!nativeMachineRecipe && !kubejsMachineRecipe) {
         throw new IllegalArgumentException(holder.id() + ": Machine recipes must use recipe/mmcece/*.json");
       }
       actual.put(holder.id(), holder.value());
     }
     if (!actual.keySet().equals(expected.keySet())) {
-      throw new IllegalArgumentException("Native machine recipe set is incomplete or contains an unvalidated recipe");
+      var missing = new java.util.LinkedHashSet<>(expected.keySet());
+      missing.removeAll(actual.keySet());
+      var unexpected = new java.util.LinkedHashSet<>(actual.keySet());
+      unexpected.removeAll(expected.keySet());
+      throw new IllegalArgumentException(
+          "Native machine recipe set is incomplete or contains an unvalidated recipe: missing " + missing + ", unvalidated " + unexpected);
     }
     var candidates = new HashMap<ResourceLocation, List<RecipeCandidate<ItemResourceKey>>>();
     var effective = new LinkedHashMap<ResourceLocation, MachineItemRecipe>();
