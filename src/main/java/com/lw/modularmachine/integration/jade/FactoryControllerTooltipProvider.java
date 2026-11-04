@@ -1,11 +1,16 @@
 package com.lw.modularmachine.integration.jade;
 
+import com.lw.modularmachine.api.MachineControllerApi;
 import com.lw.modularmachine.blockentity.FactoryControllerBlockEntity;
+import com.lw.modularmachine.machine.recipe.ControllerMetrics;
 import com.lw.modularmachine.machine.structure.StructureService;
 import java.util.Locale;
+import net.minecraft.ChatFormatting;
+import net.minecraft.core.BlockPos;
 import net.minecraft.nbt.CompoundTag;
 import net.minecraft.network.chat.Component;
 import net.minecraft.resources.ResourceLocation;
+import net.minecraft.server.level.ServerLevel;
 import snownee.jade.api.BlockAccessor;
 import snownee.jade.api.IBlockComponentProvider;
 import snownee.jade.api.IServerDataProvider;
@@ -15,6 +20,7 @@ import snownee.jade.api.config.IPluginConfig;
 final class FactoryControllerTooltipProvider implements IBlockComponentProvider, IServerDataProvider<BlockAccessor> {
   static final FactoryControllerTooltipProvider INSTANCE = new FactoryControllerTooltipProvider();
   private static final String PREFIX = "mmcece:factory_";
+  private static final String DIAGNOSTIC = PREFIX + "diagnostic";
 
   private FactoryControllerTooltipProvider() {
   }
@@ -36,7 +42,16 @@ final class FactoryControllerTooltipProvider implements IBlockComponentProvider,
     }
     data.putString(PREFIX + "structure", factory.verificationState().name());
     data.putString(PREFIX + "failure", factory.verificationFailure().name());
-    data.putLong(PREFIX + "epoch", StructureService.definitionEpoch());
+    if (factory.getLevel() instanceof ServerLevel level) {
+      MachineControllerApi.structureDiagnostic(factory.registration(), level).ifPresent(diagnostic -> {
+        data.putLong(DIAGNOSTIC + "_position", diagnostic.position().asLong());
+        data.putString(DIAGNOSTIC + "_part", diagnostic.partId());
+        data.putString(DIAGNOSTIC + "_expected", diagnostic.expected());
+        data.putString(DIAGNOSTIC + "_actual", diagnostic.actual());
+      });
+    }
+    data.putInt(PREFIX + "tick_micros", ControllerMetrics.averageTickMicros());
+    data.putInt(PREFIX + "search_micros", ControllerMetrics.averageSearchMicros());
     var threads = factory.scheduler().channels();
     int count = Math.min(threads.size(), 8);
     data.putInt(PREFIX + "count", count);
@@ -71,8 +86,28 @@ final class FactoryControllerTooltipProvider implements IBlockComponentProvider,
       return;
     }
     String structure = data.getString(PREFIX + "structure").toLowerCase(Locale.ROOT);
-    tooltip.add(Component.translatable("jade.mmcece.factory.structure." + structure));
-    tooltip.add(Component.translatable("jade.mmcece.factory.epoch", data.getLong(PREFIX + "epoch")));
+    if (!"confirmed".equals(structure)) {
+      tooltip.add(Component.translatable("jade.mmcece.factory.structure." + structure));
+    }
+    if ("invalid".equals(structure)) {
+      tooltip.add(
+          Component.translatable("jade.mmcece.failure." + data.getString(PREFIX + "failure").toLowerCase(Locale.ROOT)));
+    }
+    if (data.contains(DIAGNOSTIC + "_position")) {
+      tooltip.add(
+          Component.translatable(
+              "jade.mmcece.diagnostic.position",
+              data.getString(DIAGNOSTIC + "_part"),
+              BlockPos.of(data.getLong(DIAGNOSTIC + "_position")).toShortString()));
+      tooltip.add(
+          Component.translatable(
+              "jade.mmcece.diagnostic.expected",
+              MachineControllerApi.localizedDiagnostic(data.getString(DIAGNOSTIC + "_expected"))));
+      tooltip.add(
+          Component.translatable(
+              "jade.mmcece.diagnostic.actual",
+              MachineControllerApi.localizedDiagnostic(data.getString(DIAGNOSTIC + "_actual"))));
+    }
     int count = Math.min(data.getInt(PREFIX + "count"), 8);
     for (int i = 0; i < count; i++) {
       String key = PREFIX + i + "_";
@@ -100,12 +135,20 @@ final class FactoryControllerTooltipProvider implements IBlockComponentProvider,
                 Component.translatable("menu.mmcece.factory.reason." + reason.toLowerCase(Locale.ROOT))));
       }
       if (data.getBoolean(key + "has_run")) {
-        tooltip.add(
-            Component.translatable(
-                "jade.mmcece.factory.progress",
-                data.getInt(key + "progress"),
-                data.getInt(key + "duration")));
+        int progress = data.getInt(key + "progress");
+        int duration = data.getInt(key + "duration");
+        int percent = duration <= 0 ? 0 : Math.min(100, progress * 100 / duration);
+        tooltip.add(Component.translatable("jade.mmcece.factory.progress", percent + "%"));
       }
     }
+    tooltip.add(
+        Component.translatable(
+            "jade.mmcece.performance",
+            data.getInt(PREFIX + "tick_micros"),
+            String.format(java.util.Locale.ROOT, "%.2f", data.getInt(PREFIX + "search_micros") / 1000.0)));
+    tooltip.add(
+        Component.translatable(
+            "jade.mmcece.workmode",
+            Component.literal(StructureService.workMode()).withStyle(ChatFormatting.GREEN)));
   }
 }

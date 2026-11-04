@@ -28,6 +28,8 @@ class MachinePayloadsTest {
         "RUNNING",
         7,
         20,
+        0,
+        0,
         List.of(new MachinePayloads.Shortage("minecraft:dirt", 4, 1, 3)));
   }
 
@@ -37,7 +39,7 @@ class MachinePayloadsTest {
     assertThrows(
         IllegalArgumentException.class,
         () -> new MachinePayloads.ControllerStatusPayload(
-            2,
+            3,
             valid.position(),
             valid.machineId(),
             valid.definitionEpoch(),
@@ -53,6 +55,8 @@ class MachinePayloadsTest {
             valid.runState(),
             valid.progress(),
             valid.duration(),
+            0,
+            0,
             valid.shortages()));
     assertThrows(
         IllegalArgumentException.class,
@@ -73,6 +77,8 @@ class MachinePayloadsTest {
             valid.runState(),
             21,
             20,
+            0,
+            0,
             valid.shortages()));
     assertThrows(
         IllegalArgumentException.class,
@@ -96,6 +102,8 @@ class MachinePayloadsTest {
             valid.runState(),
             valid.progress(),
             valid.duration(),
+            0,
+            0,
             IntStream.range(0, MachinePayloads.MAX_SHORTAGES + 1)
                 .mapToObj(index -> new MachinePayloads.Shortage("item" + index, 1, 0, 1)).toList()));
   }
@@ -119,7 +127,7 @@ class MachinePayloadsTest {
     assertEquals(InteractionHand.MAIN_HAND, action.hand());
     assertThrows(
         IllegalArgumentException.class,
-        () -> new MachinePayloads.ResourcePortActionPayload(2, action.position(), action.hand()));
+        () -> new MachinePayloads.ResourcePortActionPayload(3, action.position(), action.hand()));
   }
 
 }

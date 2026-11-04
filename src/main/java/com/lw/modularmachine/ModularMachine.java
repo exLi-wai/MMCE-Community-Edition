@@ -63,7 +63,7 @@ public class ModularMachine {
     MachineRegistries.register(modEventBus);
     MachineRecipeRegistries.register(modEventBus);
     modEventBus.addListener(MachineCapabilities::register);
-    modContainer.registerConfig(ModConfig.Type.COMMON, MachineConfig.SPEC);
+    modContainer.registerConfig(ModConfig.Type.COMMON, MachineConfig.SPEC, "modularmachinery/mmcece-common.toml");
     NeoForge.EVENT_BUS.register(AssemblyService.class);
     NeoForge.EVENT_BUS.register(StructureService.class);
     NeoForge.EVENT_BUS.register(MachineRecipeService.class);

@@ -29,6 +29,7 @@ import com.lw.modularmachine.machine.parallel.ParallelCapacity;
 import com.lw.modularmachine.machine.recipe.FactoryOutputEngine;
 import com.lw.modularmachine.machine.recipe.FactoryParallelResourceCommitter;
 import com.lw.modularmachine.machine.recipe.FactoryParallelStarter;
+import com.lw.modularmachine.machine.recipe.ControllerMetrics;
 import com.lw.modularmachine.machine.recipe.FactoryRecipeStarter;
 import com.lw.modularmachine.machine.recipe.FactoryRunResourceCommitter;
 import com.lw.modularmachine.machine.recipe.FrozenItemRun;
@@ -815,9 +816,13 @@ public final class FactoryControllerBlockEntity extends BlockEntity implements M
     refreshAutomaticUpgradeBindings(server);
     refreshThreadGates();
     refreshLockedRecipeGates(server);
+    long tickStarted = System.nanoTime();
     advanceFactoryRuns(server);
+    ControllerMetrics.recordTick(System.nanoTime() - tickStarted);
     refreshUpgradeSnapshot();
+    long searchStarted = System.nanoTime();
     advanceRecipeSearches();
+    ControllerMetrics.recordSearch(System.nanoTime() - searchStarted);
   }
 
   private void clearUpgradeDiscovery() {

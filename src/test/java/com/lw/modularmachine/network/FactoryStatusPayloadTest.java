@@ -18,10 +18,13 @@ class FactoryStatusPayloadTest {
     var payload = new MachinePayloads.FactoryStatusPayload(
         MachinePayloads.PROTOCOL_VERSION,
         new BlockPos(4, 5, 6),
+        MACHINE,
         1,
         true,
         "CONFIRMED",
         "NONE",
+        0,
+        0,
         List.of(idle, running));
 
     assertEquals(2, payload.threads().size());

@@ -93,43 +93,63 @@ public final class FactoryControllerScreen extends AbstractContainerScreen<Facto
     graphics.pose().pushPose();
     graphics.pose().scale(.72F, .72F, 1F);
     int infoX = (int) (113 / .72F);
-    graphics.drawString(font, Component.translatable("menu.mmcece.factory.read_only"), infoX, 12, INFO_COLOR, true);
-    graphics.drawString(
-        font,
+    int infoY = 12;
+    var status = menu.status();
+    boolean formed = status != null && "CONFIRMED".equals(status.structureState());
+    Component blueprint = ControllerStatusLabels.blueprint(menu);
+    if (blueprint != null || !formed) {
+      infoY = drawWrapped(
+          graphics,
+          Component.translatable(
+              "menu.mmcece.controller.blueprint",
+              blueprint == null ? ControllerStatusLabels.none() : blueprint),
+          infoX,
+          infoY) + 5;
+    }
+    if (status == null) {
+      drawWrapped(graphics, Component.translatable("menu.mmcece.controller.status_waiting"), infoX, infoY);
+      graphics.pose().popPose();
+      return;
+    }
+    Component structure = ControllerStatusLabels.structure(status.structureState(), status.machineId());
+    infoY = drawWrapped(
+        graphics,
+        Component.translatable(
+            "menu.mmcece.controller.structure",
+            structure == null ? ControllerStatusLabels.none() : structure),
+        infoX,
+        infoY) + 5;
+    infoY = drawWrapped(
+        graphics,
+        Component.translatable("menu.mmcece.controller.status", ControllerStatusLabels.factoryState(status)),
+        infoX,
+        infoY) + 5;
+    infoY = drawWrapped(
+        graphics,
         Component.translatable("menu.mmcece.factory.threads", threads.size()),
         infoX,
-        24,
-        INFO_COLOR,
-        true);
-    String structureKey = structureKey();
-    graphics.drawString(font, Component.translatable(structureKey), infoX, 38, INFO_COLOR, true);
-    if (menu.status() != null && "INVALID".equals(menu.status().structureState())) {
-      graphics.drawString(
-          font,
+        infoY) + 5;
+    if ("INVALID".equals(status.structureState())) {
+      infoY = drawWrapped(
+          graphics,
           Component.translatable(
               "menu.mmcece.factory.structure_failure",
-              Component
-                  .translatable("jade.mmcece.failure." + menu.status().structureFailure().toLowerCase(Locale.ROOT))),
+              Component.translatable("jade.mmcece.failure." + status.structureFailure().toLowerCase(Locale.ROOT))),
           infoX,
-          50,
-          INFO_COLOR,
-          true);
+          infoY) + 5;
     }
+    ControllerStatusLabels
+        .drawPerformance(graphics, font, infoX, infoY, status.averageTickMicros(), status.averageSearchMicros());
     graphics.pose().popPose();
   }
 
-  private String structureKey() {
-    if (menu.status() == null) {
-      return "menu.mmcece.factory.structure_pending";
+  private int drawWrapped(GuiGraphics graphics, Component text, int x, int y) {
+    for (var line : font.split(text, 187)) {
+      graphics.drawString(font, line, x, y, INFO_COLOR, true);
+      y += 10;
     }
-    if (!menu.status().persistentStateValid()) {
-      return "menu.mmcece.factory.state_opaque";
-    }
-    return switch (menu.status().structureState()) {
-      case "CONFIRMED" -> "jade.mmcece.structure.confirmed";
-      case "INVALID" -> "jade.mmcece.structure.invalid";
-      default -> "menu.mmcece.factory.structure_pending";
-    };
+
+    return y;
   }
 
   private void drawThreadStatus(GuiGraphics graphics, MachinePayloads.FactoryStatusThread thread, int row) {
@@ -153,7 +173,9 @@ public final class FactoryControllerScreen extends AbstractContainerScreen<Facto
     if (thread.duration() > 0) {
       graphics.drawString(
           font,
-          Component.literal(thread.progress() + " / " + thread.duration()),
+          Component.translatable(
+              "menu.mmcece.controller.progress",
+              ControllerStatusLabels.percent(thread.progress(), thread.duration()) + "%"),
           x,
           y + 22,
           FONT_COLOR,

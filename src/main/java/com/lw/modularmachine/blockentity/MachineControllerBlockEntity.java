@@ -16,6 +16,7 @@ import com.lw.modularmachine.machine.orientation.ControllerPlacementData;
 import com.lw.modularmachine.machine.orientation.MachineOrientation;
 import com.lw.modularmachine.machine.parallel.ParallelCapacity;
 import com.lw.modularmachine.machine.recipe.AtomicRecipeStarter.Result;
+import com.lw.modularmachine.machine.recipe.ControllerMetrics;
 import com.lw.modularmachine.machine.recipe.FrozenItemRun;
 import com.lw.modularmachine.machine.recipe.ItemRecipePlan;
 import com.lw.modularmachine.machine.recipe.ItemRecipeSearch;
@@ -630,7 +631,9 @@ public final class MachineControllerBlockEntity extends BlockEntity implements M
     refreshUpgradeSources();
     broadcastObserverStatus(server);
     if (runningRecipe != null) {
+      long tickStarted = System.nanoTime();
       recipeEngine.tick(this, server);
+      ControllerMetrics.recordTick(System.nanoTime() - tickStarted);
       broadcastObserverStatus(server);
       return;
     }
@@ -722,11 +725,16 @@ public final class MachineControllerBlockEntity extends BlockEntity implements M
       return;
     }
     if (preparedRecipe == null) {
-      var result = recipeSearch.advance(MachineConfig.RECIPE_OUTPUT_WORK.get());
-      if (result.status() != Status.SELECTED) {
-        return;
+      long searchStarted = System.nanoTime();
+      try {
+        var result = recipeSearch.advance(MachineConfig.RECIPE_OUTPUT_WORK.get());
+        if (result.status() != Status.SELECTED) {
+          return;
+        }
+        preparedRecipe = result.plan().orElseThrow();
+      } finally {
+        ControllerMetrics.recordSearch(System.nanoTime() - searchStarted);
       }
-      preparedRecipe = result.plan().orElseThrow();
     }
     var result = preparedRecipe.start();
     if (result != Result.BUSY) {

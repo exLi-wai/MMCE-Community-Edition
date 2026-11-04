@@ -58,6 +58,11 @@ public final class StructureService {
   private StructureService() {
   }
 
+  /** Structure work mode shown by the controller panels. */
+  public static String workMode() {
+    return gameTestMode() ? "INLINE" : "ASYNC";
+  }
+
   public static long definitionEpoch() {
     return catalog.epoch();
   }

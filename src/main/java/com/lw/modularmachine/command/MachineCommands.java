@@ -83,8 +83,8 @@ public final class MachineCommands {
                 "commands.mmcece.diagnose.structure_detail",
                 diagnostic.partId(),
                 diagnostic.position().toShortString(),
-                diagnostic.expected(),
-                diagnostic.actual()),
+                MachineControllerApi.localizedDiagnostic(diagnostic.expected()),
+                MachineControllerApi.localizedDiagnostic(diagnostic.actual())),
             false));
     value.recipeInputDiagnostic().ifPresent(diagnostic -> {
       source.sendSuccess(() -> Component.translatable("commands.mmcece.diagnose.recipe", diagnostic.recipeId()), false);

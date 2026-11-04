@@ -31,6 +31,10 @@ public final class MachineBlueprintItem extends Item {
   public ResourceLocation machineId() {
     return machine.id();
   }
+  /** Localized machine name without the item's "blueprint" wrapper. */
+  public Component machineName() {
+    return Component.translatable(machine.translationKey());
+  }
   public static MachineBlueprint.Binding binding(ItemStack stack) {
     if (!(stack.getItem() instanceof MachineBlueprintItem item)) {
       return null;

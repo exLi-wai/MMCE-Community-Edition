@@ -1,10 +1,13 @@
 package com.lw.modularmachine.integration.jade;
 
 import com.lw.modularmachine.api.MachineControllerApi;
+import com.lw.modularmachine.machine.recipe.ControllerMetrics;
+import com.lw.modularmachine.machine.structure.StructureService;
 import com.lw.modularmachine.blockentity.MachineControllerBlockEntity;
 import com.lw.modularmachine.machine.recipe.FrozenItemRun;
 import com.lw.modularmachine.machine.structure.VerificationState;
 import java.util.Locale;
+import net.minecraft.ChatFormatting;
 import net.minecraft.core.BlockPos;
 import net.minecraft.nbt.CompoundTag;
 import net.minecraft.network.chat.Component;
@@ -20,14 +23,12 @@ final class MachineControllerTooltipProvider implements IBlockComponentProvider,
   private static final String PREFIX = "mmcece:";
   private static final String STRUCTURE = PREFIX + "structure";
   private static final String FAILURE = PREFIX + "failure";
-  private static final String FRONT = PREFIX + "front";
-  private static final String ROLL = PREFIX + "roll";
   private static final String PRODUCTION = PREFIX + "production";
   private static final String RECIPE = PREFIX + "recipe";
   private static final String RUN_STATE = PREFIX + "run_state";
   private static final String PROGRESS = PREFIX + "progress";
   private static final String RUN_STATUS = PREFIX + "run_status";
-  private static final String DEFINITION_EPOCH = PREFIX + "definition_epoch";
+  private static final String PERFORMANCE = PREFIX + "performance";
   private static final String DIAGNOSTIC = PREFIX + "diagnostic";
   private static final String INPUT_DIAGNOSTIC = PREFIX + "input_diagnostic";
 
@@ -52,11 +53,10 @@ final class MachineControllerTooltipProvider implements IBlockComponentProvider,
     MachineControllerApi.inspect(controller).ifPresent(snapshot -> {
       data.putString(STRUCTURE, snapshot.structureState().name());
       data.putString(FAILURE, snapshot.structureFailure().name());
-      data.putString(FRONT, snapshot.orientation().front().getSerializedName());
-      data.putInt(ROLL, snapshot.orientation().roll());
       data.putBoolean(PRODUCTION, snapshot.productionAllowed());
       data.putString(RUN_STATUS, snapshot.recipeRunStatus().name());
-      data.putLong(DEFINITION_EPOCH, snapshot.definitionEpoch());
+      data.putInt(PERFORMANCE + "_tick", ControllerMetrics.averageTickMicros());
+      data.putInt(PERFORMANCE + "_search", ControllerMetrics.averageSearchMicros());
       snapshot.structureDiagnostic().ifPresent(diagnostic -> {
         data.putLong(DIAGNOSTIC + "_position", diagnostic.position().asLong());
         data.putString(DIAGNOSTIC + "_part", diagnostic.partId());
@@ -98,13 +98,7 @@ final class MachineControllerTooltipProvider implements IBlockComponentProvider,
     tooltip.add(Component.translatable("jade.mmcece.structure." + structure.name().toLowerCase(Locale.ROOT)));
     tooltip.add(
         Component.translatable(
-            "jade.mmcece.orientation",
-            Component.translatable("direction." + data.getString(FRONT)),
-            data.getInt(ROLL)));
-    tooltip.add(
-        Component.translatable(
             data.getBoolean(PRODUCTION) ? "jade.mmcece.production.ready" : "jade.mmcece.production.paused"));
-    tooltip.add(Component.translatable("jade.mmcece.definition_epoch", data.getLong(DEFINITION_EPOCH)));
     if (structure == VerificationState.INVALID) {
       tooltip.add(Component.translatable("jade.mmcece.failure." + data.getString(FAILURE).toLowerCase(Locale.ROOT)));
       if (data.contains(DIAGNOSTIC + "_position")) {
@@ -113,9 +107,14 @@ final class MachineControllerTooltipProvider implements IBlockComponentProvider,
                 "jade.mmcece.diagnostic.position",
                 data.getString(DIAGNOSTIC + "_part"),
                 BlockPos.of(data.getLong(DIAGNOSTIC + "_position")).toShortString()));
-        tooltip
-            .add(Component.translatable("jade.mmcece.diagnostic.expected", data.getString(DIAGNOSTIC + "_expected")));
-        tooltip.add(Component.translatable("jade.mmcece.diagnostic.actual", data.getString(DIAGNOSTIC + "_actual")));
+        tooltip.add(
+            Component.translatable(
+                "jade.mmcece.diagnostic.expected",
+                MachineControllerApi.localizedDiagnostic(data.getString(DIAGNOSTIC + "_expected"))));
+        tooltip.add(
+            Component.translatable(
+                "jade.mmcece.diagnostic.actual",
+                MachineControllerApi.localizedDiagnostic(data.getString(DIAGNOSTIC + "_actual"))));
       }
     }
     if (data.contains(INPUT_DIAGNOSTIC + "_count")) {
@@ -134,15 +133,25 @@ final class MachineControllerTooltipProvider implements IBlockComponentProvider,
       if (runState != null) {
         tooltip.add(Component.translatable("jade.mmcece.recipe", data.getString(RECIPE)));
         tooltip.add(Component.translatable("jade.mmcece.run." + runState.name().toLowerCase(Locale.ROOT)));
-        tooltip.add(
-            Component.translatable(
-                "jade.mmcece.progress",
-                data.getInt("mmcece:progress_value"),
-                data.getInt("mmcece:duration_value")));
+        int progress = data.getInt("mmcece:progress_value");
+        int duration = data.getInt("mmcece:duration_value");
+        int percent = duration <= 0 ? 0 : Math.min(100, progress * 100 / duration);
+        tooltip.add(Component.translatable("jade.mmcece.progress", percent + "%"));
       }
     } else {
       tooltip
           .add(Component.translatable("jade.mmcece.run_status." + data.getString(RUN_STATUS).toLowerCase(Locale.ROOT)));
+    }
+    if (data.contains(PERFORMANCE + "_tick")) {
+      tooltip.add(
+          Component.translatable(
+              "jade.mmcece.performance",
+              data.getInt(PERFORMANCE + "_tick"),
+              String.format(java.util.Locale.ROOT, "%.2f", data.getInt(PERFORMANCE + "_search") / 1000.0)));
+      tooltip.add(
+          Component.translatable(
+              "jade.mmcece.workmode",
+              Component.literal(StructureService.workMode()).withStyle(ChatFormatting.GREEN)));
     }
   }
 

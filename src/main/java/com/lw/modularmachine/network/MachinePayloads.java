@@ -7,6 +7,7 @@ import com.lw.modularmachine.blockentity.MachinePortBlockEntity;
 import com.lw.modularmachine.machine.PortKind;
 import com.lw.modularmachine.machine.factory.FactoryThreadState;
 import com.lw.modularmachine.machine.factory.FactoryThreadStateCodec;
+import com.lw.modularmachine.machine.recipe.ControllerMetrics;
 import com.lw.modularmachine.machine.recipe.FrozenItemRun;
 import com.lw.modularmachine.menu.FactoryControllerMenu;
 import com.lw.modularmachine.menu.MachineResourceMenu;
@@ -29,7 +30,7 @@ import net.neoforged.neoforge.network.handling.IPayloadContext;
 
 /** Versioned, bounded controller state payloads for menus and observers. */
 public final class MachinePayloads {
-  public static final int PROTOCOL_VERSION = 1;
+  public static final int PROTOCOL_VERSION = 2;
   public static final int MAX_SHORTAGES = 8;
   public static final int MAX_TEXT_LENGTH = 512;
   public static final ResourceLocation STATUS_ID = ResourceLocation
@@ -116,10 +117,13 @@ public final class MachinePayloads {
     return new FactoryStatusPayload(
         PROTOCOL_VERSION,
         factory.getBlockPos(),
+        factory.machineId(),
         factory.scheduler().cursor(),
         factory.persistentStateValid(),
         factory.verificationState().name(),
         factory.verificationFailure().name(),
+        ControllerMetrics.averageTickMicros(),
+        ControllerMetrics.averageSearchMicros(),
         threads);
   }
 
@@ -237,16 +241,22 @@ public final class MachinePayloads {
   public record FactoryStatusPayload(
       int version,
       BlockPos position,
+      ResourceLocation machineId,
       int schedulerCursor,
       boolean persistentStateValid,
       String structureState,
       String structureFailure,
+      int averageTickMicros,
+      int averageSearchMicros,
       List<FactoryStatusThread> threads) implements CustomPacketPayload {
     public FactoryStatusPayload {
       if (version != PROTOCOL_VERSION
+          || machineId == null
           || schedulerCursor < 0
           || structureState == null
           || structureFailure == null
+          || averageTickMicros < 0
+          || averageSearchMicros < 0
           || threads == null
           || threads.size() > MAX_FACTORY_THREADS) {
         throw new IllegalArgumentException("Invalid factory status payload");
@@ -389,6 +399,8 @@ public final class MachinePayloads {
       String runState,
       int progress,
       int duration,
+      int averageTickMicros,
+      int averageSearchMicros,
       List<Shortage> shortages) implements CustomPacketPayload {
     public ControllerStatusPayload {
       if (version != PROTOCOL_VERSION
@@ -398,6 +410,8 @@ public final class MachinePayloads {
           || progress < 0
           || duration < 0
           || progress > duration
+          || averageTickMicros < 0
+          || averageSearchMicros < 0
           || shortages.size() > MAX_SHORTAGES) {
         throw new IllegalArgumentException("Invalid controller status payload");
       }
@@ -435,6 +449,8 @@ public final class MachinePayloads {
           run == null ? "" : run.state().name(),
           run == null ? 0 : run.progress(),
           run == null ? 0 : run.duration(),
+          ControllerMetrics.averageTickMicros(),
+          ControllerMetrics.averageSearchMicros(),
           shortages);
     }
 
@@ -470,6 +486,8 @@ public final class MachinePayloads {
     writeText(buffer, payload.runState());
     buffer.writeVarInt(payload.progress());
     buffer.writeVarInt(payload.duration());
+    buffer.writeVarInt(payload.averageTickMicros());
+    buffer.writeVarInt(payload.averageSearchMicros());
     buffer.writeVarInt(payload.shortages().size());
     for (var shortage : payload.shortages()) {
       writeText(buffer, shortage.key());
@@ -496,6 +514,8 @@ public final class MachinePayloads {
     String runState = readText(buffer);
     int progress = buffer.readVarInt();
     int duration = buffer.readVarInt();
+    int averageTickMicros = buffer.readVarInt();
+    int averageSearchMicros = buffer.readVarInt();
     int size = buffer.readVarInt();
     if (size < 0 || size > MAX_SHORTAGES) {
       throw new IllegalArgumentException("Too many status shortages");
@@ -521,6 +541,8 @@ public final class MachinePayloads {
         runState,
         progress,
         duration,
+        averageTickMicros,
+        averageSearchMicros,
         shortages);
   }
 
@@ -538,10 +560,13 @@ public final class MachinePayloads {
   private static void writeFactoryStatus(RegistryFriendlyByteBuf buffer, FactoryStatusPayload payload) {
     buffer.writeVarInt(payload.version());
     buffer.writeBlockPos(payload.position());
+    buffer.writeResourceLocation(payload.machineId());
     buffer.writeVarInt(payload.schedulerCursor());
     buffer.writeBoolean(payload.persistentStateValid());
     writeText(buffer, payload.structureState());
     writeText(buffer, payload.structureFailure());
+    buffer.writeVarInt(payload.averageTickMicros());
+    buffer.writeVarInt(payload.averageSearchMicros());
     buffer.writeVarInt(payload.threads().size());
     for (var thread : payload.threads()) {
       writeText(buffer, thread.threadId());
@@ -610,10 +635,13 @@ public final class MachinePayloads {
   private static FactoryStatusPayload readFactoryStatus(RegistryFriendlyByteBuf buffer) {
     int version = buffer.readVarInt();
     var position = buffer.readBlockPos();
+    var machineId = buffer.readResourceLocation();
     int cursor = buffer.readVarInt();
     boolean valid = buffer.readBoolean();
     String structureState = readText(buffer);
     String structureFailure = readText(buffer);
+    int averageTickMicros = buffer.readVarInt();
+    int averageSearchMicros = buffer.readVarInt();
     int size = buffer.readVarInt();
     if (size < 0 || size > MAX_FACTORY_THREADS) {
       throw new IllegalArgumentException("Too many factory status threads");
@@ -646,7 +674,17 @@ public final class MachinePayloads {
               buffer.readVarInt(),
               buffer.readVarInt()));
     }
-    return new FactoryStatusPayload(version, position, cursor, valid, structureState, structureFailure, threads);
+    return new FactoryStatusPayload(
+        version,
+        position,
+        machineId,
+        cursor,
+        valid,
+        structureState,
+        structureFailure,
+        averageTickMicros,
+        averageSearchMicros,
+        threads);
   }
 
   private static ResourcePortStatusPayload readResourceStatus(RegistryFriendlyByteBuf buffer) {

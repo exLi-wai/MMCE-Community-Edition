@@ -311,7 +311,7 @@ public final class MachineGameTests {
         helper.assertTrue(
             diagnostic.position().equals(bad)
                 && !diagnostic.expected().isBlank()
-                && diagnostic.actual().contains("minecraft:air"),
+                && diagnostic.actual().contains("block.minecraft.air"),
             "Read-only structure diagnostic omitted location, expectation, or actual state");
         helper.getLevel().setBlockAndUpdate(bad, expected);
         helper.runAfterDelay(8, () -> {

@@ -7,7 +7,13 @@ import net.minecraft.network.chat.Component;
 import net.minecraft.resources.ResourceLocation;
 import net.minecraft.world.entity.player.Inventory;
 
+/**
+ * Original-style controller panel: found blueprint, found structure, status and
+ * recipe progress as a percentage.
+ */
 public final class MachineControllerScreen extends AbstractContainerScreen<MachineControllerMenu> {
+  private static final int TEXT_WIDTH = 187;
+
   public MachineControllerScreen(MachineControllerMenu menu, Inventory inventory, Component title) {
     super(menu, inventory, title);
     MachineControllerStatusClient.attach(this);
@@ -41,49 +47,63 @@ public final class MachineControllerScreen extends AbstractContainerScreen<Machi
   protected void renderLabels(GuiGraphics graphics, int mouseX, int mouseY) {
     graphics.pose().pushPose();
     graphics.pose().scale(.72F, .72F, 1F);
-    graphics.drawString(font, Component.translatable("menu.mmcece.controller.read_only"), 12, 12, 0xFFFFFF, true);
+
+    int x = 12;
+    int y = 12;
     var status = menu.status();
+    boolean formed = status != null && "CONFIRMED".equals(status.structureState());
+    Component blueprint = ControllerStatusLabels.blueprint(menu);
+    // Original layout: once the machine is formed without a blueprint item, the
+    // "found blueprint" line disappears instead of saying "none".
+    if (blueprint != null || !formed) {
+      y = draw(
+          graphics,
+          Component.translatable(
+              "menu.mmcece.controller.blueprint",
+              blueprint == null ? ControllerStatusLabels.none() : blueprint),
+          x,
+          y) + 5;
+    }
+
     if (status == null) {
-      graphics
-          .drawString(font, Component.translatable("menu.mmcece.controller.status_waiting"), 12, 24, 0xFFFFFF, true);
+      draw(graphics, Component.translatable("menu.mmcece.controller.status_waiting"), x, y);
       graphics.pose().popPose();
       return;
     }
-    graphics.drawString(
-        font,
-        Component.translatable("menu.mmcece.controller.structure", status.structureState()),
-        12,
-        24,
-        0xFFFFFF,
-        true);
-    graphics.drawString(
-        font,
-        Component.translatable("menu.mmcece.controller.recipe", status.recipeStatus()),
-        12,
-        34,
-        0xFFFFFF,
-        true);
-    graphics.drawString(
-        font,
-        Component.translatable("menu.mmcece.controller.progress", status.progress(), status.duration()),
-        12,
-        44,
-        0xFFFFFF,
-        true);
-    graphics.drawString(
-        font,
-        Component.translatable("menu.mmcece.controller.orientation", status.front(), status.roll()),
-        12,
-        54,
-        0xFFFFFF,
-        true);
-    graphics.drawString(
-        font,
-        Component.translatable("menu.mmcece.controller.epoch", status.definitionEpoch()),
-        12,
-        64,
-        0xFFFFFF,
-        true);
+
+    Component structure = ControllerStatusLabels.structure(status.structureState(), status.machineId());
+    y = draw(
+        graphics,
+        Component.translatable(
+            "menu.mmcece.controller.structure",
+            structure == null ? ControllerStatusLabels.none() : structure),
+        x,
+        y) + 5;
+    y = draw(
+        graphics,
+        Component.translatable("menu.mmcece.controller.status", ControllerStatusLabels.state(status)),
+        x,
+        y) + 5;
+    if (status.duration() > 0) {
+      y = draw(
+          graphics,
+          Component.translatable(
+              "menu.mmcece.controller.progress",
+              ControllerStatusLabels.percent(status.progress(), status.duration()) + "%"),
+          x,
+          y) + 5;
+    }
+    ControllerStatusLabels
+        .drawPerformance(graphics, font, x, y, status.averageTickMicros(), status.averageSearchMicros());
     graphics.pose().popPose();
+  }
+
+  private int draw(GuiGraphics graphics, Component text, int x, int y) {
+    for (var line : font.split(text, TEXT_WIDTH)) {
+      graphics.drawString(font, line, x, y, 0xFFFFFF, true);
+      y += 10;
+    }
+
+    return y;
   }
 }

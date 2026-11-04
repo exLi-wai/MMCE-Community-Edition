@@ -21,6 +21,8 @@ import java.util.List;
 import java.util.Objects;
 import java.util.Optional;
 import java.util.UUID;
+import net.minecraft.network.chat.Component;
+import net.minecraft.network.chat.MutableComponent;
 import net.minecraft.core.BlockPos;
 import net.minecraft.resources.ResourceLocation;
 import net.minecraft.server.level.ServerLevel;
@@ -213,7 +215,11 @@ public final class MachineControllerApi {
   }
 
   private static Optional<StructureDiagnostic> structureDiagnostic(MachineControllerBlockEntity controller, ServerLevel level) {
-    var registration = controller.registration();
+    return structureDiagnostic(controller.registration(), level);
+  }
+
+  /** Shared by the ordinary and factory Jade diagnostic displays. */
+  public static Optional<StructureDiagnostic> structureDiagnostic(StructureService.Registration registration, ServerLevel level) {
     if (registration == null || registration.verifier.failurePosition() < 0) {
       return Optional.empty();
     }
@@ -223,7 +229,10 @@ public final class MachineControllerApi {
     }
     var part = registration.pattern.definition.parts().get(index);
     String expected = expected(part.rule());
-    String actual = bounded(level.getBlockState(registration.pattern.position(index)).toString());
+    var state = level.getBlockState(registration.pattern.position(index));
+    var values = state.getValues().entrySet().stream().map(entry -> entry.getKey().getName() + "=" + entry.getValue())
+        .sorted().toList();
+    String actual = bounded(state.getBlock().getDescriptionId() + (values.isEmpty() ? "" : values.toString()));
     return Optional.of(new StructureDiagnostic(registration.pattern.position(index), part.id(), expected, actual));
   }
 
@@ -234,9 +243,35 @@ public final class MachineControllerApi {
     var alternatives = rule.alternatives().stream().map(alternative -> {
       var properties = alternative.properties().entrySet().stream()
           .map(entry -> entry.getKey().getName() + "=" + entry.getValue()).sorted().toList();
-      return alternative.snapshot().id() + (properties.isEmpty() ? "" : properties.toString());
+      return alternative.block().getDescriptionId() + (properties.isEmpty() ? "" : properties.toString());
     }).sorted().toList();
-    return bounded(alternatives.toString());
+    return bounded(String.join("; ", alternatives));
+  }
+
+  /** Resolves stored description ids to client-localized names for display. */
+  public static Component localizedDiagnostic(String value) {
+    MutableComponent result = Component.empty();
+    String[] alternatives = value.split("; ");
+    for (int index = 0; index < alternatives.length; index++) {
+      if (index > 0) {
+        result.append(Component.literal(", "));
+      }
+      result.append(localizedAlternative(alternatives[index]));
+    }
+    return result;
+  }
+
+  private static Component localizedAlternative(String value) {
+    if (value.startsWith("port:")) {
+      return Component.literal(value);
+    }
+    int bracket = value.indexOf('[');
+    String key = bracket < 0 ? value : value.substring(0, bracket);
+    String suffix = bracket < 0 ? "" : value.substring(bracket);
+    if (!key.contains(".")) {
+      key = "block." + key.replace(':', '.');
+    }
+    return Component.translatable(key).append(Component.literal(suffix));
   }
 
   private static String bounded(String value) {

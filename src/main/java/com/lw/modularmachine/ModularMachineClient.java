@@ -29,7 +29,7 @@ import net.neoforged.neoforge.client.gui.IConfigScreenFactory;
 @EventBusSubscriber(modid = ModularMachine.MODID, value = Dist.CLIENT)
 public class ModularMachineClient {
   public ModularMachineClient(ModContainer container) {
-    container.registerConfig(ModConfig.Type.CLIENT, MachineClientConfig.SPEC);
+    container.registerConfig(ModConfig.Type.CLIENT, MachineClientConfig.SPEC, "modularmachinery/mmcece-client.toml");
     container.registerExtensionPoint(IConfigScreenFactory.class, ConfigurationScreen::new);
     MachineJeiPayloads.setReceiver(ClientMachineJeiCatalog::receive);
     ProjectionPayloads.setReceiver(WorldProjection::receive);
