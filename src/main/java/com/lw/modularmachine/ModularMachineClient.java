@@ -111,14 +111,11 @@ public class ModularMachineClient {
       return -1;
     }
     Block block = state.getBlock();
-    if (level instanceof PreviewBlockView preview
-        && (block instanceof MachineCasingBlock
-            || block instanceof MachinePortBlock
-            || block instanceof ParallelControllerBlock
-            || block instanceof UpgradeBusBlock
-            || block instanceof SmartInterfaceBlock
-            || block instanceof MachineControllerBlock
-            || block instanceof FactoryControllerBlock)) {
+    int activePreviewColor = PreviewBlockView.activeMachineColor();
+    if (activePreviewColor >= 0 && isMachineColorBlock(block)) {
+      return activePreviewColor;
+    }
+    if (level instanceof PreviewBlockView preview && isMachineColorBlock(block)) {
       return preview.machineColor();
     }
     if (block instanceof MachineControllerBlock controller) {
@@ -143,6 +140,16 @@ public class ModularMachineClient {
     }
     BlockEntity entity = pos == null ? null : level.getBlockEntity(pos);
     return entity instanceof MachineColorable colorable ? colorable.machineColor() : -1;
+  }
+
+  private static boolean isMachineColorBlock(Block block) {
+    return block instanceof MachineCasingBlock
+        || block instanceof MachinePortBlock
+        || block instanceof ParallelControllerBlock
+        || block instanceof UpgradeBusBlock
+        || block instanceof SmartInterfaceBlock
+        || block instanceof MachineControllerBlock
+        || block instanceof FactoryControllerBlock;
   }
 
   private static int itemColor(ItemStack stack, int tintIndex) {

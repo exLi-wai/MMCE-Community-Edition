@@ -6,13 +6,17 @@ import com.lw.modularmachine.machine.PortKind;
 import com.mojang.serialization.MapCodec;
 import java.util.List;
 import net.minecraft.core.BlockPos;
+import net.minecraft.ChatFormatting;
 import net.minecraft.server.level.ServerPlayer;
 import net.minecraft.world.InteractionHand;
 import net.minecraft.world.InteractionResult;
 import net.minecraft.world.ItemInteractionResult;
 import net.minecraft.world.entity.player.Player;
+import net.minecraft.world.item.Item;
 import net.minecraft.world.item.BlockItem;
 import net.minecraft.world.item.ItemStack;
+import net.minecraft.network.chat.Component;
+import net.minecraft.world.item.TooltipFlag;
 import net.minecraft.world.level.Level;
 import net.minecraft.world.level.block.BaseEntityBlock;
 import net.minecraft.world.level.block.RenderShape;
@@ -56,6 +60,38 @@ public final class MachinePortBlock extends BaseEntityBlock {
 
   public HatchTier tier() {
     return tier;
+  }
+
+  @Override
+  public void appendHoverText(ItemStack stack, Item.TooltipContext context, List<Component> tooltip, TooltipFlag flag) {
+    switch (kind.resource()) {
+      case ITEM -> {
+        tooltip.add(
+            Component.translatable(
+                tier.capacity() == 1 ? "tooltip.mmcece.item_bus.slot" : "tooltip.mmcece.item_bus.slots",
+                tier.capacity()).withStyle(ChatFormatting.GRAY));
+        if (kind.isInput()) {
+          tooltip.add(Component.translatable("tooltip.mmcece.input_group").withStyle(ChatFormatting.GRAY));
+        }
+      }
+      case FLUID -> {
+        tooltip.add(
+            Component.translatable("tooltip.mmcece.fluid_hatch.capacity", tier.capacity())
+                .withStyle(ChatFormatting.GRAY));
+        if (kind.isInput()) {
+          tooltip.add(Component.translatable("tooltip.mmcece.input_group").withStyle(ChatFormatting.GRAY));
+        }
+      }
+      case ENERGY -> {
+        tooltip.add(
+            Component.translatable("tooltip.mmcece.energy_hatch.capacity", tier.capacity())
+                .withStyle(ChatFormatting.GRAY));
+        tooltip.add(
+            Component.translatable(
+                kind.isInput() ? "tooltip.mmcece.energy_hatch.input" : "tooltip.mmcece.energy_hatch.output",
+                tier.transferLimit()).withStyle(ChatFormatting.GRAY));
+      }
+    }
   }
 
   @Override

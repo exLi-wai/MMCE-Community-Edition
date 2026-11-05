@@ -1,6 +1,7 @@
 package com.lw.modularmachine.integration.jei;
 
 import com.mojang.blaze3d.platform.Lighting;
+import com.lw.modularmachine.client.preview.PreviewBlockView;
 import mezz.jei.api.gui.builder.ITooltipBuilder;
 import mezz.jei.api.gui.inputs.IJeiGuiEventListener;
 import mezz.jei.api.gui.widgets.IRecipeWidget;
@@ -97,7 +98,7 @@ final class LegacyStructureJeiWidget implements IRecipeWidget, IJeiGuiEventListe
       cycleTick = Util.getMillis() / 1500;
     }
     int tick = (int) cycleTick;
-    try {
+    try (var colorScope = PreviewBlockView.pushMachineColor(machine.color())) {
       for (var part : machine.parts()) {
         if (layers && part.offset().getY() != layer) {
           continue;

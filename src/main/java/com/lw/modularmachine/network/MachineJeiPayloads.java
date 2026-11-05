@@ -48,6 +48,7 @@ public final class MachineJeiPayloads {
       int machines,
       ResourceLocation machine,
       String translation,
+      int color,
       int start,
       int total,
       List<Part> parts) implements CustomPacketPayload {
@@ -57,6 +58,8 @@ public final class MachineJeiPayloads {
           || machines < 0
           || machines > 1024
           || translation.length() > 512
+          || color < 0
+          || color > 0xFFFFFF
           || start < -2
           || total < 0
           || parts.size() > CHUNK_PARTS
@@ -75,7 +78,7 @@ public final class MachineJeiPayloads {
     receiver = Objects.requireNonNull(value);
   }
   public static void register(RegisterPayloadHandlersEvent event) {
-    event.registrar("1").playToClient(
+    event.registrar("2").playToClient(
         TYPE,
         StreamCodec.of(MachineJeiPayloads::write, MachineJeiPayloads::read),
         (payload, context) -> context.enqueueWork(() -> receiver.accept(payload)));
@@ -85,6 +88,7 @@ public final class MachineJeiPayloads {
     buffer.writeVarInt(value.machines());
     buffer.writeResourceLocation(value.machine());
     buffer.writeUtf(value.translation(), 512);
+    buffer.writeInt(value.color());
     buffer.writeInt(value.start());
     buffer.writeVarInt(value.total());
     buffer.writeVarInt(value.parts().size());
@@ -101,6 +105,7 @@ public final class MachineJeiPayloads {
     int machines = buffer.readVarInt();
     var machine = buffer.readResourceLocation();
     String translation = buffer.readUtf(512);
+    int color = buffer.readInt();
     int start = buffer.readInt();
     int total = buffer.readVarInt();
     int count = buffer.readVarInt();
@@ -120,7 +125,7 @@ public final class MachineJeiPayloads {
       }
       parts.add(new Part(offset, states));
     }
-    return new Snapshot(epoch, machines, machine, translation, start, total, parts);
+    return new Snapshot(epoch, machines, machine, translation, color, start, total, parts);
   }
   @SubscribeEvent
   public static void sync(OnDatapackSyncEvent event) {
@@ -129,7 +134,7 @@ public final class MachineJeiPayloads {
     var packets = new ArrayList<Snapshot>();
     long epoch = StructureService.definitionEpoch();
     var marker = ResourceLocation.fromNamespaceAndPath(ModularMachine.MODID, "catalog");
-    packets.add(new Snapshot(epoch, definitions.size(), marker, "", -1, 0, List.of()));
+    packets.add(new Snapshot(epoch, definitions.size(), marker, "", 0xFFFFFF, -1, 0, List.of()));
     for (var definition : definitions) {
       var parts = new ArrayList<Part>();
       parts.add(new Part(BlockPos.ZERO, List.of(controllerState(definition))));
@@ -145,12 +150,13 @@ public final class MachineJeiPayloads {
                 definitions.size(),
                 definition.id(),
                 definition.translationKey(),
+                definition.color(),
                 start,
                 parts.size(),
                 parts.subList(start, Math.min(parts.size(), start + CHUNK_PARTS))));
       }
     }
-    packets.add(new Snapshot(epoch, definitions.size(), marker, "", -2, 0, List.of()));
+    packets.add(new Snapshot(epoch, definitions.size(), marker, "", 0xFFFFFF, -2, 0, List.of()));
     List<ServerPlayer> players = event.getPlayer() == null ? event.getPlayerList().getPlayers() : List
         .of(event.getPlayer());
     for (var player : players) {

@@ -18,7 +18,7 @@ import net.neoforged.neoforge.client.event.ClientPlayerNetworkEvent;
  */
 @EventBusSubscriber(modid = ModularMachine.MODID, value = Dist.CLIENT)
 public final class ClientMachineJeiCatalog {
-  public record Machine(ResourceLocation id, String translation, List<MachineJeiPayloads.Part> parts) {
+  public record Machine(ResourceLocation id, String translation, int color, List<MachineJeiPayloads.Part> parts) {
     public Machine {
       parts = List.copyOf(parts);
     }
@@ -78,7 +78,7 @@ public final class ClientMachineJeiCatalog {
       parts.addAll(previous.parts());
     }
     parts.addAll(packet.parts());
-    pending.put(packet.machine(), new Machine(packet.machine(), packet.translation(), parts));
+    pending.put(packet.machine(), new Machine(packet.machine(), packet.translation(), packet.color(), parts));
   }
   @SubscribeEvent
   public static void logout(ClientPlayerNetworkEvent.LoggingOut event) {

@@ -5,10 +5,16 @@ import com.lw.modularmachine.machine.UpgradeBusTier;
 import com.lw.modularmachine.registry.MachineRegistries;
 import com.mojang.serialization.MapCodec;
 import net.minecraft.core.BlockPos;
+import net.minecraft.ChatFormatting;
 import net.minecraft.server.level.ServerPlayer;
 import net.minecraft.world.InteractionResult;
 import net.minecraft.world.MenuProvider;
 import net.minecraft.world.entity.player.Player;
+import net.minecraft.world.item.Item;
+import net.minecraft.world.item.ItemStack;
+import net.minecraft.network.chat.Component;
+import net.minecraft.world.item.TooltipFlag;
+import java.util.List;
 import net.minecraft.world.level.Level;
 import net.minecraft.world.level.block.BaseEntityBlock;
 import net.minecraft.world.level.block.RenderShape;
@@ -30,6 +36,11 @@ public final class UpgradeBusBlock extends BaseEntityBlock {
 
   public UpgradeBusTier tier() {
     return tier;
+  }
+
+  @Override
+  public void appendHoverText(ItemStack stack, Item.TooltipContext context, List<Component> tooltip, TooltipFlag flag) {
+    tooltip.add(Component.translatable("tooltip.mmcece.upgrade_bus", tier.slots()).withStyle(ChatFormatting.GRAY));
   }
 
   @Override

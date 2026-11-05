@@ -4,6 +4,7 @@ import com.lw.modularmachine.blockentity.SmartInterfaceBlockEntity;
 import com.lw.modularmachine.registry.MachineRegistries;
 import com.mojang.serialization.MapCodec;
 import net.minecraft.core.BlockPos;
+import net.minecraft.ChatFormatting;
 import net.minecraft.server.level.ServerPlayer;
 import net.minecraft.world.InteractionResult;
 import net.minecraft.world.MenuProvider;
@@ -16,6 +17,11 @@ import net.minecraft.world.level.block.entity.BlockEntityTicker;
 import net.minecraft.world.level.block.entity.BlockEntityType;
 import net.minecraft.world.level.block.state.BlockState;
 import net.minecraft.world.phys.BlockHitResult;
+import net.minecraft.world.item.Item;
+import net.minecraft.world.item.ItemStack;
+import net.minecraft.network.chat.Component;
+import net.minecraft.world.item.TooltipFlag;
+import java.util.List;
 
 public final class SmartInterfaceBlock extends BaseEntityBlock {
   private static final MapCodec<SmartInterfaceBlock> CODEC = simpleCodec(SmartInterfaceBlock::new);
@@ -37,6 +43,11 @@ public final class SmartInterfaceBlock extends BaseEntityBlock {
   @Override
   public BlockEntity newBlockEntity(BlockPos pos, BlockState state) {
     return new SmartInterfaceBlockEntity(pos, state);
+  }
+
+  @Override
+  public void appendHoverText(ItemStack stack, Item.TooltipContext context, List<Component> tooltip, TooltipFlag flag) {
+    tooltip.add(Component.translatable("tooltip.mmcece.smart_interface").withStyle(ChatFormatting.GRAY));
   }
 
   @Override

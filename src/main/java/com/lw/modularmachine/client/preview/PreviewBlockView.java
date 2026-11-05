@@ -14,6 +14,7 @@ import net.minecraft.world.level.material.FluidState;
 
 /** Render-thread schematic neighbors; never passed to packing workers. */
 public final class PreviewBlockView implements BlockAndTintGetter {
+  private static final ThreadLocal<Integer> ACTIVE_MACHINE_COLOR = new ThreadLocal<>();
   private final PreviewRenderScene scene;
   private final int layer, step;
 
@@ -25,6 +26,28 @@ public final class PreviewBlockView implements BlockAndTintGetter {
 
   public int machineColor() {
     return scene.machineColor();
+  }
+
+  public static int activeMachineColor() {
+    return ACTIVE_MACHINE_COLOR.get() == null ? -1 : ACTIVE_MACHINE_COLOR.get();
+  }
+
+  public static Scope pushMachineColor(int color) {
+    Integer previous = ACTIVE_MACHINE_COLOR.get();
+    ACTIVE_MACHINE_COLOR.set(color & 0xFFFFFF);
+    return () -> {
+      if (previous == null) {
+        ACTIVE_MACHINE_COLOR.remove();
+      } else {
+        ACTIVE_MACHINE_COLOR.set(previous);
+      }
+    };
+  }
+
+  @FunctionalInterface
+  public interface Scope extends AutoCloseable {
+    @Override
+    void close();
   }
 
   @Override
