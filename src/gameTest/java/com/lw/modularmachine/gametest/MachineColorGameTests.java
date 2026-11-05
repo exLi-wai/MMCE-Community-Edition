@@ -74,14 +74,36 @@ public final class MachineColorGameTests {
     helper.assertTrue(
         controller.canCommitProduction() && input.machineColor() == 0x38A6D2 && output.machineColor() == 0x38A6D2,
         "Budgeted structure scan stopped before distributing color to every resource hatch");
+
+    input.setMachineColor(0xFFFFFF);
+    output.setMachineColor(0xFFFFFF);
+    StructureService.requestAudit(controller);
+    for (int attempt = 0; attempt < 200
+        && (!controller.canCommitProduction()
+            || input.machineColor() != 0x38A6D2
+            || output.machineColor() != 0x38A6D2); attempt++) {
+      StructureService.advance(level, 512, 1, 50_000_000L);
+    }
+    helper.assertTrue(
+        controller.canCommitProduction() && input.machineColor() == 0x38A6D2 && output.machineColor() == 0x38A6D2,
+        "Structure revalidation did not refresh component colors");
     helper.succeed();
   }
 
   private static boolean restoredColor(BlockEntity original, BlockPos position, net.minecraft.world.level.block.state.BlockState state, net.minecraft.server.level.ServerLevel level) {
     var saved = original.saveWithFullMetadata(level.registryAccess());
+    var update = original.getUpdateTag(level.registryAccess());
+    if (!update.contains(com.lw.modularmachine.blockentity.MachineColorable.COLOR_TAG)) {
+      return false;
+    }
     var restored = BlockEntity.loadStatic(position, state, saved, level.registryAccess());
-    return restored instanceof com.lw.modularmachine.blockentity.MachineColorable colorable
-        && colorable.machineColor() == 0x38A6D2;
+    if (!(restored instanceof com.lw.modularmachine.blockentity.MachineColorable colorable)) {
+      return false;
+    }
+    if (!colorable.machineColorAssigned()) {
+      colorable.setMachineColor(0xFFFFFF);
+    }
+    return colorable.machineColor() == 0x38A6D2;
   }
 
   private MachineColorGameTests() {

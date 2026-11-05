@@ -369,7 +369,7 @@ public record MachineDefinition(
         maxParallelism,
         root.has("requires_blueprint") && bool(root.get("requires_blueprint"), path + ".requires_blueprint"),
         root.has("factory_only") && bool(root.get("factory_only"), path + ".factory_only"),
-        root.has("color") ? color(root.get("color"), path + ".color") : 0xFFFFFF);
+        machineColor(root, path));
   }
 
   /**
@@ -452,7 +452,8 @@ public record MachineDefinition(
         "parallel",
         "requires_blueprint",
         "factory_only",
-        "color");
+        "color",
+        "machine_color");
     return 2;
   }
 
@@ -480,6 +481,14 @@ public record MachineDefinition(
       throw error(path, "Expected a six-digit hexadecimal RGB color, for example FFFFFF");
     }
     return Integer.parseInt(value, 16);
+  }
+
+  private static int machineColor(JsonObject root, String path) {
+    if (root.has("color") && root.has("machine_color")) {
+      throw error(path, "Use only one of color or machine_color");
+    }
+    String key = root.has("machine_color") ? "machine_color" : "color";
+    return root.has(key) ? color(root.get(key), path + "." + key) : 0xFFFFFF;
   }
 
   private static void partFields(JsonObject part, String path) {

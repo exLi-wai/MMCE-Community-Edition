@@ -60,6 +60,7 @@ public final class UpgradeBusBlockEntity extends BlockEntity implements MenuProv
   private final UpgradeBusTier tier;
   private final int slots;
   private int machineColor = 0xFFFFFF;
+  private boolean machineColorAssigned;
   private final TransactionalItemStackHandler inventory;
   private final Map<BlockPos, UpgradeBusBinding> bindings = new LinkedHashMap<>();
   private final Map<ResourceLocation, FactoryUpgradeBusContext> contexts = new HashMap<>();
@@ -104,8 +105,14 @@ public final class UpgradeBusBlockEntity extends BlockEntity implements MenuProv
   }
 
   @Override
+  public boolean machineColorAssigned() {
+    return machineColorAssigned;
+  }
+
+  @Override
   public void setMachineColor(int color) {
     color &= 0xFFFFFF;
+    machineColorAssigned = true;
     if (machineColor != color) {
       machineColor = color;
       MachineColorable.update(this);
@@ -931,6 +938,7 @@ public final class UpgradeBusBlockEntity extends BlockEntity implements MenuProv
     long previousRevision = upgradeRevision;
     long previousBindingRevision = bindingRevision;
     super.loadAdditional(tag, registries);
+    machineColorAssigned = tag.contains(MachineColorable.COLOR_TAG);
     machineColor = MachineColorable.load(tag);
     withdrawAll();
     unsupportedData = null;
@@ -1016,6 +1024,11 @@ public final class UpgradeBusBlockEntity extends BlockEntity implements MenuProv
     if (level instanceof ServerLevel) {
       refreshBinding();
     }
+  }
+
+  @Override
+  public CompoundTag getUpdateTag(HolderLookup.Provider registries) {
+    return saveWithoutMetadata(registries);
   }
 
   private static long advanceRestoredRevision(long previous, long restored) {

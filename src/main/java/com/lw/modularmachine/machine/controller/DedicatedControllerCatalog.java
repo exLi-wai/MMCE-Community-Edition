@@ -68,7 +68,7 @@ public final class DedicatedControllerCatalog {
    */
   public static String resourceFingerprint() {
     try {
-      byte[] bytes = ("registered-machines-v5\n" + MACHINES + ENTRIES).getBytes(StandardCharsets.UTF_8);
+      byte[] bytes = ("registered-machines-v6\n" + MACHINES + ENTRIES).getBytes(StandardCharsets.UTF_8);
       return HexFormat.of().formatHex(MessageDigest.getInstance("SHA-256").digest(bytes));
     } catch (NoSuchAlgorithmException impossible) {
       throw new IllegalStateException(impossible);
@@ -330,7 +330,10 @@ public final class DedicatedControllerCatalog {
   }
 
   private static int color(JsonObject root) {
-    var value = root.get("color");
+    if (root.has("color") && root.has("machine_color")) {
+      throw new IllegalArgumentException("Use only one of color or machine_color");
+    }
+    var value = root.has("machine_color") ? root.get("machine_color") : root.get("color");
     if (value == null) {
       return 0xFFFFFF;
     }

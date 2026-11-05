@@ -104,6 +104,24 @@ public final class CompiledRecipeSet<K> {
     return entries.stream().map(entry -> entry.recipe).toList();
   }
 
+  /**
+   * Returns candidates restricted by stable IDs without rebuilding or sorting the
+   * compiled catalog. The single-ID path avoids scanning unrelated recipes.
+   */
+  List<RecipeCandidate<K>> candidatesFor(Set<String> allowedIds) {
+    if (allowedIds == null) {
+      return candidates();
+    }
+    if (allowedIds.isEmpty()) {
+      return List.of();
+    }
+    if (allowedIds.size() == 1) {
+      String id = allowedIds.iterator().next();
+      return byId.containsKey(id) ? List.of(byId.get(id)) : List.of();
+    }
+    return entries.stream().filter(entry -> allowedIds.contains(entry.recipe.id())).map(entry -> entry.recipe).toList();
+  }
+
   public Optional<RecipeCandidate<K>> candidate(String id) {
     return Optional.ofNullable(byId.get(id));
   }

@@ -34,6 +34,7 @@ import com.lw.modularmachine.network.MachinePayloads;
 import com.lw.modularmachine.registry.MachineRegistries;
 import com.lw.modularmachine.storage.ControllerBlueprintInventory;
 import com.lw.modularmachine.util.thread.ServerThreadGuard;
+import java.util.ArrayList;
 import java.util.HashSet;
 import java.util.List;
 import java.util.Objects;
@@ -58,6 +59,8 @@ import net.minecraft.world.level.block.state.BlockState;
 import net.neoforged.neoforge.network.PacketDistributor;
 
 public final class MachineControllerBlockEntity extends BlockEntity implements MenuProvider, UpgradeBusOwner {
+  private static final int RECIPE_RETRY_INITIAL = 5;
+  private static final int RECIPE_RETRY_MAX = 80;
   private final GenericControllerDiscovery genericDiscovery = new GenericControllerDiscovery();
   private ResourceLocation machineId = ControllerPlacementData.UNBOUND_MACHINE;
   private StructureService.Registration registration;
@@ -66,6 +69,9 @@ public final class MachineControllerBlockEntity extends BlockEntity implements M
   private long successfulTransfers;
   private long bindingRebuilds;
   private long conservativeChecks;
+  private StructureService.Registration conservativeRegistration;
+  private long conservativeRevision = Long.MIN_VALUE;
+  private boolean conservativeValidated;
   private MachinePayloads.ControllerStatusPayload lastObserverStatus;
   private final Set<UUID> observerRecipients = new HashSet<>();
   private Tag unsupportedData;
@@ -85,6 +91,7 @@ public final class MachineControllerBlockEntity extends BlockEntity implements M
   private ItemRecipeSearch recipeSearch;
   private ItemRecipePlan preparedRecipe;
   private long recipeRetryAfter;
+  private int recipeRetryInterval = RECIPE_RETRY_INITIAL;
   private String lastRecipeFailure;
   private VerificationState detachedState = VerificationState.PENDING;
   private VerificationFailure detachedFailure = VerificationFailure.UNVERIFIED;
@@ -135,7 +142,11 @@ public final class MachineControllerBlockEntity extends BlockEntity implements M
     recipeEngine.invalidate();
     recipeSearch = null;
     preparedRecipe = null;
+    resetRecipeRetry(0L);
     this.registration = registration;
+    conservativeRegistration = null;
+    conservativeRevision = Long.MIN_VALUE;
+    conservativeValidated = false;
     input = null;
     output = null;
     detachedState = VerificationState.PENDING;
@@ -167,6 +178,7 @@ public final class MachineControllerBlockEntity extends BlockEntity implements M
       genericDiscovery.clear();
       recipeSearch = null;
       preparedRecipe = null;
+      resetRecipeRetry(level.getGameTime());
       var target = blueprintMachineId();
       if (!formed && runningRecipe == null && target != null && !target.equals(machineId)) {
         bindMachine(target);
@@ -629,11 +641,10 @@ public final class MachineControllerBlockEntity extends BlockEntity implements M
     // state itself.
     StructureService.register(this);
     refreshUpgradeSources();
-    broadcastObserverStatus(server);
     if (runningRecipe != null) {
       long tickStarted = System.nanoTime();
       var runResult = recipeEngine.tick(this, server);
-      ControllerMetrics.recordTick(System.nanoTime() - tickStarted);
+      ControllerMetrics.recordTick(System.nanoTime() - tickStarted, server.getServer().getTickCount());
       broadcastObserverStatus(server);
       if (runningRecipe != null || runResult != ItemRunEngine.Result.FINISHED) {
         return;
@@ -648,11 +659,11 @@ public final class MachineControllerBlockEntity extends BlockEntity implements M
     if (amount <= 0) {
       if (server.getGameTime() >= recipeRetryAfter) {
         try {
-          advanceNativeRecipe();
+          advanceNativeRecipe(server);
         } catch (RuntimeException failure) {
           recipeSearch = null;
           preparedRecipe = null;
-          recipeRetryAfter = server.getGameTime() + 20;
+          backoffRecipeRetry(server.getGameTime());
           if (!failure.toString().equals(lastRecipeFailure)) {
             lastRecipeFailure = failure.toString();
             ModularMachine.LOGGER.warn("Ordinary recipe preparation failed at {}", worldPosition, failure);
@@ -696,19 +707,27 @@ public final class MachineControllerBlockEntity extends BlockEntity implements M
   }
 
   private void broadcastObserverStatus(ServerLevel server) {
+    var nearbyPlayers = new ArrayList<ServerPlayer>();
+    var nearby = new HashSet<UUID>();
+    for (ServerPlayer player : server.players()) {
+      if (player
+          .distanceToSqr(worldPosition.getX() + .5, worldPosition.getY() + .5, worldPosition.getZ() + .5) <= 32 * 32) {
+        nearbyPlayers.add(player);
+        nearby.add(player.getUUID());
+      }
+    }
+    if (nearbyPlayers.isEmpty()) {
+      observerRecipients.clear();
+      return;
+    }
     var snapshot = MachineControllerApi.inspectForMenu(this);
     if (snapshot.isEmpty()) {
       return;
     }
     var payload = MachinePayloads.ControllerStatusPayload.from(snapshot.orElseThrow());
-    var nearby = new HashSet<UUID>();
-    for (ServerPlayer player : server.players()) {
-      if (player
-          .distanceToSqr(worldPosition.getX() + .5, worldPosition.getY() + .5, worldPosition.getZ() + .5) <= 32 * 32) {
-        nearby.add(player.getUUID());
-        if (!payload.equals(lastObserverStatus) || !observerRecipients.contains(player.getUUID())) {
-          PacketDistributor.sendToPlayer(player, payload);
-        }
+    for (ServerPlayer player : nearbyPlayers) {
+      if (!payload.equals(lastObserverStatus) || !observerRecipients.contains(player.getUUID())) {
+        PacketDistributor.sendToPlayer(player, payload);
       }
     }
     observerRecipients.retainAll(nearby);
@@ -716,37 +735,60 @@ public final class MachineControllerBlockEntity extends BlockEntity implements M
     lastObserverStatus = payload;
   }
 
-  private void advanceNativeRecipe() {
+  private void advanceNativeRecipe(ServerLevel server) {
     if (recipeSearch != null && !recipeSearch.dependenciesCurrent()) {
       recipeSearch = null;
       preparedRecipe = null;
+      resetRecipeRetry(server.getGameTime());
     }
     if (recipeSearch == null) {
       recipeSearch = ItemRecipeSearch.begin(this).orElse(null);
-    }
-    if (recipeSearch == null) {
-      return;
+      if (recipeSearch == null) {
+        backoffRecipeRetry(server.getGameTime());
+        return;
+      }
     }
     if (preparedRecipe == null) {
       long searchStarted = System.nanoTime();
       try {
         var result = recipeSearch.advance(MachineConfig.RECIPE_OUTPUT_WORK.get());
-        if (result.status() != Status.SELECTED) {
+        if (result.status() == Status.BUDGET_EXHAUSTED) {
+          return;
+        }
+        if (result.status() == Status.NO_MATCH) {
+          recipeSearch = null;
+          backoffRecipeRetry(server.getGameTime());
           return;
         }
         preparedRecipe = result.plan().orElseThrow();
       } finally {
-        ControllerMetrics.recordSearch(System.nanoTime() - searchStarted);
+        ControllerMetrics.recordSearch(System.nanoTime() - searchStarted, server.getServer().getTickCount());
       }
     }
     var result = preparedRecipe.start();
     if (result == Result.STARTED) {
       recipeEngine.started();
+      resetRecipeRetry(server.getGameTime());
     }
     if (result != Result.BUSY) {
       recipeSearch = null;
       preparedRecipe = null;
+      if (result == Result.STALE) {
+        resetRecipeRetry(server.getGameTime());
+      } else if (result != Result.STARTED) {
+        backoffRecipeRetry(server.getGameTime());
+      }
     }
+  }
+
+  private void resetRecipeRetry(long now) {
+    recipeRetryInterval = RECIPE_RETRY_INITIAL;
+    recipeRetryAfter = now;
+  }
+
+  private void backoffRecipeRetry(long now) {
+    recipeRetryAfter = now + recipeRetryInterval;
+    recipeRetryInterval = Math.min(RECIPE_RETRY_MAX, recipeRetryInterval << 1);
   }
 
   /**
@@ -764,16 +806,29 @@ public final class MachineControllerBlockEntity extends BlockEntity implements M
       return false;
     }
     if (MachineConfig.CONSERVATIVE_COMMIT_CHECK.get()) {
+      long revision = ticket.verifier.revision();
+      if (conservativeRegistration == ticket && conservativeRevision == revision) {
+        return conservativeValidated && registration == ticket && canCommitProduction();
+      }
       var reference = ticket.pattern.modifierReference(server);
       var full = ticket.pattern.fullScan(server, reference);
       conservativeChecks = addTelemetry(conservativeChecks, full.checks());
       if (full.state() != VerificationState.CONFIRMED) {
         ticket.verifier.rejectProof(full.failure(), full.failedIndex(), server.getGameTime());
+        conservativeRegistration = ticket;
+        conservativeRevision = ticket.verifier.revision();
+        conservativeValidated = false;
         return false;
       }
       if (!ticket.verifyModifierReference(server, reference)) {
+        conservativeRegistration = ticket;
+        conservativeRevision = ticket.verifier.revision();
+        conservativeValidated = false;
         return false;
       }
+      conservativeRegistration = ticket;
+      conservativeRevision = ticket.verifier.revision();
+      conservativeValidated = true;
     }
     return registration == ticket && canCommitProduction();
   }

@@ -100,10 +100,7 @@ public final class ItemRecipeSearch {
     // all per-port stamps.
     var snapshot = new ItemResourceSnapshot<>(ticket.structureRevision(), counts, spaces);
     var fluidCandidates = new HashSet<String>();
-    for (var candidate : catalog.recipes().candidates()) {
-      if (allowedIds != null && !allowedIds.contains(candidate.id())) {
-        continue;
-      }
+    for (var candidate : catalog.recipes().candidatesFor(allowedIds)) {
       if (ticket.interfacesMatch(candidate.interfaceInputs())
           && fluidInputsAvailable(
               catalog.fluidInputs(candidate.id()),

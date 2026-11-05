@@ -75,6 +75,13 @@ class MachineDefinitionSchemaTest {
 
     root.addProperty("color", "FFF");
     assertPath(root, "$.color");
+
+    root.remove("color");
+    root.addProperty("machine_color", "#0A1b2C");
+    assertEquals(0x0A1B2C, parse(root).color());
+
+    root.addProperty("color", "#FFFFFF");
+    assertPath(root, "Use only one of color or machine_color");
   }
 
   @Test

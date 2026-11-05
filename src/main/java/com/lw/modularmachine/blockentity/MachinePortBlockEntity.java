@@ -51,6 +51,7 @@ public final class MachinePortBlockEntity extends BlockEntity implements MenuPro
   private int preferredInputGroup = 1;
   private CompoundTag unsupportedData;
   private int machineColor = 0xFFFFFF;
+  private boolean machineColorAssigned;
 
   public MachinePortBlockEntity(BlockPos pos, BlockState state) {
     super(MachineRegistries.PORT_ENTITY.get(), pos, state);
@@ -528,8 +529,14 @@ public final class MachinePortBlockEntity extends BlockEntity implements MenuPro
   }
 
   @Override
+  public boolean machineColorAssigned() {
+    return machineColorAssigned;
+  }
+
+  @Override
   public void setMachineColor(int color) {
     color &= 0xFFFFFF;
+    machineColorAssigned = true;
     if (machineColor != color) {
       machineColor = color;
       MachineColorable.update(this);
@@ -586,6 +593,7 @@ public final class MachinePortBlockEntity extends BlockEntity implements MenuPro
       throw new IllegalStateException("Cannot reload a leased input/output port");
     }
     super.loadAdditional(tag, registries);
+    machineColorAssigned = tag.contains(MachineColorable.COLOR_TAG);
     machineColor = MachineColorable.load(tag);
     boolean previouslySupported = schemaSupported();
     CompoundTag data = tag.getCompound("mmcece");
@@ -637,6 +645,11 @@ public final class MachinePortBlockEntity extends BlockEntity implements MenuPro
         StructureService.blockChanged(server, worldPosition);
       }
     }
+  }
+
+  @Override
+  public CompoundTag getUpdateTag(HolderLookup.Provider registries) {
+    return saveWithoutMetadata(registries);
   }
 
   public Component statusMessage() {

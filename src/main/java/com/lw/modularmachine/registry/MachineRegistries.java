@@ -20,14 +20,12 @@ import com.lw.modularmachine.item.MachineBlueprintItem;
 import com.lw.modularmachine.item.MachineConstructionTool;
 import com.lw.modularmachine.item.MachineControllerItem;
 import com.lw.modularmachine.item.MachineWrenchItem;
-import com.lw.modularmachine.item.PortableBlueprintItem;
 import com.lw.modularmachine.item.RangedConstructToolItem;
 import com.lw.modularmachine.machine.HatchTier;
 import com.lw.modularmachine.machine.ParallelControllerTier;
 import com.lw.modularmachine.machine.PortKind;
 import com.lw.modularmachine.machine.UpgradeBusTier;
 import com.lw.modularmachine.machine.controller.DedicatedControllerCatalog;
-import com.lw.modularmachine.machine.orientation.MachineOrientation;
 import com.lw.modularmachine.menu.FactoryControllerMenu;
 import com.lw.modularmachine.menu.GroupInputMenu;
 import com.lw.modularmachine.menu.MachineControllerMenu;
@@ -82,12 +80,6 @@ public final class MachineRegistries {
       .register("factory_controller", () -> new FactoryControllerBlock(properties().strength(5F, 10F)));
   public static final DeferredItem<MachineWrenchItem> WRENCH = ITEMS
       .register("machine_wrench", () -> new MachineWrenchItem(new Item.Properties().stacksTo(1)));
-  /**
-   * Original single blueprint item; per-machine registered blueprints stay
-   * separate.
-   */
-  public static final DeferredItem<PortableBlueprintItem> BLUEPRINT = ITEMS
-      .register("blueprint", () -> new PortableBlueprintItem(new Item.Properties().stacksTo(16)));
   public static final DeferredItem<MachineConstructionTool> PROJECTOR = ITEMS
       .register("machine_projector", () -> new MachineConstructionTool(new Item.Properties().stacksTo(1)));
   /** Ranged structure selection that exports a schema 2 machine definition. */
@@ -231,10 +223,6 @@ public final class MachineRegistries {
             PARALLEL_CONTROLLERS.values().forEach(block -> output.accept(block.get()));
             UPGRADE_BUSES.values().forEach(block -> output.accept(block.get()));
             output.accept(WRENCH.get());
-            output.accept(BLUEPRINT.get());
-            for (var machine : DedicatedControllerCatalog.machines()) {
-              output.accept(PortableBlueprintItem.bound(BLUEPRINT.get(), machine.id(), MachineOrientation.IDENTITY));
-            }
             BLUEPRINTS.values().forEach(blueprint -> output.accept(blueprint.get()));
             output.accept(PROJECTOR.get());
             output.accept(RANGED_CONSTRUCT_TOOL.get());

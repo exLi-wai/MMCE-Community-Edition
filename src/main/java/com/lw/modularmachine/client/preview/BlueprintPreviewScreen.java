@@ -1,7 +1,7 @@
 package com.lw.modularmachine.client.preview;
 
 import com.lw.modularmachine.integration.jei.ClientMachineJeiCatalog;
-import com.lw.modularmachine.machine.blueprint.BlueprintBindings;
+import com.lw.modularmachine.item.MachineBlueprintItem;
 import com.lw.modularmachine.network.ProjectionPayloads;
 import com.mojang.blaze3d.systems.RenderSystem;
 import java.util.LinkedHashMap;
@@ -117,7 +117,7 @@ public final class BlueprintPreviewScreen extends Screen {
     if (scene == null) {
       init();
     }
-    var held = BlueprintBindings.binding(minecraft.player.getItemInHand(hand));
+    var held = MachineBlueprintItem.binding(minecraft.player.getItemInHand(hand));
     if (held == null || !held.machine().equals(machine)) {
       onClose();
     }

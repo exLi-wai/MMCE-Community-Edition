@@ -132,7 +132,7 @@ public final class MachineJeiPayloads {
     packets.add(new Snapshot(epoch, definitions.size(), marker, "", -1, 0, List.of()));
     for (var definition : definitions) {
       var parts = new ArrayList<Part>();
-      parts.add(new Part(BlockPos.ZERO, List.of(MachineRegistries.CONTROLLER.get().defaultBlockState())));
+      parts.add(new Part(BlockPos.ZERO, List.of(controllerState(definition))));
       for (int index = 0; index < definition.parts().size(); index++) {
         var part = definition.parts().get(index);
         var states = new LinkedHashSet<BlockState>(states(part.rule()));
@@ -172,6 +172,19 @@ public final class MachineJeiPayloads {
       return state;
     }).toList();
   }
+
+  private static BlockState controllerState(MachineDefinition definition) {
+    if (definition.factoryOnly()) {
+      return MachineRegistries.DEDICATED_FACTORIES.values().stream().map(holder -> holder.get())
+          .filter(block -> block.dedicated() != null && block.dedicated().machine().equals(definition.id())).findFirst()
+          .map(Block::defaultBlockState)
+          .orElseGet(() -> MachineRegistries.FACTORY_CONTROLLER.get().defaultBlockState());
+    }
+    return MachineRegistries.DEDICATED_CONTROLLERS.values().stream().map(holder -> holder.get())
+        .filter(block -> block.dedicated() != null && block.dedicated().machine().equals(definition.id())).findFirst()
+        .map(Block::defaultBlockState).orElseGet(() -> MachineRegistries.CONTROLLER.get().defaultBlockState());
+  }
+
   private static <T extends Comparable<T>> BlockState property(BlockState state, Property<T> property, Comparable<?> value) {
     return state.setValue(property, property.getValueClass().cast(value));
   }

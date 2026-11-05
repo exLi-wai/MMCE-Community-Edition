@@ -56,8 +56,8 @@ public final class UpgradeBusScreen extends AbstractContainerScreen<UpgradeBusMe
     int scroll = Math.min(scrollbar.current(), maxScroll);
     graphics.pose().pushPose();
     graphics.pose().scale(.72F, .72F, 1F);
-    int x = (int) (DESCRIPTION_X / .72F);
-    int y = (int) (DESCRIPTION_Y / .72F);
+    int x = DESCRIPTION_X;
+    int y = DESCRIPTION_Y;
     for (int index = scroll; index < Math.min(lines.size(), scroll + MAX_DESCRIPTION_LINES); index++) {
       graphics.drawString(font, lines.get(index), x, y, FONT_COLOR, true);
       y += DESCRIPTION_LINE_HEIGHT;

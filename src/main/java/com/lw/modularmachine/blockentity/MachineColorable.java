@@ -13,10 +13,17 @@ public interface MachineColorable {
 
   int machineColor();
 
+  /**
+   * Whether this block entity already has an explicit persisted/runtime color.
+   */
+  boolean machineColorAssigned();
+
   void setMachineColor(int color);
 
   static void save(BlockEntity entity, CompoundTag tag, int color) {
-    tag.putInt(COLOR_TAG, color & 0xFFFFFF);
+    if (entity instanceof MachineColorable colorable && colorable.machineColorAssigned()) {
+      tag.putInt(COLOR_TAG, color & 0xFFFFFF);
+    }
   }
 
   static int load(CompoundTag tag) {

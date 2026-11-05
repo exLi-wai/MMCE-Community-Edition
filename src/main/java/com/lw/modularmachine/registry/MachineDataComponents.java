@@ -4,7 +4,6 @@ import com.lw.modularmachine.machine.blueprint.MachineBlueprint;
 import net.minecraft.core.BlockPos;
 import net.minecraft.core.component.DataComponentType;
 import net.minecraft.core.registries.Registries;
-import net.minecraft.resources.ResourceLocation;
 import net.neoforged.bus.api.IEventBus;
 import net.neoforged.neoforge.registries.DeferredHolder;
 import net.neoforged.neoforge.registries.DeferredRegister;
@@ -17,15 +16,6 @@ public final class MachineDataComponents {
           "blueprint_orientation",
           () -> DataComponentType.<MachineBlueprint>builder().persistent(MachineBlueprint.CODEC)
               .networkSynchronized(MachineBlueprint.STREAM_CODEC).build());
-  /**
-   * Portable blueprint machines only. Registered blueprints keep their identity
-   * in the item itself.
-   */
-  public static final DeferredHolder<DataComponentType<?>, DataComponentType<ResourceLocation>> BLUEPRINT_MACHINE = TYPES
-      .register(
-          "blueprint_machine",
-          () -> DataComponentType.<ResourceLocation>builder().persistent(ResourceLocation.CODEC)
-              .networkSynchronized(ResourceLocation.STREAM_CODEC).build());
   /**
    * Ranged construct tool corners; the second one is absent until both are set.
    */

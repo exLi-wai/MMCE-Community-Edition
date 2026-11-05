@@ -30,6 +30,7 @@ import net.minecraft.world.level.block.state.BlockState;
 public final class ParallelControllerBlockEntity extends BlockEntity implements MenuProvider, MachineColorable {
   private final ParallelControllerTier tier;
   private int machineColor = 0xFFFFFF;
+  private boolean machineColorAssigned;
   private UUID instance = UUID.randomUUID();
   private Integer configured;
   private long revision;
@@ -70,8 +71,14 @@ public final class ParallelControllerBlockEntity extends BlockEntity implements 
   }
 
   @Override
+  public boolean machineColorAssigned() {
+    return machineColorAssigned;
+  }
+
+  @Override
   public void setMachineColor(int color) {
     color &= 0xFFFFFF;
+    machineColorAssigned = true;
     if (machineColor != color) {
       machineColor = color;
       MachineColorable.update(this);
@@ -161,6 +168,7 @@ public final class ParallelControllerBlockEntity extends BlockEntity implements 
       }
     }
     super.loadAdditional(tag, registries);
+    machineColorAssigned = tag.contains(MachineColorable.COLOR_TAG);
     machineColor = MachineColorable.load(tag);
     configured = null;
     opaque = null;
@@ -185,6 +193,11 @@ public final class ParallelControllerBlockEntity extends BlockEntity implements 
     revision = data.getLong("revision");
     configured = data.contains("value") ? data.getInt("value") : null;
     notifyStructure();
+  }
+
+  @Override
+  public CompoundTag getUpdateTag(HolderLookup.Provider registries) {
+    return saveWithoutMetadata(registries);
   }
 
   @Override

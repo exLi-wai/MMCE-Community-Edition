@@ -22,6 +22,7 @@ import java.util.List;
 import java.util.Map;
 import java.util.Set;
 import java.util.concurrent.CompletableFuture;
+import java.util.concurrent.ConcurrentLinkedQueue;
 import java.util.stream.IntStream;
 import net.minecraft.core.BlockPos;
 import net.minecraft.core.SectionPos;
@@ -154,6 +155,7 @@ public final class StructureService {
     retire(state, anchor.registration);
     retire(state, anchor.draft);
     anchor.builder = null;
+    anchor.actualRevision = Long.MIN_VALUE;
     anchor.preparing = false;
     anchor.generation = state.nextGeneration = Math.incrementExact(state.nextGeneration);
     anchor.epoch = snapshot.epoch();
@@ -270,6 +272,7 @@ public final class StructureService {
     retire(state, anchor.registration);
     retire(state, anchor.draft);
     anchor.builder = null;
+    anchor.actualRevision = Long.MIN_VALUE;
     controller.attach(null);
     anchor.turning = true;
     boolean written;
@@ -317,7 +320,7 @@ public final class StructureService {
       }
       int group = registration.pattern.groupFor(pos);
       if (group >= 0) {
-        markDirty(state, registration, group, false, level.getGameTime());
+        markDirty(state, registration, group, false, true, level.getGameTime());
       }
     }
   }
@@ -335,13 +338,16 @@ public final class StructureService {
     }
     for (Registration registration : watched) {
       if (registration.valid && registration.pattern.watchesContentsAt(pos)) {
-        markDirty(state, registration, registration.pattern.groupFor(pos), false, level.getGameTime());
+        markDirty(state, registration, registration.pattern.groupFor(pos), false, false, level.getGameTime());
       }
     }
   }
 
-  private static void markDirty(LevelState state, Registration registration, int group, boolean all, long now) {
+  private static void markDirty(LevelState state, Registration registration, int group, boolean all, boolean resetColors, long now) {
     Anchor anchor = registration.owner;
+    if (resetColors) {
+      registration.resetColors();
+    }
     registration.interfacesReady = registration.interfaceParts.length == 0;
     if (registration.verifier.state() != VerificationState.PENDING) {
       anchor.roundStarted = now;
@@ -373,7 +379,7 @@ public final class StructureService {
     }
     long now = level.getGameTime();
     if (anchor.registration != null && matchesActual(level, anchor)) {
-      markDirty(state, anchor.registration, -1, true, now);
+      markDirty(state, anchor.registration, -1, true, true, now);
     } else {
       request(controller, true, false);
     }
@@ -396,7 +402,7 @@ public final class StructureService {
         continue;
       }
       if (loaded) {
-        markDirty(state, registration, -1, true, now);
+        markDirty(state, registration, -1, true, true, now);
       } else {
         registration.modifiers.markAllDirty(now);
         registration.verifier.unavailable(now);
@@ -418,6 +424,7 @@ public final class StructureService {
     if (state == null) {
       return 0;
     }
+    state.drainReady();
     int used = 0;
     int idle = 0;
     long deadline = System.nanoTime() + timeBudgetNanos;
@@ -486,6 +493,8 @@ public final class StructureService {
               anchor.controller.structurePosition(),
               anchor.orientation,
               pattern -> new Prepared(pattern, started));
+          var builder = anchor.builder;
+          builder.whenComplete((ignored, failure) -> state.ready.add(anchor));
         }
       }
       if (anchor.builder != null && anchor.builder.isDone() && anchor.retired == null) {
@@ -633,14 +642,24 @@ public final class StructureService {
   }
 
   private static boolean matchesActual(ServerLevel level, Anchor anchor) {
+    LevelState state = LEVELS.get(level);
+    if (state == null) {
+      return false;
+    }
+    if (anchor.actualRevision == state.revision) {
+      return anchor.actual;
+    }
     var current = catalog;
-    return anchor.alive
+    boolean result = anchor.alive
         && liveController(level, anchor.controller)
         && anchor.epoch == current.epoch()
         && anchor.definition == current.definitions().get(anchor.controller.structureMachineId())
         && anchor.schemaSupported == anchor.controller.structureSchemaSupported()
         && anchor.controller.structureMachineId().equals(anchor.machineId)
         && anchor.orientation == anchor.controller.structureOrientation(level);
+    anchor.actualRevision = state.revision;
+    anchor.actual = result;
+    return result;
   }
 
   public static int pendingWorkCount(MachineControllerBlockEntity controller) {
@@ -742,6 +761,8 @@ public final class StructureService {
     final StructureSubject controller;
     boolean alive = true, turning, schemaSupported, preparing;
     long epoch = -1, generation, roundStarted;
+    long actualRevision = Long.MIN_VALUE;
+    boolean actual;
     ResourceLocation machineId;
     MachineDefinition definition;
     MachineOrientation orientation;
@@ -754,15 +775,21 @@ public final class StructureService {
     }
 
     boolean needsWork() {
-      return preparing
-          || draft != null
-          || registration != null
-              && (registration.verifier.state() == VerificationState.PENDING
-                  || registration.valid
-                      && registration.verifier.canCommit()
-                      && registration.modifiers.canCommit()
-                      && registration.interfacesReady
-                      && !registration.colorsComplete);
+      boolean waitingForBuilder = preparing && builder != null && !builder.isDone();
+      boolean waitingForMatch = registration != null
+          && registration.matching != null
+          && !registration.matching.isDone();
+      return !waitingForBuilder
+          && !waitingForMatch
+          && (preparing
+              || draft != null
+              || registration != null
+                  && (registration.verifier.state() == VerificationState.PENDING
+                      || registration.valid
+                          && registration.verifier.canCommit()
+                          && registration.modifiers.canCommit()
+                          && registration.interfacesReady
+                          && !registration.colorsComplete));
     }
   }
 
@@ -814,6 +841,8 @@ public final class StructureService {
     private int subscribed, cleaned;
     private int colorCursor;
     private boolean colorsComplete;
+    private long conservativeModifierRevision = Long.MIN_VALUE;
+    private boolean conservativeModifiersValidated;
     private StructureSnapshot.Capture capture;
     private AsyncStructureWork.Permit capturePermit;
     private CompletableFuture<StructureSnapshot.Result> matching;
@@ -837,6 +866,11 @@ public final class StructureService {
 
     public int[] parallelParts() {
       return parallelParts.clone();
+    }
+
+    private void resetColors() {
+      colorCursor = 0;
+      colorsComplete = false;
     }
 
     private void discardCapture() {
@@ -910,6 +944,10 @@ public final class StructureService {
         if (future != null) {
           var permit = capturePermit;
           future.whenComplete((result, failure) -> permit.close());
+          LevelState state = LEVELS.get(level);
+          if (state != null) {
+            future.whenComplete((result, failure) -> state.ready.add(owner));
+          }
           capturePermit = null;
           capture = null;
           matching = future;
@@ -923,7 +961,8 @@ public final class StructureService {
       int used = 0;
       while (used < budget && colorCursor < pattern.definition.parts().size()) {
         var position = pattern.position(colorCursor++);
-        if (level.getBlockEntity(position) instanceof com.lw.modularmachine.blockentity.MachineColorable colorable) {
+        if (level.getBlockEntity(position) instanceof com.lw.modularmachine.blockentity.MachineColorable colorable
+            && (!colorable.machineColorAssigned() || colorable.machineColor() != pattern.definition.color())) {
           colorable.setMachineColor(pattern.definition.color());
         }
         used++;
@@ -1009,7 +1048,7 @@ public final class StructureService {
       }
       if (!reference.rules().equals(modifiers.rules())) {
         var state = LEVELS.get(level);
-        markDirty(state, this, -1, true, level.getGameTime());
+        markDirty(state, this, -1, true, true, level.getGameTime());
         return false;
       }
 
@@ -1023,15 +1062,23 @@ public final class StructureService {
       if (pattern.definition.structureModifiers().isEmpty() || !MachineConfig.CONSERVATIVE_COMMIT_CHECK.get()) {
         return true;
       }
+      long revision = verifier.revision();
+      if (conservativeModifierRevision == revision) {
+        return conservativeModifiersValidated && canCommit(level);
+      }
       var reference = pattern.modifierReference(level);
       var full = pattern.fullScan(level, reference);
       if (full.state() != VerificationState.CONFIRMED) {
         modifiers.markAllDirty(level.getGameTime());
         verifier.rejectProof(full.failure(), full.failedIndex(), level.getGameTime());
+        conservativeModifierRevision = verifier.revision();
+        conservativeModifiersValidated = false;
         return false;
       }
-
-      return verifyModifierReference(level, reference);
+      boolean validReference = verifyModifierReference(level, reference);
+      conservativeModifierRevision = verifier.revision();
+      conservativeModifiersValidated = validReference;
+      return validReference;
     }
 
     public boolean canCommit(ServerLevel level) {
@@ -1064,11 +1111,19 @@ public final class StructureService {
     final Map<Long, Set<Registration>> sections = new HashMap<>();
     final Map<Long, Set<Registration>> chunks = new HashMap<>();
     final LinkedHashSet<Work> queue = new LinkedHashSet<>();
+    final ConcurrentLinkedQueue<Anchor> ready = new ConcurrentLinkedQueue<>();
     long nextGeneration, revision;
 
     void enqueue(Anchor anchor) {
       if (anchor.alive && anchor.needsWork()) {
         queue.add(anchor);
+      }
+    }
+
+    void drainReady() {
+      Anchor anchor;
+      while ((anchor = ready.poll()) != null) {
+        enqueue(anchor);
       }
     }
 
@@ -1095,6 +1150,7 @@ public final class StructureService {
       sections.clear();
       chunks.clear();
       queue.clear();
+      ready.clear();
     }
   }
 }

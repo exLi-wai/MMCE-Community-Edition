@@ -78,6 +78,8 @@ import net.minecraft.world.level.block.state.BlockState;
 
 public final class FactoryControllerBlockEntity extends BlockEntity implements MenuProvider, UpgradeBusOwner {
   private static final int FACTORY_SCHEMA = 7;
+  private static final int SEARCH_RETRY_INITIAL = 5;
+  private static final int SEARCH_RETRY_MAX = 80;
   private FactoryScheduler scheduler = new FactoryScheduler(List.of());
   private boolean threadsInitialized;
   private long configurationRevision;
@@ -93,6 +95,8 @@ public final class FactoryControllerBlockEntity extends BlockEntity implements M
   private VerificationFailure detachedFailure = VerificationFailure.UNVERIFIED;
   private final Map<String, ItemRecipeSearch> searches = new HashMap<>();
   private final Map<String, ItemRecipePlan> plans = new HashMap<>();
+  private final Map<String, Long> searchRetryAfter = new HashMap<>();
+  private final Map<String, Integer> searchRetryInterval = new HashMap<>();
   private final Map<String, FactoryRunSet> runSets = new HashMap<>();
   private final FactoryUpgradeRuntimeWork runtimeUpgrades = new FactoryUpgradeRuntimeWork(this);
   private final FactoryOutputEngine outputEngine = new FactoryOutputEngine();
@@ -131,8 +135,7 @@ public final class FactoryControllerBlockEntity extends BlockEntity implements M
     if (level instanceof ServerLevel) {
       boolean formed = registration != null && registration.verifier.state() == VerificationState.CONFIRMED;
       genericDiscovery.clear();
-      searches.clear();
-      plans.clear();
+      clearSearchState();
       var target = blueprintInventory.machine();
       if (!formed
           && target != null
@@ -168,8 +171,7 @@ public final class FactoryControllerBlockEntity extends BlockEntity implements M
     runtimeUpgrades.clear();
     clearUpgradeDiscovery();
     upgradeBusSources.clear();
-    searches.clear();
-    plans.clear();
+    clearSearchState();
     runSets.clear();
     outputEngine.clear();
     startingThreads.clear();
@@ -186,8 +188,7 @@ public final class FactoryControllerBlockEntity extends BlockEntity implements M
     runtimeUpgrades.clear();
     clearUpgradeDiscovery();
     upgradeBusSources.clear();
-    searches.clear();
-    plans.clear();
+    clearSearchState();
     runSets.clear();
     outputEngine.clear();
     startingThreads.clear();
@@ -291,8 +292,7 @@ public final class FactoryControllerBlockEntity extends BlockEntity implements M
     machineId = id;
     clearUpgradeDiscovery();
     outputEngine.invalidate();
-    searches.clear();
-    plans.clear();
+    clearSearchState();
     setChanged();
     StructureService.register(this);
   }
@@ -366,8 +366,7 @@ public final class FactoryControllerBlockEntity extends BlockEntity implements M
     scheduler = replacement;
     threadsInitialized = true;
     configurationRevision++;
-    searches.clear();
-    plans.clear();
+    clearSearchState();
     outputEngine.invalidate();
     appliedUpgradeSourceView = null;
     pendingUpgradeSnapshot = null;
@@ -530,8 +529,7 @@ public final class FactoryControllerBlockEntity extends BlockEntity implements M
     }
     scheduler = scheduler.replace(next);
     configurationRevision++;
-    searches.remove(threadId);
-    plans.remove(threadId);
+    removeSearchState(threadId, server.getGameTime());
     setChanged();
     return true;
   }
@@ -561,8 +559,7 @@ public final class FactoryControllerBlockEntity extends BlockEntity implements M
       return true;
     }
     scheduler = scheduler.replace(next);
-    searches.remove(threadId);
-    plans.remove(threadId);
+    removeSearchState(threadId, server.getGameTime());
     setChanged();
     return true;
   }
@@ -818,11 +815,11 @@ public final class FactoryControllerBlockEntity extends BlockEntity implements M
     refreshLockedRecipeGates(server);
     long tickStarted = System.nanoTime();
     advanceFactoryRuns(server);
-    ControllerMetrics.recordTick(System.nanoTime() - tickStarted);
+    ControllerMetrics.recordTick(System.nanoTime() - tickStarted, server.getServer().getTickCount());
     refreshUpgradeSnapshot();
     long searchStarted = System.nanoTime();
     advanceRecipeSearches();
-    ControllerMetrics.recordSearch(System.nanoTime() - searchStarted);
+    ControllerMetrics.recordSearch(System.nanoTime() - searchStarted, server.getServer().getTickCount());
   }
 
   private void clearUpgradeDiscovery() {
@@ -947,8 +944,7 @@ public final class FactoryControllerBlockEntity extends BlockEntity implements M
       upgradeSourcesValid = false;
       appliedUpgradeSourceView = null;
       pendingUpgradeSnapshot = null;
-      searches.clear();
-      plans.clear();
+      clearSearchState();
       var reason = upgradeRestrictionStatus
           .valid() ? FactoryThreadState.Reason.CHECK_ERROR : FactoryThreadState.Reason.UPGRADE_CONFLICT;
       for (var thread : List.copyOf(scheduler.channels())) {
@@ -977,8 +973,7 @@ public final class FactoryControllerBlockEntity extends BlockEntity implements M
       } catch (IllegalArgumentException | ArithmeticException invalid) {
         pendingUpgradeSnapshot = null;
         upgradeSourcesValid = false;
-        searches.clear();
-        plans.clear();
+        clearSearchState();
       }
       appliedUpgradeSourceView = List.copyOf(sources);
       setChanged();
@@ -1221,14 +1216,12 @@ public final class FactoryControllerBlockEntity extends BlockEntity implements M
 
   private void advanceRecipeSearches() {
     if (verificationState() != VerificationState.CONFIRMED || !upgradeSourcesValid) {
-      searches.clear();
-      plans.clear();
+      clearSearchState();
       return;
     }
     var catalog = MachineRecipeService.catalogFor(this).orElse(null);
     if (catalog == null) {
-      searches.clear();
-      plans.clear();
+      clearSearchState();
       updateWaitingThreads(FactoryThreadState.Reason.CONTROLLER_UNAVAILABLE);
       return;
     }
@@ -1237,6 +1230,7 @@ public final class FactoryControllerBlockEntity extends BlockEntity implements M
       return;
     }
     int visitBudget = Math.min(MachineConfig.FACTORY_THREADS_PER_TICK.get(), channels.size());
+    long now = level.getGameTime();
     var window = nextThreadWindow(visitBudget);
     for (var visited : window) {
       var thread = scheduler.channel(visited.threadId());
@@ -1248,16 +1242,19 @@ public final class FactoryControllerBlockEntity extends BlockEntity implements M
       }
       var search = searches.get(thread.threadId());
       if (search != null && !search.dependenciesCurrent()) {
-        searches.remove(thread.threadId());
-        plans.remove(thread.threadId());
+        removeSearchState(thread.threadId(), now);
         search = null;
       }
       if (search == null) {
+        if (now < searchRetryAfter.getOrDefault(thread.threadId(), 0L)) {
+          continue;
+        }
         var allowed = thread.lockedRecipe() == null ? null : Set.of(thread.lockedRecipe().toString());
         try {
           search = ItemRecipeSearch.beginFactory(this, thread.threadId(), catalog, allowed).orElse(null);
         } catch (FactoryUpgradeRecipeChecks.FailedException invalid) {
           updateThreadState(thread, FactoryThreadState.State.WAITING, FactoryThreadState.Reason.CHECK_ERROR);
+          backoffSearch(thread.threadId(), now);
           recordSearchAttempt(thread.threadId());
           continue;
         }
@@ -1265,6 +1262,7 @@ public final class FactoryControllerBlockEntity extends BlockEntity implements M
           var reason = thread.upgradeSnapshot().recipeModifiers()
               .isEmpty() ? FactoryThreadState.Reason.STALE_RESOURCES : FactoryThreadState.Reason.SEARCH_BUDGET;
           updateThreadState(thread, FactoryThreadState.State.WAITING, reason);
+          backoffSearch(thread.threadId(), now);
           recordSearchAttempt(thread.threadId());
           continue;
         }
@@ -1282,6 +1280,8 @@ public final class FactoryControllerBlockEntity extends BlockEntity implements M
               int upper = Math.min(resourceLimit, FactoryUpgradeStartCosts.maxRuns(this));
               var nativeRecipe = MachineRecipeService.definitionForStart(this, plan).orElse(null);
               if (nativeRecipe == null) {
+                removeSearchState(thread.threadId(), now);
+                backoffSearch(thread.threadId(), now);
                 return;
               }
               int maxInstances = upper == 0 ? 0 : plan
@@ -1308,6 +1308,7 @@ public final class FactoryControllerBlockEntity extends BlockEntity implements M
               }
               if (startResult == FactoryRecipeStarter.Result.STARTED) {
                 updateThreadState(thread, FactoryThreadState.State.RUNNING, FactoryThreadState.Reason.NONE);
+                resetSearchRetry(thread.threadId(), now);
               } else {
                 var reason = switch (startResult) {
                   case CHECK_REJECTED -> FactoryThreadState.Reason.NO_RECIPE;
@@ -1317,24 +1318,30 @@ public final class FactoryControllerBlockEntity extends BlockEntity implements M
                   default -> FactoryThreadState.Reason.STALE_RESOURCES;
                 };
                 updateThreadState(thread, FactoryThreadState.State.WAITING, reason);
+                if (startResult != FactoryRecipeStarter.Result.CHECK_PENDING) {
+                  removeSearchState(thread.threadId(), now);
+                  backoffSearch(thread.threadId(), now);
+                }
               }
             });
           }
           case BUDGET_EXHAUSTED ->
             updateThreadState(thread, FactoryThreadState.State.WAITING, FactoryThreadState.Reason.SEARCH_BUDGET);
-          case NO_MATCH -> updateThreadState(
-              thread,
-              FactoryThreadState.State.WAITING,
-              thread
-                  .lockedRecipe() == null ? FactoryThreadState.Reason.NO_RECIPE : FactoryThreadState.Reason.INPUT_MISSING);
+          case NO_MATCH -> {
+            updateThreadState(
+                thread,
+                FactoryThreadState.State.WAITING,
+                thread
+                    .lockedRecipe() == null ? FactoryThreadState.Reason.NO_RECIPE : FactoryThreadState.Reason.INPUT_MISSING);
+            removeSearchState(thread.threadId(), now);
+            backoffSearch(thread.threadId(), now);
+          }
           default -> {
           }
         }
       } catch (RuntimeException failure) {
-        if (!(failure instanceof FactoryUpgradeRecipeChecks.FailedException)) {
-          searches.remove(thread.threadId());
-        }
-        plans.remove(thread.threadId());
+        removeSearchState(thread.threadId(), now);
+        backoffSearch(thread.threadId(), now);
         var reason = failure instanceof FactoryUpgradeRecipeChecks.StaleException ? FactoryThreadState.Reason.STALE_RESOURCES : FactoryThreadState.Reason.CHECK_ERROR;
         updateThreadState(thread, FactoryThreadState.State.WAITING, reason);
       }
@@ -1357,6 +1364,30 @@ public final class FactoryControllerBlockEntity extends BlockEntity implements M
     if (scheduler.recordAttempt(threadId, !runSet(threadId).runs().isEmpty())) {
       setChanged();
     }
+  }
+
+  private void clearSearchState() {
+    searches.clear();
+    plans.clear();
+    searchRetryAfter.clear();
+    searchRetryInterval.clear();
+  }
+
+  private void removeSearchState(String threadId, long now) {
+    searches.remove(threadId);
+    plans.remove(threadId);
+    resetSearchRetry(threadId, now);
+  }
+
+  private void resetSearchRetry(String threadId, long now) {
+    searchRetryInterval.put(threadId, SEARCH_RETRY_INITIAL);
+    searchRetryAfter.put(threadId, now);
+  }
+
+  private void backoffSearch(String threadId, long now) {
+    int interval = searchRetryInterval.getOrDefault(threadId, SEARCH_RETRY_INITIAL);
+    searchRetryAfter.put(threadId, now + interval);
+    searchRetryInterval.put(threadId, Math.min(SEARCH_RETRY_MAX, interval << 1));
   }
 
   private void updateWaitingThreads(FactoryThreadState.Reason reason) {
@@ -1552,8 +1583,7 @@ public final class FactoryControllerBlockEntity extends BlockEntity implements M
     upgradeSourceEpoch = 0;
     upgradeSourcesManaged = false;
     upgradeSourcesValid = true;
-    searches.clear();
-    plans.clear();
+    clearSearchState();
     runSets.clear();
     startingThreads.clear();
     parallelAdmissionLimits.clear();

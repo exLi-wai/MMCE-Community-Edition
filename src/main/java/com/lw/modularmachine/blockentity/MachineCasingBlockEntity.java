@@ -9,6 +9,7 @@ import net.minecraft.world.level.block.state.BlockState;
 
 public final class MachineCasingBlockEntity extends BlockEntity implements MachineColorable {
   private int machineColor = 0xFFFFFF;
+  private boolean machineColorAssigned;
 
   public MachineCasingBlockEntity(BlockPos pos, BlockState state) {
     super(MachineRegistries.CASING_ENTITY.get(), pos, state);
@@ -20,8 +21,14 @@ public final class MachineCasingBlockEntity extends BlockEntity implements Machi
   }
 
   @Override
+  public boolean machineColorAssigned() {
+    return machineColorAssigned;
+  }
+
+  @Override
   public void setMachineColor(int color) {
     color &= 0xFFFFFF;
+    machineColorAssigned = true;
     if (machineColor != color) {
       machineColor = color;
       MachineColorable.update(this);
@@ -37,6 +44,7 @@ public final class MachineCasingBlockEntity extends BlockEntity implements Machi
   @Override
   protected void loadAdditional(CompoundTag tag, HolderLookup.Provider registries) {
     super.loadAdditional(tag, registries);
+    machineColorAssigned = tag.contains(MachineColorable.COLOR_TAG);
     machineColor = MachineColorable.load(tag);
   }
 

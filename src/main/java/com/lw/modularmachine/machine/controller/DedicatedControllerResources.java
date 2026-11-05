@@ -91,6 +91,7 @@ public final class DedicatedControllerResources {
             textures.addProperty("casing", entry.casing().toString());
             textures.addProperty("overlay", entry.overlay().toString());
             template.add("textures", textures);
+            tintCasingFaces(template);
           } else {
             // Custom models must supply all 24 keys: <model prefix>/<front>_<roll>.
             template = new JsonObject();
@@ -135,6 +136,28 @@ public final class DedicatedControllerResources {
       return JsonParser.parseString(new String(input.readAllBytes(), StandardCharsets.UTF_8)).getAsJsonObject();
     }
   }
+
+  private static void tintCasingFaces(JsonObject model) {
+    var elements = model.getAsJsonArray("elements");
+    if (elements == null) {
+      return;
+    }
+    for (var element : elements) {
+      if (!element.isJsonObject() || !element.getAsJsonObject().has("faces")) {
+        continue;
+      }
+      var faces = element.getAsJsonObject().getAsJsonObject("faces");
+      for (var face : faces.entrySet()) {
+        var faceData = face.getValue();
+        if (faceData.isJsonObject()
+            && faceData.getAsJsonObject().has("texture")
+            && "#casing".equals(faceData.getAsJsonObject().get("texture").getAsString())) {
+          faceData.getAsJsonObject().addProperty("tintindex", 0);
+        }
+      }
+    }
+  }
+
   private static void write(Path path, JsonObject value) throws IOException {
     Files.createDirectories(path.getParent());
     Files.writeString(path, new GsonBuilder().setPrettyPrinting().create().toJson(value), StandardCharsets.UTF_8);

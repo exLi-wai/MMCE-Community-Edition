@@ -86,11 +86,14 @@ public final class PreviewRenderScene {
   }
 
   public static PreviewRenderScene create(long request, ResourceLocation dimension, List<ProjectionPayloads.Entry> entries) {
-    return create(request, dimension, ResourceLocation.fromNamespaceAndPath("mmcece", "none"), entries);
+    return create(request, dimension, 0xFFFFFF, entries);
   }
 
   public static PreviewRenderScene create(long request, ResourceLocation dimension, ResourceLocation machine, List<ProjectionPayloads.Entry> entries) {
-    int machineColor = DedicatedControllerCatalog.color(machine);
+    return create(request, dimension, DedicatedControllerCatalog.color(machine), entries);
+  }
+
+  private static PreviewRenderScene create(long request, ResourceLocation dimension, int machineColor, List<ProjectionPayloads.Entry> entries) {
     var grouped = new LinkedHashMap<Long, ArrayList<ProjectionPayloads.Entry>>();
     var positions = new Long2ObjectOpenHashMap<ProjectionPayloads.Entry>(entries.size());
     var indices = new Long2IntOpenHashMap(entries.size());

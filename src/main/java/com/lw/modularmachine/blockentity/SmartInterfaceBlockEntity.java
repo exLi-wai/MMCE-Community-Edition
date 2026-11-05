@@ -81,6 +81,7 @@ public final class SmartInterfaceBlockEntity extends BlockEntity implements Menu
   private boolean valid = true;
   private CompoundTag opaque;
   private int machineColor = 0xFFFFFF;
+  private boolean machineColorAssigned;
 
   public SmartInterfaceBlockEntity(BlockPos pos, BlockState state) {
     super(MachineRegistries.SMART_INTERFACE_ENTITY.get(), pos, state);
@@ -104,8 +105,14 @@ public final class SmartInterfaceBlockEntity extends BlockEntity implements Menu
   }
 
   @Override
+  public boolean machineColorAssigned() {
+    return machineColorAssigned;
+  }
+
+  @Override
   public void setMachineColor(int color) {
     color &= 0xFFFFFF;
+    machineColorAssigned = true;
     if (machineColor != color) {
       machineColor = color;
       MachineColorable.update(this);
@@ -448,6 +455,7 @@ public final class SmartInterfaceBlockEntity extends BlockEntity implements Menu
       }
     }
     super.loadAdditional(tag, registries);
+    machineColorAssigned = tag.contains(MachineColorable.COLOR_TAG);
     machineColor = MachineColorable.load(tag);
     valid = false;
     bindings.clear();
@@ -500,5 +508,10 @@ public final class SmartInterfaceBlockEntity extends BlockEntity implements Menu
         }
       }
     }
+  }
+
+  @Override
+  public CompoundTag getUpdateTag(HolderLookup.Provider registries) {
+    return saveWithoutMetadata(registries);
   }
 }

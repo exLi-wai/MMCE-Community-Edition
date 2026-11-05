@@ -45,7 +45,7 @@ public final class MachineBlueprintItem extends Item {
   }
   @Override
   public Component getName(ItemStack stack) {
-    return Component.translatable("item.mmcece.registered_blueprint", Component.translatable(machine.translationKey()));
+    return Component.translatable("item.mmcece.registered_blueprint");
   }
   @Override
   public InteractionResult useOn(UseOnContext context) {
@@ -63,7 +63,7 @@ public final class MachineBlueprintItem extends Item {
   }
   @Override
   public void appendHoverText(ItemStack stack, TooltipContext context, List<Component> lines, TooltipFlag flag) {
-    lines.add(Component.translatable("tooltip.mmcece.registered_blueprint"));
     lines.add(Component.translatable(machine.translationKey()));
+    lines.add(Component.translatable("tooltip.mmcece.registered_blueprint"));
   }
 }
