@@ -59,25 +59,27 @@ class ControllerModelContractTest {
   @Test
   void allTwentyFourStateVariantsHaveLiteralFrontFacesAndRollUvs() throws Exception {
     var variants = resource("/assets/mmcece/blockstates/machine_controller.json").getAsJsonObject("variants");
-    assertEquals(24, variants.size());
+    assertEquals(48, variants.size());
     String[] fronts = {"north", "east", "south", "west", "up", "down"};
     for (String front : fronts) {
       for (int roll = 0; roll < 4; roll++) {
-        var variant = variants.getAsJsonObject("facing=" + front + ",roll=" + roll);
-        assertNotNull(variant);
-        String model = variant.get("model").getAsString();
-        assertEquals("mmcece:block/controller/" + front + "_" + roll, model);
-        var json = resource("/assets/mmcece/models/" + model.substring("mmcece:".length()) + ".json");
-        assertFalse(json.getAsJsonObject("textures").has("up_arrow"));
-        var overlay = json.getAsJsonArray("elements").get(1).getAsJsonObject().getAsJsonObject("faces");
-        assertEquals(Set.of(front), overlay.keySet());
-        assertEquals(front, overlay.getAsJsonObject(front).get("cullface").getAsString());
-        assertEquals("#overlay", overlay.getAsJsonObject(front).get("texture").getAsString());
-        int base = front.equals("up") || front.equals("down") ? 180 : 0;
-        assertEquals((base + roll * 90) % 360, overlay.getAsJsonObject(front).get("rotation").getAsInt());
-        assertEquals(
-            Set.of(fronts),
-            json.getAsJsonArray("elements").get(0).getAsJsonObject().getAsJsonObject("faces").keySet());
+        for (boolean formed : new boolean[]{false, true}) {
+          var variant = variants.getAsJsonObject("facing=" + front + ",roll=" + roll + ",formed=" + formed);
+          assertNotNull(variant);
+          String model = variant.get("model").getAsString();
+          assertEquals("mmcece:block/controller/" + front + "_" + roll, model);
+          var json = resource("/assets/mmcece/models/" + model.substring("mmcece:".length()) + ".json");
+          assertFalse(json.getAsJsonObject("textures").has("up_arrow"));
+          var overlay = json.getAsJsonArray("elements").get(1).getAsJsonObject().getAsJsonObject("faces");
+          assertEquals(Set.of(front), overlay.keySet());
+          assertEquals(front, overlay.getAsJsonObject(front).get("cullface").getAsString());
+          assertEquals("#overlay", overlay.getAsJsonObject(front).get("texture").getAsString());
+          int base = front.equals("up") || front.equals("down") ? 180 : 0;
+          assertEquals((base + roll * 90) % 360, overlay.getAsJsonObject(front).get("rotation").getAsInt());
+          assertEquals(
+              Set.of(fronts),
+              json.getAsJsonArray("elements").get(0).getAsJsonObject().getAsJsonObject("faces").keySet());
+        }
       }
     }
   }

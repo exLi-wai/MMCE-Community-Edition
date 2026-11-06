@@ -32,6 +32,8 @@
   "jei.mmcece.machine_item.fluid_components": "流体组件：%s",
   "jei.mmcece.machine_item.interface_input": "接口 %s：%s..%s",
   "jei.mmcece.view_details": "查看详情",
+  "jei.mmcece.required_blocks": "所需方块",
+  "jei.mmcece.candidates": "可选方块",
   "jei.mmcece.details.title": "结构预览：%s",
   "menu.mmcece.controller.progress": "进度：%s",
   "block.mmcece.factory_controller": "工厂控制器",
