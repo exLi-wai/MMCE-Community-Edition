@@ -22,6 +22,7 @@ import net.minecraft.network.chat.Component;
 import net.minecraft.resources.ResourceLocation;
 import net.minecraft.world.item.ItemStack;
 import net.minecraft.world.item.Items;
+import net.minecraft.world.entity.item.ItemEntity;
 import net.minecraft.world.level.block.Block;
 import net.minecraft.world.level.block.Blocks;
 import net.minecraft.world.level.block.RotatedPillarBlock;
@@ -29,6 +30,7 @@ import net.minecraft.world.level.block.state.BlockState;
 import net.minecraft.world.level.block.state.properties.AttachFace;
 import net.minecraft.world.level.block.state.properties.BlockStateProperties;
 import net.minecraft.world.level.material.Fluids;
+import net.minecraft.world.phys.AABB;
 import net.neoforged.neoforge.capabilities.Capabilities;
 import net.neoforged.neoforge.fluids.FluidStack;
 import net.neoforged.neoforge.fluids.capability.IFluidHandler;
@@ -382,7 +384,7 @@ public final class MachineGameTests {
   }
 
   @GameTest(template = "empty16", timeoutTicks = 40)
-  public static void port_capabilities_persistence_and_carried_drop(GameTestHelper helper) {
+  public static void port_capabilities_and_mined_inventory_drop(GameTestHelper helper) {
     BlockPos relative = new BlockPos(3, 2, 3);
     helper.setBlock(relative, MachineRegistries.PORTS.get("item_output_bus_tiny").get());
     BlockPos pos = helper.absolutePos(relative);
@@ -400,16 +402,15 @@ public final class MachineGameTests {
         "Simulation mutated output");
     var drops = Block.getDrops(port.getBlockState(), helper.getLevel(), pos, port);
     helper.assertTrue(
-        drops.size() == 1 && drops.getFirst().has(DataComponents.BLOCK_ENTITY_DATA),
-        "Mining did not carry port state");
-    var restored = new MachinePortBlockEntity(pos, port.getBlockState());
-    restored.loadWithComponents(
-        drops.getFirst().get(DataComponents.BLOCK_ENTITY_DATA).copyTag(),
-        helper.getLevel().registryAccess());
-    helper.assertTrue(restored.inventory().getStackInSlot(0).getCount() == 5, "Inventory lost on carry");
-    helper.assertTrue(
-        restored.inventory().getStackInSlot(0).getHoverName().getString().equals("preserved"),
-        "Item components lost");
+        drops.size() == 1
+            && drops.getFirst().has(DataComponents.BLOCK_ENTITY_DATA)
+            && !drops.getFirst().get(DataComponents.BLOCK_ENTITY_DATA).copyTag().getCompound("mmcece")
+                .contains("items"),
+        "Port block item retained an inventory that should be dropped separately");
+    helper.getLevel().destroyBlock(pos, false);
+    int droppedCount = helper.getLevel().getEntitiesOfClass(ItemEntity.class, new AABB(pos).inflate(2.0D)).stream()
+        .filter(entity -> entity.getItem().is(Items.DIAMOND)).mapToInt(entity -> entity.getItem().getCount()).sum();
+    helper.assertTrue(droppedCount == 5, "Mining did not drop the port inventory");
     helper.succeed();
   }
 

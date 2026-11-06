@@ -7,6 +7,7 @@ import com.mojang.serialization.MapCodec;
 import java.util.List;
 import net.minecraft.core.BlockPos;
 import net.minecraft.ChatFormatting;
+import net.minecraft.nbt.CompoundTag;
 import net.minecraft.server.level.ServerPlayer;
 import net.minecraft.world.InteractionHand;
 import net.minecraft.world.InteractionResult;
@@ -126,13 +127,34 @@ public final class MachinePortBlock extends BaseEntityBlock {
   }
 
   @Override
+  public void onRemove(BlockState state, Level level, BlockPos pos, BlockState newState, boolean isMoving) {
+    if (!state.is(newState.getBlock())
+        && !isMoving
+        && !level.isClientSide
+        && kind.resource() == PortKind.Resource.ITEM
+        && level.getBlockEntity(pos) instanceof MachinePortBlockEntity port) {
+      for (int slot = 0; slot < port.inventory().getSlots(); slot++) {
+        ItemStack stack = port.inventory().getStackInSlot(slot);
+        if (!stack.isEmpty()) {
+          popResource(level, pos, stack.copy());
+          port.inventory().setStackInSlot(slot, ItemStack.EMPTY);
+        }
+      }
+    }
+    super.onRemove(state, level, pos, newState, isMoving);
+  }
+
+  @Override
   protected List<ItemStack> getDrops(BlockState state, LootParams.Builder params) {
     List<ItemStack> drops = super.getDrops(state, params);
     if (params.getOptionalParameter(LootContextParams.BLOCK_ENTITY) instanceof MachinePortBlockEntity port) {
       for (ItemStack stack : drops) {
         if (stack.is(asItem())) {
-          BlockItem
-              .setBlockEntityData(stack, port.getType(), port.saveWithoutMetadata(params.getLevel().registryAccess()));
+          CompoundTag data = port.saveWithoutMetadata(params.getLevel().registryAccess());
+          if (kind.resource() == PortKind.Resource.ITEM && data.get("mmcece") instanceof CompoundTag portData) {
+            portData.remove("items");
+          }
+          BlockItem.setBlockEntityData(stack, port.getType(), data);
         }
       }
     }
