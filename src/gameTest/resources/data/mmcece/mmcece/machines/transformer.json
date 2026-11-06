@@ -85,7 +85,7 @@
         0,
         1
       ],
-      "port": "energy_output"
+      "block": "energy_output"
     },
     {
       "offset": [
@@ -93,7 +93,7 @@
         0,
         1
       ],
-      "port": "energy_input"
+      "block": "energy_input"
     },
     {
       "offset": [
@@ -101,7 +101,7 @@
         0,
         2
       ],
-      "blocks": [
+      "block": [
         "mmcece:machine_casing_plain",
         "mmcece:machine_casing_vent",
         "mmcece:machine_casing_firebox",

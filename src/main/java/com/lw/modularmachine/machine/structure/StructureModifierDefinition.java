@@ -28,7 +28,7 @@ public record StructureModifierDefinition(
   public static final int MAX_GROUPS = 256;
   public static final int MAX_CONDITIONS = 4096;
   private static final Set<String> FIELDS = Set.of("id", "parts", "modifiers", "allow_replacement");
-  private static final Set<String> PART_FIELDS = Set.of("part_id", "block", "blocks", "properties", "properties_space");
+  private static final Set<String> PART_FIELDS = Set.of("part_id", "block", "properties", "properties_space");
 
   public StructureModifierDefinition {
     partIndices = List.copyOf(partIndices);
@@ -168,7 +168,6 @@ public record StructureModifierDefinition(
         if (!PART_FIELDS.containsAll(condition.keySet())
             || !seen.add(ref)
             || target == null
-            || target.has("port")
             || target.has("field")
             || target.has("interface")) {
           throw new JsonParseException(

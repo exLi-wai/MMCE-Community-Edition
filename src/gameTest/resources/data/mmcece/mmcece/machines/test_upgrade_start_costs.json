@@ -1,8 +1,8 @@
 {
   "orientation": {"policy": "all_24"},
   "parts": [
-    {"part_id": "item_in", "offset": [-1, 0, 1], "port": "item_input"},
-    {"part_id": "item_out", "offset": [1, 0, 1], "port": "item_output"},
+    {"part_id": "item_in", "offset": [-1, 0, 1], "block": "item_input"},
+    {"part_id": "item_out", "offset": [1, 0, 1], "block": "item_output"},
     {"part_id": "cost_a", "offset": [0, 0, 1], "block": "mmcece:upgrade_bus_normal"},
     {"part_id": "cost_b", "offset": [2, 0, 1], "block": "mmcece:upgrade_bus_normal"}
   ]

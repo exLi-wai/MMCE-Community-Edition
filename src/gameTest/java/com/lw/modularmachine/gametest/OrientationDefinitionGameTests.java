@@ -115,7 +115,7 @@ public final class OrientationDefinitionGameTests {
     }
     JsonObject part = root.getAsJsonArray("parts").get(0).getAsJsonObject();
     part.remove("block");
-    part.add("blocks", JsonParser.parseString("[\"minecraft:furnace\",\"minecraft:dispenser\"]"));
+    part.add("block", JsonParser.parseString("[\"minecraft:furnace\",\"minecraft:dispenser\"]"));
     var alternatives = parse(root);
     helper.assertTrue(alternatives.allowedOrientationMask() == 0xFFFFFF, "Valid dispenser branch was discarded");
     var upRule = alternatives.rulesFor(MachineOrientation.of(Direction.UP, 0)).getFirst();
@@ -274,7 +274,7 @@ public final class OrientationDefinitionGameTests {
       for (int i = 0; i < 256; i++) {
         alternatives.add("minecraft:stone_bricks");
       }
-      prototype.add("blocks", alternatives);
+      prototype.add("block", alternatives);
     }
     JsonArray parts = new JsonArray();
     for (int i = 0; i < count; i++) {

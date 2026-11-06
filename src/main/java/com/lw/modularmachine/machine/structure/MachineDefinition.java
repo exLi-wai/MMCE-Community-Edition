@@ -25,7 +25,6 @@ import java.util.ArrayList;
 import java.util.HashMap;
 import java.util.HashSet;
 import java.util.List;
-import java.util.Locale;
 import java.util.Map;
 import java.util.Objects;
 import java.util.Set;
@@ -248,18 +247,12 @@ public record MachineDefinition(
       } catch (IllegalArgumentException exception) {
         throw error(partPath + ".properties_space", exception.getMessage());
       }
-      int kinds = (part.has("block") ? 1 : 0) + (part.has("blocks") ? 1 : 0) + (part.has("port") ? 1 : 0);
-      if (kinds != 1) {
-        throw error(partPath, "Exactly one of block/blocks/port is required");
+      if (!part.has("block")) {
+        throw error(partPath, "Expected block");
       }
-      PortKind port = null;
+      PortKind port = candidatePort(part);
       List<Alternative> alternatives = new ArrayList<>();
-      if (part.has("port")) {
-        try {
-          port = PortKind.valueOf(string(part.get("port"), partPath + ".port").toUpperCase(Locale.ROOT));
-        } catch (IllegalArgumentException exception) {
-          throw error(partPath + ".port", "Unknown core port");
-        }
+      if (port != null) {
         if (part.has("properties") || part.has("properties_space")) {
           throw error(partPath, "Core ports do not have state properties");
         }
@@ -414,7 +407,10 @@ public record MachineDefinition(
         String partPath = path + ".parts[" + index + "]";
         JsonObject part = object(parts.get(index), partPath);
         partFields(part, partPath);
-        if (!part.has("block") && !part.has("blocks")) {
+        if (!part.has("block")) {
+          continue;
+        }
+        if (candidatePort(part) != null) {
           continue;
         }
         List<StateOrientationAdapters.PropertyReference> properties = new ArrayList<>();
@@ -579,8 +575,6 @@ public record MachineDefinition(
         path,
         "offset",
         "block",
-        "blocks",
-        "port",
         "properties",
         "field",
         "part_id",
@@ -590,21 +584,44 @@ public record MachineDefinition(
   }
 
   private static List<String> blockNames(JsonObject part, String path) {
-    if (part.has("block") && part.has("blocks")) {
-      throw error(path, "block and blocks are mutually exclusive");
-    }
-    if (part.has("block")) {
+    if (part.get("block").isJsonPrimitive()) {
       return List.of(string(part.get("block"), path + ".block"));
     }
-    JsonArray elements = array(part.get("blocks"), path + ".blocks");
+    JsonArray elements = array(part.get("block"), path + ".block");
     if (elements.isEmpty() || elements.size() > 256) {
-      throw error(path + ".blocks", "Expected 1..256 alternatives");
+      throw error(path + ".block", "Expected 1..256 alternatives");
     }
     List<String> result = new ArrayList<>();
     for (int i = 0; i < elements.size(); i++) {
-      result.add(string(elements.get(i), path + ".blocks[" + i + "]"));
+      result.add(string(elements.get(i), path + ".block[" + i + "]"));
     }
     return result;
+  }
+
+  private static PortKind blockPort(JsonElement value) {
+    if (value.isJsonPrimitive() && value.getAsJsonPrimitive().isString()) {
+      return tryParsePort(value.getAsString());
+    }
+    if (value.isJsonArray() && value.getAsJsonArray().size() == 1) {
+      JsonElement candidate = value.getAsJsonArray().get(0);
+      if (candidate.isJsonPrimitive() && candidate.getAsJsonPrimitive().isString()) {
+        return tryParsePort(candidate.getAsString());
+      }
+    }
+    return null;
+  }
+
+  private static PortKind candidatePort(JsonObject part) {
+    return blockPort(part.get("block"));
+  }
+
+  private static PortKind tryParsePort(String value) {
+    for (var kind : PortKind.values()) {
+      if (kind.name().equalsIgnoreCase(value) || kind.path().equalsIgnoreCase(value)) {
+        return kind;
+      }
+    }
+    return null;
   }
 
   private static ResourceLocation blockId(String name, String path) {

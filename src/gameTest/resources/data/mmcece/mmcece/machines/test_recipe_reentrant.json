@@ -1,7 +1,7 @@
 {
   "parts": [
-    {"offset": [-1, 0, 1], "port": "item_input"},
-    {"offset": [1, 0, 1], "port": "item_output"},
+    {"offset": [-1, 0, 1], "block": "item_input"},
+    {"offset": [1, 0, 1], "block": "item_output"},
     {"offset": [0, 1, 1], "block": "mmcece:test_reentrant_predicate", "properties": {"facing": "north"}, "properties_space": "legacy"}
   ]
 }

@@ -1,7 +1,7 @@
 {
   "parts": [
-    {"offset": [-1, 0, 1], "port": "item_input"},
-    {"offset": [1, 0, 1], "port": "item_output"},
-    {"offset": [0, 1, 1], "port": "energy_input"}
+    {"offset": [-1, 0, 1], "block": "item_input"},
+    {"offset": [1, 0, 1], "block": "item_output"},
+    {"offset": [0, 1, 1], "block": "energy_input"}
   ]
 }

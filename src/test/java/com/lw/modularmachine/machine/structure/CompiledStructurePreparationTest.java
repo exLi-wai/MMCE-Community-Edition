@@ -22,9 +22,9 @@ class CompiledStructurePreparationTest {
   private static MachineDefinition definition(boolean legacy) {
     JsonObject root = JsonParser.parseString("""
         {"orientation":{"policy":"all_24"},"parts":[
-        {"part_id":"marker","offset":[2,3,5],"port":"item_input"},
-        {"part_id":"source","offset":[1,0,1],"port":"energy_input"},
-        {"part_id":"target","offset":[-1,0,1],"port":"energy_output"}],
+        {"part_id":"marker","offset":[2,3,5],"block":"item_input"},
+        {"part_id":"source","offset":[1,0,1],"block":"energy_input"},
+        {"part_id":"target","offset":[-1,0,1],"block":"energy_output"}],
         "operation":{"type":"energy_transfer","energy_per_tick":128}}
         """).getAsJsonObject();
     if (legacy) {

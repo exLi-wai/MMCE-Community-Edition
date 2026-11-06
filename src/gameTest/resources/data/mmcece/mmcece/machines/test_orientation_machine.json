@@ -1,8 +1,8 @@
 {
   "orientation": { "policy": "all_24" },
   "parts": [
-    { "part_id": "input", "offset": [-1, 0, 1], "port": "energy_input" },
-    { "part_id": "output", "offset": [1, 0, 1], "port": "energy_output" },
+    { "part_id": "input", "offset": [-1, 0, 1], "block": "energy_input" },
+    { "part_id": "output", "offset": [1, 0, 1], "block": "energy_output" },
     { "part_id": "axis", "offset": [0, 1, 1], "block": "minecraft:oak_log", "properties": { "axis": "x" } },
     { "part_id": "asymmetric", "offset": [1, 2, 2], "block": "minecraft:stone_bricks" }
   ],

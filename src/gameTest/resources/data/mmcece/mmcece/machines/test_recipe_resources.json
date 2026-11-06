@@ -1,11 +1,11 @@
 {
   "orientation": { "policy": "all_24" },
   "parts": [
-    { "part_id": "item_in", "offset": [-1, 0, 1], "port": "item_input" },
-    { "part_id": "item_out", "offset": [1, 0, 1], "port": "item_output" },
-    { "part_id": "fluid_in", "offset": [0, 1, 1], "port": "fluid_input" },
-    { "part_id": "fluid_out", "offset": [0, -1, 1], "port": "fluid_output" },
-    { "part_id": "energy_in", "offset": [-1, 1, 1], "port": "energy_input" },
-    { "part_id": "energy_out", "offset": [1, -1, 1], "port": "energy_output" }
+    { "part_id": "item_in", "offset": [-1, 0, 1], "block": "item_input" },
+    { "part_id": "item_out", "offset": [1, 0, 1], "block": "item_output" },
+    { "part_id": "fluid_in", "offset": [0, 1, 1], "block": "fluid_input" },
+    { "part_id": "fluid_out", "offset": [0, -1, 1], "block": "fluid_output" },
+    { "part_id": "energy_in", "offset": [-1, 1, 1], "block": "energy_input" },
+    { "part_id": "energy_out", "offset": [1, -1, 1], "block": "energy_output" }
   ]
 }

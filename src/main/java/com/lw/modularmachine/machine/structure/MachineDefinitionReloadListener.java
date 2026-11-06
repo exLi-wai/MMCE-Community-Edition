@@ -97,20 +97,33 @@ public final class MachineDefinitionReloadListener extends ContextAwareReloadLis
     try (var paths = Files.walk(root)) {
       var files = paths.filter(path -> Files.isRegularFile(path, LinkOption.NOFOLLOW_LINKS))
           .filter(path -> path.getFileName().toString().endsWith(".json"))
-          .filter(path -> !path.getFileName().toString().endsWith(".var.json")).limit(1025)
           .sorted(Comparator.comparing(path -> root.relativize(path).toString())).toList();
-      if (files.size() > 1024) {
+      var variableFiles = files.stream().filter(path -> path.getFileName().toString().endsWith(".var.json")).toList();
+      var machineFiles = files.stream().filter(path -> !path.getFileName().toString().endsWith(".var.json")).toList();
+      if (machineFiles.size() > 1024) {
         throw new JsonParseException("At most 1024 machine definitions per reload");
       }
+      var variables = new LinkedHashMap<String, List<String>>();
+      for (Path file : variableFiles) {
+        try (var reader = Files.newBufferedReader(file, StandardCharsets.UTF_8)) {
+          var parsed = MachineDefinitionVariables
+              .parse(JsonParser.parseReader(reader).getAsJsonObject(), file.toString());
+          variables.putAll(parsed.values());
+        } catch (IOException | IllegalArgumentException | JsonParseException exception) {
+          throw new JsonParseException(file + ": Failed reading variable definitions", exception);
+        }
+      }
+      var variableCatalog = MachineDefinitionVariables.from(variables);
       long totalBytes = 0;
-      for (Path file : files) {
+      for (Path file : machineFiles) {
         long size = Files.size(file);
         if (size > 67_108_864L || (totalBytes = Math.addExact(totalBytes, size)) > 1_073_741_824L) {
           throw new JsonParseException(file + ": Machine definition size limit exceeded");
         }
         ResourceLocation id = MachineDefinitionConfig.id(root.relativize(file));
         try (var reader = Files.newBufferedReader(file, StandardCharsets.UTF_8)) {
-          put(result, id, JsonParser.parseReader(reader), file.toString());
+          var rootJson = JsonParser.parseReader(reader).getAsJsonObject();
+          put(result, id, variableCatalog.expandParts(rootJson, file.toString()), file.toString());
         } catch (IOException | IllegalArgumentException | JsonParseException exception) {
           throw new JsonParseException(id + ": $: Failed reading " + file, exception);
         }

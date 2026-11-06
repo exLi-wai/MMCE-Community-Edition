@@ -80,7 +80,7 @@ public final class RangedSelectionService {
       xyz.add(offset.getZ());
       part.add("offset", xyz);
       if (state.getBlock() instanceof MachinePortBlock port) {
-        part.addProperty("port", port.kind().name().toLowerCase(Locale.ROOT));
+        part.addProperty("block", port.kind().name().toLowerCase(Locale.ROOT));
       } else {
         part.addProperty("block", BuiltInRegistries.BLOCK.getKey(state.getBlock()).toString());
       }

@@ -2,6 +2,7 @@ package com.lw.modularmachine.machine.structure;
 
 import com.google.gson.JsonParseException;
 import com.lw.modularmachine.ModularMachine;
+import com.lw.modularmachine.config.MachineVariableDefaults;
 import java.io.IOException;
 import java.nio.file.Files;
 import java.nio.file.Path;
@@ -28,6 +29,7 @@ public final class MachineDefinitionConfig {
     Path root = directory();
     try {
       Files.createDirectories(root);
+      MachineVariableDefaults.ensure();
     } catch (IOException failure) {
       throw new IllegalStateException("Cannot create machine definition directory " + root, failure);
     }

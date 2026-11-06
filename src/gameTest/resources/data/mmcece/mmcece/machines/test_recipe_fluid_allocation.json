@@ -1,9 +1,9 @@
 {
   "orientation": {"policy": "all_24"},
   "parts": [
-    {"part_id": "item_in", "offset": [-1, 0, 1], "port": "item_input"},
-    {"part_id": "item_out", "offset": [1, 0, 1], "port": "item_output"},
-    {"part_id": "fluid_a", "offset": [0, 1, 1], "port": "fluid_output"},
-    {"part_id": "fluid_b", "offset": [0, -1, 1], "port": "fluid_output"}
+    {"part_id": "item_in", "offset": [-1, 0, 1], "block": "item_input"},
+    {"part_id": "item_out", "offset": [1, 0, 1], "block": "item_output"},
+    {"part_id": "fluid_a", "offset": [0, 1, 1], "block": "fluid_output"},
+    {"part_id": "fluid_b", "offset": [0, -1, 1], "block": "fluid_output"}
   ]
 }

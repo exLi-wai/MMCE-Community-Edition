@@ -43,8 +43,8 @@ class MachineDefinitionSchemaTest {
       Map.of());
   private static final String PORTS = """
       {"parts":[
-        {"offset":[1,0,0],"port":"energy_input"},
-        {"offset":[-1,0,0],"port":"energy_output"}
+        {"offset":[1,0,0],"block":"energy_input"},
+        {"offset":[-1,0,0],"block":"energy_output"}
       ]}
       """;
 
@@ -102,12 +102,12 @@ class MachineDefinitionSchemaTest {
   void orientationAloneSelectsThePoseSpace() {
     var definition = parse(
         json(
-            "{\"parts\":[{\"offset\":[1,0,0],\"port\":\"energy_input\"},{\"offset\":[-1,0,0],\"port\":\"energy_output\"}]}"));
+            "{\"parts\":[{\"offset\":[1,0,0],\"block\":\"energy_input\"},{\"offset\":[-1,0,0],\"block\":\"energy_output\"}]}"));
     assertSame(OrientationPolicy.HORIZONTAL, definition.orientationPolicy());
     assertEquals(0x1111, definition.allowedOrientationMask());
     var posed = parse(
         json(
-            "{\"orientation\":{\"policy\":\"all_24\"},\"parts\":[{\"offset\":[1,0,0],\"port\":\"energy_input\"},{\"offset\":[-1,0,0],\"port\":\"energy_output\"}]}"));
+            "{\"orientation\":{\"policy\":\"all_24\"},\"parts\":[{\"offset\":[1,0,0],\"block\":\"energy_input\"},{\"offset\":[-1,0,0],\"block\":\"energy_output\"}]}"));
     assertEquals(MachineOrientation.ALL_MASK, posed.allowedOrientationMask());
   }
 
@@ -126,7 +126,7 @@ class MachineDefinitionSchemaTest {
     }
     assertEquals(24, definition.orientationCompilation().cachedOrientationCount());
     assertThrows(UnsupportedOperationException.class, () -> definition.rulesFor(orientation).clear());
-    root.getAsJsonArray("parts").get(0).getAsJsonObject().addProperty("port", "item_input");
+    root.getAsJsonArray("parts").get(0).getAsJsonObject().addProperty("block", "item_input");
     assertEquals("energy_input", definition.parts().getFirst().rule().port().name().toLowerCase());
   }
 
@@ -220,7 +220,7 @@ class MachineDefinitionSchemaTest {
   @Test
   void referenceCollectionFreezesLiteralsAndIdentifiesTheirJsonPaths() {
     JsonObject root = json(
-        "{\"parts\":[{\"offset\":[1,0,0],\"blocks\":[\"minecraft:furnace\",\"minecraft:dispenser\"],\"properties\":{\"facing\":\"north\"}}]}");
+        "{\"parts\":[{\"offset\":[1,0,0],\"block\":[\"minecraft:furnace\",\"minecraft:dispenser\"],\"properties\":{\"facing\":\"north\"}}]}");
     var references = MachineDefinition.blockReferences(Map.of(ID, root));
     assertEquals(2, references.size());
     assertEquals("north", references.getFirst().properties().getFirst().literal());

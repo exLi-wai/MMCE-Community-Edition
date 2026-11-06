@@ -41,9 +41,10 @@ class LegacyTransformerContractTest {
       String block = original.get("elements").getAsString();
       switch (block) {
         case "minecraft:stonebrick@0" -> assertEquals("minecraft:stone_bricks", part.get("block").getAsString());
-        case "modularmachinery:blockenergyinputhatch" -> assertEquals("energy_input", part.get("port").getAsString());
-        case "modularmachinery:blockenergyoutputhatch" -> assertEquals("energy_output", part.get("port").getAsString());
-        case "casings_decorative" -> assertEquals(6, part.getAsJsonArray("blocks").size());
+        case "modularmachinery:blockenergyinputhatch" -> assertEquals("energy_input", part.get("block").getAsString());
+        case "modularmachinery:blockenergyoutputhatch" ->
+          assertEquals("energy_output", part.get("block").getAsString());
+        case "casings_decorative" -> assertEquals(6, part.getAsJsonArray("block").size());
         default -> assertEquals(block, part.get("block").getAsString());
       }
     }
