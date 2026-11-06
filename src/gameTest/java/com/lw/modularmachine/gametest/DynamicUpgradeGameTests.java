@@ -60,6 +60,7 @@ public final class DynamicUpgradeGameTests {
             helper.fail("Dynamic upgrade reload failed: " + failure);
             return;
           }
+          GameTestUpgradeFixtures.install();
           savedDefinitions = FactoryUpgradeService.snapshot().definitions();
           try {
             verifyEffects(helper);

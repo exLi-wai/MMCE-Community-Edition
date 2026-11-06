@@ -97,7 +97,7 @@ public final class MachineItemRecipeKubeJSSchema {
   }
 
   public static ResourceLocation id() {
-    return ResourceLocation.fromNamespaceAndPath(ModularMachine.MODID, "machine_item");
+    return ResourceLocation.fromNamespaceAndPath(ModularMachine.MODID, "machine");
   }
 
   public static void register(RecipeSchemaRegistry registry) {

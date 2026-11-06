@@ -145,7 +145,7 @@ final class FactoryControllerTooltipProvider implements IBlockComponentProvider,
         Component.translatable(
             "jade.mmcece.performance",
             data.getInt(PREFIX + "tick_micros"),
-            String.format(java.util.Locale.ROOT, "%.2f", data.getInt(PREFIX + "search_micros") / 1000.0)));
+            String.format(Locale.ROOT, "%.2f", data.getInt(PREFIX + "search_micros") / 1000.0)));
     tooltip.add(
         Component.translatable(
             "jade.mmcece.workmode",

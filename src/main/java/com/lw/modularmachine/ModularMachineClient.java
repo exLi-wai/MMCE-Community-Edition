@@ -1,5 +1,12 @@
 package com.lw.modularmachine;
 
+import com.lw.modularmachine.machine.orientation.ControllerPlacementData;
+import net.minecraft.world.level.block.state.BlockState;
+import net.minecraft.world.item.component.CustomData;
+import net.minecraft.world.item.Item;
+import net.minecraft.resources.ResourceLocation;
+import net.minecraft.core.component.DataComponents;
+import net.minecraft.core.BlockPos;
 import com.lw.modularmachine.client.*;
 import com.lw.modularmachine.client.preview.BlueprintPreviewScreen;
 import com.lw.modularmachine.client.preview.PreviewBlockView;
@@ -93,7 +100,7 @@ public class ModularMachineClient {
 
   @SubscribeEvent
   static void registerItemColors(RegisterColorHandlersEvent.Item event) {
-    var items = new java.util.ArrayList<net.minecraft.world.item.Item>();
+    var items = new ArrayList<Item>();
     items.add(MachineRegistries.CONTROLLER.get().asItem());
     items.add(MachineRegistries.FACTORY_CONTROLLER.get().asItem());
     MachineRegistries.DEDICATED_CONTROLLERS.values().forEach(holder -> items.add(holder.get().asItem()));
@@ -103,10 +110,10 @@ public class ModularMachineClient {
     MachineRegistries.PARALLEL_CONTROLLERS.values().forEach(holder -> items.add(holder.get().asItem()));
     MachineRegistries.UPGRADE_BUSES.values().forEach(holder -> items.add(holder.get().asItem()));
     items.add(MachineRegistries.SMART_INTERFACE.get().asItem());
-    event.register(ModularMachineClient::itemColor, items.toArray(net.minecraft.world.item.Item[]::new));
+    event.register(ModularMachineClient::itemColor, items.toArray(Item[]::new));
   }
 
-  private static int blockColor(net.minecraft.world.level.block.state.BlockState state, BlockAndTintGetter level, net.minecraft.core.BlockPos pos, int tintIndex) {
+  private static int blockColor(BlockState state, BlockAndTintGetter level, BlockPos pos, int tintIndex) {
     if (tintIndex != 0) {
       return -1;
     }
@@ -163,20 +170,17 @@ public class ModularMachineClient {
     if (block instanceof FactoryControllerBlock controller && controller.dedicated() != null) {
       return machineColor(controller.dedicated().machine());
     }
-    var data = stack.getOrDefault(
-        net.minecraft.core.component.DataComponents.BLOCK_ENTITY_DATA,
-        net.minecraft.world.item.component.CustomData.EMPTY).copyTag();
+    var data = stack.getOrDefault(DataComponents.BLOCK_ENTITY_DATA, CustomData.EMPTY).copyTag();
     if (data.contains("machine")) {
-      var machine = net.minecraft.resources.ResourceLocation.tryParse(data.getString("machine"));
-      if (machine != null
-          && !machine.equals(com.lw.modularmachine.machine.orientation.ControllerPlacementData.UNBOUND_MACHINE)) {
+      var machine = ResourceLocation.tryParse(data.getString("machine"));
+      if (machine != null && !machine.equals(ControllerPlacementData.UNBOUND_MACHINE)) {
         return machineColor(machine);
       }
     }
     return data.contains(MachineColorable.COLOR_TAG) ? MachineColorable.load(data) : 0xFFFFFF;
   }
 
-  private static int machineColor(net.minecraft.resources.ResourceLocation machine) {
+  private static int machineColor(ResourceLocation machine) {
     var definition = StructureService.definition(machine);
     return definition == null ? DedicatedControllerCatalog.color(machine) : definition.color();
   }

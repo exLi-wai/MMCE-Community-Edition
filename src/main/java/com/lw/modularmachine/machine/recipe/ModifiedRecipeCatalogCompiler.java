@@ -22,7 +22,7 @@ final class ModifiedRecipeCatalogCompiler {
   private final List<RecipeModifier> rules;
   private final List<String> ids;
   private final List<RecipeCandidate<ItemResourceKey>> candidates = new ArrayList<>();
-  private final Map<String, MachineItemRecipe> definitions = new HashMap<>();
+  private final Map<String, MachineRecipe> definitions = new HashMap<>();
   private int cursor;
   private long lastTick = Long.MIN_VALUE;
   private boolean failed;

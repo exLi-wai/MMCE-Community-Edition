@@ -32,7 +32,7 @@ import net.neoforged.neoforge.fluids.FluidStack;
  * Native data definition. This recipe cannot assemble through a crafting grid
  * or bypass machine admission.
  */
-public final class MachineItemRecipe implements Recipe<RecipeInput> {
+public final class MachineRecipe implements Recipe<RecipeInput> {
   public static final class ItemAmount {
     private static final Codec<ItemAmount> CODEC = RecordCodecBuilder.create(
         instance -> instance
@@ -87,52 +87,32 @@ public final class MachineItemRecipe implements Recipe<RecipeInput> {
     }
   }
 
-  private static final MapCodec<MachineItemRecipe> BASE = RecordCodecBuilder.mapCodec(
-      instance -> instance
-          .group(
-              ResourceLocation.CODEC.fieldOf("machine").forGetter(MachineItemRecipe::machineId),
-              Codec.INT.optionalFieldOf("priority", 0).forGetter(MachineItemRecipe::priority),
-              Codec.INT.fieldOf("duration").forGetter(MachineItemRecipe::duration),
-              Codec.LONG.optionalFieldOf("energy_per_tick", 0L).forGetter(MachineItemRecipe::energyPerTick),
-              FluidStack.CODEC.optionalFieldOf("fluid_per_tick", FluidStack.EMPTY)
-                  .forGetter(MachineItemRecipe::fluidPerTick),
-              FluidStack.CODEC.listOf().optionalFieldOf("fluid_inputs", List.of())
-                  .forGetter(MachineItemRecipe::fluidInputs),
-              FluidStack.CODEC.listOf().optionalFieldOf("fluid_outputs", List.of())
-                  .forGetter(MachineItemRecipe::fluidOutputs),
-              Codec.STRING.optionalFieldOf("failure_action", "still")
-                  .forGetter(value -> value.failureAction().serialized()),
-              Codec.LONG.optionalFieldOf("random_seed", 0L).forGetter(MachineItemRecipe::randomSeed),
-              ItemAmount.CODEC.listOf().fieldOf("inputs").forGetter(MachineItemRecipe::inputs),
-              ItemAmount.CODEC.listOf().fieldOf("outputs").forGetter(MachineItemRecipe::outputs),
-              SmartNumberRequirement.CODEC.listOf().optionalFieldOf("interface_inputs", List.of())
-                  .forGetter(MachineItemRecipe::interfaceInputs),
-              RecipeSelectors.CODEC.optionalFieldOf("selectors", RecipeSelectors.NONE)
-                  .forGetter(MachineItemRecipe::selectors))
-          .apply(
-              instance,
-              (machineId, priority, duration, energyPerTick, fluidPerTick, fluidInputs, fluidOutputs, failureAction, randomSeed, inputs, outputs, interfaceInputs, selectors) -> new MachineItemRecipe(
-                  machineId,
-                  priority,
-                  duration,
-                  energyPerTick,
-                  fluidPerTick,
-                  fluidInputs,
-                  fluidOutputs,
-                  failureAction,
-                  randomSeed,
-                  inputs,
-                  outputs,
-                  interfaceInputs,
-                  selectors)));
-  public static final MapCodec<MachineItemRecipe> CODEC = new MapCodec<>() {
+  private static final MapCodec<MachineRecipe> BASE = RecordCodecBuilder.mapCodec(
+      instance -> instance.group(
+          ResourceLocation.CODEC.fieldOf("machine").forGetter(MachineRecipe::machineId),
+          Codec.INT.optionalFieldOf("priority", 0).forGetter(MachineRecipe::priority),
+          Codec.INT.fieldOf("duration").forGetter(MachineRecipe::duration),
+          Codec.LONG.optionalFieldOf("energy_per_tick", 0L).forGetter(MachineRecipe::energyPerTick),
+          FluidStack.CODEC.optionalFieldOf("fluid_per_tick", FluidStack.EMPTY).forGetter(MachineRecipe::fluidPerTick),
+          FluidStack.CODEC.listOf().optionalFieldOf("fluid_inputs", List.of()).forGetter(MachineRecipe::fluidInputs),
+          FluidStack.CODEC.listOf().optionalFieldOf("fluid_outputs", List.of()).forGetter(MachineRecipe::fluidOutputs),
+          Codec.STRING.optionalFieldOf("failure_action", "still")
+              .forGetter(value -> value.failureAction().serialized()),
+          Codec.LONG.optionalFieldOf("random_seed", 0L).forGetter(MachineRecipe::randomSeed),
+          ItemAmount.CODEC.listOf().fieldOf("inputs").forGetter(MachineRecipe::inputs),
+          ItemAmount.CODEC.listOf().fieldOf("outputs").forGetter(MachineRecipe::outputs),
+          SmartNumberRequirement.CODEC.listOf().optionalFieldOf("interface_inputs", List.of())
+              .forGetter(MachineRecipe::interfaceInputs),
+          RecipeSelectors.CODEC.optionalFieldOf("selectors", RecipeSelectors.NONE).forGetter(MachineRecipe::selectors))
+          .apply(instance, MachineRecipe::new));
+  public static final MapCodec<MachineRecipe> CODEC = new MapCodec<>() {
     @Override
     public <T> Stream<T> keys(DynamicOps<T> ops) {
       return MachineRecipeJson.FIELDS.stream().map(ops::createString);
     }
 
     @Override
-    public <T> DataResult<MachineItemRecipe> decode(DynamicOps<T> ops, MapLike<T> input) {
+    public <T> DataResult<MachineRecipe> decode(DynamicOps<T> ops, MapLike<T> input) {
       try {
         var source = ops.convertTo(JsonOps.INSTANCE, ops.createMap(input.entries()));
         if (source.isJsonObject() && source.getAsJsonObject().has(MachineRecipeJson.KUBEJS_CHANGED_MARKER)) {
@@ -152,12 +132,12 @@ public final class MachineItemRecipe implements Recipe<RecipeInput> {
     }
 
     @Override
-    public <T> RecordBuilder<T> encode(MachineItemRecipe value, DynamicOps<T> ops, RecordBuilder<T> prefix) {
+    public <T> RecordBuilder<T> encode(MachineRecipe value, DynamicOps<T> ops, RecordBuilder<T> prefix) {
       return BASE.encode(value, ops, prefix);
     }
   };
-  public static final StreamCodec<RegistryFriendlyByteBuf, MachineItemRecipe> STREAM_CODEC = StreamCodec
-      .of(MachineItemRecipe::write, MachineItemRecipe::read);
+  public static final StreamCodec<RegistryFriendlyByteBuf, MachineRecipe> STREAM_CODEC = StreamCodec
+      .of(MachineRecipe::write, MachineRecipe::read);
   private final ResourceLocation machineId;
   private final int priority, duration;
   private final long energyPerTick;
@@ -170,7 +150,7 @@ public final class MachineItemRecipe implements Recipe<RecipeInput> {
   private final List<SmartNumberRequirement> interfaceInputs;
   private final RecipeSelectors selectors;
 
-  private MachineItemRecipe(ResourceLocation machineId, int priority, int duration, long energyPerTick, FluidStack fluidPerTick, List<FluidStack> fluidInputs, List<FluidStack> fluidOutputs, String failureAction, long randomSeed, List<ItemAmount> inputs, List<ItemAmount> outputs, List<SmartNumberRequirement> interfaceInputs, RecipeSelectors selectors) {
+  private MachineRecipe(ResourceLocation machineId, int priority, int duration, long energyPerTick, FluidStack fluidPerTick, List<FluidStack> fluidInputs, List<FluidStack> fluidOutputs, String failureAction, long randomSeed, List<ItemAmount> inputs, List<ItemAmount> outputs, List<SmartNumberRequirement> interfaceInputs, RecipeSelectors selectors) {
     if (duration <= 0 || energyPerTick < 0) {
       throw new IllegalArgumentException("Nonpositive duration");
     }
@@ -294,7 +274,7 @@ public final class MachineItemRecipe implements Recipe<RecipeInput> {
         interfaceInputs);
   }
 
-  boolean sameDefinition(MachineItemRecipe other) {
+  boolean sameDefinition(MachineRecipe other) {
     return machineId.equals(other.machineId)
         && priority == other.priority
         && duration == other.duration
@@ -337,7 +317,7 @@ public final class MachineItemRecipe implements Recipe<RecipeInput> {
     return true;
   }
 
-  private static void write(RegistryFriendlyByteBuf buffer, MachineItemRecipe value) {
+  private static void write(RegistryFriendlyByteBuf buffer, MachineRecipe value) {
     buffer.writeVarInt(10);
     buffer.writeResourceLocation(value.machineId);
     buffer.writeVarInt(value.priority);
@@ -378,7 +358,7 @@ public final class MachineItemRecipe implements Recipe<RecipeInput> {
     }
   }
 
-  private static MachineItemRecipe read(RegistryFriendlyByteBuf buffer) {
+  private static MachineRecipe read(RegistryFriendlyByteBuf buffer) {
     try {
       int schema = buffer.readVarInt();
       if (schema != 10) {
@@ -411,7 +391,7 @@ public final class MachineItemRecipe implements Recipe<RecipeInput> {
           buffer.readUtf(ResourceSelector.MAX_LENGTH),
           buffer.readUtf(ResourceSelector.MAX_LENGTH),
           buffer.readUtf(ResourceSelector.MAX_LENGTH));
-      return new MachineItemRecipe(
+      return new MachineRecipe(
           machine,
           priority,
           duration,
@@ -513,14 +493,14 @@ public final class MachineItemRecipe implements Recipe<RecipeInput> {
     return MachineRecipeRegistries.ITEM_TYPE.get();
   }
 
-  public static final class Serializer implements RecipeSerializer<MachineItemRecipe> {
+  public static final class Serializer implements RecipeSerializer<MachineRecipe> {
     @Override
-    public MapCodec<MachineItemRecipe> codec() {
+    public MapCodec<MachineRecipe> codec() {
       return CODEC;
     }
 
     @Override
-    public StreamCodec<RegistryFriendlyByteBuf, MachineItemRecipe> streamCodec() {
+    public StreamCodec<RegistryFriendlyByteBuf, MachineRecipe> streamCodec() {
       return STREAM_CODEC;
     }
   }

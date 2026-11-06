@@ -14,6 +14,7 @@ import java.util.Collection;
 import java.util.HashMap;
 import java.util.IdentityHashMap;
 import java.util.LinkedHashMap;
+import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Map;
 import java.util.Optional;
@@ -43,19 +44,19 @@ public final class MachineRecipeService {
       long structureEpoch,
       Collection<RecipeHolder<?>> recipeView,
       Map<ResourceLocation, CompiledRecipeSet<ItemResourceKey>> candidates,
-      Map<ResourceLocation, MachineItemRecipe> definitions,
+      Map<ResourceLocation, MachineRecipe> definitions,
       Map<ResourceLocation, RecipeModifierTemplate> templates) {
   }
 
   private MachineRecipeService() {
   }
 
-  static void stage(RecipeManager manager, Map<ResourceLocation, MachineItemRecipe> expected, Map<ResourceLocation, JsonElement> sources, HolderLookup.Provider registries) {
+  static void stage(RecipeManager manager, Map<ResourceLocation, MachineRecipe> expected, Map<ResourceLocation, JsonElement> sources, HolderLookup.Provider registries) {
     var server = ServerLifecycleHooks.getCurrentServer();
     if (server != null) {
       ServerThreadGuard.require(server, "Machine recipe catalog accessed");
     }
-    var actual = new LinkedHashMap<ResourceLocation, MachineItemRecipe>();
+    var actual = new LinkedHashMap<ResourceLocation, MachineRecipe>();
     for (var holder : manager.getAllRecipesFor(MachineRecipeRegistries.ITEM_TYPE.get())) {
       boolean nativeMachineRecipe = holder.id().getPath().startsWith("mmcece/");
       boolean kubejsMachineRecipe = holder.id().getNamespace().equals("kubejs") && sources.containsKey(holder.id());
@@ -65,15 +66,15 @@ public final class MachineRecipeService {
       actual.put(holder.id(), holder.value());
     }
     if (!actual.keySet().equals(expected.keySet())) {
-      var missing = new java.util.LinkedHashSet<>(expected.keySet());
+      var missing = new LinkedHashSet<>(expected.keySet());
       missing.removeAll(actual.keySet());
-      var unexpected = new java.util.LinkedHashSet<>(actual.keySet());
+      var unexpected = new LinkedHashSet<>(actual.keySet());
       unexpected.removeAll(expected.keySet());
       throw new IllegalArgumentException(
           "Native machine recipe set is incomplete or contains an unvalidated recipe: missing " + missing + ", unvalidated " + unexpected);
     }
     var candidates = new HashMap<ResourceLocation, List<RecipeCandidate<ItemResourceKey>>>();
-    var effective = new LinkedHashMap<ResourceLocation, MachineItemRecipe>();
+    var effective = new LinkedHashMap<ResourceLocation, MachineRecipe>();
     var templates = new LinkedHashMap<ResourceLocation, RecipeModifierTemplate>();
     for (var entry : expected.entrySet()) {
       var original = actual.get(entry.getKey());
@@ -161,7 +162,7 @@ public final class MachineRecipeService {
     return contextCatalog(published, owner, base, List.of(), false);
   }
 
-  static void validatePorts(ResourceLocation id, MachineItemRecipe recipe, MachineDefinition machine) {
+  static void validatePorts(ResourceLocation id, MachineRecipe recipe, MachineDefinition machine) {
     for (var requirement : recipe.interfaceInputs()) {
       if (!machine.interfaceTypes().containsKey(requirement.type())
           || machine.parts().stream()
@@ -262,7 +263,7 @@ public final class MachineRecipeService {
     }
   }
 
-  public static Optional<MachineItemRecipe> definition(MinecraftServer server, ResourceLocation id) {
+  public static Optional<MachineRecipe> definition(MinecraftServer server, ResourceLocation id) {
     var published = current(server);
     return published == null ? Optional.empty() : Optional.ofNullable(published.prepared.definitions().get(id));
   }
@@ -276,11 +277,11 @@ public final class MachineRecipeService {
     return Optional.of(recipe != null && recipe.machineId().equals(machineId));
   }
 
-  static Optional<MachineItemRecipe> definitionForStart(MachineControllerBlockEntity controller, ItemRecipePlan plan) {
+  static Optional<MachineRecipe> definitionForStart(MachineControllerBlockEntity controller, ItemRecipePlan plan) {
     return definitionForStart((StructureService.StructureSubject) controller, plan);
   }
 
-  public static Optional<MachineItemRecipe> definitionForStart(StructureService.StructureSubject owner, ItemRecipePlan plan) {
+  public static Optional<MachineRecipe> definitionForStart(StructureService.StructureSubject owner, ItemRecipePlan plan) {
     if (!(owner.structureLevel() instanceof ServerLevel level)) {
       return Optional.empty();
     }
@@ -359,7 +360,7 @@ public final class MachineRecipeService {
       prepared.candidates().forEach((machine, recipes) -> {
         var fluids = new HashMap<String, List<FluidStack>>();
         var outputs = new HashMap<String, List<FluidStack>>();
-        var definitions = new HashMap<String, MachineItemRecipe>();
+        var definitions = new HashMap<String, MachineRecipe>();
         var selectors = new HashMap<String, RecipeSelectors>();
         prepared.definitions().forEach((id, definition) -> {
           if (definition.machineId().equals(machine)) {

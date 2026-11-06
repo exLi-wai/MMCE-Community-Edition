@@ -147,7 +147,7 @@ final class MachineControllerTooltipProvider implements IBlockComponentProvider,
           Component.translatable(
               "jade.mmcece.performance",
               data.getInt(PERFORMANCE + "_tick"),
-              String.format(java.util.Locale.ROOT, "%.2f", data.getInt(PERFORMANCE + "_search") / 1000.0)));
+              String.format(Locale.ROOT, "%.2f", data.getInt(PERFORMANCE + "_search") / 1000.0)));
       tooltip.add(
           Component.translatable(
               "jade.mmcece.workmode",

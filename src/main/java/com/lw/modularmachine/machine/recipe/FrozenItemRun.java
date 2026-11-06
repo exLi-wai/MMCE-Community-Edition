@@ -232,19 +232,19 @@ public final class FrozenItemRun {
     return new FrozenItemRun(data, registries);
   }
 
-  static FrozenItemRun freeze(ResourceLocation recipeId, MachineItemRecipe recipe, long epoch, HolderLookup.Provider registries, List<RecipeExecutionTicket.PortSnapshot> ports, long tick) {
+  static FrozenItemRun freeze(ResourceLocation recipeId, MachineRecipe recipe, long epoch, HolderLookup.Provider registries, List<RecipeExecutionTicket.PortSnapshot> ports, long tick) {
     return freeze(recipeId, recipe, epoch, registries, ports, tick, FactoryUpgradeSnapshot.identity(0));
   }
 
-  static FrozenItemRun freeze(ResourceLocation recipeId, MachineItemRecipe recipe, long epoch, HolderLookup.Provider registries, List<RecipeExecutionTicket.PortSnapshot> ports, long tick, FactoryUpgradeSnapshot upgrades) {
+  static FrozenItemRun freeze(ResourceLocation recipeId, MachineRecipe recipe, long epoch, HolderLookup.Provider registries, List<RecipeExecutionTicket.PortSnapshot> ports, long tick, FactoryUpgradeSnapshot upgrades) {
     return freeze(recipeId, recipe, epoch, registries, ports, tick, upgrades, InputGroup.SHARED);
   }
 
-  static FrozenItemRun freeze(ResourceLocation recipeId, MachineItemRecipe recipe, long epoch, HolderLookup.Provider registries, List<RecipeExecutionTicket.PortSnapshot> ports, long tick, FactoryUpgradeSnapshot upgrades, int inputGroup) {
+  static FrozenItemRun freeze(ResourceLocation recipeId, MachineRecipe recipe, long epoch, HolderLookup.Provider registries, List<RecipeExecutionTicket.PortSnapshot> ports, long tick, FactoryUpgradeSnapshot upgrades, int inputGroup) {
     return freeze(recipeId, recipe, epoch, registries, ports, tick, upgrades, inputGroup, 1);
   }
 
-  static FrozenItemRun freeze(ResourceLocation recipeId, MachineItemRecipe recipe, long epoch, HolderLookup.Provider registries, List<RecipeExecutionTicket.PortSnapshot> ports, long tick, FactoryUpgradeSnapshot upgrades, int inputGroup, int parallelInstances) {
+  static FrozenItemRun freeze(ResourceLocation recipeId, MachineRecipe recipe, long epoch, HolderLookup.Provider registries, List<RecipeExecutionTicket.PortSnapshot> ports, long tick, FactoryUpgradeSnapshot upgrades, int inputGroup, int parallelInstances) {
     var encodedDefinition = Recipe.CODEC.encodeStart(registries.createSerializationContext(NbtOps.INSTANCE), recipe)
         .getOrThrow();
     if (!(encodedDefinition instanceof CompoundTag)) {

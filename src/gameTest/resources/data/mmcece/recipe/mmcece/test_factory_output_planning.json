@@ -1,5 +1,5 @@
 {
-  "type": "mmcece:machine_item",
+  "type": "mmcece:machine",
   "machine": "mmcece:test_factory_output_planning",
   "duration": 2,
   "inputs": [{"stack": {"id": "minecraft:dirt"}, "amount": 1}],

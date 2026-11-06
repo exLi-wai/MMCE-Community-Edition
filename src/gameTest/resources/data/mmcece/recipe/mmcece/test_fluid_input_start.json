@@ -1,5 +1,5 @@
 {
-  "type": "mmcece:machine_item",
+  "type": "mmcece:machine",
   "machine": "mmcece:test_recipe_energy_lifecycle",
   "duration": 1,
   "fluid_inputs": [

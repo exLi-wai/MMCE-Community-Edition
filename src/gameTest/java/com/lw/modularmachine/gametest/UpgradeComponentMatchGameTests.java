@@ -51,6 +51,7 @@ public final class UpgradeComponentMatchGameTests {
             helper.fail("Exact upgrade reload failed: " + failure);
             return;
           }
+          GameTestUpgradeFixtures.install();
           savedDefinitions = FactoryUpgradeService.snapshot().definitions();
           try {
             verify(helper);

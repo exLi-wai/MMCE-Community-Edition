@@ -1,5 +1,5 @@
 {
-  "type": "mmcece:machine_item",
+  "type": "mmcece:machine",
   "machine": "mmcece:test_upgrade_compatibility_run",
   "duration": 20,
   "inputs": [{"stack": {"id": "minecraft:dirt"}, "amount": 1}],

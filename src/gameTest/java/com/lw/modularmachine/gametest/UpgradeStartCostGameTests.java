@@ -78,6 +78,7 @@ public final class UpgradeStartCostGameTests {
             helper.fail("Start cost resource reload failed: " + failure);
             return;
           }
+          GameTestUpgradeFixtures.install();
           savedDefinitions = FactoryUpgradeService.snapshot().definitions();
           var current = new AtomicReference<Fixture>();
           var observations = new AtomicInteger();

@@ -10,7 +10,7 @@ import static org.junit.jupiter.api.Assertions.*;
 class MachineRecipeJsonTest {
   private static JsonObject valid() {
     return JsonParser.parseString(
-        "{\"type\":\"mmcece:machine_item\",\"machine\":\"mmcece:processor\",\"duration\":20,\"inputs\":[{\"stack\":{\"id\":\"minecraft:dirt\"},\"amount\":1}],\"outputs\":[{\"stack\":{\"id\":\"minecraft:iron_ingot\"},\"amount\":1}]}")
+        "{\"type\":\"mmcece:machine\",\"machine\":\"mmcece:processor\",\"duration\":20,\"inputs\":[{\"stack\":{\"id\":\"minecraft:dirt\"},\"amount\":1}],\"outputs\":[{\"stack\":{\"id\":\"minecraft:iron_ingot\"},\"amount\":1}]}")
         .getAsJsonObject();
   }
 

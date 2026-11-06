@@ -13,15 +13,15 @@ public final class MachineRecipeRegistries {
       .create(Registries.RECIPE_TYPE, ModularMachine.MODID);
   private static final DeferredRegister<RecipeSerializer<?>> SERIALIZERS = DeferredRegister
       .create(Registries.RECIPE_SERIALIZER, ModularMachine.MODID);
-  public static final DeferredHolder<RecipeType<?>, RecipeType<MachineItemRecipe>> ITEM_TYPE = TYPES
-      .register("machine_item", () -> new RecipeType<>() {
+  public static final DeferredHolder<RecipeType<?>, RecipeType<MachineRecipe>> ITEM_TYPE = TYPES
+      .register("machine", () -> new RecipeType<>() {
         @Override
         public String toString() {
           return MachineRecipeJson.TYPE;
         }
       });
-  public static final DeferredHolder<RecipeSerializer<?>, MachineItemRecipe.Serializer> ITEM_SERIALIZER = SERIALIZERS
-      .register("machine_item", MachineItemRecipe.Serializer::new);
+  public static final DeferredHolder<RecipeSerializer<?>, MachineRecipe.Serializer> ITEM_SERIALIZER = SERIALIZERS
+      .register("machine", MachineRecipe.Serializer::new);
 
   private MachineRecipeRegistries() {
   }

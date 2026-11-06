@@ -10,14 +10,14 @@ import net.neoforged.neoforge.fluids.FluidStack;
  */
 final class ParallelRecipeAdmission {
   private final ItemRecipePlan plan;
-  private final MachineItemRecipe definition;
+  private final MachineRecipe definition;
   private final ItemOutputLayout layout;
   private final FluidOutputLayout fluids;
   private int low = 1, high, probe;
   private RecipePlanner.Session<ItemResourceKey> items;
   private FluidOutputLayout.Planning fluidPlan;
 
-  ParallelRecipeAdmission(ItemRecipePlan plan, MachineItemRecipe definition, int limit, boolean aggregateDefinition) {
+  ParallelRecipeAdmission(ItemRecipePlan plan, MachineRecipe definition, int limit, boolean aggregateDefinition) {
     this.plan = plan;
     this.definition = definition;
     high = Math.min(limit, Math.min(plan.maxRepeatableInputs(), plan.maxRepeatableOutputs()));

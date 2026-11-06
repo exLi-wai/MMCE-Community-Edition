@@ -1,5 +1,5 @@
 {
-  "type": "mmcece:machine_item",
+  "type": "mmcece:machine",
   "machine": "mmcece:test_recipe_lifecycle",
   "duration": 8,
   "inputs": [{"stack": {"id": "minecraft:sand"}, "amount": 1}],

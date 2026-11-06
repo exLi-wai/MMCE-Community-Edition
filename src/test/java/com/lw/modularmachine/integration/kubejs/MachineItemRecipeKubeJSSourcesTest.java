@@ -13,7 +13,7 @@ import static org.junit.jupiter.api.Assertions.*;
 
 class MachineItemRecipeKubeJSSourcesTest {
   private static final String RECIPE = """
-      {"type":"mmcece:machine_item","machine":"mmcece:ae","duration":100,
+      {"type":"mmcece:machine","machine":"mmcece:ae","duration":100,
        "inputs":[{"stack":{"id":"minecraft:iron_ingot","count":1},"amount":1}],
        "outputs":[{"stack":{"id":"minecraft:gold_ingot"},"amount":1}]}
       """;
@@ -63,7 +63,7 @@ class MachineItemRecipeKubeJSSourcesTest {
     Map<ResourceLocation, JsonElement> live = new LinkedHashMap<>();
     MachineItemRecipeKubeJSSources.capture(live);
     live.put(ResourceLocation.fromNamespaceAndPath("kubejs", "ae/gold_ingot"), JsonParser.parseString("""
-        {"type":"mmcece:machine_item","machine":"mmcece:ae","duration":100,
+        {"type":"mmcece:machine","machine":"mmcece:ae","duration":100,
          "_kubejs_changed_marker":{"source":"main.js"},
          "inputs":[{"stack":{"id":"minecraft:iron_ingot"},"amount":1}],
          "outputs":[{"stack":{"id":"minecraft:gold_ingot"},"amount":1}]}
@@ -78,7 +78,7 @@ class MachineItemRecipeKubeJSSourcesTest {
     Map<ResourceLocation, JsonElement> live = new LinkedHashMap<>();
     MachineItemRecipeKubeJSSources.capture(live);
     live.put(ResourceLocation.fromNamespaceAndPath("kubejs", "ae/gold_ingot"), JsonParser.parseString("""
-        {"type":"mmcece:machine_item","machine":"mmcece:ae","duration":100,
+        {"type":"mmcece:machine","machine":"mmcece:ae","duration":100,
          "inputs":[{"stack":{"id":"minecraft:iron_ingot","count":2},"amount":1}],
          "outputs":[{"stack":{"id":"minecraft:gold_ingot"},"amount":1}]}
         """));

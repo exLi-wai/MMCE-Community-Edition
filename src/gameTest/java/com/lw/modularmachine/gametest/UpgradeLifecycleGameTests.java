@@ -73,6 +73,7 @@ public final class UpgradeLifecycleGameTests {
             helper.fail("Upgrade event reload failed: " + failure);
             return;
           }
+          GameTestUpgradeFixtures.install();
           savedDefinitions = FactoryUpgradeService.snapshot().definitions();
           beginSingleRun(helper);
         })));

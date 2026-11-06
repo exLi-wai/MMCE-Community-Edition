@@ -1,6 +1,6 @@
 package com.lw.modularmachine.integration.jei;
 
-import com.lw.modularmachine.machine.recipe.MachineItemRecipe;
+import com.lw.modularmachine.machine.recipe.MachineRecipe;
 import java.math.BigInteger;
 import java.text.NumberFormat;
 import java.util.ArrayList;
@@ -36,7 +36,7 @@ final class MachineItemRecipeJeiCategory implements IRecipeCategory<MachineRecip
   private final IDrawable[] frames = new IDrawable[23];
 
   @SuppressWarnings("unchecked")
-  MachineItemRecipeJeiCategory(IJeiHelpers helpers, ResourceLocation machine, List<MachineItemRecipe> recipes) {
+  MachineItemRecipeJeiCategory(IJeiHelpers helpers, ResourceLocation machine, List<MachineRecipe> recipes) {
     this.machine = machine;
     type = new RecipeType<>(
         ResourceLocation.fromNamespaceAndPath("mmcece", "machine/" + machine.getNamespace() + "/" + machine.getPath()),
@@ -170,7 +170,7 @@ final class MachineItemRecipeJeiCategory implements IRecipeCategory<MachineRecip
     }
   }
 
-  static List<Component> text(MachineItemRecipe recipe) {
+  static List<Component> text(MachineRecipe recipe) {
     var result = new ArrayList<Component>();
     if (recipe.energyPerTick() > 0) {
       result.add(

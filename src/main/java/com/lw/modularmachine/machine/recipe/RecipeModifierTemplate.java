@@ -19,12 +19,12 @@ final class RecipeModifierTemplate {
     this.machineRules = List.copyOf(machineRules);
   }
 
-  MachineItemRecipe resolve(List<RecipeModifier> upgradeRules, HolderLookup.Provider registries) {
+  MachineRecipe resolve(List<RecipeModifier> upgradeRules, HolderLookup.Provider registries) {
     var inherited = new ArrayList<>(machineRules);
     inherited.addAll(upgradeRules);
     var effective = MachineRecipeJson.normalize(source, inherited);
 
-    return MachineItemRecipe.CODEC.codec().parse(registries.createSerializationContext(JsonOps.INSTANCE), effective)
+    return MachineRecipe.CODEC.codec().parse(registries.createSerializationContext(JsonOps.INSTANCE), effective)
         .getOrThrow();
   }
 }

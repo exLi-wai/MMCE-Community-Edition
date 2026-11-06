@@ -424,6 +424,7 @@ public final class UpgradeItemDataGameTests {
             helper.fail("Item data resource reload failed: " + failure);
             return;
           }
+          GameTestUpgradeFixtures.install();
           savedDefinitions = FactoryUpgradeService.snapshot().definitions();
           var echo = savedDefinitions.stream()
               .filter(definition -> definition.effect().id().equals(id("test_upgrade_item_data"))).findFirst()

@@ -56,6 +56,7 @@ public final class FixedUpgradeDefinitionGameTests {
             helper.fail("Fixed upgrade resource reload failed: " + failure);
             return;
           }
+          GameTestUpgradeFixtures.install();
           savedDefinitions = FactoryUpgradeService.snapshot().definitions();
           try {
             verify(helper);

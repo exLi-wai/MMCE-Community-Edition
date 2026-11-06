@@ -1,13 +1,13 @@
 package com.lw.modularmachine.integration.jei;
 
-import com.lw.modularmachine.machine.recipe.MachineItemRecipe;
+import com.lw.modularmachine.machine.recipe.MachineRecipe;
 import java.util.List;
 import java.util.Objects;
 import net.minecraft.resources.ResourceLocation;
 import net.minecraft.world.item.crafting.RecipeHolder;
 
 /** One recipe from one machine uses the legacy component-planned JEI page. */
-record MachineRecipeJeiPage(ResourceLocation machine, List<RecipeHolder<MachineItemRecipe>> recipes) {
+record MachineRecipeJeiPage(ResourceLocation machine, List<RecipeHolder<MachineRecipe>> recipes) {
   static final int RECIPES_PER_PAGE = 1;
 
   MachineRecipeJeiPage {

@@ -1,5 +1,5 @@
 {
-  "type": "mmcece:machine_item",
+  "type": "mmcece:machine",
   "machine": "mmcece:test_recipe_multi_input",
   "duration": 30,
   "inputs": [{"stack": {"id": "minecraft:dirt"}, "amount": 2}],

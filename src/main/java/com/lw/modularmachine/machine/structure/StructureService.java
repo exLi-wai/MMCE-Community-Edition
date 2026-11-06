@@ -3,6 +3,7 @@ package com.lw.modularmachine.machine.structure;
 import com.lw.modularmachine.block.FactoryControllerBlock;
 import com.lw.modularmachine.block.MachineControllerBlock;
 import com.lw.modularmachine.block.ParallelControllerBlock;
+import com.lw.modularmachine.blockentity.MachineColorable;
 import com.lw.modularmachine.blockentity.MachineControllerBlockEntity;
 import com.lw.modularmachine.blockentity.SmartInterfaceBlockEntity;
 import com.lw.modularmachine.config.MachineConfig;
@@ -961,7 +962,7 @@ public final class StructureService {
       int used = 0;
       while (used < budget && colorCursor < pattern.definition.parts().size()) {
         var position = pattern.position(colorCursor++);
-        if (level.getBlockEntity(position) instanceof com.lw.modularmachine.blockentity.MachineColorable colorable
+        if (level.getBlockEntity(position) instanceof MachineColorable colorable
             && (!colorable.machineColorAssigned() || colorable.machineColor() != pattern.definition.color())) {
           colorable.setMachineColor(pattern.definition.color());
         }

@@ -475,6 +475,7 @@ public final class UpgradeBusDataGameTests {
             helper.fail("Bus data resource reload failed: " + failure);
             return;
           }
+          GameTestUpgradeFixtures.install();
           savedDefinitions = FactoryUpgradeService.snapshot().definitions();
           var definition = savedDefinitions.stream().filter(value -> value.effect().id().equals(DEFINITION_A))
               .findFirst().orElseThrow();

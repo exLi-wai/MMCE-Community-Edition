@@ -1,5 +1,5 @@
 {
-  "type": "mmcece:machine_item",
+  "type": "mmcece:machine",
   "machine": "mmcece:test_factory_parallel_paid",
   "duration": 5,
   "energy_per_tick": 1,

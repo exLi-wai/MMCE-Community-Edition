@@ -1,5 +1,5 @@
 {
-  "type": "mmcece:machine_item",
+  "type": "mmcece:machine",
   "neoforge:conditions": [{"type": "neoforge:mod_loaded", "modid": "mmcece_intentionally_absent"}],
   "machine": "mmcece:test_recipe_resources",
   "duration": 1,

@@ -20,7 +20,7 @@ public final class ItemRecipeCatalog {
   private final Map<String, List<FluidStack>> fluidOutputs;
   private final BooleanSupplier authority;
   private final ItemRecipeCatalog root;
-  private final Map<String, MachineItemRecipe> definitions;
+  private final Map<String, MachineRecipe> definitions;
   private final List<RecipeModifier> contextRules;
   private final Map<String, RecipeSelectors> selectors;
 
@@ -40,11 +40,11 @@ public final class ItemRecipeCatalog {
     this(machineId, recipes, fluidInputs, fluidOutputs, authority, null, Map.of(), List.of());
   }
 
-  ItemRecipeCatalog(ResourceLocation machineId, CompiledRecipeSet<ItemResourceKey> recipes, Map<String, List<FluidStack>> fluidInputs, Map<String, List<FluidStack>> fluidOutputs, BooleanSupplier authority, ItemRecipeCatalog root, Map<String, MachineItemRecipe> definitions, List<RecipeModifier> contextRules) {
+  ItemRecipeCatalog(ResourceLocation machineId, CompiledRecipeSet<ItemResourceKey> recipes, Map<String, List<FluidStack>> fluidInputs, Map<String, List<FluidStack>> fluidOutputs, BooleanSupplier authority, ItemRecipeCatalog root, Map<String, MachineRecipe> definitions, List<RecipeModifier> contextRules) {
     this(machineId, recipes, fluidInputs, fluidOutputs, authority, root, definitions, contextRules, Map.of());
   }
 
-  ItemRecipeCatalog(ResourceLocation machineId, CompiledRecipeSet<ItemResourceKey> recipes, Map<String, List<FluidStack>> fluidInputs, Map<String, List<FluidStack>> fluidOutputs, BooleanSupplier authority, ItemRecipeCatalog root, Map<String, MachineItemRecipe> definitions, List<RecipeModifier> contextRules, Map<String, RecipeSelectors> selectors) {
+  ItemRecipeCatalog(ResourceLocation machineId, CompiledRecipeSet<ItemResourceKey> recipes, Map<String, List<FluidStack>> fluidInputs, Map<String, List<FluidStack>> fluidOutputs, BooleanSupplier authority, ItemRecipeCatalog root, Map<String, MachineRecipe> definitions, List<RecipeModifier> contextRules, Map<String, RecipeSelectors> selectors) {
     this.machineId = Objects.requireNonNull(machineId, "machineId");
     this.recipes = Objects.requireNonNull(recipes, "recipes");
     var copied = new HashMap<String, List<FluidStack>>();
@@ -68,7 +68,7 @@ public final class ItemRecipeCatalog {
     return root;
   }
 
-  MachineItemRecipe definition(String id) {
+  MachineRecipe definition(String id) {
     return definitions.get(id);
   }
 

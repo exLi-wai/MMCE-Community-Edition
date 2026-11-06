@@ -41,13 +41,13 @@ public final class MachineRecipeReloadListener extends ContextAwareReloadListene
                 throw new JsonParseException(entry.getKey() + ": Duplicate native/KubeJS machine recipe ID");
               }
             }
-            var decoded = new LinkedHashMap<ResourceLocation, MachineItemRecipe>();
+            var decoded = new LinkedHashMap<ResourceLocation, MachineRecipe>();
             for (var entry : sources.entrySet()) {
               var result = Recipe.CONDITIONAL_CODEC.parse(makeConditionalOps(), entry.getValue())
                   .getOrThrow(message -> new JsonParseException(entry.getKey() + ": " + message));
               result.ifPresent(value -> {
-                if (!(value.carrier() instanceof MachineItemRecipe machine)) {
-                  throw new JsonParseException(entry.getKey() + ": Expected machine_item recipe in reserved directory");
+                if (!(value.carrier() instanceof MachineRecipe machine)) {
+                  throw new JsonParseException(entry.getKey() + ": Expected machine recipe in reserved directory");
                 }
                 decoded.put(entry.getKey(), machine);
               });

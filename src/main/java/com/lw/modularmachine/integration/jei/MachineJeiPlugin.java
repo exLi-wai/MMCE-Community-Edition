@@ -1,7 +1,7 @@
 package com.lw.modularmachine.integration.jei;
 
 import com.lw.modularmachine.ModularMachine;
-import com.lw.modularmachine.machine.recipe.MachineItemRecipe;
+import com.lw.modularmachine.machine.recipe.MachineRecipe;
 import com.lw.modularmachine.machine.recipe.MachineRecipeRegistries;
 import com.lw.modularmachine.registry.MachineRegistries;
 import java.util.ArrayList;
@@ -26,7 +26,7 @@ import net.minecraft.world.item.crafting.RecipeHolder;
 public final class MachineJeiPlugin implements IModPlugin {
   private final Map<ResourceLocation, MachineItemRecipeJeiCategory> categories = new LinkedHashMap<>();
   private MachineStructureJeiCategory structureOverview;
-  private Map<ResourceLocation, List<RecipeHolder<MachineItemRecipe>>> recipes = Map.of();
+  private Map<ResourceLocation, List<RecipeHolder<MachineRecipe>>> recipes = Map.of();
   static IJeiRuntime runtime;
   @Override
   public ResourceLocation getPluginUid() {
@@ -36,7 +36,7 @@ public final class MachineJeiPlugin implements IModPlugin {
   @Override
   public void registerCategories(IRecipeCategoryRegistration registration) {
     categories.clear();
-    var grouped = new LinkedHashMap<ResourceLocation, List<RecipeHolder<MachineItemRecipe>>>();
+    var grouped = new LinkedHashMap<ResourceLocation, List<RecipeHolder<MachineRecipe>>>();
     var connection = Minecraft.getInstance().getConnection();
     if (connection != null) {
       connection.getRecipeManager().getAllRecipesFor(MachineRecipeRegistries.ITEM_TYPE.get()).stream()

@@ -1,5 +1,8 @@
 package com.lw.modularmachine.gametest;
 
+import net.minecraft.world.level.block.state.BlockState;
+import net.minecraft.server.level.ServerLevel;
+import com.lw.modularmachine.blockentity.MachineColorable;
 import com.lw.modularmachine.blockentity.ParallelControllerBlockEntity;
 import com.lw.modularmachine.block.MachineControllerBlock;
 import com.lw.modularmachine.blockentity.MachineControllerBlockEntity;
@@ -90,14 +93,14 @@ public final class MachineColorGameTests {
     helper.succeed();
   }
 
-  private static boolean restoredColor(BlockEntity original, BlockPos position, net.minecraft.world.level.block.state.BlockState state, net.minecraft.server.level.ServerLevel level) {
+  private static boolean restoredColor(BlockEntity original, BlockPos position, BlockState state, ServerLevel level) {
     var saved = original.saveWithFullMetadata(level.registryAccess());
     var update = original.getUpdateTag(level.registryAccess());
-    if (!update.contains(com.lw.modularmachine.blockentity.MachineColorable.COLOR_TAG)) {
+    if (!update.contains(MachineColorable.COLOR_TAG)) {
       return false;
     }
     var restored = BlockEntity.loadStatic(position, state, saved, level.registryAccess());
-    if (!(restored instanceof com.lw.modularmachine.blockentity.MachineColorable colorable)) {
+    if (!(restored instanceof MachineColorable colorable)) {
       return false;
     }
     if (!colorable.machineColorAssigned()) {

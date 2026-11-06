@@ -352,6 +352,7 @@ public final class UpgradeRecipeCheckGameTests {
             helper.fail("Recipe checker reload failed: " + failure);
             return;
           }
+          GameTestUpgradeFixtures.install();
           savedDefinitions = FactoryUpgradeService.snapshot().definitions();
           var definition = savedDefinitions.stream()
               .filter(value -> value.effect().id().equals(id("test_recipe_check_upgrade"))).findFirst().orElseThrow();

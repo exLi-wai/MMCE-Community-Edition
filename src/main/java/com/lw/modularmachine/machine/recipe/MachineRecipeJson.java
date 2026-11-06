@@ -13,7 +13,7 @@ import java.util.Set;
  * native codec.
  */
 public final class MachineRecipeJson {
-  public static final String TYPE = "mmcece:machine_item";
+  public static final String TYPE = "mmcece:machine";
   /**
    * KubeJS adds this marker to every generated recipe for its own change
    * tracking.

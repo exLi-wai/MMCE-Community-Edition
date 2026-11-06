@@ -32,7 +32,10 @@ import java.util.concurrent.atomic.AtomicLong;
 import net.minecraft.resources.ResourceLocation;
 import net.neoforged.neoforge.server.ServerLifecycleHooks;
 
-/** KubeJS-only bridge for the new tick/finished runtime upgrade proposals. */
+/**
+ * KubeJS-only bridge for fixed upgrade definitions and runtime upgrade
+ * handlers.
+ */
 public final class MMCECEKubeJSPlugin implements KubeJSPlugin {
   public static final EventGroup EVENTS = EventGroup.of("MMCECEUpgradeEvents");
   public static final EventGroup SMART_INTERFACE_EVENTS = EventGroup.of("MMCECESmartInterfaceEvents");
@@ -70,6 +73,7 @@ public final class MMCECEKubeJSPlugin implements KubeJSPlugin {
   @Override
   public void registerClasses(ClassFilter filter) {
     filter.allow(KubeJSUpgradeHandlerRegistration.class);
+    filter.allow(FactoryUpgradeKubeJSHandlers.FixedUpgradeBuilder.class);
     filter.allow(KubeJSSmartInterfaceRegistration.class);
     filter.allow(KubeJSRecipeLifecycleRegistration.class);
     filter.allow(SmartInterfaceApi.class);

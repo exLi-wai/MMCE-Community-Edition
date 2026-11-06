@@ -12,7 +12,7 @@ import com.lw.modularmachine.machine.factory.FactoryThreadState;
 import com.lw.modularmachine.machine.factory.FactoryUpgradeSnapshot;
 import com.lw.modularmachine.machine.orientation.MachineOrientation;
 import com.lw.modularmachine.machine.recipe.ItemRecipeSearch;
-import com.lw.modularmachine.machine.recipe.MachineItemRecipe;
+import com.lw.modularmachine.machine.recipe.MachineRecipe;
 import com.lw.modularmachine.machine.recipe.MachineRecipeService;
 import com.lw.modularmachine.machine.recipe.RecipePlanner;
 import com.lw.modularmachine.machine.structure.StructureService;
@@ -51,12 +51,12 @@ public final class NativeMachineRecipeGameTests {
 
   private static JsonObject root() {
     return JsonParser.parseString(
-        "{\"type\":\"mmcece:machine_item\",\"machine\":\"mmcece:test_recipe_resources\",\"priority\":7,\"duration\":40,\"inputs\":[{\"stack\":{\"id\":\"minecraft:dirt\"},\"amount\":2}],\"outputs\":[{\"stack\":{\"id\":\"minecraft:iron_ingot\"},\"amount\":3}]}")
+        "{\"type\":\"mmcece:machine\",\"machine\":\"mmcece:test_recipe_resources\",\"priority\":7,\"duration\":40,\"inputs\":[{\"stack\":{\"id\":\"minecraft:dirt\"},\"amount\":2}],\"outputs\":[{\"stack\":{\"id\":\"minecraft:iron_ingot\"},\"amount\":3}]}")
         .getAsJsonObject();
   }
 
-  private static MachineItemRecipe decode(GameTestHelper helper, JsonObject root) {
-    return (MachineItemRecipe) Recipe.CODEC
+  private static MachineRecipe decode(GameTestHelper helper, JsonObject root) {
+    return (MachineRecipe) Recipe.CODEC
         .parse(helper.getLevel().registryAccess().createSerializationContext(JsonOps.INSTANCE), root).getOrThrow();
   }
 
@@ -82,7 +82,7 @@ public final class NativeMachineRecipeGameTests {
     var encoded = Recipe.CODEC
         .encodeStart(helper.getLevel().registryAccess().createSerializationContext(JsonOps.INSTANCE), recipe)
         .getOrThrow();
-    var copy = (MachineItemRecipe) Recipe.CODEC
+    var copy = (MachineRecipe) Recipe.CODEC
         .parse(helper.getLevel().registryAccess().createSerializationContext(JsonOps.INSTANCE), encoded).getOrThrow();
     helper.assertTrue(
         copy.inputs().getFirst().amount() == Long.MAX_VALUE
@@ -154,7 +154,7 @@ public final class NativeMachineRecipeGameTests {
     var buffer = new RegistryFriendlyByteBuf(Unpooled.buffer(), helper.getLevel().registryAccess());
     try {
       Recipe.STREAM_CODEC.encode(buffer, recipe);
-      var copy = (MachineItemRecipe) Recipe.STREAM_CODEC.decode(buffer);
+      var copy = (MachineRecipe) Recipe.STREAM_CODEC.decode(buffer);
       helper.assertTrue(
           copy.inputs().getFirst().amount() == Long.MAX_VALUE
               && copy.priority() == 7
@@ -185,7 +185,7 @@ public final class NativeMachineRecipeGameTests {
     try {
       buffer.writeVarInt(7);
       try {
-        MachineItemRecipe.STREAM_CODEC.decode(buffer);
+        MachineRecipe.STREAM_CODEC.decode(buffer);
         helper.fail("Outdated recipe wire schema was accepted");
       } catch (DecoderException expected) {
       }
@@ -212,7 +212,7 @@ public final class NativeMachineRecipeGameTests {
           }
         }
         try {
-          MachineItemRecipe.STREAM_CODEC.decode(buffer);
+          MachineRecipe.STREAM_CODEC.decode(buffer);
           helper.fail("Invalid native packet accepted");
         } catch (DecoderException expected) {
         }

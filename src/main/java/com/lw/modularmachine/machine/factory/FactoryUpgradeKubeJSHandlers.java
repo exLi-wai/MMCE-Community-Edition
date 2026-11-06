@@ -1,6 +1,12 @@
 package com.lw.modularmachine.machine.factory;
 
+import com.google.gson.JsonArray;
+import com.google.gson.JsonObject;
+import com.google.gson.JsonParser;
+import com.google.gson.JsonParseException;
+import java.util.ArrayList;
 import java.util.HashMap;
+import java.util.List;
 import java.util.LinkedHashSet;
 import java.util.Map;
 import java.util.Objects;
@@ -9,6 +15,192 @@ import net.minecraft.resources.ResourceLocation;
 
 /** Immutable server registrations supplied by KubeJS server scripts. */
 public final class FactoryUpgradeKubeJSHandlers {
+  /** Fluent KubeJS builder; JSON is kept private as the validation DTO. */
+  public static final class FixedUpgradeBuilder {
+    private final String idText;
+    private final JsonObject source = new JsonObject();
+    private boolean valid = true;
+
+    private FixedUpgradeBuilder(String id, String item) {
+      idText = id;
+      source.addProperty("schema_version", 1);
+      if (item == null || item.isBlank()) {
+        valid = false;
+      } else {
+        source.addProperty("item", item);
+      }
+    }
+
+    public FixedUpgradeBuilder parallelAdd(int value) {
+      number("parallel_add", value);
+      return this;
+    }
+
+    public FixedUpgradeBuilder parallel(int value) {
+      return parallelAdd(value);
+    }
+
+    public FixedUpgradeBuilder speed(int numerator, int denominator) {
+      number("speed_numerator", numerator);
+      number("speed_denominator", denominator);
+      return this;
+    }
+
+    public FixedUpgradeBuilder energy(int numerator, int denominator) {
+      number("energy_numerator", numerator);
+      number("energy_denominator", denominator);
+      return this;
+    }
+
+    public FixedUpgradeBuilder fluid(int numerator, int denominator) {
+      number("fluid_numerator", numerator);
+      number("fluid_denominator", denominator);
+      return this;
+    }
+
+    public FixedUpgradeBuilder compatibleMachine(String id) {
+      addString("compatible_machines", id);
+      return this;
+    }
+
+    public FixedUpgradeBuilder incompatibleMachine(String id) {
+      addString("incompatible_machines", id);
+      return this;
+    }
+
+    public FixedUpgradeBuilder incompatibleUpgrade(String id) {
+      addString("incompatible_upgrades", id);
+      return this;
+    }
+
+    public FixedUpgradeBuilder exclusiveGroup(String id) {
+      source.addProperty("exclusive_group", id);
+      return this;
+    }
+
+    public FixedUpgradeBuilder maxCount(int value) {
+      number("max_count", value);
+      return this;
+    }
+
+    public FixedUpgradeBuilder dynamicEffect(String id) {
+      source.addProperty("dynamic_effect", id);
+      return this;
+    }
+
+    public FixedUpgradeBuilder lifecycleHandler(String id) {
+      source.addProperty("lifecycle_handler", id);
+      return this;
+    }
+
+    public FixedUpgradeBuilder recipeCheckHandler(String id) {
+      source.addProperty("recipe_check_handler", id);
+      return this;
+    }
+
+    public FixedUpgradeBuilder startDataHandler(String id) {
+      source.addProperty("start_data_handler", id);
+      return this;
+    }
+
+    public FixedUpgradeBuilder startBusDataHandler(String id) {
+      source.addProperty("start_bus_data_handler", id);
+      return this;
+    }
+
+    public FixedUpgradeBuilder tickDataHandler(String id) {
+      source.addProperty("tick_data_handler", id);
+      return this;
+    }
+
+    public FixedUpgradeBuilder finishDataHandler(String id) {
+      source.addProperty("finish_data_handler", id);
+      return this;
+    }
+
+    public FixedUpgradeBuilder startCost(int consume, int durability) {
+      costs("start_cost", consume, durability);
+      return this;
+    }
+
+    public FixedUpgradeBuilder tickCost(int consume, int durability) {
+      costs("tick_cost", consume, durability);
+      return this;
+    }
+
+    public FixedUpgradeBuilder component(String id, String value) {
+      components().addProperty(id, value);
+      return this;
+    }
+
+    public FixedUpgradeBuilder componentNumber(String id, double value) {
+      components().addProperty(id, value);
+      return this;
+    }
+
+    public FixedUpgradeBuilder componentBoolean(String id, boolean value) {
+      components().addProperty(id, value);
+      return this;
+    }
+
+    /** Advanced escape hatch for a component value with a structured JSON shape. */
+    public FixedUpgradeBuilder componentJson(String id, String jsonValue) {
+      try {
+        components().add(id, JsonParser.parseString(jsonValue));
+      } catch (RuntimeException invalid) {
+        valid = false;
+      }
+      return this;
+    }
+
+    public FixedUpgradeBuilder recipeModifier(String target, String io, String operation, double value) {
+      var modifiers = source.has("recipe_modifiers") ? source.getAsJsonArray("recipe_modifiers") : new JsonArray();
+      var modifier = new JsonObject();
+      modifier.addProperty("target", target);
+      modifier.addProperty("io", io);
+      modifier.addProperty("operation", operation);
+      modifier.addProperty("value", value);
+      modifiers.add(modifier);
+      source.add("recipe_modifiers", modifiers);
+      return this;
+    }
+
+    private void number(String field, int value) {
+      source.addProperty(field, value);
+    }
+
+    private JsonObject components() {
+      if (!source.has("components")) {
+        source.add("components", new JsonObject());
+      }
+      return source.getAsJsonObject("components");
+    }
+
+    private void addString(String field, String value) {
+      var values = source.has(field) ? source.getAsJsonArray(field) : new JsonArray();
+      values.add(value);
+      source.add(field, values);
+    }
+
+    private void costs(String field, int consume, int durability) {
+      var cost = new JsonObject();
+      cost.addProperty("consume", consume);
+      cost.addProperty("durability", durability);
+      source.add(field, cost);
+    }
+
+    private void invalidate() {
+      valid = false;
+    }
+
+    private FactoryUpgradeDefinition compile() {
+      if (!valid) {
+        throw new JsonParseException("Invalid KubeJS fixed upgrade builder");
+      }
+      return FactoryUpgradeDefinition.parse(ResourceLocation.parse(idText), source);
+    }
+  }
+
   public static final class Registration {
     private final Map<ResourceLocation, FactoryDynamicUpgrades.Evaluator> dynamic = new HashMap<>();
     private final Map<ResourceLocation, FactoryUpgradeRecipeChecks.Checker> checks = new HashMap<>();
@@ -16,8 +208,28 @@ public final class FactoryUpgradeKubeJSHandlers {
     private final Map<ResourceLocation, FactoryUpgradeItemData.Preparer> itemData = new HashMap<>();
     private final Map<ResourceLocation, FactoryUpgradeBusData.Preparer> busData = new HashMap<>();
     private final Map<ResourceLocation, FactoryUpgradeRuntimeData.Preparer> runtimeData = new HashMap<>();
+    private final List<FixedUpgradeBuilder> definitions = new ArrayList<>();
+    private final Set<ResourceLocation> definitionIdentifiers = new LinkedHashSet<>();
     private final Set<ResourceLocation> identifiers = new LinkedHashSet<>();
     private boolean valid = true;
+
+    /** Starts one fixed item upgrade definition in the KubeJS server script. */
+    public FixedUpgradeBuilder fixedUpgrade(String id, String item) {
+      ResourceLocation identifier = ResourceLocation.tryParse(id);
+      if (identifier == null
+          || !identifier.getNamespace().equals("kubejs")
+          || !identifier.toString().equals(id)
+          || !definitionIdentifiers.add(identifier)
+          || definitions.size() >= FactoryUpgradeService.MAX_DEFINITIONS) {
+        valid = false;
+        var invalid = new FixedUpgradeBuilder(id, item);
+        invalid.invalidate();
+        return invalid;
+      }
+      var builder = new FixedUpgradeBuilder(id, item);
+      definitions.add(builder);
+      return builder;
+    }
 
     public void dynamic(String id, FactoryDynamicUpgrades.Evaluator handler) {
       put(dynamic, id, handler);
@@ -65,7 +277,15 @@ public final class FactoryUpgradeKubeJSHandlers {
     }
 
     public Snapshot snapshot() {
-      return !valid ? Snapshot.EMPTY : new Snapshot(dynamic, checks, events, itemData, busData, runtimeData);
+      List<FactoryUpgradeDefinition> compiled = new ArrayList<>();
+      if (valid) {
+        try {
+          definitions.stream().map(FixedUpgradeBuilder::compile).forEach(compiled::add);
+        } catch (RuntimeException invalid) {
+          valid = false;
+        }
+      }
+      return !valid ? Snapshot.EMPTY : new Snapshot(dynamic, checks, events, itemData, busData, runtimeData, compiled);
     }
   }
 
@@ -75,8 +295,16 @@ public final class FactoryUpgradeKubeJSHandlers {
       Map<ResourceLocation, FactoryUpgradeEvents.Listener> events,
       Map<ResourceLocation, FactoryUpgradeItemData.Preparer> itemData,
       Map<ResourceLocation, FactoryUpgradeBusData.Preparer> busData,
-      Map<ResourceLocation, FactoryUpgradeRuntimeData.Preparer> runtimeData) {
-    public static final Snapshot EMPTY = new Snapshot(Map.of(), Map.of(), Map.of(), Map.of(), Map.of(), Map.of());
+      Map<ResourceLocation, FactoryUpgradeRuntimeData.Preparer> runtimeData,
+      List<FactoryUpgradeDefinition> definitions) {
+    public static final Snapshot EMPTY = new Snapshot(
+        Map.of(),
+        Map.of(),
+        Map.of(),
+        Map.of(),
+        Map.of(),
+        Map.of(),
+        List.of());
 
     public Snapshot {
       dynamic = Map.copyOf(dynamic);
@@ -85,6 +313,7 @@ public final class FactoryUpgradeKubeJSHandlers {
       itemData = Map.copyOf(itemData);
       busData = Map.copyOf(busData);
       runtimeData = Map.copyOf(runtimeData);
+      definitions = List.copyOf(definitions);
     }
   }
 
@@ -100,6 +329,7 @@ public final class FactoryUpgradeKubeJSHandlers {
   public static void install(Snapshot candidate) {
     FactoryUpgradeHandlers.requireServer();
     var next = Objects.requireNonNull(candidate, "candidate");
+    FactoryUpgradeService.replaceDefinitions(next.definitions());
     if (!next.equals(current)) {
       current = next;
       FactoryUpgradeService.invalidateDynamicEffects();

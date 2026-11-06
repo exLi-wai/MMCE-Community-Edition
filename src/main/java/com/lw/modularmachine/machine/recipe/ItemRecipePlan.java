@@ -241,7 +241,7 @@ public final class ItemRecipePlan {
         first.factoryScope);
   }
 
-  public int prepareParallel(MachineItemRecipe definition, int limit, int budget) {
+  public int prepareParallel(MachineRecipe definition, int limit, int budget) {
     if (parallelAdmission == null || parallelRequest != limit) {
       parallelAdmission = new ParallelRecipeAdmission(
           this,

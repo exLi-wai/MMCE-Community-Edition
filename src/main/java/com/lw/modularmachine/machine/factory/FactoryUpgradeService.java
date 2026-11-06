@@ -16,7 +16,6 @@ import net.minecraft.resources.ResourceLocation;
 import net.minecraft.world.item.ItemStack;
 import net.minecraft.world.item.Items;
 import net.neoforged.bus.api.SubscribeEvent;
-import net.neoforged.neoforge.event.AddReloadListenerEvent;
 import net.neoforged.neoforge.event.server.ServerStoppedEvent;
 import net.neoforged.neoforge.server.ServerLifecycleHooks;
 
@@ -184,11 +183,6 @@ public final class FactoryUpgradeService {
       indexes.put(group.getKey(), new ItemIndex(fallback, exact));
     }
     current = new Snapshot(Math.incrementExact(current.epoch()), ordered, grouped, indexes);
-  }
-
-  @SubscribeEvent
-  public static void reload(AddReloadListenerEvent event) {
-    event.addListener(new FactoryUpgradeReloadListener());
   }
 
   @SubscribeEvent

@@ -1,6 +1,6 @@
 package com.lw.modularmachine.integration.jei;
 
-import com.lw.modularmachine.machine.recipe.MachineItemRecipe;
+import com.lw.modularmachine.machine.recipe.MachineRecipe;
 import java.util.ArrayList;
 import java.util.List;
 import net.minecraft.client.Minecraft;
@@ -19,7 +19,7 @@ final class LegacyRecipeLayout {
   final List<Part> parts;
   final int width, height, arrowX, arrowY;
 
-  LegacyRecipeLayout(List<MachineItemRecipe> recipes) {
+  LegacyRecipeLayout(List<MachineRecipe> recipes) {
     var result = new ArrayList<Part>();
     int x = 4, highest = 0, arrow = 8;
     for (boolean input : new boolean[]{true, false}) {
@@ -57,7 +57,7 @@ final class LegacyRecipeLayout {
             .max().orElse(0));
   }
 
-  static int count(MachineItemRecipe recipe, Kind kind, boolean input) {
+  static int count(MachineRecipe recipe, Kind kind, boolean input) {
     return switch (kind) {
       case ENERGY -> input && recipe.energyPerTick() > 0 ? 1 : 0;
       case FLUID ->
