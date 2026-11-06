@@ -305,6 +305,7 @@ public final class FactoryControllerBlockEntity extends BlockEntity implements M
     this.registration = registration;
     detachedState = VerificationState.PENDING;
     detachedFailure = VerificationFailure.UNVERIFIED;
+    syncFormedState();
   }
 
   @Override
@@ -314,6 +315,21 @@ public final class FactoryControllerBlockEntity extends BlockEntity implements M
     registration = null;
     detachedState = VerificationState.INVALID;
     detachedFailure = failure;
+    syncFormedState();
+  }
+
+  private void syncFormedState() {
+    if (level == null || !(getBlockState().getBlock() instanceof FactoryControllerBlock)) {
+      return;
+    }
+    var state = getBlockState();
+    var definition = StructureService.definition(machineId);
+    boolean formed = verificationState() == VerificationState.CONFIRMED
+        && definition != null
+        && definition.hideComponentsWhenFormed();
+    if (state.hasProperty(FactoryControllerBlock.FORMED) && state.getValue(FactoryControllerBlock.FORMED) != formed) {
+      level.setBlock(worldPosition, state.setValue(FactoryControllerBlock.FORMED, formed), 3);
+    }
   }
 
   @Override
@@ -809,6 +825,7 @@ public final class FactoryControllerBlockEntity extends BlockEntity implements M
       }
     }
     StructureService.register(this);
+    syncFormedState();
     initializeThreadsIfNeeded();
     refreshAutomaticUpgradeBindings(server);
     refreshThreadGates();
@@ -1514,6 +1531,12 @@ public final class FactoryControllerBlockEntity extends BlockEntity implements M
 
   @Override
   public Component getDisplayName() {
+    if (verificationState() == VerificationState.CONFIRMED) {
+      var definition = StructureService.definition(machineId);
+      if (definition != null) {
+        return Component.translatable(definition.translationKey());
+      }
+    }
     if (getBlockState().getBlock() instanceof FactoryControllerBlock block && block.dedicated() != null) {
       return block.asItem().getName(block.asItem().getDefaultInstance());
     }

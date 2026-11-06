@@ -24,13 +24,13 @@ import org.lwjgl.glfw.GLFW;
  * reflection/mixins.
  */
 final class LegacyStructureJeiWidget implements IRecipeWidget, IJeiGuiEventListener {
-  private static final ResourceLocation TEXTURE = ResourceLocation
-      .fromNamespaceAndPath("mmcece", "textures/gui/guiblueprint_new.png");
+  private static final ResourceLocation DETAILS_BUTTON = ResourceLocation
+      .fromNamespaceAndPath("mmcece", "textures/gui/button.png");
   private final ClientMachineJeiCatalog.Machine machine;
   private final float centerX, centerY, centerZ, baseScale;
   private boolean dragging;
   private float yaw = -135, pitch = 25, zoom = 1, panX, panY;
-  private boolean layers, cycle = true, menu = true;
+  private boolean cycle = true;
   private long cycleTick = Util.getMillis() / 1500;
   private int layer;
   private final int minY, maxY;
@@ -67,30 +67,18 @@ final class LegacyStructureJeiWidget implements IRecipeWidget, IJeiGuiEventListe
   public void drawWidget(GuiGraphics graphics, double mouseX, double mouseY) {
 
     var mc = Minecraft.getInstance();
-    var title = Component.translatable(machine.translation());
-    var titleLines = mc.font.split(title, 136);
-    if (!titleLines.isEmpty()) {
-      var line = titleLines.getFirst();
-      // Legacy MultiLineLabel centers its 10px line inside the 18px title row.
-      int titleY = 5 + (18 - 10) / 2;
-      graphics.drawString(mc.font, line, 43 + Math.max(0, (136 - mc.font.width(line)) / 2), titleY, 0xFFFFFFFF, true);
-    }
-    graphics.drawString(
-        mc.font,
-        layers ? Component.translatable("jei.mmcece.legacy.layer", layer) : Component.literal("3D"),
-        8,
-        28,
-        0xFFFFFFFF,
-        true);
-    float scale = baseScale * zoom;
+    int width = getArea().width();
+    int height = getArea().height();
+    int buttonHeight = detailsButtonHeight(height);
+    int previewHeight = Math.max(1, height - buttonHeight);
+    float scale = Math.max(.1F, Math.min(24F, Math.min(width, previewHeight) * .55F / structureExtent()) * zoom);
     enablePreviewScissor(graphics);
     graphics.pose().pushPose();
-    graphics.pose().translate(92 + panX, 100 + panY, 150);
+    graphics.pose().translate(width / 2F + panX, previewHeight / 2F + panY, 150);
     graphics.pose().scale(scale, -scale, scale);
-    graphics.pose().mulPose(
-        new Quaternionf()
-            .rotationXYZ((float) Math.toRadians(layers ? 90 : pitch), (float) Math.toRadians(layers ? 0 : yaw), 0));
-    graphics.pose().translate(-centerX, layers ? -layer - .5F : -centerY, -centerZ);
+    graphics.pose()
+        .mulPose(new Quaternionf().rotationXYZ((float) Math.toRadians(pitch), (float) Math.toRadians(yaw), 0));
+    graphics.pose().translate(-centerX, -centerY, -centerZ);
     Lighting.setupFor3DItems();
     graphics.flush();
     var buffers = mc.renderBuffers().bufferSource();
@@ -100,9 +88,6 @@ final class LegacyStructureJeiWidget implements IRecipeWidget, IJeiGuiEventListe
     int tick = (int) cycleTick;
     try (var colorScope = PreviewBlockView.pushMachineColor(machine.color())) {
       for (var part : machine.parts()) {
-        if (layers && part.offset().getY() != layer) {
-          continue;
-        }
         var state = part.alternatives().get(Math.floorMod(tick, part.alternatives().size()));
         graphics.pose().pushPose();
         graphics.pose().translate(part.offset().getX(), part.offset().getY(), part.offset().getZ());
@@ -123,23 +108,55 @@ final class LegacyStructureJeiWidget implements IRecipeWidget, IJeiGuiEventListe
       }
     }
 
-    button(graphics, 165, 161, 15, menu, mouseX, mouseY);
-    if (menu) {
-      button(graphics, 150, 161, 30, layers, mouseX, mouseY);
-      button(graphics, 135, 161, 105, cycle, mouseX, mouseY);
-    }
-    button(graphics, 165, 28, 229, false, mouseX, mouseY);
+    drawDetailsButton(graphics, mouseX, mouseY, width, height, buttonHeight);
+  }
+
+  private float structureExtent() {
+    float minX = machine.parts().stream().mapToInt(part -> part.offset().getX()).min().orElse(0);
+    float maxX = machine.parts().stream().mapToInt(part -> part.offset().getX()).max().orElse(0);
+    float minY = machine.parts().stream().mapToInt(part -> part.offset().getY()).min().orElse(0);
+    float maxY = machine.parts().stream().mapToInt(part -> part.offset().getY()).max().orElse(0);
+    float minZ = machine.parts().stream().mapToInt(part -> part.offset().getZ()).min().orElse(0);
+    float maxZ = machine.parts().stream().mapToInt(part -> part.offset().getZ()).max().orElse(0);
+    return Math.max(maxX - minX + 1, Math.max(maxY - minY + 1, maxZ - minZ + 1));
+  }
+
+  private static int detailsButtonHeight(int height) {
+    return Math.min(20, Math.max(14, height / 11));
+  }
+
+  private static int detailsButtonLeft(int width) {
+    return Math.max(0, width / 2 - Math.max(1, width - 16) / 2);
+  }
+
+  private static int detailsButtonWidth(int width) {
+    return Math.max(1, width - 16);
+  }
+
+  private static void drawDetailsButton(GuiGraphics graphics, double mouseX, double mouseY, int width, int height, int buttonHeight) {
+    int buttonWidth = detailsButtonWidth(width);
+    int left = detailsButtonLeft(width);
+    int top = height - buttonHeight;
+    boolean hovered = mouseX >= left && mouseX < left + buttonWidth && mouseY >= top && mouseY < height;
+    graphics.blit(DETAILS_BUTTON, left, top, buttonWidth, buttonHeight, 0, 0, 200, 20, 200, 20);
+    Minecraft minecraft = Minecraft.getInstance();
+    int color = hovered ? 0xFF202020 : 0xFF404040;
+    Component text = Component.translatable("jei.mmcece.view_details");
+    int textX = left + (buttonWidth - minecraft.font.width(text)) / 2;
+    int textY = top + Math.max(0, (buttonHeight - minecraft.font.lineHeight) / 2);
+    graphics.drawString(minecraft.font, text, textX, textY, color, false);
   }
 
   /**
    * JEI invokes this widget with the recipe-area transform already on the pose
    * stack. GuiGraphics.enableScissor consumes screen coordinates and does not
-   * apply that transform, so convert the local preview rectangle first.
+   * apply that transform, so convert the whole local recipe area first.
    */
-  private static void enablePreviewScissor(GuiGraphics graphics) {
+  private void enablePreviewScissor(GuiGraphics graphics) {
     var pose = new Matrix4f(graphics.pose().last().pose());
-    var topLeft = pose.transformPosition(new Vector3f(6, 26, 0));
-    var bottomRight = pose.transformPosition(new Vector3f(178, 176, 0));
+    var topLeft = pose.transformPosition(new Vector3f(0, 0, 0));
+    var bottomRight = pose.transformPosition(
+        new Vector3f(getArea().width(), getArea().height() - detailsButtonHeight(getArea().height()), 0));
     int left = (int) Math.floor(Math.min(topLeft.x, bottomRight.x));
     int top = (int) Math.floor(Math.min(topLeft.y, bottomRight.y));
     int right = (int) Math.ceil(Math.max(topLeft.x, bottomRight.x));
@@ -147,35 +164,18 @@ final class LegacyStructureJeiWidget implements IRecipeWidget, IJeiGuiEventListe
     graphics.enableScissor(left, top, right, bottom);
   }
 
-  private static void button(GuiGraphics graphics, int x, int y, int v, boolean selected, double mouseX, double mouseY) {
-    int u = 184 + (selected ? 30 : mouseX >= x && mouseX < x + 13 && mouseY >= y && mouseY < y + 13 ? 15 : 0);
-    graphics.blit(TEXTURE, x, y, u, v, 13, 13);
-  }
   @Override
   public boolean mouseClicked(double x, double y, int button) {
-    if (y >= 161 && y < 174) {
-      if (x >= 165 && x < 178) {
-        menu = !menu;
-        return true;
-      }
-      if (menu && x >= 150 && x < 163) {
-        layers = !layers;
-        return true;
-      }
-      if (menu && x >= 135 && x < 148) {
-        cycle = !cycle;
-        return true;
-      }
-    }
-    if (x >= 165 && x < 178 && y >= 28 && y < 41) {
-      yaw = -135;
-      pitch = 25;
-      zoom = 1;
-      panX = 0;
-      panY = 0;
+    int width = getArea().width();
+    int height = getArea().height();
+    int buttonHeight = detailsButtonHeight(height);
+    int buttonWidth = detailsButtonWidth(width);
+    int buttonLeft = detailsButtonLeft(width);
+    if (x >= buttonLeft && x < buttonLeft + buttonWidth && y >= height - buttonHeight && y < height && button == 0) {
+      Minecraft.getInstance().setScreen(new MachineDetailsScreen(machine));
       return true;
     }
-    dragging = x >= 6 && x < 178 && y >= 26 && y < 176;
+    dragging = inPreview(x, y);
     return dragging;
   }
   @Override
@@ -200,37 +200,30 @@ final class LegacyStructureJeiWidget implements IRecipeWidget, IJeiGuiEventListe
   }
   @Override
   public boolean mouseScrolled(double x, double y, double scrollX, double scrollY) {
-    if (x < 6 || x >= 178 || y < 26 || y >= 176) {
+    if (!inPreview(x, y)) {
       return false;
     }
-    if (layers) {
-      layer = Math.max(minY, Math.min(maxY, layer + (int) Math.signum(scrollY)));
-    } else {
-      zoom = Math.max(.1F, Math.min(8, zoom * (float) Math.pow(1.1, scrollY)));
-    }
+    zoom = Math.max(.1F, Math.min(8, zoom * (float) Math.pow(1.1, scrollY)));
     return true;
   }
   @Override
   public void getTooltip(ITooltipBuilder tooltip, double x, double y) {
-    if (x >= 165 && x < 178 && y >= 28 && y < 41) {
-      tooltip.add(Component.translatable("gui.preview.button.reset_center.tip"));
+    int width = getArea().width();
+    int height = getArea().height();
+    int buttonHeight = detailsButtonHeight(height);
+    int buttonWidth = detailsButtonWidth(width);
+    int buttonLeft = detailsButtonLeft(width);
+    if (x >= buttonLeft && x < buttonLeft + buttonWidth && y >= height - buttonHeight && y < height) {
+      tooltip.add(Component.translatable("jei.mmcece.view_details"));
+      return;
     }
-    if (y >= 161 && y < 174) {
-      if (x >= 165 && x < 178) {
-        tooltip.add(Component.translatable("gui.preview.button.menu.tip"));
-      } else if (menu && x >= 150 && x < 163) {
-        tooltip.add(
-            Component.translatable(
-                layers ? "gui.preview.button.toggle_3d_render.tip" : "gui.preview.button.toggle_layer_render.tip"));
-      } else if (menu && x >= 135 && x < 148) {
-        tooltip.add(
-            Component.translatable(
-                cycle ? "gui.preview.button.disable_cycle_replaceable_blocks.tip" : "gui.preview.button.enable_cycle_replaceable_blocks.tip.0"));
-        if (!cycle) {
-          tooltip.add(Component.translatable("gui.preview.button.enable_cycle_replaceable_blocks.tip.1"));
-        }
-      }
-    }
+  }
+
+  private boolean inPreview(double x, double y) {
+    return x >= 0
+        && x < getArea().width()
+        && y >= 0
+        && y < getArea().height() - detailsButtonHeight(getArea().height());
   }
   @Override
   public boolean keyPressed(double x, double y, int key, int scan, int modifiers) {

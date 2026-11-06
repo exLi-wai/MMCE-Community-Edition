@@ -31,6 +31,7 @@ import java.util.Objects;
 import java.util.Set;
 import net.minecraft.core.BlockPos;
 import net.minecraft.resources.ResourceLocation;
+import net.minecraft.world.phys.AABB;
 import org.slf4j.Logger;
 import net.minecraft.world.level.block.Block;
 import net.minecraft.world.level.block.state.BlockState;
@@ -52,7 +53,9 @@ public record MachineDefinition(
     int maxParallelism,
     boolean requiresBlueprint,
     boolean factoryOnly,
-    int color) {
+    int color,
+    boolean hideComponentsWhenFormed,
+    AABB controllerBoundingBox) {
 
   /**
    * In Laozi's world, Laozi builds it however he wants.
@@ -63,7 +66,7 @@ public record MachineDefinition(
   public MachineDefinition(ResourceLocation id, String translationKey, List<Part> parts, long energyPerTick, OrientationPolicy orientationPolicy, OrientationCompilation orientationCompilation, FactoryThreadPreset factoryPreset, List<RecipeModifier> recipeModifiers, List<StructureModifierDefinition> structureModifiers, Map<String, SmartInterfaceType> interfaceTypes, int internalParallelism, int maxParallelism) {
     this(id, translationKey, parts, energyPerTick, orientationPolicy, orientationCompilation, factoryPreset,
         recipeModifiers, structureModifiers, interfaceTypes, internalParallelism, maxParallelism, false, false,
-        0xFFFFFF);
+        0xFFFFFF, false, new AABB(0, 0, 0, 1, 1, 1));
   }
 
   public MachineDefinition(ResourceLocation id, String translationKey, List<Part> parts, long energyPerTick, OrientationPolicy orientationPolicy, OrientationCompilation orientationCompilation, FactoryThreadPreset factoryPreset, List<RecipeModifier> recipeModifiers, List<StructureModifierDefinition> structureModifiers, Map<String, SmartInterfaceType> interfaceTypes) {
@@ -93,6 +96,10 @@ public record MachineDefinition(
   public MachineDefinition {
     if ((color & ~0xFFFFFF) != 0) {
       throw new IllegalArgumentException("Machine color must be an RGB value");
+    }
+    Objects.requireNonNull(controllerBoundingBox, "controllerBoundingBox");
+    if (!validBox(controllerBoundingBox)) {
+      throw new IllegalArgumentException("Controller bounding box must be finite and inside one block");
     }
     if (internalParallelism < 0 || maxParallelism < 1 || internalParallelism > maxParallelism) {
       throw new IllegalArgumentException("Invalid internal or maximum machine parallelism");
@@ -353,6 +360,13 @@ public record MachineDefinition(
     }
     var interfaceTypes = root.has("interfaces") ? SmartInterfaceType
         .parse(root.get("interfaces"), path + ".interfaces") : Map.<String, SmartInterfaceType>of();
+    boolean hideComponentsWhenFormed = booleanAlias(
+        root,
+        "hide_components_when_formed",
+        "hide-components-when-formed",
+        false,
+        path);
+    AABB controllerBoundingBox = boundingBoxAlias(root, "controller_bounding_box", "controller-bounding-box", path);
 
     return new MachineDefinition(
         id,
@@ -369,7 +383,9 @@ public record MachineDefinition(
         maxParallelism,
         root.has("requires_blueprint") && bool(root.get("requires_blueprint"), path + ".requires_blueprint"),
         root.has("factory_only") && bool(root.get("factory_only"), path + ".factory_only"),
-        machineColor(root, path));
+        machineColor(root, path),
+        hideComponentsWhenFormed,
+        controllerBoundingBox);
   }
 
   /**
@@ -452,6 +468,10 @@ public record MachineDefinition(
         "parallel",
         "requires_blueprint",
         "factory_only",
+        "hide_components_when_formed",
+        "hide-components-when-formed",
+        "controller_bounding_box",
+        "controller-bounding-box",
         "color",
         "machine_color");
     return 2;
@@ -470,6 +490,68 @@ public record MachineDefinition(
       throw error(path, "Expected boolean");
     }
     return element.getAsBoolean();
+  }
+
+  private static boolean booleanAlias(JsonObject root, String primary, String legacy, boolean fallback, String path) {
+    if (root.has(primary) && root.has(legacy)) {
+      throw error(path, "Use only one of " + primary + " or " + legacy);
+    }
+    String key = root.has(primary) ? primary : root.has(legacy) ? legacy : null;
+    return key == null ? fallback : bool(root.get(key), path + "." + key);
+  }
+
+  private static AABB boundingBoxAlias(JsonObject root, String primary, String legacy, String path) {
+    if (root.has(primary) && root.has(legacy)) {
+      throw error(path, "Use only one of " + primary + " or " + legacy);
+    }
+    String key = root.has(primary) ? primary : root.has(legacy) ? legacy : null;
+    if (key == null) {
+      return new AABB(0, 0, 0, 1, 1, 1);
+    }
+    JsonArray values = array(root.get(key), path + "." + key);
+    if (values.size() != 6) {
+      throw error(path + "." + key, "Expected six finite coordinates");
+    }
+    double minX = decimal(values.get(0), path + "." + key + "[0]");
+    double minY = decimal(values.get(1), path + "." + key + "[1]");
+    double minZ = decimal(values.get(2), path + "." + key + "[2]");
+    double maxX = decimal(values.get(3), path + "." + key + "[3]");
+    double maxY = decimal(values.get(4), path + "." + key + "[4]");
+    double maxZ = decimal(values.get(5), path + "." + key + "[5]");
+    AABB result = new AABB(minX, minY, minZ, maxX, maxY, maxZ);
+    if (!validBox(result)) {
+      throw error(path + "." + key, "Expected a box inside [0, 1]");
+    }
+    return result;
+  }
+
+  private static double decimal(JsonElement element, String path) {
+    if (element == null || !element.isJsonPrimitive() || !element.getAsJsonPrimitive().isNumber()) {
+      throw error(path, "Expected number");
+    }
+    double value = element.getAsDouble();
+    if (!Double.isFinite(value)) {
+      throw error(path, "Expected finite number");
+    }
+    return value;
+  }
+
+  private static boolean validBox(AABB box) {
+    return Double.isFinite(box.minX)
+        && Double.isFinite(box.minY)
+        && Double.isFinite(box.minZ)
+        && Double.isFinite(box.maxX)
+        && Double.isFinite(box.maxY)
+        && Double.isFinite(box.maxZ)
+        && box.minX >= 0
+        && box.minY >= 0
+        && box.minZ >= 0
+        && box.maxX <= 1
+        && box.maxY <= 1
+        && box.maxZ <= 1
+        && box.minX <= box.maxX
+        && box.minY <= box.maxY
+        && box.minZ <= box.maxZ;
   }
 
   private static int color(JsonElement element, String path) {

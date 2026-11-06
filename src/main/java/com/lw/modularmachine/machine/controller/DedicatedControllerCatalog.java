@@ -68,7 +68,7 @@ public final class DedicatedControllerCatalog {
    */
   public static String resourceFingerprint() {
     try {
-      byte[] bytes = ("registered-machines-v6\n" + MACHINES + ENTRIES).getBytes(StandardCharsets.UTF_8);
+      byte[] bytes = ("registered-machines-v7\n" + MACHINES + ENTRIES).getBytes(StandardCharsets.UTF_8);
       return HexFormat.of().formatHex(MessageDigest.getInstance("SHA-256").digest(bytes));
     } catch (NoSuchAlgorithmException impossible) {
       throw new IllegalStateException(impossible);

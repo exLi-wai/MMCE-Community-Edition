@@ -1,9 +1,7 @@
 package com.lw.modularmachine.integration.jei;
 
 import com.lw.modularmachine.registry.MachineRegistries;
-import java.util.LinkedHashMap;
 import java.util.List;
-import mezz.jei.api.constants.VanillaTypes;
 import mezz.jei.api.gui.builder.IRecipeLayoutBuilder;
 import mezz.jei.api.gui.drawable.IDrawable;
 import mezz.jei.api.gui.ingredient.IRecipeSlotsView;
@@ -16,28 +14,13 @@ import mezz.jei.api.recipe.category.IRecipeCategory;
 import net.minecraft.client.gui.GuiGraphics;
 import net.minecraft.network.chat.Component;
 import net.minecraft.resources.ResourceLocation;
-import net.minecraft.world.item.Item;
 import net.minecraft.world.item.ItemStack;
-import net.minecraft.world.item.Items;
 
-/**
- * Original 184x220 blueprint category used by the generic controllers: every
- * machine is a recipe, so the page indicator walks through all of them.
- * Dedicated controllers instead open their machine page, which embeds the same
- * preview on the left (see MachineItemRecipeJeiCategory).
- */
 final class MachineStructureJeiCategory implements IRecipeCategory<ClientMachineJeiCatalog.Machine> {
   static final RecipeType<ClientMachineJeiCatalog.Machine> TYPE = new RecipeType<>(
       ResourceLocation.fromNamespaceAndPath("mmcece", "preview"),
       ClientMachineJeiCatalog.Machine.class);
-  private final IDrawable background;
   MachineStructureJeiCategory(IJeiHelpers helpers) {
-    background = helpers.getGuiHelper().createDrawable(
-        ResourceLocation.fromNamespaceAndPath("mmcece", "textures/gui/guiblueprint_new.png"),
-        0,
-        0,
-        184,
-        220);
   }
   @Override
   public RecipeType<ClientMachineJeiCatalog.Machine> getRecipeType() {
@@ -73,7 +56,7 @@ final class MachineStructureJeiCategory implements IRecipeCategory<ClientMachine
   }
   @Override
   public void draw(ClientMachineJeiCatalog.Machine machine, IRecipeSlotsView slots, GuiGraphics graphics, double mouseX, double mouseY) {
-    background.draw(graphics, 0, 0);
+    // The structure view intentionally uses the JEI page background directly.
   }
   @Override
   public void setRecipe(IRecipeLayoutBuilder builder, ClientMachineJeiCatalog.Machine machine, IFocusGroup focuses) {
@@ -86,24 +69,6 @@ final class MachineStructureJeiCategory implements IRecipeCategory<ClientMachine
     focus(builder, MachineJeiPlugin.factory(machine.id()));
     focus(builder, MachineJeiPlugin.blueprint(machine.id()));
     focus(builder, MachineJeiPlugin.blueprint(machine.id()), RecipeIngredientRole.OUTPUT);
-    var counts = new LinkedHashMap<List<Item>, Integer>();
-    for (var part : machine.parts()) {
-      var items = part.alternatives().stream().map(state -> state.getBlock().asItem()).filter(item -> item != Items.AIR)
-          .distinct().toList();
-      if (!items.isEmpty()) {
-        counts.merge(items, 1, Integer::sum);
-      }
-    }
-    int index = 0;
-    for (var entry : counts.entrySet()) {
-      var stacks = entry.getKey().stream().map(item -> new ItemStack(item, 1)).toList();
-      builder.addInputSlot().setSlotName("material_" + index).addItemStacks(stacks)
-          .setCustomRenderer(VanillaTypes.ITEM_STACK, new LegacyJeiItemRenderer(entry.getValue()))
-          .setPosition(6 + index % 9 * 18, 180 + index / 9 * 18).addRichTooltipCallback(
-              (view, tooltip) -> tooltip
-                  .add(Component.translatable("jei.mmcece.machine_item.amount", entry.getValue())));
-      index++;
-    }
   }
   private static void focus(IRecipeLayoutBuilder builder, ItemStack stack) {
     focus(builder, stack, RecipeIngredientRole.INPUT);
@@ -120,10 +85,5 @@ final class MachineStructureJeiCategory implements IRecipeCategory<ClientMachine
     var preview = new LegacyStructureJeiWidget(machine);
     builder.addWidget(preview);
     builder.addGuiEventListener(preview);
-    var slots = builder.getRecipeSlots().getSlots().stream()
-        .filter(slot -> slot.getSlotName().filter(name -> name.startsWith("material_")).isPresent()).toList();
-    if (!slots.isEmpty()) {
-      builder.addScrollGridWidget(slots, 9, 2).setPosition(5, 179);
-    }
   }
 }

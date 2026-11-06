@@ -84,7 +84,9 @@ public final class DedicatedControllerResources {
         for (var pose : MachineOrientation.all()) {
           var variant = new JsonObject();
           variant.addProperty("model", "mmcece:block/dedicated/" + entry.id() + "/" + pose.key());
-          variants.add("facing=" + pose.front().getSerializedName() + ",roll=" + pose.roll(), variant);
+          String key = "facing=" + pose.front().getSerializedName() + ",roll=" + pose.roll();
+          variants.add(key + ",formed=false", variant.deepCopy());
+          variants.add(key + ",formed=true", variant);
           var template = read("models/block/" + (entry.factory() ? "factory/" : "controller/") + pose.key() + ".json");
           if (entry.model() == null) {
             var textures = new JsonObject();

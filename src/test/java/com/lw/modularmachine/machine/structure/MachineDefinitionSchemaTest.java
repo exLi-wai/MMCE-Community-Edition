@@ -85,6 +85,20 @@ class MachineDefinitionSchemaTest {
   }
 
   @Test
+  void formedDisplayAndControllerBoundingBoxAreValidated() {
+    JsonObject root = json(PORTS);
+    root.addProperty("hide_components_when_formed", true);
+    root.add("controller_bounding_box", JsonParser.parseString("[0.1,0.2,0.0,0.9,1.0,0.8]"));
+    var definition = parse(root);
+    assertTrue(definition.hideComponentsWhenFormed());
+    assertEquals(0.1, definition.controllerBoundingBox().minX);
+    assertEquals(0.8, definition.controllerBoundingBox().maxZ);
+
+    root.add("controller_bounding_box", JsonParser.parseString("[-0.1,0,0,1,1,1]"));
+    assertPath(root, "controller_bounding_box");
+  }
+
+  @Test
   void orientationAloneSelectsThePoseSpace() {
     var definition = parse(
         json(

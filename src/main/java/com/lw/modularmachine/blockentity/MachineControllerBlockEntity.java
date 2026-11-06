@@ -151,12 +151,28 @@ public final class MachineControllerBlockEntity extends BlockEntity implements M
     output = null;
     detachedState = VerificationState.PENDING;
     detachedFailure = VerificationFailure.UNVERIFIED;
+    syncFormedState();
   }
 
   public void failPreparation(VerificationFailure failure) {
     attach(null);
     detachedState = VerificationState.INVALID;
     detachedFailure = failure;
+    syncFormedState();
+  }
+
+  private void syncFormedState() {
+    if (level == null || !(getBlockState().getBlock() instanceof MachineControllerBlock)) {
+      return;
+    }
+    var state = getBlockState();
+    var definition = StructureService.definition(machineId);
+    boolean formed = verificationState() == VerificationState.CONFIRMED
+        && definition != null
+        && definition.hideComponentsWhenFormed();
+    if (state.hasProperty(MachineControllerBlock.FORMED) && state.getValue(MachineControllerBlock.FORMED) != formed) {
+      level.setBlock(worldPosition, state.setValue(MachineControllerBlock.FORMED, formed), 3);
+    }
   }
 
   public ResourceLocation machineId() {
@@ -418,6 +434,12 @@ public final class MachineControllerBlockEntity extends BlockEntity implements M
 
   @Override
   public Component getDisplayName() {
+    if (verificationState() == VerificationState.CONFIRMED) {
+      var definition = StructureService.definition(machineId);
+      if (definition != null) {
+        return Component.translatable(definition.translationKey());
+      }
+    }
     if (getBlockState().getBlock() instanceof MachineControllerBlock block && block.dedicated() != null) {
       return block.asItem().getName(block.asItem().getDefaultInstance());
     }
@@ -640,6 +662,7 @@ public final class MachineControllerBlockEntity extends BlockEntity implements M
     // O(1) metadata refresh also catches an untracked change to the controller
     // state itself.
     StructureService.register(this);
+    syncFormedState();
     refreshUpgradeSources();
     if (runningRecipe != null) {
       long tickStarted = System.nanoTime();

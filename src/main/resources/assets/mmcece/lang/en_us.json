@@ -32,6 +32,8 @@
   "jei.mmcece.machine_item.selector": "Resource selector: %s",
   "jei.mmcece.machine_item.fluid_components": "Fluid components: %s",
   "jei.mmcece.machine_item.interface_input": "Interface %s: %s..%s",
+  "jei.mmcece.view_details": "View Details",
+  "jei.mmcece.details.title": "Structure Preview: %s",
   "menu.mmcece.controller.progress": "Progress: %s",
   "block.mmcece.factory_controller": "Factory Controller",
   "block.mmcece.registered_factory_controller": "%s Integration Controller",

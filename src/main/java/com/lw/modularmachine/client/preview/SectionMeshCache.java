@@ -45,7 +45,7 @@ import org.lwjgl.system.MemoryUtil;
  * Render-thread model capture / GPU ownership, detached background vertex
  * packing.
  */
-final class SectionMeshCache implements AutoCloseable {
+public final class SectionMeshCache implements AutoCloseable {
   private static final float[] FACE_SHADE = {.5F, 1F, .8F, .8F, .6F, .6F};
   private static final Direction[] FACES = Direction.values();
   private static final long GPU_BYTES = 96L << 20;
@@ -118,7 +118,7 @@ final class SectionMeshCache implements AutoCloseable {
     close();
     scene = value;
   }
-  void setPreviewScene(PreviewRenderScene value) {
+  public void setPreviewScene(PreviewRenderScene value) {
     setScene(value);
     preview = true;
   }
@@ -145,7 +145,7 @@ final class SectionMeshCache implements AutoCloseable {
     worldChecks.add(section.key());
   }
 
-  void setPreviewState(int layer, int step) {
+  public void setPreviewState(int layer, int step) {
     if (scene == null || previewLayer == layer && previewStep == step) {
       return;
     }
@@ -441,7 +441,7 @@ final class SectionMeshCache implements AutoCloseable {
     drawMeshes(event.getModelViewMatrix(), event.getProjectionMatrix(), eye, eye);
   }
 
-  void drawPreview(Matrix4f view, Matrix4f projection) {
+  public void drawPreview(Matrix4f view, Matrix4f projection) {
     var eyeVector = new Matrix4f(view).invert().transformPosition(new Vector3f());
     var eye = new Vec3(eyeVector.x, eyeVector.y, eyeVector.z);
     var frustum = new FrustumIntersection(new Matrix4f(projection).mul(view));

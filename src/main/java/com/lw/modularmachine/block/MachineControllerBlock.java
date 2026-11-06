@@ -29,6 +29,7 @@ import net.minecraft.world.level.block.state.BlockState;
 import net.minecraft.world.level.block.state.StateDefinition;
 import net.minecraft.world.level.block.state.properties.BlockStateProperties;
 import net.minecraft.world.level.block.state.properties.DirectionProperty;
+import net.minecraft.world.level.block.state.properties.BooleanProperty;
 import net.minecraft.world.level.block.state.properties.IntegerProperty;
 import net.minecraft.world.level.storage.loot.LootParams;
 import net.minecraft.world.level.storage.loot.parameters.LootContextParams;
@@ -38,6 +39,7 @@ public final class MachineControllerBlock extends BaseEntityBlock {
   public static final MapCodec<MachineControllerBlock> CODEC = simpleCodec(MachineControllerBlock::new);
   public static final DirectionProperty FACING = BlockStateProperties.FACING;
   public static final IntegerProperty ROLL = IntegerProperty.create("roll", 0, 3);
+  public static final BooleanProperty FORMED = BooleanProperty.create("formed");
 
   private final Entry dedicated;
   public MachineControllerBlock(Properties properties) {
@@ -46,7 +48,8 @@ public final class MachineControllerBlock extends BaseEntityBlock {
   public MachineControllerBlock(Properties properties, Entry dedicated) {
     super(properties);
     this.dedicated = dedicated;
-    registerDefaultState(stateDefinition.any().setValue(FACING, Direction.NORTH).setValue(ROLL, 0));
+    registerDefaultState(
+        stateDefinition.any().setValue(FACING, Direction.NORTH).setValue(ROLL, 0).setValue(FORMED, false));
   }
 
   public Entry dedicated() {
@@ -64,12 +67,22 @@ public final class MachineControllerBlock extends BaseEntityBlock {
 
   @Override
   protected RenderShape getRenderShape(BlockState state) {
-    return RenderShape.MODEL;
+    return state.getValue(FORMED) ? RenderShape.INVISIBLE : RenderShape.MODEL;
   }
 
   @Override
   protected void createBlockStateDefinition(StateDefinition.Builder<Block, BlockState> builder) {
-    builder.add(FACING, ROLL);
+    builder.add(FACING, ROLL, FORMED);
+  }
+
+  @Override
+  protected net.minecraft.world.phys.shapes.VoxelShape getShape(BlockState state, net.minecraft.world.level.BlockGetter level, BlockPos pos, net.minecraft.world.phys.shapes.CollisionContext context) {
+    return ControllerBlockGeometry.shape(level, pos);
+  }
+
+  @Override
+  protected net.minecraft.world.phys.shapes.VoxelShape getCollisionShape(BlockState state, net.minecraft.world.level.BlockGetter level, BlockPos pos, net.minecraft.world.phys.shapes.CollisionContext context) {
+    return ControllerBlockGeometry.shape(level, pos);
   }
 
   @Override
