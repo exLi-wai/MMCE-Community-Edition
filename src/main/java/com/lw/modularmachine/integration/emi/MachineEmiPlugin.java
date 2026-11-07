@@ -1,6 +1,7 @@
 package com.lw.modularmachine.integration.emi;
 
 import com.lw.modularmachine.ModularMachine;
+import com.lw.modularmachine.client.recipe.MachineRecipeLayout;
 import com.lw.modularmachine.integration.jei.ClientMachineJeiCatalog;
 import com.lw.modularmachine.integration.jei.MachineJeiPlugin;
 import com.lw.modularmachine.machine.recipe.MachineRecipe;
@@ -26,6 +27,7 @@ public final class MachineEmiPlugin implements EmiPlugin {
   public void register(EmiRegistry registry) {
     EmiPreviewInput.register();
     Map<ResourceLocation, MachineEmiCategory> recipeCategories = new LinkedHashMap<>();
+    Map<ResourceLocation, MachineRecipeLayout> layouts = new LinkedHashMap<>();
     Map<ResourceLocation, ArrayList<net.minecraft.world.item.crafting.RecipeHolder<MachineRecipe>>> recipes = new LinkedHashMap<>();
     registry.getRecipeManager().getAllRecipesFor(MachineRecipeRegistries.ITEM_TYPE.get()).stream()
         .sorted(Comparator.comparing(holder -> holder.id().toString())).forEach(
@@ -50,6 +52,10 @@ public final class MachineEmiPlugin implements EmiPlugin {
         continue;
       }
       var recipe = new MachineEmiCategory(categoryId(machine, "recipe"), icon(machine), display, false);
+      layouts.put(
+          machine,
+          new MachineRecipeLayout(
+              recipes.getOrDefault(machine, new ArrayList<>()).stream().map(holder -> holder.value()).toList()));
       recipeCategories.put(machine, recipe);
       registry.addCategory(recipe);
       addRecipeWorkstations(registry, recipe, machine);
@@ -63,7 +69,7 @@ public final class MachineEmiPlugin implements EmiPlugin {
         var recipe = recipeCategories.get(machine);
         if (recipe != null) {
           for (var holder : recipes.getOrDefault(machine, new ArrayList<>())) {
-            add.accept(new MachineEmiItemRecipe(recipe, holder.id(), holder.value()));
+            add.accept(new MachineEmiItemRecipe(recipe, holder.id(), holder.value(), layouts.get(machine)));
           }
         }
       }

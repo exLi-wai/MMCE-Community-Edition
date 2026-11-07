@@ -8,6 +8,8 @@ import dev.emi.emi.api.recipe.EmiRecipeCategory;
 import dev.emi.emi.api.stack.EmiIngredient;
 import dev.emi.emi.api.stack.EmiStack;
 import dev.emi.emi.api.widget.WidgetHolder;
+
+import java.util.ArrayList;
 import java.util.List;
 import net.minecraft.resources.ResourceLocation;
 
@@ -23,7 +25,7 @@ final class MachineEmiRecipe extends BasicEmiRecipe {
 
   @Override
   public List<EmiIngredient> getCatalysts() {
-    var result = new java.util.ArrayList<EmiIngredient>();
+    var result = new ArrayList<EmiIngredient>();
     result.add(EmiStack.of(MachineRegistries.CONTROLLER.get()));
     result.add(EmiStack.of(MachineRegistries.FACTORY_CONTROLLER.get()));
     add(result, MachineJeiPlugin.controller(machine.id()));

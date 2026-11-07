@@ -1,4 +1,4 @@
-package com.lw.modularmachine.integration.jei;
+package com.lw.modularmachine.client.recipe;
 
 import com.lw.modularmachine.machine.recipe.MachineRecipe;
 import java.util.ArrayList;
@@ -8,18 +8,18 @@ import net.minecraft.client.Minecraft;
 /**
  * Geometry ported from MMCE CategoryDynamicRecipe / RecipeLayoutPart (GPL-3.0).
  */
-final class LegacyRecipeLayout {
-  enum Kind {
+public final class MachineRecipeLayout {
+  public enum Kind {
     ENERGY,
     FLUID,
     ITEM
   }
-  record Part(Kind kind, boolean input, int index, int x, int y) {
+  public record Part(Kind kind, boolean input, int index, int x, int y) {
   }
-  final List<Part> parts;
-  final int width, height, arrowX, arrowY;
+  public final List<Part> parts;
+  public final int width, height, arrowX, arrowY;
 
-  LegacyRecipeLayout(List<MachineRecipe> recipes) {
+  public MachineRecipeLayout(List<MachineRecipe> recipes) {
     var result = new ArrayList<Part>();
     int x = 4, highest = 0, arrow = 8;
     for (boolean input : new boolean[]{true, false}) {
@@ -45,7 +45,7 @@ final class LegacyRecipeLayout {
     parts = List.copyOf(result);
     arrowX = arrow;
     arrowY = highest / 2 / 2;
-    int textWidth = recipes.stream().flatMap(recipe -> MachineItemRecipeJeiCategory.text(recipe).stream())
+    int textWidth = recipes.stream().flatMap(recipe -> MachineRecipeDisplay.text(recipe).stream())
         .mapToInt(Minecraft.getInstance().font::width).max().orElse(0);
     width = Math.max(x, textWidth + 4);
     height = Math.max(
