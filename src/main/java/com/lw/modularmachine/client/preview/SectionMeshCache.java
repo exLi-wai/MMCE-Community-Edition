@@ -5,6 +5,7 @@ import com.lw.modularmachine.network.ProjectionPayloads;
 import com.mojang.blaze3d.systems.RenderSystem;
 import com.mojang.blaze3d.vertex.ByteBufferBuilder;
 import com.mojang.blaze3d.vertex.DefaultVertexFormat;
+import com.mojang.blaze3d.vertex.VertexConsumer;
 import com.mojang.blaze3d.vertex.MeshData;
 import com.mojang.blaze3d.vertex.VertexBuffer;
 import com.mojang.blaze3d.vertex.VertexFormat;
@@ -31,6 +32,7 @@ import net.minecraft.util.RandomSource;
 import net.minecraft.world.inventory.InventoryMenu;
 import net.minecraft.world.level.block.Block;
 import net.minecraft.world.level.block.Blocks;
+import net.minecraft.world.level.block.LiquidBlock;
 import net.minecraft.world.level.block.RenderShape;
 import net.minecraft.world.level.block.state.BlockState;
 import net.minecraft.world.phys.Vec3;
@@ -341,13 +343,17 @@ public final class SectionMeshCache implements AutoCloseable {
     var actual = captured == null ? Blocks.AIR.defaultBlockState() : captured;
     var state = shown(entry);
     if (state == null
-        || state.getRenderShape() != RenderShape.MODEL
+        || state.getRenderShape() != RenderShape.MODEL && !(state.getBlock() instanceof LiquidBlock)
         || !preview && captured != null && entry.matches(actual)
         || preview && previewLayer != Integer.MIN_VALUE && entry.position().getY() != previewLayer) {
       return;
     }
     var mc = Minecraft.getInstance();
     var view = new PreviewBlockView(scene, previewLayer, previewStep);
+    if (state.getBlock() instanceof LiquidBlock) {
+      captureLiquid(job, entry, state, view, mc);
+      return;
+    }
     var model = mc.getBlockRenderer().getBlockModel(state);
     var random = job.random;
     long seed = state.getSeed(entry.position());
@@ -384,6 +390,118 @@ public final class SectionMeshCache implements AutoCloseable {
                   preview ? 255 : 100,
                   translucent));
         }
+      }
+    }
+  }
+
+  private void captureLiquid(Build job, ProjectionPayloads.Entry entry, BlockState state, PreviewBlockView view, Minecraft mc) {
+    var fluid = state.getFluidState();
+    if (fluid.isEmpty()) {
+      return;
+    }
+    var collector = new FluidQuadCollector();
+    mc.getBlockRenderer().renderLiquid(entry.position(), view, collector, state, fluid);
+    int sectionX = entry.position().getX() & 15;
+    int sectionY = entry.position().getY() & 15;
+    int sectionZ = entry.position().getZ() & 15;
+    for (var quad : collector.quads()) {
+      int color = quad.color();
+      job.quads.add(
+          new PreviewMeshData.Quad(
+              toBlockLocalVertices(quad.vertices(), sectionX, sectionY, sectionZ),
+              (float) (entry.position().getX() - job.origin.x),
+              (float) (entry.position().getY() - job.origin.y),
+              (float) (entry.position().getZ() - job.origin.z),
+              color >> 16 & 255,
+              color >> 8 & 255,
+              color & 255,
+              color >>> 24,
+              true));
+    }
+  }
+
+  private static int[] toBlockLocalVertices(int[] vertices, int sectionX, int sectionY, int sectionZ) {
+    int[] local = vertices.clone();
+    for (int index = 0; index < local.length; index += 6) {
+      local[index] = Float.floatToRawIntBits(Float.intBitsToFloat(local[index]) - sectionX);
+      local[index + 1] = Float.floatToRawIntBits(Float.intBitsToFloat(local[index + 1]) - sectionY);
+      local[index + 2] = Float.floatToRawIntBits(Float.intBitsToFloat(local[index + 2]) - sectionZ);
+    }
+    return local;
+  }
+
+  private static final class FluidQuadCollector implements VertexConsumer {
+    private final List<Quad> quads = new ArrayList<>();
+    private final int[] vertices = new int[24];
+    private int vertex;
+    private float x, y, z, u, v;
+    private int color = -1;
+    private boolean active;
+
+    private record Quad(int[] vertices, int color) {
+    }
+
+    List<Quad> quads() {
+      finishVertex();
+      return quads;
+    }
+
+    @Override
+    public VertexConsumer addVertex(float x, float y, float z) {
+      finishVertex();
+      this.x = x;
+      this.y = y;
+      this.z = z;
+      u = 0F;
+      v = 0F;
+      color = -1;
+      active = true;
+      return this;
+    }
+
+    @Override
+    public VertexConsumer setColor(int red, int green, int blue, int alpha) {
+      color = alpha << 24 | red << 16 | green << 8 | blue;
+      return this;
+    }
+
+    @Override
+    public VertexConsumer setUv(float u, float v) {
+      this.u = u;
+      this.v = v;
+      return this;
+    }
+
+    @Override
+    public VertexConsumer setUv1(int u, int v) {
+      return this;
+    }
+
+    @Override
+    public VertexConsumer setUv2(int u, int v) {
+      return this;
+    }
+
+    @Override
+    public VertexConsumer setNormal(float x, float y, float z) {
+      return this;
+    }
+
+    private void finishVertex() {
+      if (!active) {
+        return;
+      }
+      int offset = vertex++ * 6;
+      vertices[offset] = Float.floatToRawIntBits(x);
+      vertices[offset + 1] = Float.floatToRawIntBits(y);
+      vertices[offset + 2] = Float.floatToRawIntBits(z);
+      vertices[offset + 3] = 0;
+      vertices[offset + 4] = Float.floatToRawIntBits(u);
+      vertices[offset + 5] = Float.floatToRawIntBits(v);
+      active = false;
+      if (vertex == 4) {
+        quads.add(new Quad(vertices.clone(), color));
+        vertex = 0;
       }
     }
   }

@@ -232,6 +232,14 @@ class MachineDefinitionSchemaTest {
   }
 
   @Test
+  void propertyArraysExpandStateAlternatives() {
+    JsonObject root = json(
+        "{\"parts\":[{\"offset\":[1,0,0],\"block\":\"minecraft:oak_stairs\",\"properties\":{\"half\":[\"bottom\",\"top\"],\"shape\":[\"straight\",\"outer_left\"]}}]}");
+    var references = MachineDefinition.blockReferences(Map.of(ID, root));
+    assertEquals(4, references.size());
+  }
+
+  @Test
   void candidateCompilationDoesNotPublishAndReturnsAnImmutableMap() {
     var before = StructureService.definitionsSnapshot();
     long epoch = StructureService.definitionEpoch();

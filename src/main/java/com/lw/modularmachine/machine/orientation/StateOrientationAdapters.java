@@ -8,12 +8,10 @@ import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.Set;
+import net.minecraft.core.Direction;
 import net.minecraft.core.registries.BuiltInRegistries;
 import net.minecraft.resources.ResourceLocation;
 import net.minecraft.world.level.block.Block;
-import net.minecraft.world.level.block.Blocks;
-import net.minecraft.world.level.block.RotatedPillarBlock;
-import net.minecraft.world.level.block.state.properties.BlockStateProperties;
 import net.minecraft.world.level.block.state.properties.Property;
 import net.neoforged.neoforge.server.ServerLifecycleHooks;
 import org.slf4j.Logger;
@@ -117,7 +115,7 @@ public final class StateOrientationAdapters {
       }
       try {
         Block block = BuiltInRegistries.BLOCK.get(id);
-        Map<Property<?>, TransformKind> audited = auditedProperties(id, block);
+        Map<Property<?>, TransformKind> classifications = classifyProperties(block);
         Map<String, Map<String, Comparable<?>>> literals = new LinkedHashMap<>();
         Map<String, Property<?>> properties = new LinkedHashMap<>();
         for (BlockReference reference : entry.getValue()) {
@@ -134,7 +132,7 @@ public final class StateOrientationAdapters {
         }
         Map<String, PropertySnapshot> snapshots = new LinkedHashMap<>();
         properties.forEach((name, property) -> {
-          TransformKind kind = audited.getOrDefault(property, TransformKind.UNSUPPORTED);
+          TransformKind kind = classifications.getOrDefault(property, TransformKind.UNSUPPORTED);
           // Direction/axis adapters have at most six values. Opaque/scalar domains are
           // never
           // enumerated.
@@ -151,36 +149,22 @@ public final class StateOrientationAdapters {
   }
 
   /**
-   * Deliberately limited vanilla allowlist; sharing a property name or subclass
-   * is not an audit.
+   * Direction and axis properties are transformed with the controller pose; every
+   * other registered state property is an exact scalar constraint. This lets
+   * stairs, slabs, doors and modded variant blocks retain all of their state
+   * values without a per-block allowlist.
    */
-  private static Map<Property<?>, TransformKind> auditedProperties(ResourceLocation id, Block block) {
+  private static Map<Property<?>, TransformKind> classifyProperties(Block block) {
     Map<Property<?>, TransformKind> result = new HashMap<>();
-    if (!id.getNamespace().equals("minecraft")) {
-      return result;
-    }
-    if (block.getClass() == RotatedPillarBlock.class) {
-      result.put(BlockStateProperties.AXIS, TransformKind.AXIS);
-    }
-    if (block == Blocks.CHAIN) {
-      result.put(BlockStateProperties.AXIS, TransformKind.AXIS);
-      result.put(BlockStateProperties.WATERLOGGED, TransformKind.SCALAR);
-    }
-    if (block == Blocks.OBSERVER || block == Blocks.DISPENSER || block == Blocks.DROPPER || block == Blocks.END_ROD) {
-      result.put(BlockStateProperties.FACING, TransformKind.DIRECTION);
-    }
-    if (block == Blocks.OBSERVER) {
-      result.put(BlockStateProperties.POWERED, TransformKind.SCALAR);
-    }
-    if (block == Blocks.DISPENSER || block == Blocks.DROPPER) {
-      result.put(BlockStateProperties.TRIGGERED, TransformKind.SCALAR);
-    }
-    if (block == Blocks.FURNACE || block == Blocks.BLAST_FURNACE || block == Blocks.SMOKER) {
-      result.put(BlockStateProperties.HORIZONTAL_FACING, TransformKind.DIRECTION);
-      result.put(BlockStateProperties.LIT, TransformKind.SCALAR);
-    }
-    if (block == Blocks.REDSTONE_LAMP) {
-      result.put(BlockStateProperties.LIT, TransformKind.SCALAR);
+    for (Property<?> property : block.getStateDefinition().getProperties()) {
+      var values = property.getPossibleValues();
+      if (!values.isEmpty() && values.stream().allMatch(Direction.class::isInstance)) {
+        result.put(property, TransformKind.DIRECTION);
+      } else if (!values.isEmpty() && values.stream().allMatch(Direction.Axis.class::isInstance)) {
+        result.put(property, TransformKind.AXIS);
+      } else {
+        result.put(property, TransformKind.SCALAR);
+      }
     }
     return result;
   }

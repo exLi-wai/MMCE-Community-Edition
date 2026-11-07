@@ -18,7 +18,7 @@ public final class PreviewBlockView implements BlockAndTintGetter {
   private final PreviewRenderScene scene;
   private final int layer, step;
 
-  PreviewBlockView(PreviewRenderScene scene, int layer, int step) {
+  public PreviewBlockView(PreviewRenderScene scene, int layer, int step) {
     this.scene = scene;
     this.layer = layer;
     this.step = step;

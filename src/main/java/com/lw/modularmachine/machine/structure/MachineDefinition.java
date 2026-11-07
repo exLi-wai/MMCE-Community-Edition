@@ -24,6 +24,7 @@ import com.lw.modularmachine.machine.smart.SmartInterfaceType;
 import java.util.ArrayList;
 import java.util.HashMap;
 import java.util.HashSet;
+import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.Objects;
@@ -266,13 +267,15 @@ public record MachineDefinition(
             continue;
           }
           var block = snapshot.block(blockId, partPath);
-          Map<Property<?>, Comparable<?>> required = new HashMap<>();
-          for (var entry : properties.entrySet()) {
-            String propertyPath = partPath + ".properties." + entry.getKey();
-            var property = block.property(entry.getKey(), propertyPath);
-            required.put(property.property(), property.value(literal(entry.getValue(), propertyPath), propertyPath));
+          for (var variant : propertyVariants(properties, partPath + ".properties")) {
+            Map<Property<?>, Comparable<?>> required = new HashMap<>();
+            for (var entry : variant.entrySet()) {
+              String propertyPath = partPath + ".properties." + entry.getKey();
+              var property = block.property(entry.getKey(), propertyPath);
+              required.put(property.property(), property.value(entry.getValue(), propertyPath));
+            }
+            alternatives.add(new Alternative(block, required));
           }
-          alternatives.add(new Alternative(block, required));
         }
         if (alternatives.isEmpty()) {
           offsets.remove(offset);
@@ -413,23 +416,26 @@ public record MachineDefinition(
         if (candidatePort(part) != null) {
           continue;
         }
-        List<StateOrientationAdapters.PropertyReference> properties = new ArrayList<>();
-        if (part.has("properties")) {
-          JsonObject required = object(part.get("properties"), partPath + ".properties");
-          for (var property : required.entrySet()) {
-            String propertyPath = partPath + ".properties." + property.getKey();
-            properties.add(
-                new StateOrientationAdapters.PropertyReference(
-                    property.getKey(),
-                    literal(property.getValue(), propertyPath),
-                    propertyPath));
+        JsonObject required = part
+            .has("properties") ? object(part.get("properties"), partPath + ".properties") : new JsonObject();
+        for (var variant : propertyVariants(required, partPath + ".properties")) {
+          for (String name : blockNames(part, partPath)) {
+            String blockPath = partPath + ".block";
+            String propertyPath = partPath + ".properties";
+            List<StateOrientationAdapters.PropertyReference> variantProperties = new ArrayList<>();
+            for (var property : variant.entrySet()) {
+              variantProperties.add(
+                  new StateOrientationAdapters.PropertyReference(
+                      property.getKey(),
+                      property.getValue(),
+                      propertyPath + "." + property.getKey()));
+            }
+            ResourceLocation blockId = blockId(name, blockPath);
+            if (result.size() >= 4_194_304) {
+              throw error(partPath, "Reload exceeds 4194304 block alternatives");
+            }
+            result.add(new StateOrientationAdapters.BlockReference(blockId, partPath, variantProperties));
           }
-        }
-        for (String name : blockNames(part, partPath)) {
-          if (result.size() >= 4_194_304) {
-            throw error(partPath, "Reload exceeds 4194304 block alternatives");
-          }
-          result.add(new StateOrientationAdapters.BlockReference(blockId(name, partPath), partPath, properties));
         }
       }
     }
@@ -596,6 +602,40 @@ public record MachineDefinition(
       result.add(string(elements.get(i), path + ".block[" + i + "]"));
     }
     return result;
+  }
+
+  private static List<Map<String, String>> propertyVariants(JsonObject properties, String path) {
+    List<Map<String, String>> variants = new ArrayList<>();
+    variants.add(new LinkedHashMap<>());
+    for (var entry : properties.entrySet()) {
+      String propertyPath = path + "." + entry.getKey();
+      List<String> values;
+      if (entry.getValue().isJsonArray()) {
+        JsonArray array = entry.getValue().getAsJsonArray();
+        if (array.isEmpty() || array.size() > 256) {
+          throw error(propertyPath, "Expected 1..256 property values");
+        }
+        values = new ArrayList<>();
+        for (int index = 0; index < array.size(); index++) {
+          values.add(literal(array.get(index), propertyPath + "[" + index + "]"));
+        }
+      } else {
+        values = List.of(literal(entry.getValue(), propertyPath));
+      }
+      List<Map<String, String>> expanded = new ArrayList<>();
+      for (var variant : variants) {
+        for (String value : values) {
+          if (expanded.size() >= 256) {
+            throw error(path, "Property state combinations exceed 256 variants");
+          }
+          var copy = new LinkedHashMap<>(variant);
+          copy.put(entry.getKey(), value);
+          expanded.add(copy);
+        }
+      }
+      variants = expanded;
+    }
+    return variants;
   }
 
   private static PortKind blockPort(JsonElement value) {

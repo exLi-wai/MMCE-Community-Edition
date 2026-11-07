@@ -42,7 +42,7 @@ final class MachineDetailsScreen extends Screen {
   private Matrix4f inverse;
   private float centerX, centerY, centerZ, yaw = -135F, pitch = 25F, zoom = 1F, panX, panY;
   private int step;
-  private boolean cycle = true, dragging, settingsOpen;
+  private boolean cycle = true, dragging, settingsOpen = true;
   private double dragDistance;
   private int selected = -1;
   private long lastCycle;
@@ -239,7 +239,6 @@ final class MachineDetailsScreen extends Screen {
     int settingsY = panelTop + 10;
     if (button == 0 && x >= settingsX && x < settingsX + 20 && y >= settingsY && y < settingsY + 22) {
       settingsOpen = !settingsOpen;
-      selected = -1;
       return true;
     }
     if (button == 0

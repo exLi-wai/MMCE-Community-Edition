@@ -19,7 +19,8 @@ import static org.junit.jupiter.api.Assertions.*;
 class AsyncStructureWorkTest {
   @Test
   void layoutPreparationAndRelocationNeedNoWorldAndPreserveIdentity() throws Exception {
-    var json = JsonParser.parseString("{\"parts\":[{\"offset\":[1,0,0],\"port\":\"energy_input\"}]}").getAsJsonObject();
+    var json = JsonParser.parseString("{\"parts\":[{\"offset\":[1,0,0],\"block\":\"energy_input\"}]}")
+        .getAsJsonObject();
     var definition = MachineDefinition
         .parse(ResourceLocation.parse("mmcece:async_unit"), json, new RegistrySnapshot(Map.of()));
     var origin = new BlockPos(31, 70, -17);

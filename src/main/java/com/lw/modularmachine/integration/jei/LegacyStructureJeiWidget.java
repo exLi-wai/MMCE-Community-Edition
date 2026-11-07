@@ -1,7 +1,11 @@
 package com.lw.modularmachine.integration.jei;
 
 import com.mojang.blaze3d.platform.Lighting;
+import com.mojang.blaze3d.vertex.PoseStack;
+import com.mojang.blaze3d.vertex.VertexConsumer;
 import com.lw.modularmachine.client.preview.PreviewBlockView;
+import com.lw.modularmachine.client.preview.PreviewRenderScene;
+import com.lw.modularmachine.network.ProjectionPayloads;
 import mezz.jei.api.gui.builder.ITooltipBuilder;
 import mezz.jei.api.gui.inputs.IJeiGuiEventListener;
 import mezz.jei.api.gui.widgets.IRecipeWidget;
@@ -11,9 +15,14 @@ import net.minecraft.client.gui.GuiGraphics;
 import net.minecraft.client.gui.navigation.ScreenPosition;
 import net.minecraft.client.gui.navigation.ScreenRectangle;
 import net.minecraft.client.renderer.LightTexture;
+import net.minecraft.client.renderer.RenderType;
 import net.minecraft.client.renderer.texture.OverlayTexture;
+import net.minecraft.core.BlockPos;
 import net.minecraft.network.chat.Component;
 import net.minecraft.resources.ResourceLocation;
+import net.minecraft.world.level.block.LiquidBlock;
+import net.minecraft.world.level.block.state.BlockState;
+import java.util.List;
 import org.joml.Matrix4f;
 import org.joml.Quaternionf;
 import org.joml.Vector3f;
@@ -27,6 +36,7 @@ final class LegacyStructureJeiWidget implements IRecipeWidget, IJeiGuiEventListe
   private static final ResourceLocation DETAILS_BUTTON = ResourceLocation
       .fromNamespaceAndPath("mmcece", "textures/gui/button.png");
   private final ClientMachineJeiCatalog.Machine machine;
+  private final PreviewRenderScene scene;
   private final float centerX, centerY, centerZ, baseScale;
   private boolean dragging;
   private float yaw = -135, pitch = 25, zoom = 1, panX, panY;
@@ -36,6 +46,10 @@ final class LegacyStructureJeiWidget implements IRecipeWidget, IJeiGuiEventListe
   private final int minY, maxY;
   LegacyStructureJeiWidget(ClientMachineJeiCatalog.Machine machine) {
     this.machine = machine;
+    var entries = machine.parts().stream()
+        .map(part -> new ProjectionPayloads.Entry(part.offset(), part.alternatives(), List.of())).toList();
+    scene = PreviewRenderScene
+        .create(0, ResourceLocation.fromNamespaceAndPath("minecraft", "overworld"), machine.id(), entries);
 
     minY = machine.parts().stream().mapToInt(part -> part.offset().getY()).min().orElse(0);
     maxY = machine.parts().stream().mapToInt(part -> part.offset().getY()).max().orElse(0);
@@ -92,8 +106,22 @@ final class LegacyStructureJeiWidget implements IRecipeWidget, IJeiGuiEventListe
         graphics.pose().pushPose();
         graphics.pose().translate(part.offset().getX(), part.offset().getY(), part.offset().getZ());
         try {
-          mc.getBlockRenderer()
-              .renderSingleBlock(state, graphics.pose(), buffers, LightTexture.FULL_BRIGHT, OverlayTexture.NO_OVERLAY);
+          if (state.getBlock() instanceof LiquidBlock) {
+            renderLiquid(
+                mc,
+                graphics.pose().last(),
+                buffers.getBuffer(RenderType.translucent()),
+                part.offset(),
+                state,
+                tick);
+          } else {
+            mc.getBlockRenderer().renderSingleBlock(
+                state,
+                graphics.pose(),
+                buffers,
+                LightTexture.FULL_BRIGHT,
+                OverlayTexture.NO_OVERLAY);
+          }
         } finally {
           graphics.pose().popPose();
         }
@@ -109,6 +137,68 @@ final class LegacyStructureJeiWidget implements IRecipeWidget, IJeiGuiEventListe
     }
 
     drawDetailsButton(graphics, mouseX, mouseY, width, height, buttonHeight);
+  }
+
+  private void renderLiquid(Minecraft minecraft, PoseStack.Pose pose, VertexConsumer target, BlockPos position, BlockState state, int step) {
+    if (state.getFluidState().isEmpty()) {
+      return;
+    }
+    var view = new PreviewBlockView(scene, Integer.MIN_VALUE, step);
+    int sectionX = position.getX() & 15;
+    int sectionY = position.getY() & 15;
+    int sectionZ = position.getZ() & 15;
+    var consumer = new SectionLocalVertexConsumer(target, pose, sectionX, sectionY, sectionZ);
+    minecraft.getBlockRenderer().renderLiquid(position, view, consumer, state, state.getFluidState());
+  }
+
+  private static final class SectionLocalVertexConsumer implements VertexConsumer {
+    private final VertexConsumer target;
+    private final PoseStack.Pose pose;
+    private final int sectionX, sectionY, sectionZ;
+
+    private SectionLocalVertexConsumer(VertexConsumer target, PoseStack.Pose pose, int sectionX, int sectionY, int sectionZ) {
+      this.target = target;
+      this.pose = pose;
+      this.sectionX = sectionX;
+      this.sectionY = sectionY;
+      this.sectionZ = sectionZ;
+    }
+
+    @Override
+    public VertexConsumer addVertex(float x, float y, float z) {
+      target.addVertex(pose.pose(), x - sectionX, y - sectionY, z - sectionZ);
+      return this;
+    }
+
+    @Override
+    public VertexConsumer setColor(int red, int green, int blue, int alpha) {
+      target.setColor(red, green, blue, alpha);
+      return this;
+    }
+
+    @Override
+    public VertexConsumer setUv(float u, float v) {
+      target.setUv(u, v);
+      return this;
+    }
+
+    @Override
+    public VertexConsumer setUv1(int u, int v) {
+      target.setUv1(u, v);
+      return this;
+    }
+
+    @Override
+    public VertexConsumer setUv2(int u, int v) {
+      target.setUv2(u, v);
+      return this;
+    }
+
+    @Override
+    public VertexConsumer setNormal(float x, float y, float z) {
+      target.setNormal(pose, x, y, z);
+      return this;
+    }
   }
 
   private float structureExtent() {

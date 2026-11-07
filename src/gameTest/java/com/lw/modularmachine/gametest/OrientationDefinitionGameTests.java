@@ -22,6 +22,8 @@ import net.minecraft.gametest.framework.GameTestHelper;
 import net.minecraft.resources.ResourceLocation;
 import net.minecraft.world.level.block.Blocks;
 import net.minecraft.world.level.block.state.properties.BlockStateProperties;
+import net.minecraft.world.level.block.state.properties.Half;
+import net.minecraft.world.level.block.state.properties.StairsShape;
 import net.neoforged.neoforge.gametest.GameTestHolder;
 import net.neoforged.neoforge.gametest.PrefixGameTestTemplate;
 import net.neoforged.neoforge.server.ServerLifecycleHooks;
@@ -164,29 +166,52 @@ public final class OrientationDefinitionGameTests {
   }
 
   @GameTest(template = "empty16", timeoutTicks = 40)
-  public static void opaque_properties_fail_explicitly_without_breaking_legacy_field_or_world_semantics(GameTestHelper helper) {
+  public static void arbitrary_block_properties_match_declared_states(GameTestHelper helper) {
     JsonObject root = oneBlock(
         "minecraft:oak_stairs",
         "{\"facing\":\"north\",\"half\":\"bottom\",\"shape\":\"straight\"}",
         "local");
-    expectJson(helper, "UNSUPPORTED_ORIENTATION_PROPERTY", () -> parse(root));
-    root.getAsJsonArray("parts").get(0).getAsJsonObject().addProperty("properties_space", "world");
-    helper.assertTrue(parse(root).allowedOrientationMask() == 0xFFFFFF, "Explicit world semantics should be literal");
-    root.remove("orientation");
-    root.getAsJsonArray("parts").get(0).getAsJsonObject().addProperty("properties_space", "legacy");
-    var legacy = parse(root);
-    helper.assertTrue(legacy.allowedOrientationMask() == 0x1111, "Legacy property-space policy changed");
+    var local = parse(root);
+    helper.assertTrue(local.allows(MachineOrientation.IDENTITY), "Declared block state was rejected");
     BlockPos origin = helper.absolutePos(new BlockPos(4, 3, 4));
-    var pattern = new CompiledStructure(legacy, origin, Direction.EAST);
+    var pattern = new CompiledStructure(local, origin, MachineOrientation.IDENTITY);
     helper.getLevel().setBlockAndUpdate(
-        origin.south(),
-        Blocks.OAK_STAIRS.defaultBlockState().setValue(BlockStateProperties.HORIZONTAL_FACING, Direction.EAST));
-    helper.assertTrue(
-        pattern.check(helper.getLevel(), 0) == CheckResult.MATCH,
-        "Legacy property-space Block.rotate path regressed");
+        pattern.position(0),
+        Blocks.OAK_STAIRS.defaultBlockState().setValue(BlockStateProperties.HORIZONTAL_FACING, Direction.NORTH)
+            .setValue(BlockStateProperties.HALF, Half.BOTTOM)
+            .setValue(BlockStateProperties.STAIRS_SHAPE, StairsShape.STRAIGHT)
+            .setValue(BlockStateProperties.WATERLOGGED, false));
+    helper.assertTrue(pattern.check(helper.getLevel(), 0) == CheckResult.MATCH, "Declared block state did not match");
     helper.assertTrue(
         parse(oneBlock("minecraft:oak_stairs", "{}", "local")).allowedOrientationMask() == 0xFFFFFF,
-        "Block-ID-only rule gained hidden facing requirements");
+        "Block-ID-only rule gained hidden state requirements");
+    helper.succeed();
+  }
+
+  @GameTest(template = "empty16", timeoutTicks = 40)
+  public static void liquid_source_and_flowing_block_states_match_by_block_id(GameTestHelper helper) {
+    var source = parse(oneBlock("minecraft:water", "{}", "world"));
+    BlockPos origin = helper.absolutePos(new BlockPos(4, 3, 4));
+    var sourcePattern = new CompiledStructure(source, origin, MachineOrientation.IDENTITY);
+    helper.getLevel().setBlockAndUpdate(sourcePattern.position(0), Blocks.WATER.defaultBlockState());
+    helper.assertTrue(sourcePattern.check(helper.getLevel(), 0) == CheckResult.MATCH, "Water source did not match");
+    helper.getLevel().setBlockAndUpdate(
+        sourcePattern.position(0),
+        Blocks.WATER.defaultBlockState().setValue(net.minecraft.world.level.block.LiquidBlock.LEVEL, 1));
+    helper.assertTrue(
+        sourcePattern.check(helper.getLevel(), 0) == CheckResult.MATCH,
+        "Flowing water did not match the block-only rule");
+
+    JsonObject anyRoot = oneBlock("minecraft:lava", "{}", "world");
+    var anyLava = new CompiledStructure(parse(anyRoot), origin.offset(1, 0, 0), MachineOrientation.IDENTITY);
+    helper.getLevel().setBlockAndUpdate(anyLava.position(0), Blocks.LAVA.defaultBlockState());
+    helper.assertTrue(anyLava.check(helper.getLevel(), 0) == CheckResult.MATCH, "Lava source did not match");
+    helper.getLevel().setBlockAndUpdate(
+        anyLava.position(0),
+        Blocks.LAVA.defaultBlockState().setValue(net.minecraft.world.level.block.LiquidBlock.LEVEL, 7));
+    helper.assertTrue(
+        anyLava.check(helper.getLevel(), 0) == CheckResult.MATCH,
+        "Flowing lava did not match block-only rule");
     helper.succeed();
   }
 

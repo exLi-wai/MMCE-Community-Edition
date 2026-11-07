@@ -18,8 +18,11 @@ import java.util.Date;
 import java.util.List;
 import java.util.Locale;
 import net.minecraft.core.BlockPos;
+import net.minecraft.core.Direction;
 import net.minecraft.core.registries.BuiltInRegistries;
 import net.minecraft.resources.ResourceLocation;
+import net.minecraft.world.level.block.LiquidBlock;
+import net.minecraft.world.level.block.state.properties.Property;
 import net.minecraft.server.level.ServerLevel;
 import net.minecraft.world.level.block.state.BlockState;
 
@@ -83,6 +86,13 @@ public final class RangedSelectionService {
         part.addProperty("block", port.kind().name().toLowerCase(Locale.ROOT));
       } else {
         part.addProperty("block", BuiltInRegistries.BLOCK.getKey(state.getBlock()).toString());
+        if (!(state.getBlock() instanceof LiquidBlock)) {
+          ExportedProperties properties = stateProperties(state, orientation);
+          if (!properties.values().isEmpty()) {
+            part.add("properties", properties.values());
+            part.addProperty("properties_space", properties.space());
+          }
+        }
       }
       parts.add(new Part(offset, part.toString()));
     }
@@ -112,6 +122,41 @@ public final class RangedSelectionService {
         StandardCharsets.UTF_8);
     ResourceLocation machine = MachineDefinitionConfig.id(root.relativize(file));
     return new Result(file, machine, parts.size(), missingChunks);
+  }
+
+  private record ExportedProperties(JsonObject values, String space) {
+  }
+
+  private static ExportedProperties stateProperties(BlockState state, MachineOrientation orientation) {
+    JsonObject result = stateProperties(state, orientation, true);
+    if (result != null) {
+      return new ExportedProperties(result, "local");
+    }
+    return new ExportedProperties(stateProperties(state, orientation, false), "world");
+  }
+
+  private static JsonObject stateProperties(BlockState state, MachineOrientation orientation, boolean local) {
+    JsonObject result = new JsonObject();
+    for (var entry : state.getValues().entrySet()) {
+      Property<?> property = entry.getKey();
+      Object value = entry.getValue();
+      if (local && value instanceof Direction) {
+        value = orientation.toLocalDirection((Direction) value);
+      } else if (local && value instanceof Direction.Axis) {
+        value = orientation.toLocalAxis((Direction.Axis) value);
+      }
+      String serialized = propertyValue(property, (Comparable<?>) value);
+      if (local && property.getValue(serialized).isEmpty()) {
+        return null;
+      }
+      result.addProperty(property.getName(), serialized);
+    }
+    return result;
+  }
+
+  @SuppressWarnings({"rawtypes", "unchecked"})
+  private static String propertyValue(Property<?> property, Comparable<?> value) {
+    return ((Property) property).getName(value);
   }
 
   private static Path unique(Path file) {
