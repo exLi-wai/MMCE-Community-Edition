@@ -94,19 +94,19 @@ public final class MachineJeiPlugin implements IModPlugin {
     }
   }
 
-  static ItemStack controller(ResourceLocation machine) {
+  public static ItemStack controller(ResourceLocation machine) {
     return MachineRegistries.DEDICATED_CONTROLLERS.values().stream().map(holder -> holder.get())
         .filter(block -> block.dedicated().machine().equals(machine)).map(ItemStack::new).findFirst()
         .orElse(ItemStack.EMPTY);
   }
 
-  static ItemStack factory(ResourceLocation machine) {
+  public static ItemStack factory(ResourceLocation machine) {
     return MachineRegistries.DEDICATED_FACTORIES.values().stream().map(holder -> holder.get())
         .filter(block -> block.dedicated().machine().equals(machine)).map(ItemStack::new).findFirst()
         .orElse(ItemStack.EMPTY);
   }
 
-  static ItemStack blueprint(ResourceLocation machine) {
+  public static ItemStack blueprint(ResourceLocation machine) {
     var registered = MachineRegistries.BLUEPRINTS.get(machine);
     return registered == null ? ItemStack.EMPTY : registered.get().getDefaultInstance();
   }

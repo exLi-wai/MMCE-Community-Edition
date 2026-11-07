@@ -21,7 +21,7 @@ import org.joml.Quaternionf;
 import org.joml.Vector3f;
 
 /** Full-screen structure preview opened by the JEI details button. */
-final class MachineDetailsScreen extends Screen {
+public final class MachineDetailsScreen extends Screen {
   private static final int CANDIDATE_COLUMNS = 10;
   private static final int CANDIDATE_HORIZONTAL_SPACING = 20;
   private static final int CANDIDATE_VERTICAL_SPACING = 20;
@@ -47,7 +47,7 @@ final class MachineDetailsScreen extends Screen {
   private int selected = -1;
   private long lastCycle;
 
-  MachineDetailsScreen(ClientMachineJeiCatalog.Machine machine) {
+  public MachineDetailsScreen(ClientMachineJeiCatalog.Machine machine) {
     super(Component.translatable("jei.mmcece.details.title", Component.translatable(machine.translation())));
     this.machine = machine;
   }

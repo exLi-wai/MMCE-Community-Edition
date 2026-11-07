@@ -251,6 +251,8 @@
   "menu.mmcece.parallel.current": "当前并行数：%s",
   "menu.mmcece.parallel.input": "输入并行数后按回车提交",
   "jei.mmcece.legacy.preview": "机器结构预览",
+  "emi.category.mmcece.structure": "机器结构预览",
+  "emi.category.mmcece.recipe": "机器配方：%s",
   "jei.mmcece.legacy.fluid_tick": "每 tick：%s mB",
   "jei.mmcece.legacy.layer": "层：%s",
   "gui.preview.button.menu.tip": "点击打开预览选项菜单。",

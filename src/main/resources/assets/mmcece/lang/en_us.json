@@ -251,6 +251,8 @@
   "menu.mmcece.parallel.current": "Current Parallelism: %s",
   "menu.mmcece.parallel.input": "Enter parallelism and press Enter",
   "jei.mmcece.legacy.preview": "Machine Structure",
+  "emi.category.mmcece.structure": "Machine Structure",
+  "emi.category.mmcece.recipe": "Machine Recipe: %s",
   "jei.mmcece.legacy.fluid_tick": "Per tick: %s mB",
   "jei.mmcece.legacy.layer": "Layer: %s",
   "gui.preview.button.menu.tip": "Click to open the Preview Options menu.",
