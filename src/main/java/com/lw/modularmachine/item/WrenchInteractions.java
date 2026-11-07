@@ -1,10 +1,10 @@
 package com.lw.modularmachine.item;
 
-import com.lw.modularmachine.api.MachineControllerApi;
+import com.lw.modularmachine.api.controller.MachineControllerApi;
 import com.lw.modularmachine.block.FactoryControllerBlock;
 import com.lw.modularmachine.block.MachineControllerBlock;
 import com.lw.modularmachine.machine.orientation.ControllerOrientationActions;
-import com.lw.modularmachine.machine.orientation.MachineOrientation;
+import com.lw.modularmachine.api.orientation.MachineOrientation;
 import com.lw.modularmachine.machine.structure.StructureService.StructureSubject;
 import java.util.Locale;
 import net.minecraft.core.Direction;

@@ -5,7 +5,7 @@ import com.lw.modularmachine.blockentity.MachinePortBlockEntity;
 import com.lw.modularmachine.blockentity.ParallelControllerBlockEntity;
 import com.lw.modularmachine.blockentity.SmartInterfaceBlockEntity;
 import com.lw.modularmachine.machine.PortKind;
-import com.lw.modularmachine.machine.orientation.MachineOrientation;
+import com.lw.modularmachine.api.orientation.MachineOrientation;
 import com.lw.modularmachine.machine.orientation.OrientationCompilation;
 import com.lw.modularmachine.machine.orientation.PropertySpace;
 import java.util.ArrayList;

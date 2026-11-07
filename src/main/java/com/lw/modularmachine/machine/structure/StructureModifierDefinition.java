@@ -5,7 +5,7 @@ import com.google.gson.JsonObject;
 import com.google.gson.JsonParseException;
 import com.lw.modularmachine.machine.orientation.OrientationCompilation;
 import com.lw.modularmachine.machine.orientation.StateOrientationAdapters;
-import com.lw.modularmachine.machine.recipe.RecipeModifier;
+import com.lw.modularmachine.api.recipe.RecipeModifier;
 import com.lw.modularmachine.machine.recipe.RecipeModifiers;
 import java.util.ArrayList;
 import java.util.HashMap;

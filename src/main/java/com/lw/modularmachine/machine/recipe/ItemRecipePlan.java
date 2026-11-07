@@ -1,8 +1,9 @@
 package com.lw.modularmachine.machine.recipe;
 
+import com.lw.modularmachine.machine.factory.UpgradeRecipeChecks;
+
 import com.lw.modularmachine.blockentity.MachineControllerBlockEntity;
 import com.lw.modularmachine.machine.PortKind;
-import com.lw.modularmachine.machine.factory.FactoryUpgradeRecipeChecks;
 import com.lw.modularmachine.machine.factory.FactoryUpgradeStartCosts;
 import com.lw.modularmachine.machine.factory.UpgradeBusOwner;
 import java.util.ArrayList;
@@ -24,14 +25,14 @@ public final class ItemRecipePlan {
   private final List<Deduction> deductions;
   private final List<Placement> placements;
   private final long inputChanceSeed;
-  private FactoryUpgradeRecipeChecks.Scope factoryScope;
-  private FactoryUpgradeRecipeChecks.Session factoryChecks;
+  private UpgradeRecipeChecks.Scope factoryScope;
+  private UpgradeRecipeChecks.Session factoryChecks;
   private FactoryUpgradeStartCosts.Preparation factoryStartup;
   private int startupInstances;
   private ParallelRecipeAdmission parallelAdmission;
   private int parallelRequest;
 
-  ItemRecipePlan(RecipeExecutionTicket source, ItemRecipeCatalog catalog, RecipeCandidate<ItemResourceKey> recipe, List<Deduction> deductions, List<Placement> placements, long inputChanceSeed, FactoryUpgradeRecipeChecks.Scope factoryScope) {
+  ItemRecipePlan(RecipeExecutionTicket source, ItemRecipeCatalog catalog, RecipeCandidate<ItemResourceKey> recipe, List<Deduction> deductions, List<Placement> placements, long inputChanceSeed, UpgradeRecipeChecks.Scope factoryScope) {
     this.source = source;
     this.catalog = catalog;
     this.recipe = recipe;
@@ -83,27 +84,27 @@ public final class ItemRecipePlan {
     return mixed & Long.MAX_VALUE;
   }
 
-  public FactoryUpgradeRecipeChecks.Result advanceFactoryChecks(UpgradeBusOwner factory, String threadId, int budget) {
+  public UpgradeRecipeChecks.Result advanceFactoryChecks(UpgradeBusOwner factory, String threadId, int budget) {
     source.requireServerThread();
     if (source.owner() != factory
         || !source.dependenciesCurrent()
         || !catalog.isCurrent()
         || !modifierContextCurrent(factory, threadId)) {
-      return new FactoryUpgradeRecipeChecks.Result(FactoryUpgradeRecipeChecks.Status.STALE, 0);
+      return new UpgradeRecipeChecks.Result(UpgradeRecipeChecks.Status.STALE, 0);
     }
     if (factoryScope == null) {
-      factoryScope = FactoryUpgradeRecipeChecks.capture(factory, threadId);
+      factoryScope = UpgradeRecipeChecks.capture(factory, threadId);
     }
     if (!factoryScope.matches(factory, threadId) || !factoryScope.current()) {
-      return new FactoryUpgradeRecipeChecks.Result(FactoryUpgradeRecipeChecks.Status.STALE, 0);
+      return new UpgradeRecipeChecks.Result(UpgradeRecipeChecks.Status.STALE, 0);
     }
     if (factoryChecks == null) {
       factoryChecks = factoryScope.begin(this);
     }
     var result = factoryChecks.advance(budget);
 
-    return source.dependenciesCurrent() && catalog.isCurrent() ? result : new FactoryUpgradeRecipeChecks.Result(
-        FactoryUpgradeRecipeChecks.Status.STALE,
+    return source.dependenciesCurrent() && catalog.isCurrent() ? result : new UpgradeRecipeChecks.Result(
+        UpgradeRecipeChecks.Status.STALE,
         result.workUsed());
   }
 

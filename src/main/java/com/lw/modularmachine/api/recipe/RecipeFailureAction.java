@@ -1,4 +1,4 @@
-package com.lw.modularmachine.machine.recipe;
+package com.lw.modularmachine.api.recipe;
 
 /** Progress adjustment when a paid per-tick resource is unavailable. */
 public enum RecipeFailureAction {

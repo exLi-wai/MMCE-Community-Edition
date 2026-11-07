@@ -1,4 +1,4 @@
-package com.lw.modularmachine.blockentity;
+package com.lw.modularmachine.api.component;
 
 import net.minecraft.core.BlockPos;
 import net.minecraft.nbt.CompoundTag;

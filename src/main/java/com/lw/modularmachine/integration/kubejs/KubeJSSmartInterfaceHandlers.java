@@ -1,7 +1,7 @@
 package com.lw.modularmachine.integration.kubejs;
 
 import com.lw.modularmachine.ModularMachine;
-import com.lw.modularmachine.machine.smart.SmartInterfaceEvents;
+import com.lw.modularmachine.api.smart.SmartInterfaceEvents;
 import com.lw.modularmachine.util.callback.ServerCallbackRegistry;
 import java.util.HashSet;
 import java.util.List;

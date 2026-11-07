@@ -7,30 +7,20 @@ import net.minecraft.nbt.CompoundTag;
 import net.minecraft.nbt.Tag;
 import net.minecraft.resources.ResourceLocation;
 
-/**
- * Persistent per-definition upgrade data owned by one bus, never by an item.
- */
-public final class FactoryUpgradeBusData {
+import com.lw.modularmachine.api.upgrade.FactoryUpgradeBusData.Context;
+import com.lw.modularmachine.api.upgrade.FactoryUpgradeBusData.Preparer;
+import com.lw.modularmachine.api.upgrade.FactoryUpgradeBusData.Update;
+import com.lw.modularmachine.api.upgrade.FactoryUpgradeItemData;
+import com.lw.modularmachine.api.upgrade.FactoryUpgradeEvents;
+import org.jetbrains.annotations.ApiStatus;
+
+/** Internal persistent bus data, callback registry and preparation. */
+@ApiStatus.Internal
+public final class UpgradeBusDataHandlers {
   public static final String NBT_KEY = "upgrade_custom_data";
   public static final int MAX_ENTRIES = 256;
   public static final int MAX_BYTES = 65_536;
   private static final int MAX_TAGS = 4096;
-
-  @FunctionalInterface
-  public interface Preparer {
-    Update prepare(Context context, CompoundTag currentData);
-  }
-
-  public record Update(CompoundTag data) {
-    public Update {
-      data = FactoryUpgradeDataSnapshots.copy(data);
-    }
-
-    @Override
-    public CompoundTag data() {
-      return data.copy();
-    }
-  }
 
   public record Subscription(
       ResourceLocation handlerId,
@@ -39,19 +29,6 @@ public final class FactoryUpgradeBusData {
       List<FactoryUpgradeEvents.Upgrade> upgrades) {
     public Subscription {
       Objects.requireNonNull(handlerId, "handlerId");
-      validateSources(definitionId, busPosition, upgrades);
-      busPosition = busPosition.immutable();
-      upgrades = List.copyOf(upgrades);
-    }
-  }
-
-  public record Context(
-      FactoryUpgradeItemData.Context startup,
-      ResourceLocation definitionId,
-      BlockPos busPosition,
-      List<FactoryUpgradeEvents.Upgrade> upgrades) {
-    public Context {
-      Objects.requireNonNull(startup, "startup");
       validateSources(definitionId, busPosition, upgrades);
       busPosition = busPosition.immutable();
       upgrades = List.copyOf(upgrades);
@@ -137,7 +114,7 @@ public final class FactoryUpgradeBusData {
 
   private static final FactoryUpgradeHandlers<Preparer> HANDLERS = new FactoryUpgradeHandlers<>();
 
-  private FactoryUpgradeBusData() {
+  private UpgradeBusDataHandlers() {
   }
 
   public static void register(ResourceLocation id, Preparer preparer) {
@@ -186,7 +163,7 @@ public final class FactoryUpgradeBusData {
     HANDLERS.clear();
   }
 
-  private static void validateSources(ResourceLocation definitionId, BlockPos busPosition, List<FactoryUpgradeEvents.Upgrade> upgrades) {
+  public static void validateSources(ResourceLocation definitionId, BlockPos busPosition, List<FactoryUpgradeEvents.Upgrade> upgrades) {
     Objects.requireNonNull(definitionId, "definitionId");
     Objects.requireNonNull(busPosition, "busPosition");
     Objects.requireNonNull(upgrades, "upgrades");

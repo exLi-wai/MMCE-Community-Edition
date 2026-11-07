@@ -1,5 +1,7 @@
 package com.lw.modularmachine.network;
 
+import com.lw.modularmachine.api.smart.SmartInterfaceBinding;
+
 import com.lw.modularmachine.ModularMachine;
 import com.lw.modularmachine.blockentity.SmartInterfaceBlockEntity;
 import com.lw.modularmachine.machine.recipe.ResourceSelector;
@@ -144,7 +146,7 @@ public final class SmartInterfacePayloads {
     }
     var entries = new ArrayList<SmartInterfaceBlockEntity.Entry>();
     for (int index = 0; index < size; index++) {
-      var binding = new SmartInterfaceBlockEntity.Binding(
+      var binding = new SmartInterfaceBinding(
           buffer.readBlockPos(),
           buffer.readResourceLocation(),
           buffer.readUtf(ResourceSelector.MAX_LENGTH),

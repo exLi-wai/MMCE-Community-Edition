@@ -1,5 +1,17 @@
 package com.lw.modularmachine.machine.factory;
 
+import com.lw.modularmachine.api.upgrade.FactoryUpgradeRuntimeData;
+
+import com.lw.modularmachine.api.upgrade.FactoryUpgradeBusData;
+
+import com.lw.modularmachine.api.upgrade.FactoryUpgradeItemData;
+
+import com.lw.modularmachine.api.upgrade.FactoryUpgradeRecipeChecks;
+
+import com.lw.modularmachine.api.upgrade.FactoryUpgradeEvents;
+
+import com.lw.modularmachine.api.upgrade.FactoryDynamicUpgrades;
+
 import com.google.gson.JsonArray;
 import com.google.gson.JsonObject;
 import com.google.gson.JsonParser;

@@ -1,16 +1,18 @@
 package com.lw.modularmachine.gametest;
 
+import com.lw.modularmachine.machine.factory.UpgradeLifecyclePublisher;
+
 import com.lw.modularmachine.blockentity.FactoryControllerBlockEntity;
 import com.lw.modularmachine.blockentity.MachinePortBlockEntity;
 import com.lw.modularmachine.blockentity.UpgradeBusBlockEntity;
 import com.lw.modularmachine.config.MachineConfig;
-import com.lw.modularmachine.machine.factory.FactoryDynamicUpgrades;
+import com.lw.modularmachine.api.upgrade.FactoryDynamicUpgrades;
 import com.lw.modularmachine.machine.factory.FactoryThreadState;
 import com.lw.modularmachine.machine.factory.FactoryUpgradeCompatibility;
 import com.lw.modularmachine.machine.factory.FactoryUpgradeDefinition;
-import com.lw.modularmachine.machine.factory.FactoryUpgradeEntry;
-import com.lw.modularmachine.machine.factory.FactoryUpgradeEvents;
-import com.lw.modularmachine.machine.factory.FactoryUpgradeItemData;
+import com.lw.modularmachine.api.upgrade.FactoryUpgradeEntry;
+import com.lw.modularmachine.api.upgrade.FactoryUpgradeEvents;
+import com.lw.modularmachine.api.upgrade.FactoryUpgradeItemData;
 import com.lw.modularmachine.machine.factory.FactoryUpgradeService;
 import com.lw.modularmachine.machine.factory.FactoryUpgradeStartCosts;
 import com.lw.modularmachine.machine.recipe.FactoryParallelStarter;
@@ -118,7 +120,7 @@ public final class UpgradeItemDataGameTests {
               && context.threadId().equals(THREAD)
               && context.instances() == 2
               && context.dimension().equals(helper.getLevel().dimension().location())
-              && FactoryUpgradeEvents.isDispatching(fixture.factory()),
+              && UpgradeLifecyclePublisher.isDispatching(fixture.factory()),
           "Data preparer lost its batch context or read-only guard");
       try {
         fixture.busA().inventory().setStackInSlot(0, new ItemStack(Items.DIAMOND));

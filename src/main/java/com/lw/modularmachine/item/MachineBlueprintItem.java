@@ -3,7 +3,7 @@ package com.lw.modularmachine.item;
 import com.lw.modularmachine.machine.blueprint.BlueprintPreviewActions;
 import com.lw.modularmachine.machine.blueprint.MachineBlueprint;
 import com.lw.modularmachine.machine.controller.DedicatedControllerCatalog;
-import com.lw.modularmachine.machine.orientation.MachineOrientation;
+import com.lw.modularmachine.api.orientation.MachineOrientation;
 import com.lw.modularmachine.registry.MachineDataComponents;
 import java.util.List;
 import net.minecraft.network.chat.Component;

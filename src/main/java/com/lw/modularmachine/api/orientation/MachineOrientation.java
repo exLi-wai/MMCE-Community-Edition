@@ -1,4 +1,4 @@
-package com.lw.modularmachine.machine.orientation;
+package com.lw.modularmachine.api.orientation;
 
 import java.util.ArrayList;
 import java.util.List;

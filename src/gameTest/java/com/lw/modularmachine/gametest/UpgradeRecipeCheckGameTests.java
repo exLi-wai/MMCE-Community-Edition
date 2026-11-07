@@ -1,13 +1,14 @@
 package com.lw.modularmachine.gametest;
 
+import com.lw.modularmachine.machine.factory.UpgradeLifecyclePublisher;
+
 import com.lw.modularmachine.blockentity.FactoryControllerBlockEntity;
 import com.lw.modularmachine.blockentity.MachinePortBlockEntity;
 import com.lw.modularmachine.blockentity.UpgradeBusBlockEntity;
 import com.lw.modularmachine.config.MachineConfig;
 import com.lw.modularmachine.machine.factory.FactoryThreadState;
 import com.lw.modularmachine.machine.factory.FactoryUpgradeDefinition;
-import com.lw.modularmachine.machine.factory.FactoryUpgradeEvents;
-import com.lw.modularmachine.machine.factory.FactoryUpgradeRecipeChecks;
+import com.lw.modularmachine.api.upgrade.FactoryUpgradeRecipeChecks;
 import com.lw.modularmachine.machine.factory.FactoryUpgradeService;
 import com.lw.modularmachine.machine.recipe.FactoryParallelStarter;
 import com.lw.modularmachine.machine.recipe.FactoryRecipeStarter;
@@ -99,7 +100,7 @@ public final class UpgradeRecipeCheckGameTests {
               && context.threadId().equals(THREAD)
               && context.controllerPosition().equals(fixture.factory().getBlockPos())
               && context.dimension().equals(helper.getLevel().dimension().location())
-              && FactoryUpgradeEvents.isDispatching(fixture.factory()),
+              && UpgradeLifecyclePublisher.isDispatching(fixture.factory()),
           "Checker lost source identity or callback guard");
       context.recipeData().putInt("duration", 999);
       helper.assertTrue(
@@ -200,7 +201,7 @@ public final class UpgradeRecipeCheckGameTests {
       int parallelCalls = calls.size();
       awaitOutput(helper, fixture, 3, 120, () -> {
         helper.assertTrue(
-            calls.size() == parallelCalls && !FactoryUpgradeEvents.isDispatching(fixture.factory()),
+            calls.size() == parallelCalls && !UpgradeLifecyclePublisher.isDispatching(fixture.factory()),
             "Paid parallel run repeated checker calls or leaked guard");
         helper.succeed();
       });
@@ -338,7 +339,7 @@ public final class UpgradeRecipeCheckGameTests {
     }
     awaitOutput(helper, fixture, 2, 120, () -> {
       helper.assertTrue(
-          count.get() == before + 2 && !FactoryUpgradeEvents.isDispatching(fixture.factory()),
+          count.get() == before + 2 && !UpgradeLifecyclePublisher.isDispatching(fixture.factory()),
           "Checker proof did not remain frozen for paid runs");
       helper.succeed();
     });

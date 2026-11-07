@@ -1,5 +1,9 @@
 package com.lw.modularmachine.machine.factory;
 
+import com.lw.modularmachine.api.upgrade.FactoryUpgradeSnapshot;
+
+import com.lw.modularmachine.api.upgrade.FactoryUpgradeRecipeChecks;
+
 import java.util.List;
 import net.minecraft.core.BlockPos;
 import net.minecraft.nbt.CompoundTag;
@@ -68,7 +72,7 @@ class FactoryUpgradeRecipeChecksTest {
   void rejectsInvalidWorkReports() {
     assertThrows(
         IllegalArgumentException.class,
-        () -> new FactoryUpgradeRecipeChecks.Result(FactoryUpgradeRecipeChecks.Status.PENDING, -1));
-    assertThrows(NullPointerException.class, () -> new FactoryUpgradeRecipeChecks.Result(null, 0));
+        () -> new UpgradeRecipeChecks.Result(UpgradeRecipeChecks.Status.PENDING, -1));
+    assertThrows(NullPointerException.class, () -> new UpgradeRecipeChecks.Result(null, 0));
   }
 }

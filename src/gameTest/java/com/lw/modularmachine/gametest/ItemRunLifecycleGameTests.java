@@ -6,7 +6,7 @@ import com.lw.modularmachine.block.MachineControllerBlock;
 import com.lw.modularmachine.blockentity.MachineControllerBlockEntity;
 import com.lw.modularmachine.blockentity.MachinePortBlockEntity;
 import com.lw.modularmachine.config.MachineConfig;
-import com.lw.modularmachine.machine.orientation.MachineOrientation;
+import com.lw.modularmachine.api.orientation.MachineOrientation;
 import com.lw.modularmachine.machine.recipe.AtomicRecipeStarter;
 import com.lw.modularmachine.machine.recipe.ItemRecipeSearch;
 import com.lw.modularmachine.machine.recipe.ItemRunEngine;

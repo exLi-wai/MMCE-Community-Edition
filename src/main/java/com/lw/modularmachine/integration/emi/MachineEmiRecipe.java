@@ -12,6 +12,7 @@ import dev.emi.emi.api.widget.WidgetHolder;
 import java.util.ArrayList;
 import java.util.List;
 import net.minecraft.resources.ResourceLocation;
+import net.minecraft.world.item.ItemStack;
 
 final class MachineEmiRecipe extends BasicEmiRecipe {
   private final ClientMachineJeiCatalog.Machine machine;
@@ -34,7 +35,7 @@ final class MachineEmiRecipe extends BasicEmiRecipe {
     return result;
   }
 
-  private static void add(List<EmiIngredient> result, net.minecraft.world.item.ItemStack stack) {
+  private static void add(List<EmiIngredient> result, ItemStack stack) {
     if (!stack.isEmpty()) {
       result.add(EmiStack.of(stack));
     }

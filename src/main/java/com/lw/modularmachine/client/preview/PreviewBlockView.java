@@ -11,8 +11,10 @@ import net.minecraft.world.level.block.entity.BlockEntity;
 import net.minecraft.world.level.block.state.BlockState;
 import net.minecraft.world.level.lighting.LevelLightEngine;
 import net.minecraft.world.level.material.FluidState;
+import org.jetbrains.annotations.ApiStatus;
 
 /** Render-thread schematic neighbors; never passed to packing workers. */
+@ApiStatus.Internal
 public final class PreviewBlockView implements BlockAndTintGetter {
   private static final ThreadLocal<Integer> ACTIVE_MACHINE_COLOR = new ThreadLocal<>();
   private final PreviewRenderScene scene;

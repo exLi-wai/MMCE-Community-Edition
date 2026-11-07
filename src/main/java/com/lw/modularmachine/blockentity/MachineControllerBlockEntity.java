@@ -1,19 +1,20 @@
 package com.lw.modularmachine.blockentity;
 
+import com.lw.modularmachine.machine.factory.UpgradeLifecyclePublisher;
+
 import com.lw.modularmachine.ModularMachine;
-import com.lw.modularmachine.api.MachineControllerApi;
+import com.lw.modularmachine.api.controller.MachineControllerApi;
 import com.lw.modularmachine.block.MachineControllerBlock;
 import com.lw.modularmachine.config.MachineConfig;
 import com.lw.modularmachine.machine.controller.GenericControllerDiscovery;
 import com.lw.modularmachine.machine.factory.ControllerUpgrades;
-import com.lw.modularmachine.machine.factory.FactoryUpgradeEvents;
 import com.lw.modularmachine.machine.factory.FactoryUpgradeRestrictions;
 import com.lw.modularmachine.machine.factory.FactoryUpgradeRuntimeWork;
-import com.lw.modularmachine.machine.factory.FactoryUpgradeSnapshot;
+import com.lw.modularmachine.api.upgrade.FactoryUpgradeSnapshot;
 import com.lw.modularmachine.machine.factory.UpgradeBusOwner;
 import com.lw.modularmachine.machine.factory.UpgradeStartState;
 import com.lw.modularmachine.machine.orientation.ControllerPlacementData;
-import com.lw.modularmachine.machine.orientation.MachineOrientation;
+import com.lw.modularmachine.api.orientation.MachineOrientation;
 import com.lw.modularmachine.machine.parallel.ParallelCapacity;
 import com.lw.modularmachine.machine.recipe.AtomicRecipeStarter.Result;
 import com.lw.modularmachine.machine.recipe.ControllerMetrics;
@@ -21,9 +22,9 @@ import com.lw.modularmachine.machine.recipe.FrozenItemRun;
 import com.lw.modularmachine.machine.recipe.ItemRecipePlan;
 import com.lw.modularmachine.machine.recipe.ItemRecipeSearch;
 import com.lw.modularmachine.machine.recipe.ItemRunEngine;
-import com.lw.modularmachine.machine.recipe.RecipeLifecycleEvents;
+import com.lw.modularmachine.machine.recipe.RecipeLifecyclePublisher;
 import com.lw.modularmachine.machine.recipe.RecipePlanner.Status;
-import com.lw.modularmachine.machine.smart.SmartInterfaceEvents;
+import com.lw.modularmachine.machine.smart.SmartInterfaceEventPublisher;
 import com.lw.modularmachine.machine.structure.FullScanReference;
 import com.lw.modularmachine.machine.structure.MachineDefinition;
 import com.lw.modularmachine.machine.structure.StructureService;
@@ -208,9 +209,9 @@ public final class MachineControllerBlockEntity extends BlockEntity implements M
     if (level instanceof ServerLevel server) {
       ServerThreadGuard.require(server, "Controller blueprint edit");
       if (recipeStartInProgress()
-          || FactoryUpgradeEvents.isDispatchingAny()
-          || RecipeLifecycleEvents.isDispatching()
-          || SmartInterfaceEvents.isDispatching(this)) {
+          || UpgradeLifecyclePublisher.isDispatchingAny()
+          || RecipeLifecyclePublisher.isDispatching()
+          || SmartInterfaceEventPublisher.isDispatching(this)) {
         throw new IllegalStateException("Controller blueprint edit during an active transaction or callback");
       }
     }
@@ -309,7 +310,7 @@ public final class MachineControllerBlockEntity extends BlockEntity implements M
 
   public boolean canCommitProduction() {
     return level instanceof ServerLevel server
-        && !FactoryUpgradeEvents.isDispatchingAny()
+        && !UpgradeLifecyclePublisher.isDispatchingAny()
         && canCommitStructure()
         && server.getDirectSignalTo(worldPosition) == 0;
   }
@@ -410,7 +411,7 @@ public final class MachineControllerBlockEntity extends BlockEntity implements M
   }
 
   public boolean recipeStartInProgress() {
-    return recipeStart != null || recipeUpdate != null || FactoryUpgradeEvents.isDispatchingAny();
+    return recipeStart != null || recipeUpdate != null || UpgradeLifecyclePublisher.isDispatchingAny();
   }
 
   public ItemRunEngine.Result recipeRunStatus() {
@@ -638,7 +639,7 @@ public final class MachineControllerBlockEntity extends BlockEntity implements M
     try {
       tickController(server);
     } finally {
-      RecipeLifecycleEvents.machineTick(this);
+      RecipeLifecyclePublisher.machineTick(this);
     }
   }
 
@@ -646,7 +647,7 @@ public final class MachineControllerBlockEntity extends BlockEntity implements M
     if (getBlockState().getBlock() instanceof MachineControllerBlock block
         && schemaSupported()
         && runningRecipe == null
-        && !FactoryUpgradeEvents.isDispatchingAny()
+        && !UpgradeLifecyclePublisher.isDispatchingAny()
         && (registration == null || registration.verifier.state() == VerificationState.INVALID)) {
       var found = genericDiscovery.advance(
           server,

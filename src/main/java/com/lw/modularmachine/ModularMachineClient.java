@@ -8,6 +8,7 @@ import net.minecraft.resources.ResourceLocation;
 import net.minecraft.core.component.DataComponents;
 import net.minecraft.core.BlockPos;
 import com.lw.modularmachine.client.*;
+import com.lw.modularmachine.client.preview.CachedPreviewRenderer;
 import com.lw.modularmachine.client.preview.BlueprintPreviewScreen;
 import com.lw.modularmachine.client.preview.PreviewBlockView;
 import com.lw.modularmachine.client.preview.WorldProjection;
@@ -19,7 +20,7 @@ import com.lw.modularmachine.block.ParallelControllerBlock;
 import com.lw.modularmachine.block.SmartInterfaceBlock;
 import com.lw.modularmachine.block.UpgradeBusBlock;
 import com.lw.modularmachine.blockentity.FactoryControllerBlockEntity;
-import com.lw.modularmachine.blockentity.MachineColorable;
+import com.lw.modularmachine.api.component.MachineColorable;
 import com.lw.modularmachine.blockentity.MachineControllerBlockEntity;
 import com.lw.modularmachine.config.MachineClientConfig;
 import com.lw.modularmachine.integration.jei.ClientMachineJeiCatalog;
@@ -73,10 +74,8 @@ public class ModularMachineClient {
   @SubscribeEvent
   static void registerPreviewReload(RegisterClientReloadListenersEvent event) {
     event.registerReloadListener((ResourceManagerReloadListener) resources -> {
+      CachedPreviewRenderer.invalidateAll();
       WorldProjection.invalidateMeshes();
-      if (Minecraft.getInstance().screen instanceof BlueprintPreviewScreen screen) {
-        screen.invalidateMeshes();
-      }
     });
   }
   @SubscribeEvent

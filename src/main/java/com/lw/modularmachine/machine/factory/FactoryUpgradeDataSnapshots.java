@@ -1,5 +1,7 @@
 package com.lw.modularmachine.machine.factory;
 
+import com.lw.modularmachine.api.upgrade.FactoryUpgradeItemData;
+
 import java.io.DataOutputStream;
 import java.io.IOException;
 import java.io.OutputStream;
@@ -20,14 +22,15 @@ import net.minecraft.nbt.Tag;
  * Shared upgrade-domain NBT limits; validation precedes recursive defensive
  * copy.
  */
-final class FactoryUpgradeDataSnapshots {
+@org.jetbrains.annotations.ApiStatus.Internal
+public final class FactoryUpgradeDataSnapshots {
   private record Visit(Tag tag, int depth, boolean exit) {
   }
 
   private FactoryUpgradeDataSnapshots() {
   }
 
-  static CompoundTag copy(CompoundTag data) {
+  public static CompoundTag copy(CompoundTag data) {
     return copy(
         data,
         FactoryUpgradeItemData.MAX_BYTES,
@@ -35,13 +38,13 @@ final class FactoryUpgradeDataSnapshots {
         FactoryUpgradeItemData.MAX_DEPTH);
   }
 
-  static CompoundTag copy(CompoundTag data, int maxBytes, int maxTags, int maxDepth) {
+  public static CompoundTag copy(CompoundTag data, int maxBytes, int maxTags, int maxDepth) {
     validate(data, maxBytes, maxTags, maxDepth);
 
     return data.copy();
   }
 
-  static void validate(CompoundTag data, int maxBytes, int maxTags, int maxDepth) {
+  public static void validate(CompoundTag data, int maxBytes, int maxTags, int maxDepth) {
     Objects.requireNonNull(data, "data");
     var pending = new ArrayDeque<Visit>();
     var path = Collections.newSetFromMap(new IdentityHashMap<Tag, Boolean>());

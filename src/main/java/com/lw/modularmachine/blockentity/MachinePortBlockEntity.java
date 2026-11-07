@@ -1,11 +1,13 @@
 package com.lw.modularmachine.blockentity;
 
+import com.lw.modularmachine.api.component.MachineColorable;
+
 import com.lw.modularmachine.block.MachinePortBlock;
 import com.lw.modularmachine.config.MachineConfig;
 import com.lw.modularmachine.machine.HatchTier;
 import com.lw.modularmachine.machine.PortKind;
 import com.lw.modularmachine.machine.recipe.InputGroup;
-import com.lw.modularmachine.machine.recipe.RecipeLifecycleEvents;
+import com.lw.modularmachine.machine.recipe.RecipeLifecyclePublisher;
 import com.lw.modularmachine.machine.structure.StructureService;
 import com.lw.modularmachine.menu.MachinePortMenu;
 import com.lw.modularmachine.menu.MachineResourceMenu;
@@ -198,7 +200,7 @@ public final class MachinePortBlockEntity extends BlockEntity implements MenuPro
 
   private void beforeResourceWrite() {
     assertMutationThread();
-    if (level instanceof ServerLevel && RecipeLifecycleEvents.isDispatching()) {
+    if (level instanceof ServerLevel && RecipeLifecyclePublisher.isDispatching()) {
       throw new IllegalStateException("Cannot mutate resources during a read-only recipe notification");
     }
     if (resourceRevision == Long.MAX_VALUE) {
@@ -586,7 +588,7 @@ public final class MachinePortBlockEntity extends BlockEntity implements MenuPro
   @Override
   protected void loadAdditional(CompoundTag tag, HolderLookup.Provider registries) {
     assertMutationThread();
-    if (level instanceof ServerLevel && RecipeLifecycleEvents.isDispatching()) {
+    if (level instanceof ServerLevel && RecipeLifecyclePublisher.isDispatching()) {
       throw new IllegalStateException("Cannot reload resources during a read-only recipe notification");
     }
     if (items.isInTransaction() || tank.isInTransaction()) {

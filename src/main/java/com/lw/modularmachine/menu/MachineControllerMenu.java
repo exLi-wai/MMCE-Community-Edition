@@ -1,6 +1,6 @@
 package com.lw.modularmachine.menu;
 
-import com.lw.modularmachine.api.MachineControllerApi;
+import com.lw.modularmachine.api.controller.MachineControllerApi;
 import com.lw.modularmachine.blockentity.MachineControllerBlockEntity;
 import com.lw.modularmachine.network.MachinePayloads;
 import com.lw.modularmachine.registry.MachineRegistries;

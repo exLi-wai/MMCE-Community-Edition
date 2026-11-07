@@ -1,12 +1,14 @@
 package com.lw.modularmachine.gametest;
 
+import com.lw.modularmachine.machine.factory.UpgradeLifecyclePublisher;
+
 import com.lw.modularmachine.blockentity.FactoryControllerBlockEntity;
 import com.lw.modularmachine.blockentity.MachinePortBlockEntity;
 import com.lw.modularmachine.blockentity.UpgradeBusBlockEntity;
 import com.lw.modularmachine.machine.factory.FactoryUpgradeCompatibility;
 import com.lw.modularmachine.machine.factory.FactoryUpgradeDefinition;
-import com.lw.modularmachine.machine.factory.FactoryUpgradeEntry;
-import com.lw.modularmachine.machine.factory.FactoryUpgradeEvents;
+import com.lw.modularmachine.api.upgrade.FactoryUpgradeEntry;
+import com.lw.modularmachine.api.upgrade.FactoryUpgradeEvents;
 import com.lw.modularmachine.machine.factory.FactoryUpgradeService;
 import com.lw.modularmachine.machine.recipe.FactoryOutputEngine;
 import com.lw.modularmachine.machine.recipe.FactoryParallelStarter;
@@ -294,7 +296,7 @@ public final class UpgradeLifecycleGameTests {
           fixture.factory().serverTick();
         }
         helper.assertTrue(
-            events.size() == 2 && !FactoryUpgradeEvents.isDispatching(fixture.factory()),
+            events.size() == 2 && !UpgradeLifecyclePublisher.isDispatching(fixture.factory()),
             "Idle tick replayed events or leaked notification guard");
         helper.succeed();
       } else if (remaining == 0) {

@@ -1,6 +1,6 @@
 package com.lw.modularmachine.integration.kubejs;
 
-import com.lw.modularmachine.machine.recipe.RecipeLifecycleEvents;
+import com.lw.modularmachine.api.recipe.RecipeLifecycleEvents;
 import dev.latvian.mods.kubejs.event.KubeEvent;
 import java.util.ArrayList;
 import java.util.Comparator;
@@ -16,7 +16,6 @@ import net.minecraft.resources.ResourceLocation;
  * failure policies.
  */
 public final class KubeJSRecipeLifecycleRegistration implements KubeEvent {
-  private static final int MAX_HANDLERS = 256;
   private static final Set<RecipeLifecycleEvents.Type> DEFAULT_TYPES = Set
       .of(RecipeLifecycleEvents.Type.STARTED, RecipeLifecycleEvents.Type.FINISHED);
 
@@ -34,15 +33,10 @@ public final class KubeJSRecipeLifecycleRegistration implements KubeEvent {
   }
 
   public void onResourceFailure(String text, RecipeLifecycleEvents.FailurePolicy policy) {
-    ResourceLocation id = text == null ? null : ResourceLocation.tryParse(text);
+    ResourceLocation id = KubeJSRegistrationIds.parse(text);
     if (id == null
-        || !id.getNamespace().equals("kubejs")
-        || id.getPath().isEmpty()
-        || id.toString().length() > 256
-        || !id.toString().equals(text)
         || policy == null
-        || !identifiers.add(id)
-        || identifiers.size() > MAX_HANDLERS) {
+        || !KubeJSRegistrationIds.claim(identifiers, id, KubeJSRegistrationIds.MAX_HANDLERS)) {
       valid = false;
       return;
     }
@@ -50,16 +44,11 @@ public final class KubeJSRecipeLifecycleRegistration implements KubeEvent {
   }
 
   private void add(String text, Set<RecipeLifecycleEvents.Type> types, RecipeLifecycleEvents.Listener listener) {
-    ResourceLocation id = text == null ? null : ResourceLocation.tryParse(text);
+    ResourceLocation id = KubeJSRegistrationIds.parse(text);
     if (id == null
-        || !id.getNamespace().equals("kubejs")
-        || id.getPath().isEmpty()
-        || id.toString().length() > 256
-        || !id.toString().equals(text)
         || listener == null
         || types.isEmpty()
-        || !identifiers.add(id)
-        || identifiers.size() > MAX_HANDLERS) {
+        || !KubeJSRegistrationIds.claim(identifiers, id, KubeJSRegistrationIds.MAX_HANDLERS)) {
       valid = false;
       return;
     }

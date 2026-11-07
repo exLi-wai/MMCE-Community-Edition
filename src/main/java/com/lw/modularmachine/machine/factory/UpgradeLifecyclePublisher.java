@@ -5,112 +5,30 @@ import com.lw.modularmachine.blockentity.FactoryControllerBlockEntity;
 import com.lw.modularmachine.blockentity.MachineControllerBlockEntity;
 import com.lw.modularmachine.blockentity.UpgradeBusBlockEntity;
 import com.lw.modularmachine.machine.recipe.FrozenItemRun;
-import com.lw.modularmachine.machine.recipe.RecipeLifecycleEvents;
-import com.lw.modularmachine.machine.smart.SmartInterfaceEvents;
+import com.lw.modularmachine.machine.recipe.RecipeLifecyclePublisher;
+import com.lw.modularmachine.machine.smart.SmartInterfaceEventPublisher;
 import java.util.ArrayList;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.Objects;
-import java.util.UUID;
 import net.minecraft.core.BlockPos;
 import net.minecraft.nbt.CompoundTag;
 import net.minecraft.resources.ResourceLocation;
 import net.minecraft.server.level.ServerLevel;
 import net.minecraft.world.item.ItemStack;
 
-/** Read-only factory recipe notifications from active upgrade bus slots. */
-public final class FactoryUpgradeEvents {
-  @FunctionalInterface
-  public interface Listener {
-    void onEvent(Context context, Upgrade upgrade);
-  }
+import com.lw.modularmachine.api.upgrade.FactoryUpgradeEntry;
+import com.lw.modularmachine.api.upgrade.FactoryUpgradeEvents.Context;
+import com.lw.modularmachine.api.upgrade.FactoryUpgradeEvents.Listener;
+import com.lw.modularmachine.api.upgrade.FactoryUpgradeEvents.RunSnapshot;
+import com.lw.modularmachine.api.upgrade.FactoryUpgradeEvents.Type;
+import com.lw.modularmachine.api.upgrade.FactoryUpgradeEvents.Upgrade;
+import org.jetbrains.annotations.ApiStatus;
 
-  public enum Type {
-    STARTED,
-    FINISHED
-  }
-
-  public record Upgrade(
-      ResourceLocation definitionId,
-      ResourceLocation itemId,
-      BlockPos busPosition,
-      int slot,
-      int count,
-      FactoryUpgradeEntry effect,
-      CompoundTag itemData,
-      CompoundTag busData) {
-    public Upgrade(ResourceLocation definitionId, ResourceLocation itemId, BlockPos busPosition, int slot, int count, FactoryUpgradeEntry effect, CompoundTag itemData) {
-      this(definitionId, itemId, busPosition, slot, count, effect, itemData, new CompoundTag());
-    }
-
-    public Upgrade {
-      Objects.requireNonNull(definitionId, "definitionId");
-      Objects.requireNonNull(itemId, "itemId");
-      Objects.requireNonNull(busPosition, "busPosition");
-      Objects.requireNonNull(effect, "effect");
-      Objects.requireNonNull(itemData, "itemData");
-      if (slot < 0 || slot >= FactoryUpgradeCatalog.MAX_SLOTS || count < 1 || count > 256) {
-        throw new IllegalArgumentException("Invalid upgrade event source");
-      }
-      busPosition = busPosition.immutable();
-      itemData = itemData.copy();
-      busData = FactoryUpgradeDataSnapshots.copy(busData);
-    }
-
-    @Override
-    public CompoundTag itemData() {
-      return itemData.copy();
-    }
-
-    @Override
-    public CompoundTag busData() {
-      return busData.copy();
-    }
-  }
-
-  public record RunSnapshot(
-      UUID runId,
-      ResourceLocation recipeId,
-      FrozenItemRun.State state,
-      int progress,
-      int duration) {
-    public RunSnapshot {
-      Objects.requireNonNull(runId, "runId");
-      Objects.requireNonNull(recipeId, "recipeId");
-      Objects.requireNonNull(state, "state");
-      if (duration < 1
-          || progress < 0
-          || progress > duration
-          || state == FrozenItemRun.State.OUTPUT_PENDING && progress != duration) {
-        throw new IllegalArgumentException("Invalid event run snapshot");
-      }
-    }
-  }
-
-  public record Context(
-      Type type,
-      ResourceLocation machine,
-      ResourceLocation dimension,
-      BlockPos controllerPosition,
-      String threadId,
-      long tick,
-      List<RunSnapshot> runs) {
-    public Context {
-      Objects.requireNonNull(type, "type");
-      Objects.requireNonNull(machine, "machine");
-      Objects.requireNonNull(dimension, "dimension");
-      Objects.requireNonNull(controllerPosition, "controllerPosition");
-      Objects.requireNonNull(threadId, "threadId");
-      Objects.requireNonNull(runs, "runs");
-      if (threadId.isBlank() || threadId.length() > 64 || tick < 0 || runs.isEmpty()) {
-        throw new IllegalArgumentException("Invalid factory upgrade event context");
-      }
-      controllerPosition = controllerPosition.immutable();
-      runs = List.copyOf(runs);
-    }
-  }
-
+/** Internal committed upgrade event dispatch and callback guards. */
+@ApiStatus.Internal
+public final class UpgradeLifecyclePublisher {
   public record Subscription(ResourceLocation handlerId, Upgrade upgrade) {
     public Subscription {
       Objects.requireNonNull(handlerId, "handlerId");
@@ -124,7 +42,7 @@ public final class FactoryUpgradeEvents {
   private static final FactoryUpgradeHandlers<Listener> HANDLERS = new FactoryUpgradeHandlers<>();
   private static final Map<ResourceLocation, Listener> REPORTED_FAILURES = new HashMap<>();
 
-  private FactoryUpgradeEvents() {
+  private UpgradeLifecyclePublisher() {
   }
 
   public static void register(ResourceLocation id, Listener listener) {
@@ -146,12 +64,12 @@ public final class FactoryUpgradeEvents {
 
   public static boolean isDispatching(UpgradeBusOwner factory) {
     return FactoryUpgradeCallbacks.contains(factory)
-        || RecipeLifecycleEvents.isDispatching()
-        || SmartInterfaceEvents.isDispatching(factory);
+        || RecipeLifecyclePublisher.isDispatching()
+        || SmartInterfaceEventPublisher.isDispatching(factory);
   }
 
   public static boolean isDispatchingAny() {
-    return FactoryUpgradeCallbacks.any() || RecipeLifecycleEvents.isDispatching();
+    return FactoryUpgradeCallbacks.any() || RecipeLifecyclePublisher.isDispatching();
   }
 
   public static boolean isRegistered(ResourceLocation handlerId) {
@@ -197,18 +115,18 @@ public final class FactoryUpgradeEvents {
 
   public static void recipeStarted(UpgradeBusOwner factory, String threadId, List<FrozenItemRun> runs) {
     if (factory instanceof FactoryControllerBlockEntity controller) {
-      RecipeLifecycleEvents.started(controller, threadId, runs);
+      RecipeLifecyclePublisher.started(controller, threadId, runs);
     } else if (factory instanceof MachineControllerBlockEntity controller && runs != null && runs.size() == 1) {
-      RecipeLifecycleEvents.started(controller, runs.getFirst());
+      RecipeLifecyclePublisher.started(controller, runs.getFirst());
     }
     dispatch(factory, threadId, runs, Type.STARTED);
   }
 
   public static void recipeFinished(UpgradeBusOwner factory, String threadId, List<FrozenItemRun> runs) {
     if (factory instanceof FactoryControllerBlockEntity controller) {
-      RecipeLifecycleEvents.finished(controller, threadId, runs);
+      RecipeLifecyclePublisher.finished(controller, threadId, runs);
     } else if (factory instanceof MachineControllerBlockEntity controller && runs != null && runs.size() == 1) {
-      RecipeLifecycleEvents.finished(controller, runs.getFirst());
+      RecipeLifecyclePublisher.finished(controller, runs.getFirst());
     }
     dispatch(factory, threadId, runs, Type.FINISHED);
   }

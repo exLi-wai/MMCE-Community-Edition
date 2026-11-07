@@ -5,7 +5,7 @@ import com.google.gson.JsonArray;
 import com.google.gson.JsonObject;
 import com.google.gson.JsonParser;
 import com.lw.modularmachine.block.MachinePortBlock;
-import com.lw.modularmachine.machine.orientation.MachineOrientation;
+import com.lw.modularmachine.api.orientation.MachineOrientation;
 import com.lw.modularmachine.machine.structure.MachineDefinitionConfig;
 import java.io.IOException;
 import java.nio.charset.StandardCharsets;

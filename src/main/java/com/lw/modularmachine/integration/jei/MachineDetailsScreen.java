@@ -1,9 +1,9 @@
 package com.lw.modularmachine.integration.jei;
 
-import com.lw.modularmachine.client.preview.PreviewRenderScene;
-import com.lw.modularmachine.client.preview.SectionMeshCache;
-import com.lw.modularmachine.network.ProjectionPayloads;
-import com.mojang.blaze3d.systems.RenderSystem;
+import com.lw.modularmachine.api.client.preview.PreviewCamera;
+import com.lw.modularmachine.api.client.preview.PreviewRenderer;
+import com.lw.modularmachine.api.client.preview.PreviewSceneData;
+import com.lw.modularmachine.api.client.preview.PreviewViewport;
 import java.util.LinkedHashMap;
 import java.util.List;
 import net.minecraft.Util;
@@ -11,14 +11,10 @@ import net.minecraft.client.gui.GuiGraphics;
 import net.minecraft.client.gui.screens.Screen;
 import net.minecraft.network.chat.Component;
 import net.minecraft.resources.ResourceLocation;
-import org.lwjgl.glfw.GLFW;
 import net.minecraft.world.item.Item;
 import net.minecraft.world.item.ItemStack;
-import net.minecraft.world.phys.AABB;
-import net.minecraft.world.phys.Vec3;
-import org.joml.Matrix4f;
-import org.joml.Quaternionf;
-import org.joml.Vector3f;
+import net.minecraft.world.item.Items;
+import org.lwjgl.glfw.GLFW;
 
 /** Full-screen structure preview opened by the JEI details button. */
 public final class MachineDetailsScreen extends Screen {
@@ -37,10 +33,10 @@ public final class MachineDetailsScreen extends Screen {
   private static final ResourceLocation SETTINGS_ICON = ResourceLocation
       .fromNamespaceAndPath("mmcece", "textures/gui/seetting.png");
   private final ClientMachineJeiCatalog.Machine machine;
-  private final SectionMeshCache cache = new SectionMeshCache();
-  private PreviewRenderScene scene;
-  private Matrix4f inverse;
-  private float centerX, centerY, centerZ, yaw = -135F, pitch = 25F, zoom = 1F, panX, panY;
+  private final PreviewRenderer renderer = PreviewRenderer.create();
+  private final PreviewCamera camera = new PreviewCamera(89F);
+  private PreviewSceneData scene;
+  private List<PreviewSceneData.Entry> animated = List.of();
   private int step;
   private boolean cycle = true, dragging, settingsOpen = true;
   private double dragDistance;
@@ -55,20 +51,11 @@ public final class MachineDetailsScreen extends Screen {
   @Override
   protected void init() {
     var entries = machine.parts().stream()
-        .map(part -> new ProjectionPayloads.Entry(part.offset(), part.alternatives(), List.of())).toList();
-    int minX = entries.stream().mapToInt(entry -> entry.position().getX()).min().orElse(0);
-    int maxX = entries.stream().mapToInt(entry -> entry.position().getX()).max().orElse(0);
-    int minY = entries.stream().mapToInt(entry -> entry.position().getY()).min().orElse(0);
-    int maxY = entries.stream().mapToInt(entry -> entry.position().getY()).max().orElse(0);
-    int minZ = entries.stream().mapToInt(entry -> entry.position().getZ()).min().orElse(0);
-    int maxZ = entries.stream().mapToInt(entry -> entry.position().getZ()).max().orElse(0);
-    centerX = (minX + maxX + 1) / 2F;
-    centerY = (minY + maxY + 1) / 2F;
-    centerZ = (minZ + maxZ + 1) / 2F;
+        .map(part -> new PreviewSceneData.Entry(part.offset(), part.alternatives(), List.of())).toList();
     if (minecraft.level != null) {
-      scene = PreviewRenderScene.create(0, minecraft.level.dimension().location(), machine.id(), entries);
-      cache.setPreviewScene(scene);
-      cache.setPreviewState(Integer.MIN_VALUE, step);
+      scene = new PreviewSceneData(machine.color(), entries);
+      animated = entries.stream().filter(entry -> entry.states().size() > 1).toList();
+      renderer.setScene(scene);
     }
     lastCycle = Util.getMillis();
   }
@@ -79,10 +66,9 @@ public final class MachineDetailsScreen extends Screen {
       onClose();
       return;
     }
-    if (cycle && scene != null && !scene.animated().isEmpty() && Util.getMillis() - lastCycle >= 1500) {
+    if (cycle && !animated.isEmpty() && Util.getMillis() - lastCycle >= 1500) {
       step++;
       lastCycle = Util.getMillis();
-      cache.setPreviewState(Integer.MIN_VALUE, step);
     }
   }
 
@@ -158,7 +144,7 @@ public final class MachineDetailsScreen extends Screen {
     var counts = new LinkedHashMap<Item, Integer>();
     for (var part : machine.parts()) {
       var alternative = part.alternatives().stream().findFirst().orElse(null);
-      if (alternative == null || alternative.getBlock().asItem().equals(net.minecraft.world.item.Items.AIR)) {
+      if (alternative == null || alternative.getBlock().asItem().equals(Items.AIR)) {
         continue;
       }
       counts.merge(alternative.getBlock().asItem(), 1, Integer::sum);
@@ -170,34 +156,13 @@ public final class MachineDetailsScreen extends Screen {
     int left = panelLeft + 8, top = panelTop + 48, right = panelLeft + panelWidth - 8,
         bottom = panelTop + panelHeight - 42;
     float available = Math.min(right - left, bottom - top);
-    float scale = Math.max(.01F, Math.min(24F, available * .55F / structureExtent())) * zoom;
-    graphics.flush();
-    graphics.enableScissor(left, top, right, bottom);
-    graphics.pose().pushPose();
-    try {
-      graphics.pose().translate((left + right) / 2F + panX, (top + bottom) / 2F + panY, 150);
-      graphics.pose().scale(scale, -scale, scale);
-      graphics.pose()
-          .mulPose(new Quaternionf().rotationXYZ((float) Math.toRadians(pitch), (float) Math.toRadians(yaw), 0));
-      graphics.pose().translate(-centerX, -centerY, -centerZ);
-      inverse = new Matrix4f(graphics.pose().last().pose()).invert();
-      cache.drawPreview(
-          new Matrix4f(RenderSystem.getModelViewMatrix()).mul(graphics.pose().last().pose()),
-          RenderSystem.getProjectionMatrix());
-    } finally {
-      graphics.pose().popPose();
-      graphics.disableScissor();
-    }
-  }
-
-  private float structureExtent() {
-    float minX = machine.parts().stream().mapToInt(part -> part.offset().getX()).min().orElse(0);
-    float maxX = machine.parts().stream().mapToInt(part -> part.offset().getX()).max().orElse(0);
-    float minY = machine.parts().stream().mapToInt(part -> part.offset().getY()).min().orElse(0);
-    float maxY = machine.parts().stream().mapToInt(part -> part.offset().getY()).max().orElse(0);
-    float minZ = machine.parts().stream().mapToInt(part -> part.offset().getZ()).min().orElse(0);
-    float maxZ = machine.parts().stream().mapToInt(part -> part.offset().getZ()).max().orElse(0);
-    return Math.max(maxX - minX + 1, Math.max(maxY - minY + 1, maxZ - minZ + 1));
+    float baseScale = Math.max(.01F, Math.min(24F, available * .55F / scene.extent()));
+    renderer.render(
+        graphics,
+        new PreviewViewport(left, top, right - left, bottom - top, baseScale),
+        camera,
+        Integer.MIN_VALUE,
+        step);
   }
 
   private void drawSelectedCandidates(GuiGraphics graphics, int panelLeft, int panelTop, int panelWidth, int panelHeight, int mouseX, int mouseY) {
@@ -281,38 +246,17 @@ public final class MachineDetailsScreen extends Screen {
       return super.mouseDragged(x, y, button, dx, dy);
     if (button == 0) {
       dragDistance += Math.abs(dx) + Math.abs(dy);
-      yaw += dx * .25F;
-      pitch = Math.max(-89F, Math.min(89F, pitch + (float) dy * .25F));
+      camera.rotate(dx, dy);
     } else {
-      panX += dx;
-      panY += dy;
+      camera.pan(dx, dy);
     }
     return true;
   }
 
   @Override
   public boolean mouseReleased(double x, double y, int button) {
-    if (dragging && button == 0 && dragDistance <= 4 && inverse != null && scene != null) {
-      var from = new Vector3f((float) x, (float) y, 10000);
-      var to = new Vector3f((float) x, (float) y, -10000);
-      inverse.transformPosition(from);
-      inverse.transformPosition(to);
-      var start = new Vec3(from.x, from.y, from.z);
-      var end = new Vec3(to.x, to.y, to.z);
-      double nearest = Double.MAX_VALUE;
-      selected = -1;
-      for (var section : scene.sections()) {
-        if (section.bounds().clip(start, end).isEmpty()) {
-          continue;
-        }
-        for (var entry : section.entries()) {
-          var hit = new AABB(entry.position()).clip(start, end);
-          if (hit.isPresent() && hit.get().distanceToSqr(start) < nearest) {
-            nearest = hit.get().distanceToSqr(start);
-            selected = scene.indexAt(entry.position());
-          }
-        }
-      }
+    if (dragging && button == 0 && dragDistance <= 4 && scene != null) {
+      selected = renderer.pick(x, y);
     }
     dragging = false;
     return true;
@@ -352,13 +296,13 @@ public final class MachineDetailsScreen extends Screen {
   public boolean mouseScrolled(double x, double y, double scrollX, double scrollY) {
     if (y < 70 || y >= height - 26)
       return false;
-    zoom = Math.max(.1F, Math.min(8F, zoom * (float) Math.pow(1.1, scrollY)));
+    camera.zoomBy(scrollY);
     return true;
   }
 
   @Override
   public void removed() {
-    cache.close();
+    renderer.close();
     super.removed();
   }
 }

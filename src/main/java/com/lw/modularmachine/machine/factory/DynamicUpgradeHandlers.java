@@ -6,65 +6,21 @@ import net.minecraft.nbt.CompoundTag;
 import net.minecraft.resources.ResourceLocation;
 import net.minecraft.world.item.ItemStack;
 
-/**
- * Server-owned dynamic effect functions; no callback is serialized or exposed
- * in snapshots.
- */
-public final class FactoryDynamicUpgrades {
-  public static final int MAX_HANDLERS = FactoryUpgradeHandlers.MAX_HANDLERS;
+import com.lw.modularmachine.api.upgrade.FactoryDynamicUpgrades.Context;
+import com.lw.modularmachine.api.upgrade.FactoryDynamicUpgrades.Evaluator;
+import com.lw.modularmachine.api.upgrade.FactoryUpgradeEntry;
+import org.jetbrains.annotations.ApiStatus;
 
-  @FunctionalInterface
-  public interface Evaluator {
-    FactoryUpgradeEntry evaluate(Context context);
-  }
-
-  public record Context(
-      ResourceLocation definitionId,
-      ResourceLocation itemId,
-      ResourceLocation machine,
-      BlockPos busPosition,
-      int slot,
-      int count,
-      long epoch,
-      FactoryUpgradeEntry baseEffect,
-      CompoundTag itemData,
-      CompoundTag busData) {
-    public Context(ResourceLocation definitionId, ResourceLocation itemId, ResourceLocation machine, BlockPos busPosition, int slot, int count, long epoch, FactoryUpgradeEntry baseEffect, CompoundTag itemData) {
-      this(definitionId, itemId, machine, busPosition, slot, count, epoch, baseEffect, itemData, new CompoundTag());
-    }
-
-    public Context {
-      Objects.requireNonNull(definitionId, "definitionId");
-      Objects.requireNonNull(itemId, "itemId");
-      Objects.requireNonNull(busPosition, "busPosition");
-      Objects.requireNonNull(baseEffect, "baseEffect");
-      Objects.requireNonNull(itemData, "itemData");
-      if (slot < 0 || slot >= FactoryUpgradeCatalog.MAX_SLOTS || count < 1 || count > 256 || epoch < 0) {
-        throw new IllegalArgumentException("Invalid dynamic upgrade context");
-      }
-      busPosition = busPosition.immutable();
-      itemData = itemData.copy();
-      busData = FactoryUpgradeDataSnapshots.copy(busData);
-    }
-
-    @Override
-    public CompoundTag itemData() {
-      return itemData.copy();
-    }
-
-    @Override
-    public CompoundTag busData() {
-      return busData.copy();
-    }
-  }
-
+/** Internal upgrade callback registry and evaluation. */
+@ApiStatus.Internal
+public final class DynamicUpgradeHandlers {
   private static final FactoryUpgradeHandlers<Evaluator> handlers = new FactoryUpgradeHandlers<>();
 
   public static boolean isRegistered(ResourceLocation id) {
     return handlers.find(id) != null || FactoryUpgradeKubeJSHandlers.dynamic(id) != null;
   }
 
-  private FactoryDynamicUpgrades() {
+  private DynamicUpgradeHandlers() {
   }
 
   public static void register(ResourceLocation id, Evaluator evaluator) {

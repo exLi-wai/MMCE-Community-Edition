@@ -4,7 +4,7 @@ import com.lw.modularmachine.blockentity.FactoryControllerBlockEntity;
 import com.lw.modularmachine.machine.controller.DedicatedControllerCatalog.Entry;
 import com.lw.modularmachine.machine.controller.DedicatedControllerCatalog;
 import com.lw.modularmachine.machine.orientation.ControllerOrientationActions;
-import com.lw.modularmachine.machine.orientation.MachineOrientation;
+import com.lw.modularmachine.api.orientation.MachineOrientation;
 import com.lw.modularmachine.machine.structure.StructureService;
 import com.lw.modularmachine.registry.MachineRegistries;
 import com.mojang.serialization.MapCodec;
@@ -18,6 +18,7 @@ import net.minecraft.world.entity.player.Player;
 import net.minecraft.world.item.BlockItem;
 import net.minecraft.world.item.ItemStack;
 import net.minecraft.world.item.context.BlockPlaceContext;
+import net.minecraft.world.level.BlockGetter;
 import net.minecraft.world.level.Level;
 import net.minecraft.world.level.block.BaseEntityBlock;
 import net.minecraft.world.level.block.Block;
@@ -36,6 +37,9 @@ import net.minecraft.world.level.block.state.properties.IntegerProperty;
 import net.minecraft.world.level.storage.loot.LootParams.Builder;
 import net.minecraft.world.level.storage.loot.parameters.LootContextParams;
 import net.minecraft.world.phys.BlockHitResult;
+import net.minecraft.world.phys.shapes.VoxelShape;
+import net.minecraft.world.phys.shapes.CollisionContext;
+import org.jetbrains.annotations.NotNull;
 
 public final class FactoryControllerBlock extends BaseEntityBlock {
   public static final MapCodec<FactoryControllerBlock> CODEC = simpleCodec(FactoryControllerBlock::new);
@@ -78,17 +82,17 @@ public final class FactoryControllerBlock extends BaseEntityBlock {
   }
 
   @Override
-  protected net.minecraft.world.phys.shapes.VoxelShape getShape(BlockState state, net.minecraft.world.level.BlockGetter level, BlockPos pos, net.minecraft.world.phys.shapes.CollisionContext context) {
+  protected VoxelShape getShape(BlockState state, BlockGetter level, BlockPos pos, CollisionContext context) {
     return ControllerBlockGeometry.shape(level, pos);
   }
 
   @Override
-  protected net.minecraft.world.phys.shapes.VoxelShape getCollisionShape(BlockState state, net.minecraft.world.level.BlockGetter level, BlockPos pos, net.minecraft.world.phys.shapes.CollisionContext context) {
+  protected @NotNull VoxelShape getCollisionShape(BlockState state, BlockGetter level, BlockPos pos, CollisionContext context) {
     return ControllerBlockGeometry.shape(level, pos);
   }
 
   @Override
-  public BlockState getStateForPlacement(BlockPlaceContext context) {
+  public BlockState getStateForPlacement(@NotNull BlockPlaceContext context) {
     if (dedicated != null && !context.getLevel().isClientSide) {
       var definition = StructureService.definition(dedicated.machine());
       if (definition == null) {
@@ -98,7 +102,7 @@ public final class FactoryControllerBlock extends BaseEntityBlock {
           context.getNearestLookingDirection(),
           context.getHorizontalDirection(),
           definition.allowedOrientationMask());
-      return selected.isEmpty() ? null : withOrientation(defaultBlockState(), selected.get());
+      return selected.map(machineOrientation -> withOrientation(defaultBlockState(), machineOrientation)).orElse(null);
     }
     return withOrientation(
         defaultBlockState(),

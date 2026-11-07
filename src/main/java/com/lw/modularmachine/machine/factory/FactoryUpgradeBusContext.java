@@ -1,5 +1,17 @@
 package com.lw.modularmachine.machine.factory;
 
+import com.lw.modularmachine.api.upgrade.FactoryUpgradeEntry;
+
+import com.lw.modularmachine.api.upgrade.FactoryUpgradeRuntimeData;
+
+import com.lw.modularmachine.api.upgrade.FactoryUpgradeBusData;
+
+import com.lw.modularmachine.api.upgrade.FactoryUpgradeItemData;
+
+import com.lw.modularmachine.api.upgrade.FactoryUpgradeRecipeChecks;
+
+import com.lw.modularmachine.api.upgrade.FactoryUpgradeEvents;
+
 import com.lw.modularmachine.blockentity.UpgradeBusBlockEntity;
 import java.util.ArrayList;
 import java.util.LinkedHashMap;
@@ -25,14 +37,14 @@ public record FactoryUpgradeBusContext(
     boolean restrictionsCaptured,
     List<FactoryUpgradeRestrictions.Installed> restrictions,
     FactoryUpgradeRestrictions.Result localRestrictions,
-    List<FactoryUpgradeEvents.Subscription> lifecycle,
-    List<FactoryUpgradeRecipeChecks.Subscription> checks,
+    List<UpgradeLifecyclePublisher.Subscription> lifecycle,
+    List<UpgradeRecipeChecks.Subscription> checks,
     List<UpgradeBusBlockEntity.StartCostSlot> costs,
     List<UpgradeBusBlockEntity.StartCostSlot> tickCosts,
-    List<FactoryUpgradeRuntimeData.Subscription> tickData,
-    List<FactoryUpgradeRuntimeData.Subscription> finishData,
-    List<FactoryUpgradeItemData.Subscription> itemData,
-    List<FactoryUpgradeBusData.Subscription> busData) {
+    List<UpgradeRuntimeDataHandlers.Subscription> tickData,
+    List<UpgradeRuntimeDataHandlers.Subscription> finishData,
+    List<UpgradeItemDataHandlers.Subscription> itemData,
+    List<UpgradeBusDataHandlers.Subscription> busData) {
   public record Requirements(
       boolean checks,
       boolean modifiers,
@@ -59,7 +71,7 @@ public record FactoryUpgradeBusContext(
     busData = List.copyOf(busData);
   }
 
-  public List<FactoryUpgradeRuntimeData.Subscription> runtimeData(FactoryUpgradeRuntimeData.Phase phase) {
+  public List<UpgradeRuntimeDataHandlers.Subscription> runtimeData(FactoryUpgradeRuntimeData.Phase phase) {
     return phase == FactoryUpgradeRuntimeData.Phase.TICK ? tickData : finishData;
   }
 
@@ -85,14 +97,14 @@ public record FactoryUpgradeBusContext(
         List.of());
   }
 
-  public static FactoryUpgradeBusContext compile(FactoryUpgradeService.Snapshot definitions, List<ItemStack> contents, ResourceLocation machine, BlockPos position, long revision, FactoryUpgradeBusData.State state) {
+  public static FactoryUpgradeBusContext compile(FactoryUpgradeService.Snapshot definitions, List<ItemStack> contents, ResourceLocation machine, BlockPos position, long revision, UpgradeBusDataHandlers.State state) {
     var requirements = Requirements.UNKNOWN;
     boolean captured = false;
     List<FactoryUpgradeRestrictions.Installed> restrictions = List.of();
     var local = FactoryUpgradeRestrictions.evaluate(List.of());
     var tickCosts = new ArrayList<UpgradeBusBlockEntity.StartCostSlot>();
-    var runtimeGroups = new FactoryUpgradeRuntimeData.Subscriptions();
-    var finishGroups = new FactoryUpgradeRuntimeData.Subscriptions(FactoryUpgradeRuntimeData.Phase.FINISHED);
+    var runtimeGroups = new UpgradeRuntimeDataHandlers.Subscriptions();
+    var finishGroups = new UpgradeRuntimeDataHandlers.Subscriptions(FactoryUpgradeRuntimeData.Phase.FINISHED);
     try {
       var slots = new ArrayList<Selected>();
       var costs = new ArrayList<UpgradeBusBlockEntity.StartCostSlot>();
@@ -169,9 +181,9 @@ public record FactoryUpgradeBusContext(
             List.of());
       }
       var entries = new ArrayList<FactoryUpgradeEntry>();
-      var lifecycle = new ArrayList<FactoryUpgradeEvents.Subscription>();
-      var checks = new ArrayList<FactoryUpgradeRecipeChecks.Subscription>();
-      var dataHandlers = new ArrayList<FactoryUpgradeItemData.Subscription>();
+      var lifecycle = new ArrayList<UpgradeLifecyclePublisher.Subscription>();
+      var checks = new ArrayList<UpgradeRecipeChecks.Subscription>();
+      var dataHandlers = new ArrayList<UpgradeItemDataHandlers.Subscription>();
       var groups = new LinkedHashMap<ResourceLocation, List<FactoryUpgradeEvents.Upgrade>>();
       var busHandlers = new LinkedHashMap<ResourceLocation, ResourceLocation>();
       for (var slot : slots) {
@@ -202,15 +214,16 @@ public record FactoryUpgradeBusContext(
                 && !FactoryUpgradeBusData.isRegistered(selected.startBusDataHandler())) {
           throw new IllegalArgumentException("Missing upgrade callback handler");
         }
-        var source = FactoryUpgradeEvents.captureUpgrade(selected, slot.stack(), position, slot.slot(), entry, busData);
+        var source = UpgradeLifecyclePublisher
+            .captureUpgrade(selected, slot.stack(), position, slot.slot(), entry, busData);
         if (selected.lifecycleHandler() != null) {
-          lifecycle.add(new FactoryUpgradeEvents.Subscription(selected.lifecycleHandler(), source));
+          lifecycle.add(new UpgradeLifecyclePublisher.Subscription(selected.lifecycleHandler(), source));
         }
         if (selected.recipeCheckHandler() != null) {
-          checks.add(new FactoryUpgradeRecipeChecks.Subscription(selected.recipeCheckHandler(), source));
+          checks.add(new UpgradeRecipeChecks.Subscription(selected.recipeCheckHandler(), source));
         }
         if (selected.startDataHandler() != null) {
-          dataHandlers.add(new FactoryUpgradeItemData.Subscription(selected.startDataHandler(), source));
+          dataHandlers.add(new UpgradeItemDataHandlers.Subscription(selected.startDataHandler(), source));
         }
         if (selected.startBusDataHandler() != null) {
           groups.computeIfAbsent(selected.effect().id(), ignored -> new ArrayList<>()).add(source);
@@ -219,7 +232,7 @@ public record FactoryUpgradeBusContext(
       }
       var busData = groups.entrySet().stream()
           .map(
-              group -> new FactoryUpgradeBusData.Subscription(
+              group -> new UpgradeBusDataHandlers.Subscription(
                   busHandlers.get(group.getKey()),
                   group.getKey(),
                   position,

@@ -1,11 +1,12 @@
 package com.lw.modularmachine.integration.jade;
 
-import com.lw.modularmachine.api.MachineControllerApi;
+import com.lw.modularmachine.api.controller.MachineControllerApi;
 import com.lw.modularmachine.machine.recipe.ControllerMetrics;
 import com.lw.modularmachine.machine.structure.StructureService;
 import com.lw.modularmachine.blockentity.MachineControllerBlockEntity;
 import com.lw.modularmachine.machine.recipe.FrozenItemRun;
 import com.lw.modularmachine.machine.structure.VerificationState;
+import com.lw.modularmachine.presentation.MachineDiagnosticText;
 import java.util.Locale;
 import net.minecraft.ChatFormatting;
 import net.minecraft.core.BlockPos;
@@ -110,11 +111,11 @@ final class MachineControllerTooltipProvider implements IBlockComponentProvider,
         tooltip.add(
             Component.translatable(
                 "jade.mmcece.diagnostic.expected",
-                MachineControllerApi.localizedDiagnostic(data.getString(DIAGNOSTIC + "_expected"))));
+                MachineDiagnosticText.localized(data.getString(DIAGNOSTIC + "_expected"))));
         tooltip.add(
             Component.translatable(
                 "jade.mmcece.diagnostic.actual",
-                MachineControllerApi.localizedDiagnostic(data.getString(DIAGNOSTIC + "_actual"))));
+                MachineDiagnosticText.localized(data.getString(DIAGNOSTIC + "_actual"))));
       }
     }
     if (data.contains(INPUT_DIAGNOSTIC + "_count")) {

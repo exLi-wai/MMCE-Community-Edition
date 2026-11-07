@@ -1,7 +1,6 @@
 package com.lw.modularmachine.machine.factory;
 
 import java.util.Objects;
-import net.minecraft.core.BlockPos;
 import net.minecraft.core.component.DataComponents;
 import net.minecraft.nbt.CompoundTag;
 import net.minecraft.nbt.Tag;
@@ -9,55 +8,19 @@ import net.minecraft.resources.ResourceLocation;
 import net.minecraft.world.item.ItemStack;
 import net.minecraft.world.item.component.CustomData;
 
+import com.lw.modularmachine.api.upgrade.FactoryUpgradeItemData.Context;
+import com.lw.modularmachine.api.upgrade.FactoryUpgradeItemData.Preparer;
+import com.lw.modularmachine.api.upgrade.FactoryUpgradeItemData.Update;
+import com.lw.modularmachine.api.upgrade.FactoryUpgradeEvents;
+import static com.lw.modularmachine.api.upgrade.FactoryUpgradeItemData.DATA_KEY;
+import org.jetbrains.annotations.ApiStatus;
+
 /**
- * Pure startup transforms for one owned custom-data field, never live inventory
- * writes.
+ * Internal startup item-data registry, preparation and private inventory
+ * transforms.
  */
-public final class FactoryUpgradeItemData {
-  public static final String DATA_KEY = "mmcece:upgrade_data";
-  public static final int MAX_BYTES = 16_384;
-  public static final int MAX_TAGS = 1024;
-  public static final int MAX_DEPTH = 32;
-
-  @FunctionalInterface
-  public interface Preparer {
-    Update prepare(Context context, FactoryUpgradeEvents.Upgrade upgrade, CompoundTag currentData);
-  }
-
-  public record Context(
-      ResourceLocation machine,
-      ResourceLocation recipeId,
-      ResourceLocation dimension,
-      BlockPos controllerPosition,
-      String threadId,
-      int instances,
-      long epoch,
-      FactoryUpgradeSnapshot upgrades) {
-    public Context {
-      Objects.requireNonNull(machine, "machine");
-      Objects.requireNonNull(recipeId, "recipeId");
-      Objects.requireNonNull(dimension, "dimension");
-      Objects.requireNonNull(controllerPosition, "controllerPosition");
-      Objects.requireNonNull(threadId, "threadId");
-      Objects.requireNonNull(upgrades, "upgrades");
-      if (!threadId.matches("[a-zA-Z0-9_.-]{1,64}") || instances < 1 || epoch < 0) {
-        throw new IllegalArgumentException("Invalid upgrade data preparation context");
-      }
-      controllerPosition = controllerPosition.immutable();
-    }
-  }
-
-  public record Update(CompoundTag data) {
-    public Update {
-      data = FactoryUpgradeDataSnapshots.copy(data);
-    }
-
-    @Override
-    public CompoundTag data() {
-      return data.copy();
-    }
-  }
-
+@ApiStatus.Internal
+public final class UpgradeItemDataHandlers {
   public record Subscription(ResourceLocation handlerId, FactoryUpgradeEvents.Upgrade upgrade) {
     public Subscription {
       Objects.requireNonNull(handlerId, "handlerId");
@@ -67,7 +30,7 @@ public final class FactoryUpgradeItemData {
 
   private static final FactoryUpgradeHandlers<Preparer> HANDLERS = new FactoryUpgradeHandlers<>();
 
-  private FactoryUpgradeItemData() {
+  private UpgradeItemDataHandlers() {
   }
 
   public static void register(ResourceLocation id, Preparer preparer) {

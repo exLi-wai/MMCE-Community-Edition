@@ -1,9 +1,10 @@
 package com.lw.modularmachine.integration.jade;
 
-import com.lw.modularmachine.api.MachineControllerApi;
+import com.lw.modularmachine.api.controller.MachineControllerApi;
 import com.lw.modularmachine.blockentity.FactoryControllerBlockEntity;
 import com.lw.modularmachine.machine.recipe.ControllerMetrics;
 import com.lw.modularmachine.machine.structure.StructureService;
+import com.lw.modularmachine.presentation.MachineDiagnosticText;
 import java.util.Locale;
 import net.minecraft.ChatFormatting;
 import net.minecraft.core.BlockPos;
@@ -43,7 +44,7 @@ final class FactoryControllerTooltipProvider implements IBlockComponentProvider,
     data.putString(PREFIX + "structure", factory.verificationState().name());
     data.putString(PREFIX + "failure", factory.verificationFailure().name());
     if (factory.getLevel() instanceof ServerLevel level) {
-      MachineControllerApi.structureDiagnostic(factory.registration(), level).ifPresent(diagnostic -> {
+      MachineControllerApi.structureDiagnostic(level, factory.getBlockPos()).ifPresent(diagnostic -> {
         data.putLong(DIAGNOSTIC + "_position", diagnostic.position().asLong());
         data.putString(DIAGNOSTIC + "_part", diagnostic.partId());
         data.putString(DIAGNOSTIC + "_expected", diagnostic.expected());
@@ -102,11 +103,11 @@ final class FactoryControllerTooltipProvider implements IBlockComponentProvider,
       tooltip.add(
           Component.translatable(
               "jade.mmcece.diagnostic.expected",
-              MachineControllerApi.localizedDiagnostic(data.getString(DIAGNOSTIC + "_expected"))));
+              MachineDiagnosticText.localized(data.getString(DIAGNOSTIC + "_expected"))));
       tooltip.add(
           Component.translatable(
               "jade.mmcece.diagnostic.actual",
-              MachineControllerApi.localizedDiagnostic(data.getString(DIAGNOSTIC + "_actual"))));
+              MachineDiagnosticText.localized(data.getString(DIAGNOSTIC + "_actual"))));
     }
     int count = Math.min(data.getInt(PREFIX + "count"), 8);
     for (int i = 0; i < count; i++) {

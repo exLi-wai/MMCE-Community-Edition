@@ -4,7 +4,7 @@ import com.google.gson.JsonObject;
 import com.google.gson.JsonParseException;
 import com.lw.modularmachine.machine.factory.FactoryUpgradeCompatibility;
 import com.lw.modularmachine.machine.factory.FactoryUpgradeDefinition;
-import com.lw.modularmachine.machine.factory.FactoryUpgradeEntry;
+import com.lw.modularmachine.api.upgrade.FactoryUpgradeEntry;
 import com.lw.modularmachine.machine.factory.FactoryUpgradeEntryResolver;
 import com.lw.modularmachine.machine.factory.FactoryUpgradeService;
 import com.lw.modularmachine.network.UpgradeBusPayloads;

@@ -1,5 +1,7 @@
 package com.lw.modularmachine.machine.factory;
 
+import com.lw.modularmachine.api.upgrade.FactoryUpgradeEntry;
+
 import java.util.List;
 import java.util.Optional;
 import net.minecraft.core.BlockPos;
@@ -47,7 +49,7 @@ public final class FactoryUpgradeEntryResolver {
       return base;
     }
 
-    var resolved = FactoryDynamicUpgrades
+    var resolved = DynamicUpgradeHandlers
         .evaluate(selected, stack, machine, position, slot, epoch, base.orElseThrow(), busData);
     var declared = base.orElseThrow().recipeModifiers();
     if (!resolved.recipeModifiers().isEmpty() && !resolved.recipeModifiers().equals(declared)) {

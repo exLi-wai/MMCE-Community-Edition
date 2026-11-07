@@ -1,5 +1,7 @@
 package com.lw.modularmachine.machine.recipe;
 
+import com.lw.modularmachine.api.recipe.RecipeFailureAction;
+
 import com.lw.modularmachine.ModularMachine;
 import com.lw.modularmachine.blockentity.FactoryControllerBlockEntity;
 import com.lw.modularmachine.blockentity.MachineControllerBlockEntity;
@@ -10,190 +12,30 @@ import com.lw.modularmachine.util.callback.ServerCallbackRegistry;
 import com.lw.modularmachine.util.thread.ServerThreadGuard;
 import java.util.EnumMap;
 import java.util.HashMap;
-import java.util.HashSet;
 import java.util.List;
 import java.util.Map;
 import java.util.Objects;
 import java.util.Optional;
 import java.util.Set;
-import java.util.UUID;
 import java.util.WeakHashMap;
-import net.minecraft.core.BlockPos;
 import net.minecraft.resources.ResourceLocation;
 import net.minecraft.server.level.ServerLevel;
+
+import com.lw.modularmachine.api.recipe.RecipeLifecycleEvents.Context;
+import com.lw.modularmachine.api.recipe.RecipeLifecycleEvents.FailureContext;
+import com.lw.modularmachine.api.recipe.RecipeLifecycleEvents.FailureDecision;
+import com.lw.modularmachine.api.recipe.RecipeLifecycleEvents.FailurePolicy;
+import com.lw.modularmachine.api.recipe.RecipeLifecycleEvents.Listener;
+import com.lw.modularmachine.api.recipe.RecipeLifecycleEvents.ResourceFailure;
+import com.lw.modularmachine.api.recipe.RecipeLifecycleEvents.RunSnapshot;
+import com.lw.modularmachine.api.recipe.RecipeLifecycleEvents.Type;
 import net.neoforged.bus.api.SubscribeEvent;
 import net.neoforged.neoforge.event.server.ServerStoppedEvent;
+import org.jetbrains.annotations.ApiStatus;
 
-/** Read-only post-commit notifications, with opt-in high-frequency events. */
-public final class RecipeLifecycleEvents {
-  public enum Type {
-    STARTED,
-    TICK,
-    RESOURCE_FAILURE,
-    DISCARDED,
-    FINISHED,
-    MACHINE_TICK
-  }
-
-  public enum ResourceFailure {
-    ENERGY,
-    FLUID
-  }
-
-  @FunctionalInterface
-  public interface Listener {
-    void onEvent(Context context);
-  }
-
-  public enum FailureDecision {
-    DEFAULT,
-    RESET,
-    STILL,
-    DECREASE,
-    DISCARD
-  }
-
-  @FunctionalInterface
-  public interface FailurePolicy {
-    FailureDecision decide(FailureContext context);
-  }
-
-  public record FailureContext(
-      ResourceLocation dimension,
-      BlockPos controllerPosition,
-      ResourceLocation machine,
-      boolean factory,
-      Optional<String> threadId,
-      long tick,
-      ResourceFailure resource,
-      RunSnapshot run) {
-    public FailureContext {
-      Objects.requireNonNull(dimension, "dimension");
-      Objects.requireNonNull(controllerPosition, "controllerPosition");
-      Objects.requireNonNull(machine, "machine");
-      Objects.requireNonNull(threadId, "threadId");
-      Objects.requireNonNull(resource, "resource");
-      Objects.requireNonNull(run, "run");
-      controllerPosition = controllerPosition.immutable();
-      if (tick < 0
-          || factory != threadId.isPresent()
-          || threadId.isPresent() && threadId.orElseThrow().isBlank()
-          || run.state() != FrozenItemRun.State.RUNNING
-          || run.lastProgressTick() >= tick) {
-        throw new IllegalArgumentException("Invalid recipe failure policy context");
-      }
-    }
-  }
-
-  public record RunSnapshot(
-      UUID runId,
-      ResourceLocation recipeId,
-      FrozenItemRun.State state,
-      int parallelInstances,
-      int progress,
-      int duration,
-      long lastProgressTick) {
-    public RunSnapshot {
-      Objects.requireNonNull(runId, "runId");
-      Objects.requireNonNull(recipeId, "recipeId");
-      Objects.requireNonNull(state, "state");
-      if (parallelInstances < 1
-          || duration < 1
-          || progress < 0
-          || progress > duration
-          || state == FrozenItemRun.State.OUTPUT_PENDING && progress != duration) {
-        throw new IllegalArgumentException("Invalid recipe event run snapshot");
-      }
-    }
-
-    static RunSnapshot capture(FrozenItemRun run) {
-      return new RunSnapshot(
-          run.runId(),
-          run.recipeId(),
-          run.state(),
-          run.parallelInstances(),
-          run.progress(),
-          run.duration(),
-          run.lastProgressTick());
-    }
-  }
-
-  public record Context(
-      Type type,
-      ResourceLocation dimension,
-      BlockPos controllerPosition,
-      ResourceLocation machine,
-      boolean factory,
-      Optional<String> threadId,
-      long tick,
-      VerificationState structureState,
-      VerificationFailure structureFailure,
-      List<RunSnapshot> before,
-      List<RunSnapshot> after,
-      Optional<ResourceFailure> resourceFailure) {
-    public Context {
-      Objects.requireNonNull(type, "type");
-      Objects.requireNonNull(dimension, "dimension");
-      Objects.requireNonNull(machine, "machine");
-      Objects.requireNonNull(threadId, "threadId");
-      Objects.requireNonNull(structureState, "structureState");
-      Objects.requireNonNull(structureFailure, "structureFailure");
-      Objects.requireNonNull(resourceFailure, "resourceFailure");
-      controllerPosition = controllerPosition.immutable();
-      before = List.copyOf(before);
-      after = List.copyOf(after);
-      if (tick < 0
-          || threadId.isPresent()
-              && (!factory || threadId.orElseThrow().isBlank() || threadId.orElseThrow().length() > 64)
-          || type != Type.MACHINE_TICK && factory != threadId.isPresent()
-          || (type == Type.RESOURCE_FAILURE || type == Type.DISCARDED) != resourceFailure.isPresent()) {
-        throw new IllegalArgumentException("Invalid recipe event identity");
-      }
-      if (type == Type.MACHINE_TICK && (!before.isEmpty() || !after.isEmpty() || threadId.isPresent())
-          || type == Type.STARTED
-              && (!before.isEmpty()
-                  || after.isEmpty()
-                  || after.stream().anyMatch(run -> run.progress() != 0 || run.state() != FrozenItemRun.State.RUNNING))
-          || type == Type.FINISHED
-              && (!after.isEmpty()
-                  || before.isEmpty()
-                  || before.stream().anyMatch(run -> run.state() != FrozenItemRun.State.OUTPUT_PENDING))
-          || type == Type.DISCARDED
-              && (!after.isEmpty()
-                  || before.isEmpty()
-                  || before.stream().anyMatch(run -> run.state() != FrozenItemRun.State.RUNNING))) {
-        throw new IllegalArgumentException("Invalid recipe event boundary");
-      }
-      if (type == Type.TICK || type == Type.RESOURCE_FAILURE) {
-        if (before.isEmpty() || before.size() != after.size()) {
-          throw new IllegalArgumentException("Unpaired recipe event transition");
-        }
-        for (int index = 0; index < before.size(); index++) {
-          var previous = before.get(index);
-          var current = after.get(index);
-          if (!previous.runId().equals(current.runId())
-              || !previous.recipeId().equals(current.recipeId())
-              || previous.parallelInstances() != current.parallelInstances()
-              || previous.duration() != current.duration()
-              || previous.state() != FrozenItemRun.State.RUNNING
-              || current.lastProgressTick() != tick
-              || previous.lastProgressTick() >= current.lastProgressTick()
-              || type == Type.TICK && current.progress() <= previous.progress()
-              || type == Type.RESOURCE_FAILURE
-                  && (current.progress() > previous.progress() || current.state() != FrozenItemRun.State.RUNNING)) {
-            throw new IllegalArgumentException("Invalid recipe event transition");
-          }
-        }
-      }
-      for (var snapshots : List.of(before, after)) {
-        var ids = new HashSet<UUID>();
-        if (snapshots.stream().anyMatch(run -> !ids.add(run.runId()))) {
-          throw new IllegalArgumentException("Duplicate recipe event run");
-        }
-      }
-    }
-  }
-
+/** Internal production dispatch and callback guards; not an integration API. */
+@ApiStatus.Internal
+public final class RecipeLifecyclePublisher {
   private record Handler(Set<Type> types, Listener listener) {
     Handler {
       types = Set.copyOf(types);
@@ -214,7 +56,7 @@ public final class RecipeLifecycleEvents {
   private static final Map<StructureService.StructureSubject, Long> MACHINE_TICKS = new WeakHashMap<>();
   private static StructureService.StructureSubject activeOwner;
 
-  private RecipeLifecycleEvents() {
+  private RecipeLifecyclePublisher() {
   }
 
   public static void register(ResourceLocation id, Listener listener) {
@@ -350,7 +192,7 @@ public final class RecipeLifecycleEvents {
         threadId,
         level.getGameTime(),
         resource,
-        RunSnapshot.capture(run));
+        snapshot(run));
     var policySnapshot = FAILURE_POLICIES.snapshot();
     var deliveries = FAILURE_POLICIES.orderedSnapshot();
     activeOwner = owner;
@@ -444,8 +286,8 @@ public final class RecipeLifecycleEvents {
           level.getGameTime(),
           state,
           structureFailure,
-          before.stream().map(RunSnapshot::capture).toList(),
-          after.stream().map(RunSnapshot::capture).toList(),
+          before.stream().map(RecipeLifecyclePublisher::snapshot).toList(),
+          after.stream().map(RecipeLifecyclePublisher::snapshot).toList(),
           failure);
       activeOwner = owner;
       try {
@@ -473,6 +315,17 @@ public final class RecipeLifecycleEvents {
       ModularMachine.LOGGER
           .warn("Recipe {} event capture failed at {}", type, owner.structurePosition(), captureFailure);
     }
+  }
+
+  private static RunSnapshot snapshot(FrozenItemRun run) {
+    return new RunSnapshot(
+        run.runId(),
+        run.recipeId(),
+        run.state(),
+        run.parallelInstances(),
+        run.progress(),
+        run.duration(),
+        run.lastProgressTick());
   }
 
   @SubscribeEvent

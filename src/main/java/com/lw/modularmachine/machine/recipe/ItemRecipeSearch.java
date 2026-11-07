@@ -1,9 +1,10 @@
 package com.lw.modularmachine.machine.recipe;
 
+import com.lw.modularmachine.machine.factory.UpgradeRecipeChecks;
+
 import com.lw.modularmachine.blockentity.FactoryControllerBlockEntity;
 import com.lw.modularmachine.blockentity.MachineControllerBlockEntity;
 import com.lw.modularmachine.machine.PortKind;
-import com.lw.modularmachine.machine.factory.FactoryUpgradeRecipeChecks;
 import com.lw.modularmachine.machine.factory.UpgradeBusOwner;
 import com.lw.modularmachine.machine.structure.StructureService;
 import java.util.ArrayList;
@@ -31,7 +32,7 @@ public final class ItemRecipeSearch {
   private final FluidOutputLayout fluidLayout;
   private FluidOutputLayout.Planning fluidPlan;
   private long fluidWork;
-  private final FactoryUpgradeRecipeChecks.Scope factoryScope;
+  private final UpgradeRecipeChecks.Scope factoryScope;
   private final UpgradeBusOwner factory;
   private final String factoryThread;
   private ItemRecipePlan pendingFactoryPlan;
@@ -50,7 +51,7 @@ public final class ItemRecipeSearch {
     this.factoryThread = startThread(ticket, factoryThread);
     this.groups = List.copyOf(groups);
     factory = this.factoryThread != null && ticket.owner() instanceof UpgradeBusOwner owner ? owner : null;
-    factoryScope = factory == null ? null : FactoryUpgradeRecipeChecks.capture(factory, this.factoryThread);
+    factoryScope = factory == null ? null : UpgradeRecipeChecks.capture(factory, this.factoryThread);
     inputs = List.of();
     outputs = List.of();
     session = null;
@@ -62,7 +63,7 @@ public final class ItemRecipeSearch {
     this.catalog = catalog;
     this.factoryThread = startThread(ticket, factoryThread);
     factory = this.factoryThread != null && ticket.owner() instanceof UpgradeBusOwner owner ? owner : null;
-    factoryScope = factory == null ? null : FactoryUpgradeRecipeChecks.capture(factory, this.factoryThread);
+    factoryScope = factory == null ? null : UpgradeRecipeChecks.capture(factory, this.factoryThread);
     var inputSlots = new ArrayList<InputSlot>();
     var outputSlots = new ArrayList<ItemSlotRef>();
     var counts = new LinkedHashMap<ItemResourceKey, Long>();
@@ -247,7 +248,7 @@ public final class ItemRecipeSearch {
       throw new IllegalArgumentException("Negative planning budget");
     }
     if (factoryScope != null && !factoryScope.current()) {
-      throw new FactoryUpgradeRecipeChecks.StaleException();
+      throw new UpgradeRecipeChecks.StaleException();
     }
     if (groups != null) {
       return advanceGroups(budget);
@@ -326,8 +327,8 @@ public final class ItemRecipeSearch {
             session.rejectSelected();
             continue;
           }
-          case STALE -> throw new FactoryUpgradeRecipeChecks.StaleException();
-          case ERROR -> throw new FactoryUpgradeRecipeChecks.FailedException();
+          case STALE -> throw new UpgradeRecipeChecks.StaleException();
+          case ERROR -> throw new UpgradeRecipeChecks.FailedException();
           case ALLOWED -> {
           }
         }

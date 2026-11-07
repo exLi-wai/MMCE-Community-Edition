@@ -1,31 +1,27 @@
 package com.lw.modularmachine.integration.kubejs;
 
-import com.lw.modularmachine.machine.smart.SmartInterfaceEvents;
+import com.lw.modularmachine.api.smart.SmartInterfaceEvents;
 import dev.latvian.mods.kubejs.event.KubeEvent;
 import java.util.ArrayList;
 import java.util.Comparator;
 import java.util.LinkedHashMap;
 import java.util.List;
+import java.util.LinkedHashSet;
 import java.util.Map;
+import java.util.Set;
 import net.minecraft.resources.ResourceLocation;
 
 /** Registration builder for read-only smart interface notifications. */
 public final class KubeJSSmartInterfaceRegistration implements KubeEvent {
-  private static final int MAX_HANDLERS = 256;
-
   private final Map<ResourceLocation, SmartInterfaceEvents.Listener> handlers = new LinkedHashMap<>();
+  private final Set<ResourceLocation> identifiers = new LinkedHashSet<>();
   private boolean valid = true;
 
   public void onUpdate(String text, SmartInterfaceEvents.Listener listener) {
-    ResourceLocation id = text == null ? null : ResourceLocation.tryParse(text);
+    ResourceLocation id = KubeJSRegistrationIds.parse(text);
     if (id == null
-        || !id.getNamespace().equals("kubejs")
-        || id.getPath().isEmpty()
-        || id.toString().length() > 256
-        || !id.toString().equals(text)
         || listener == null
-        || handlers.containsKey(id)
-        || handlers.size() >= MAX_HANDLERS) {
+        || !KubeJSRegistrationIds.claim(identifiers, id, KubeJSRegistrationIds.MAX_HANDLERS)) {
       valid = false;
       return;
     }

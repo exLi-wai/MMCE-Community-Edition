@@ -4,7 +4,7 @@ import com.google.gson.JsonElement;
 import com.google.gson.JsonObject;
 import com.google.gson.JsonParseException;
 import com.google.gson.JsonParser;
-import com.lw.modularmachine.machine.orientation.MachineOrientation;
+import com.lw.modularmachine.api.orientation.MachineOrientation;
 import com.lw.modularmachine.machine.orientation.OrientationPolicy;
 import com.lw.modularmachine.machine.orientation.PropertySpace;
 import com.lw.modularmachine.machine.orientation.StateOrientationAdapters;

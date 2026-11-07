@@ -1,5 +1,11 @@
 package com.lw.modularmachine.machine.factory;
 
+import com.lw.modularmachine.api.upgrade.FactoryUpgradeStartCost;
+
+import com.lw.modularmachine.api.upgrade.FactoryUpgradeRuntimeData;
+
+import com.lw.modularmachine.api.upgrade.FactoryUpgradeItemData;
+
 import com.lw.modularmachine.ModularMachine;
 import com.lw.modularmachine.block.UpgradeBusBlock;
 import com.lw.modularmachine.blockentity.UpgradeBusBlockEntity;
@@ -39,14 +45,14 @@ public final class FactoryUpgradeTickCosts {
     private final BlockState state;
     private final long revision;
     private final List<UpgradeBusBlockEntity.StartCostSlot> costs;
-    private final List<FactoryUpgradeRuntimeData.Subscription> subscriptions;
+    private final List<UpgradeRuntimeDataHandlers.Subscription> subscriptions;
     private final NonNullList<ItemStack> before;
     private final NonNullList<ItemStack> prepared;
-    private final FactoryUpgradeBusData.State beforeData;
-    private FactoryUpgradeBusData.State preparedData;
+    private final UpgradeBusDataHandlers.State beforeData;
+    private UpgradeBusDataHandlers.State preparedData;
     private boolean changed;
 
-    private Source(UpgradeBusBlockEntity bus, BlockPos position, BlockState state, long revision, List<UpgradeBusBlockEntity.StartCostSlot> costs, List<FactoryUpgradeRuntimeData.Subscription> subscriptions, NonNullList<ItemStack> before, NonNullList<ItemStack> prepared, FactoryUpgradeBusData.State beforeData) {
+    private Source(UpgradeBusBlockEntity bus, BlockPos position, BlockState state, long revision, List<UpgradeBusBlockEntity.StartCostSlot> costs, List<UpgradeRuntimeDataHandlers.Subscription> subscriptions, NonNullList<ItemStack> before, NonNullList<ItemStack> prepared, UpgradeBusDataHandlers.State beforeData) {
       this.bus = bus;
       this.position = position;
       this.state = state;
@@ -61,7 +67,7 @@ public final class FactoryUpgradeTickCosts {
     }
   }
 
-  private record Step(Source source, FactoryUpgradeRuntimeData.Subscription subscription) {
+  private record Step(Source source, UpgradeRuntimeDataHandlers.Subscription subscription) {
   }
 
   private final UpgradeBusOwner owner;
@@ -113,7 +119,7 @@ public final class FactoryUpgradeTickCosts {
                 || runs.stream()
                     .anyMatch(run -> run.pendingOutput() != (phase == FactoryUpgradeRuntimeData.Phase.FINISHED)))
         || legacy && FactoryUpgradeService.snapshot().hasTickData()
-        || FactoryUpgradeEvents.isDispatching(owner)
+        || UpgradeLifecyclePublisher.isDispatching(owner)
         || !owner.canCommitStructure()
         || !runsCurrent()) {
       sources = List.of();
@@ -189,7 +195,7 @@ public final class FactoryUpgradeTickCosts {
                 List.of(),
                 null,
                 null,
-                FactoryUpgradeBusData.State.empty()));
+                UpgradeBusDataHandlers.State.empty()));
         continue;
       }
       if (!(level.getBlockEntity(position) instanceof UpgradeBusBlockEntity bus) || !bus.hasFactoryBinding(owner)) {
@@ -204,7 +210,7 @@ public final class FactoryUpgradeTickCosts {
       }
       var costs = phase == FactoryUpgradeRuntimeData.Phase.TICK ? bus
           .tickCostSlots(owner) : List.<UpgradeBusBlockEntity.StartCostSlot>of();
-      var subscriptions = legacy ? List.<FactoryUpgradeRuntimeData.Subscription>of() : bus
+      var subscriptions = legacy ? List.<UpgradeRuntimeDataHandlers.Subscription>of() : bus
           .runtimeDataSubscriptions(owner, phase);
       if (costs.isEmpty() && subscriptions.isEmpty()) {
         result.add(
@@ -314,7 +320,7 @@ public final class FactoryUpgradeTickCosts {
       while (cursor < steps.size() && allowance > 0) {
         var step = steps.get(cursor);
         allowance--;
-        var update = FactoryUpgradeRuntimeData.prepare(
+        var update = UpgradeRuntimeDataHandlers.prepare(
             step.subscription,
             context(step.subscription, step.source),
             step.source.preparedData.get(step.subscription.definitionId()));
@@ -343,7 +349,7 @@ public final class FactoryUpgradeTickCosts {
     return initial - allowance;
   }
 
-  private FactoryUpgradeRuntimeData.Context context(FactoryUpgradeRuntimeData.Subscription subscription, Source source) {
+  private FactoryUpgradeRuntimeData.Context context(UpgradeRuntimeDataHandlers.Subscription subscription, Source source) {
     var items = new ArrayList<FactoryUpgradeRuntimeData.Item>();
     if (source.before != null) {
       for (var slot : subscription.slots()) {
@@ -392,7 +398,7 @@ public final class FactoryUpgradeTickCosts {
         items);
   }
 
-  private void apply(FactoryUpgradeRuntimeData.Update update, FactoryUpgradeRuntimeData.Subscription subscription, Source source) {
+  private void apply(FactoryUpgradeRuntimeData.Update update, UpgradeRuntimeDataHandlers.Subscription subscription, Source source) {
     for (var item : update.items()) {
       if (!subscription.slots().contains(item.slot())) {
         throw new IllegalArgumentException("Runtime handler wrote an unowned slot");
@@ -411,7 +417,7 @@ public final class FactoryUpgradeTickCosts {
         stack = source.prepared.get(item.slot());
       }
       if (!stack.isEmpty() && item.data().isPresent()) {
-        source.changed |= FactoryUpgradeItemData.apply(stack, item.data().orElseThrow());
+        source.changed |= UpgradeItemDataHandlers.apply(stack, item.data().orElseThrow());
       }
     }
     if (update.busData().isPresent()) {
@@ -465,7 +471,7 @@ public final class FactoryUpgradeTickCosts {
         || !level.hasChunkAt(owner.getBlockPos())
         || level.getBlockEntity(owner.getBlockPos()) != owner
         || sameTick && level.getGameTime() != authorityTick
-        || FactoryUpgradeEvents.isDispatching(owner)
+        || UpgradeLifecyclePublisher.isDispatching(owner)
         || owner.structureRegistration() != registration
         || !owner.machineId().equals(machine)
         || FactoryUpgradeService.snapshot().epoch() != epoch

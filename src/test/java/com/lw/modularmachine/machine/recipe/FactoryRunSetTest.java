@@ -1,5 +1,7 @@
 package com.lw.modularmachine.machine.recipe;
 
+import com.lw.modularmachine.api.recipe.RecipeFailureAction;
+
 import com.lw.modularmachine.machine.factory.FactoryRunSet;
 import java.util.ArrayList;
 import java.util.HashMap;

@@ -1,12 +1,12 @@
 package com.lw.modularmachine.integration.kubejs;
 
-import com.lw.modularmachine.machine.factory.FactoryDynamicUpgrades;
-import com.lw.modularmachine.machine.factory.FactoryUpgradeBusData;
-import com.lw.modularmachine.machine.factory.FactoryUpgradeEvents;
-import com.lw.modularmachine.machine.factory.FactoryUpgradeItemData;
+import com.lw.modularmachine.api.upgrade.FactoryDynamicUpgrades;
+import com.lw.modularmachine.api.upgrade.FactoryUpgradeBusData;
+import com.lw.modularmachine.api.upgrade.FactoryUpgradeEvents;
+import com.lw.modularmachine.api.upgrade.FactoryUpgradeItemData;
 import com.lw.modularmachine.machine.factory.FactoryUpgradeKubeJSHandlers;
-import com.lw.modularmachine.machine.factory.FactoryUpgradeRecipeChecks;
-import com.lw.modularmachine.machine.factory.FactoryUpgradeRuntimeData;
+import com.lw.modularmachine.api.upgrade.FactoryUpgradeRecipeChecks;
+import com.lw.modularmachine.api.upgrade.FactoryUpgradeRuntimeData;
 import dev.latvian.mods.kubejs.event.KubeEvent;
 
 /**

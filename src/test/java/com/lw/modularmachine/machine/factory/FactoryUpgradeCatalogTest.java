@@ -1,5 +1,9 @@
 package com.lw.modularmachine.machine.factory;
 
+import com.lw.modularmachine.api.upgrade.FactoryUpgradeSnapshot;
+
+import com.lw.modularmachine.api.upgrade.FactoryUpgradeEntry;
+
 import java.util.Collections;
 import java.util.List;
 import net.minecraft.resources.ResourceLocation;

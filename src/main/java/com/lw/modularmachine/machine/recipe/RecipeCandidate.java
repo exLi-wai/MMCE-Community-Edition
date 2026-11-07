@@ -1,6 +1,6 @@
 package com.lw.modularmachine.machine.recipe;
 
-import com.lw.modularmachine.machine.smart.SmartNumberRequirement;
+import com.lw.modularmachine.api.smart.SmartNumberRequirement;
 import java.util.List;
 import java.util.Objects;
 

@@ -1,13 +1,16 @@
 package com.lw.modularmachine.machine.recipe;
 
+import com.lw.modularmachine.machine.factory.UpgradeLifecyclePublisher;
+
+import com.lw.modularmachine.api.recipe.RecipeLifecycleEvents;
+
 import com.lw.modularmachine.ModularMachine;
 import com.lw.modularmachine.blockentity.MachineControllerBlockEntity;
 import com.lw.modularmachine.blockentity.MachinePortBlockEntity;
 import com.lw.modularmachine.blockentity.UpgradeBusBlockEntity.StartCostLease;
 import com.lw.modularmachine.config.MachineConfig;
 import com.lw.modularmachine.machine.PortKind;
-import com.lw.modularmachine.machine.factory.FactoryUpgradeEvents;
-import com.lw.modularmachine.machine.factory.FactoryUpgradeRuntimeData.Phase;
+import com.lw.modularmachine.api.upgrade.FactoryUpgradeRuntimeData.Phase;
 import com.lw.modularmachine.machine.factory.FactoryUpgradeStartCosts;
 import com.lw.modularmachine.machine.factory.FactoryUpgradeTickCosts.Status;
 import com.lw.modularmachine.machine.structure.StructureService;
@@ -121,7 +124,7 @@ public final class ItemRunEngine {
     if (!level.getServer().isSameThread()) {
       throw new IllegalStateException("Recipe run tick outside server thread");
     }
-    if (RecipeLifecycleEvents.isDispatching()) {
+    if (RecipeLifecyclePublisher.isDispatching()) {
       return Result.PAUSED;
     }
     long now = level.getGameTime();
@@ -240,7 +243,7 @@ public final class ItemRunEngine {
         }
         controller.upgradeRuntimeWork().clear(Phase.TICK, "main");
         FactoryUpgradeStartCosts.publish(controller, tickCostLeases);
-        RecipeLifecycleEvents.advanced(controller, beforeTick, run);
+        RecipeLifecyclePublisher.advanced(controller, beforeTick, run);
         for (var lease : energyLeases) {
           try {
             lease.publish();
@@ -277,7 +280,7 @@ public final class ItemRunEngine {
 
   private Result applyResourceFailure(MachineControllerBlockEntity controller, FrozenItemRun run, long tick, Result result) {
     var resource = result == Result.WAITING_ENERGY ? RecipeLifecycleEvents.ResourceFailure.ENERGY : RecipeLifecycleEvents.ResourceFailure.FLUID;
-    var decision = RecipeLifecycleEvents.decideResourceFailure(controller, Optional.empty(), run, resource);
+    var decision = RecipeLifecyclePublisher.decideResourceFailure(controller, Optional.empty(), run, resource);
     if (controller.runningRecipe().orElse(null) != run
         || !controller.canCommitProduction()
         || !stillUnavailable(controller, run, resource)) {
@@ -293,12 +296,12 @@ public final class ItemRunEngine {
         owner.resolve(commit);
       }
       if (commit) {
-        RecipeLifecycleEvents.resourceDiscarded(controller, run, resource);
+        RecipeLifecyclePublisher.resourceDiscarded(controller, run, resource);
         publishController(controller);
       }
       return result;
     }
-    var adjusted = RecipeLifecycleEvents.applyFailureDecision(run, tick, decision);
+    var adjusted = RecipeLifecyclePublisher.applyFailureDecision(run, tick, decision);
     if (adjusted == run) {
       return result;
     }
@@ -311,7 +314,7 @@ public final class ItemRunEngine {
       owner.resolve(commit);
     }
     if (commit) {
-      RecipeLifecycleEvents.resourceFailed(controller, run, adjusted, resource);
+      RecipeLifecyclePublisher.resourceFailed(controller, run, adjusted, resource);
       publishController(controller);
     }
 
@@ -505,7 +508,7 @@ public final class ItemRunEngine {
     controller.upgradeRuntimeWork().clear(Phase.FINISHED, "main");
     FactoryUpgradeStartCosts.publish(controller, upgradeLeases);
     publishController(controller);
-    FactoryUpgradeEvents.recipeFinished(controller, "main", List.of(run));
+    UpgradeLifecyclePublisher.recipeFinished(controller, "main", List.of(run));
     for (var lease : leases.values()) {
       try {
         lease.publish();

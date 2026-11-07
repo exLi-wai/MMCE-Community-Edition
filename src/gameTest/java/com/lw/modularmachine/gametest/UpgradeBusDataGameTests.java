@@ -1,17 +1,21 @@
 package com.lw.modularmachine.gametest;
 
+import com.lw.modularmachine.machine.factory.UpgradeBusDataHandlers;
+
+import com.lw.modularmachine.machine.factory.UpgradeLifecyclePublisher;
+
 import com.lw.modularmachine.blockentity.FactoryControllerBlockEntity;
 import com.lw.modularmachine.blockentity.MachinePortBlockEntity;
 import com.lw.modularmachine.blockentity.UpgradeBusBlockEntity;
 import com.lw.modularmachine.config.MachineConfig;
-import com.lw.modularmachine.machine.factory.FactoryDynamicUpgrades;
+import com.lw.modularmachine.api.upgrade.FactoryDynamicUpgrades;
 import com.lw.modularmachine.machine.factory.FactoryThreadState;
-import com.lw.modularmachine.machine.factory.FactoryUpgradeBusData;
+import com.lw.modularmachine.api.upgrade.FactoryUpgradeBusData;
 import com.lw.modularmachine.machine.factory.FactoryUpgradeCompatibility;
 import com.lw.modularmachine.machine.factory.FactoryUpgradeDefinition;
-import com.lw.modularmachine.machine.factory.FactoryUpgradeEntry;
-import com.lw.modularmachine.machine.factory.FactoryUpgradeEvents;
-import com.lw.modularmachine.machine.factory.FactoryUpgradeItemData;
+import com.lw.modularmachine.api.upgrade.FactoryUpgradeEntry;
+import com.lw.modularmachine.api.upgrade.FactoryUpgradeEvents;
+import com.lw.modularmachine.api.upgrade.FactoryUpgradeItemData;
 import com.lw.modularmachine.machine.factory.FactoryUpgradeService;
 import com.lw.modularmachine.machine.factory.FactoryUpgradeStartCosts;
 import com.lw.modularmachine.machine.recipe.FactoryParallelStarter;
@@ -127,7 +131,7 @@ public final class UpgradeBusDataGameTests {
       helper.assertTrue(
           context.startup().recipeId().equals(RECIPE)
               && context.startup().threadId().equals(THREAD)
-              && FactoryUpgradeEvents.isDispatching(fixture.factory()),
+              && UpgradeLifecyclePublisher.isDispatching(fixture.factory()),
           "Bus data preparation lost its batch or reentry guard");
       data.putLong("runs", Math.addExact(data.getLong("runs"), context.startup().instances()));
       data.putInt("source_slots", context.upgrades().size());
@@ -332,7 +336,7 @@ public final class UpgradeBusDataGameTests {
     var payload = new CompoundTag();
     payload.putByteArray("payload", new byte[8000]);
     var value = new FactoryUpgradeBusData.Update(payload);
-    var history = FactoryUpgradeBusData.State.empty();
+    var history = UpgradeBusDataHandlers.State.empty();
     for (int index = 0; index < 8; index++) {
       history = history.with(id("history_" + index), value);
     }
@@ -346,7 +350,7 @@ public final class UpgradeBusDataGameTests {
             && fixture.a().inventory().getStackInSlot(1).getCount() == 3
             && fixture.input().inventory().getStackInSlot(0).getCount() == 2,
         "Aggregate bus data overflow committed a partial value or startup cost");
-    seed(fixture, fixture.a(), FactoryUpgradeBusData.State.empty());
+    seed(fixture, fixture.a(), UpgradeBusDataHandlers.State.empty());
     FactoryUpgradeBusData.register(BUS_HANDLER, (context, data) -> {
       FactoryUpgradeBusData.register(BUS_HANDLER, stable);
       return new FactoryUpgradeBusData.Update(data);
@@ -420,7 +424,7 @@ public final class UpgradeBusDataGameTests {
     var saved = bus.saveWithFullMetadata(helper.getLevel().registryAccess());
     var invalid = new CompoundTag();
     invalid.putString(DEFINITION_A.toString(), "NA");
-    saved.put(FactoryUpgradeBusData.NBT_KEY, invalid);
+    saved.put(UpgradeBusDataHandlers.NBT_KEY, invalid);
     var state = bus.getBlockState();
     helper.getLevel().removeBlockEntity(position);
     var loaded = (UpgradeBusBlockEntity) BlockEntity
@@ -430,7 +434,7 @@ public final class UpgradeBusDataGameTests {
     helper.assertTrue(
         !loaded.schemaSupported()
             && loaded.saveWithFullMetadata(helper.getLevel().registryAccess())
-                .getCompound(FactoryUpgradeBusData.NBT_KEY).equals(invalid),
+                .getCompound(UpgradeBusDataHandlers.NBT_KEY).equals(invalid),
         "Malformed saved bus data was normalized or discarded");
     try {
       loaded.inventory().setStackInSlot(0, new ItemStack(Items.STONE));
@@ -439,7 +443,7 @@ public final class UpgradeBusDataGameTests {
     }
   }
 
-  private static void seed(Fixture fixture, UpgradeBusBlockEntity bus, FactoryUpgradeBusData.State state) {
+  private static void seed(Fixture fixture, UpgradeBusBlockEntity bus, UpgradeBusDataHandlers.State state) {
     var lease = bus
         .acquireStartup(fixture.factory(), bus.upgradeRevision(), bus.upgradeCatalog(), contents(bus), state);
     lease.resolve(true);

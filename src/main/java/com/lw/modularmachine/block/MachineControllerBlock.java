@@ -5,7 +5,7 @@ import com.lw.modularmachine.machine.controller.DedicatedControllerCatalog.Entry
 import com.lw.modularmachine.machine.controller.DedicatedControllerCatalog;
 import com.lw.modularmachine.machine.orientation.ControllerOrientationActions;
 import com.lw.modularmachine.machine.orientation.ControllerPlacementData;
-import com.lw.modularmachine.machine.orientation.MachineOrientation;
+import com.lw.modularmachine.api.orientation.MachineOrientation;
 import com.lw.modularmachine.machine.structure.StructureService;
 import com.lw.modularmachine.registry.MachineRegistries;
 import com.mojang.serialization.MapCodec;
@@ -21,6 +21,7 @@ import net.minecraft.world.item.BlockItem;
 import net.minecraft.world.item.ItemStack;
 import net.minecraft.world.item.context.BlockPlaceContext;
 import net.minecraft.world.level.Level;
+import net.minecraft.world.level.BlockGetter;
 import net.minecraft.world.level.block.*;
 import net.minecraft.world.level.block.entity.BlockEntity;
 import net.minecraft.world.level.block.entity.BlockEntityTicker;
@@ -34,6 +35,8 @@ import net.minecraft.world.level.block.state.properties.IntegerProperty;
 import net.minecraft.world.level.storage.loot.LootParams;
 import net.minecraft.world.level.storage.loot.parameters.LootContextParams;
 import net.minecraft.world.phys.BlockHitResult;
+import net.minecraft.world.phys.shapes.VoxelShape;
+import net.minecraft.world.phys.shapes.CollisionContext;
 
 public final class MachineControllerBlock extends BaseEntityBlock {
   public static final MapCodec<MachineControllerBlock> CODEC = simpleCodec(MachineControllerBlock::new);
@@ -76,12 +79,12 @@ public final class MachineControllerBlock extends BaseEntityBlock {
   }
 
   @Override
-  protected net.minecraft.world.phys.shapes.VoxelShape getShape(BlockState state, net.minecraft.world.level.BlockGetter level, BlockPos pos, net.minecraft.world.phys.shapes.CollisionContext context) {
+  protected VoxelShape getShape(BlockState state, BlockGetter level, BlockPos pos, CollisionContext context) {
     return ControllerBlockGeometry.shape(level, pos);
   }
 
   @Override
-  protected net.minecraft.world.phys.shapes.VoxelShape getCollisionShape(BlockState state, net.minecraft.world.level.BlockGetter level, BlockPos pos, net.minecraft.world.phys.shapes.CollisionContext context) {
+  protected VoxelShape getCollisionShape(BlockState state, BlockGetter level, BlockPos pos, CollisionContext context) {
     return ControllerBlockGeometry.shape(level, pos);
   }
 

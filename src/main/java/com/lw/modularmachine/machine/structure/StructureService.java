@@ -3,15 +3,15 @@ package com.lw.modularmachine.machine.structure;
 import com.lw.modularmachine.block.FactoryControllerBlock;
 import com.lw.modularmachine.block.MachineControllerBlock;
 import com.lw.modularmachine.block.ParallelControllerBlock;
-import com.lw.modularmachine.blockentity.MachineColorable;
+import com.lw.modularmachine.api.component.MachineColorable;
 import com.lw.modularmachine.blockentity.MachineControllerBlockEntity;
 import com.lw.modularmachine.blockentity.SmartInterfaceBlockEntity;
 import com.lw.modularmachine.config.MachineConfig;
-import com.lw.modularmachine.machine.orientation.MachineOrientation;
-import com.lw.modularmachine.machine.recipe.RecipeLifecycleEvents;
-import com.lw.modularmachine.machine.recipe.RecipeModifier;
+import com.lw.modularmachine.api.orientation.MachineOrientation;
+import com.lw.modularmachine.machine.recipe.RecipeLifecyclePublisher;
+import com.lw.modularmachine.api.recipe.RecipeModifier;
 import com.lw.modularmachine.machine.smart.SmartInterfaceAssignment;
-import com.lw.modularmachine.machine.smart.SmartInterfaceEvents;
+import com.lw.modularmachine.machine.smart.SmartInterfaceEventPublisher;
 import com.lw.modularmachine.util.thread.ServerThreadGuard;
 import com.mojang.logging.LogUtils;
 import java.util.ArrayList;
@@ -1087,8 +1087,8 @@ public final class StructureService {
       LevelState state = LEVELS.get(level);
       return valid
           && published
-          && !SmartInterfaceEvents.isDispatching(controller)
-          && !RecipeLifecycleEvents.isDispatching()
+          && !SmartInterfaceEventPublisher.isDispatching(controller)
+          && !RecipeLifecyclePublisher.isDispatching()
           && epoch == catalog.epoch()
           && verifier.canCommit()
           && modifiers.canCommit()

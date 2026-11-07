@@ -1,11 +1,12 @@
 package com.lw.modularmachine.command;
 
 import com.lw.modularmachine.ModularMachine;
-import com.lw.modularmachine.api.MachineControllerApi;
+import com.lw.modularmachine.api.controller.MachineControllerApi;
 import com.lw.modularmachine.blockentity.MachineControllerBlockEntity;
 import com.lw.modularmachine.config.MachineConfig;
 import com.lw.modularmachine.machine.controller.DedicatedControllerCatalog;
 import com.lw.modularmachine.machine.structure.StructureService;
+import com.lw.modularmachine.presentation.MachineDiagnosticText;
 import com.mojang.brigadier.CommandDispatcher;
 import net.minecraft.commands.CommandSourceStack;
 import net.minecraft.commands.Commands;
@@ -83,8 +84,8 @@ public final class MachineCommands {
                 "commands.mmcece.diagnose.structure_detail",
                 diagnostic.partId(),
                 diagnostic.position().toShortString(),
-                MachineControllerApi.localizedDiagnostic(diagnostic.expected()),
-                MachineControllerApi.localizedDiagnostic(diagnostic.actual())),
+                MachineDiagnosticText.localized(diagnostic.expected()),
+                MachineDiagnosticText.localized(diagnostic.actual())),
             false));
     value.recipeInputDiagnostic().ifPresent(diagnostic -> {
       source.sendSuccess(() -> Component.translatable("commands.mmcece.diagnose.recipe", diagnostic.recipeId()), false);

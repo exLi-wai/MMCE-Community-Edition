@@ -1,22 +1,30 @@
 package com.lw.modularmachine.blockentity;
 
+import com.lw.modularmachine.machine.factory.UpgradeRuntimeDataHandlers;
+
+import com.lw.modularmachine.machine.factory.UpgradeBusDataHandlers;
+
+import com.lw.modularmachine.machine.factory.UpgradeItemDataHandlers;
+
+import com.lw.modularmachine.machine.factory.UpgradeRecipeChecks;
+
+import com.lw.modularmachine.machine.factory.UpgradeLifecyclePublisher;
+
+import com.lw.modularmachine.api.component.MachineColorable;
+
 import com.lw.modularmachine.block.UpgradeBusBlock;
 import com.lw.modularmachine.config.MachineConfig;
 import com.lw.modularmachine.machine.UpgradeBusTier;
 import com.lw.modularmachine.machine.factory.FactoryUpgradeBusContext;
-import com.lw.modularmachine.machine.factory.FactoryUpgradeBusData;
 import com.lw.modularmachine.machine.factory.FactoryUpgradeCatalog;
-import com.lw.modularmachine.machine.factory.FactoryUpgradeEvents;
-import com.lw.modularmachine.machine.factory.FactoryUpgradeItemData;
-import com.lw.modularmachine.machine.factory.FactoryUpgradeRecipeChecks;
 import com.lw.modularmachine.machine.factory.FactoryUpgradeRestrictions;
-import com.lw.modularmachine.machine.factory.FactoryUpgradeRuntimeData;
+import com.lw.modularmachine.api.upgrade.FactoryUpgradeRuntimeData;
 import com.lw.modularmachine.machine.factory.FactoryUpgradeService;
-import com.lw.modularmachine.machine.factory.FactoryUpgradeStartCost;
+import com.lw.modularmachine.api.upgrade.FactoryUpgradeStartCost;
 import com.lw.modularmachine.machine.factory.UpgradeBusBinding;
 import com.lw.modularmachine.machine.factory.UpgradeBusOwner;
-import com.lw.modularmachine.machine.recipe.RecipeLifecycleEvents;
-import com.lw.modularmachine.machine.smart.SmartInterfaceEvents;
+import com.lw.modularmachine.machine.recipe.RecipeLifecyclePublisher;
+import com.lw.modularmachine.machine.smart.SmartInterfaceEventPublisher;
 import com.lw.modularmachine.menu.UpgradeBusMenu;
 import com.lw.modularmachine.registry.MachineRegistries;
 import com.lw.modularmachine.storage.TransactionalItemStackHandler;
@@ -67,7 +75,7 @@ public final class UpgradeBusBlockEntity extends BlockEntity implements MenuProv
   private final Map<BlockPos, UpgradeBusOwner> published = new HashMap<>();
   private long upgradeRevision, bindingRevision;
   private long definitionsEpoch = -1, lastBindingCheck = Long.MIN_VALUE;
-  private FactoryUpgradeBusData.State customData = FactoryUpgradeBusData.State.empty();
+  private UpgradeBusDataHandlers.State customData = UpgradeBusDataHandlers.State.empty();
   private boolean loading, rebuildingCatalog, lifecycleNotification;
   private CompoundTag unsupportedData;
 
@@ -253,11 +261,11 @@ public final class UpgradeBusBlockEntity extends BlockEntity implements MenuProv
     return context(binding.machine()).localRestrictions();
   }
 
-  public List<FactoryUpgradeEvents.Subscription> lifecycleSubscriptions(UpgradeBusOwner factory) {
+  public List<UpgradeLifecyclePublisher.Subscription> lifecycleSubscriptions(UpgradeBusOwner factory) {
     return upgradeCatalogValid(factory) ? context(factory).lifecycle() : List.of();
   }
 
-  public List<FactoryUpgradeEvents.Subscription> lifecycleSubscriptions() {
+  public List<UpgradeLifecyclePublisher.Subscription> lifecycleSubscriptions() {
     return upgradeCatalogValid() ? displayContext().lifecycle() : List.of();
   }
 
@@ -269,11 +277,11 @@ public final class UpgradeBusBlockEntity extends BlockEntity implements MenuProv
     return displayContext().required().checks();
   }
 
-  public List<FactoryUpgradeRecipeChecks.Subscription> recipeCheckSubscriptions(UpgradeBusOwner factory) {
+  public List<UpgradeRecipeChecks.Subscription> recipeCheckSubscriptions(UpgradeBusOwner factory) {
     return upgradeCatalogValid(factory) ? context(factory).checks() : List.of();
   }
 
-  public List<FactoryUpgradeRecipeChecks.Subscription> recipeCheckSubscriptions() {
+  public List<UpgradeRecipeChecks.Subscription> recipeCheckSubscriptions() {
     return upgradeCatalogValid() ? displayContext().checks() : List.of();
   }
 
@@ -315,7 +323,7 @@ public final class UpgradeBusBlockEntity extends BlockEntity implements MenuProv
     return current(context) && context.restrictionsCaptured() && hasFactoryBinding(factory);
   }
 
-  public List<FactoryUpgradeRuntimeData.Subscription> tickDataSubscriptions(UpgradeBusOwner factory) {
+  public List<UpgradeRuntimeDataHandlers.Subscription> tickDataSubscriptions(UpgradeBusOwner factory) {
     var context = context(factory);
 
     return tickDataReady(factory) ? context.tickData() : List.of();
@@ -325,7 +333,7 @@ public final class UpgradeBusBlockEntity extends BlockEntity implements MenuProv
     return context(factory).required().runtimeData();
   }
 
-  public List<FactoryUpgradeRuntimeData.Subscription> runtimeDataSubscriptions(UpgradeBusOwner factory, FactoryUpgradeRuntimeData.Phase phase) {
+  public List<UpgradeRuntimeDataHandlers.Subscription> runtimeDataSubscriptions(UpgradeBusOwner factory, FactoryUpgradeRuntimeData.Phase phase) {
     var context = context(factory);
 
     return current(context) && context.restrictionsCaptured() && hasFactoryBinding(factory) ? context
@@ -343,8 +351,8 @@ public final class UpgradeBusBlockEntity extends BlockEntity implements MenuProv
     var expectedData = context(factory).tickData();
     var expectedFinishData = context(factory).finishData();
     var actual = new ArrayList<StartCostSlot>();
-    var actualData = new FactoryUpgradeRuntimeData.Subscriptions();
-    var actualFinishData = new FactoryUpgradeRuntimeData.Subscriptions(FactoryUpgradeRuntimeData.Phase.FINISHED);
+    var actualData = new UpgradeRuntimeDataHandlers.Subscriptions();
+    var actualFinishData = new UpgradeRuntimeDataHandlers.Subscriptions(FactoryUpgradeRuntimeData.Phase.FINISHED);
     rebuildingCatalog = true;
     try {
       for (int slot = 0; slot < slots; slot++) {
@@ -384,11 +392,11 @@ public final class UpgradeBusBlockEntity extends BlockEntity implements MenuProv
     return displayContext().required().itemData();
   }
 
-  public List<FactoryUpgradeItemData.Subscription> startDataSubscriptions(UpgradeBusOwner factory) {
+  public List<UpgradeItemDataHandlers.Subscription> startDataSubscriptions(UpgradeBusOwner factory) {
     return upgradeCatalogValid(factory) ? context(factory).itemData() : List.of();
   }
 
-  public List<FactoryUpgradeItemData.Subscription> startDataSubscriptions() {
+  public List<UpgradeItemDataHandlers.Subscription> startDataSubscriptions() {
     return upgradeCatalogValid() ? displayContext().itemData() : List.of();
   }
 
@@ -400,15 +408,15 @@ public final class UpgradeBusBlockEntity extends BlockEntity implements MenuProv
     return displayContext().required().busData();
   }
 
-  public List<FactoryUpgradeBusData.Subscription> startBusDataSubscriptions(UpgradeBusOwner factory) {
+  public List<UpgradeBusDataHandlers.Subscription> startBusDataSubscriptions(UpgradeBusOwner factory) {
     return upgradeCatalogValid(factory) ? context(factory).busData() : List.of();
   }
 
-  public List<FactoryUpgradeBusData.Subscription> startBusDataSubscriptions() {
+  public List<UpgradeBusDataHandlers.Subscription> startBusDataSubscriptions() {
     return upgradeCatalogValid() ? displayContext().busData() : List.of();
   }
 
-  public FactoryUpgradeBusData.State busDataSnapshot() {
+  public UpgradeBusDataHandlers.State busDataSnapshot() {
     requireServer();
     if (!schemaSupported() || inventory.isInTransaction()) {
       throw new IllegalStateException("Upgrade bus data is unavailable");
@@ -450,7 +458,7 @@ public final class UpgradeBusBlockEntity extends BlockEntity implements MenuProv
 
   public boolean bindFactory(UpgradeBusOwner factory) {
     var server = requireServer();
-    if (FactoryUpgradeEvents.isDispatchingAny()
+    if (UpgradeLifecyclePublisher.isDispatchingAny()
         || !bindingMutationAllowed()
         || !schemaSupported()
         || !liveBus(server)
@@ -477,7 +485,7 @@ public final class UpgradeBusBlockEntity extends BlockEntity implements MenuProv
 
   public void unbindFactory(UpgradeBusOwner factory) {
     requireServer();
-    if (FactoryUpgradeEvents.isDispatchingAny() || !bindingMutationAllowed()) {
+    if (UpgradeLifecyclePublisher.isDispatchingAny() || !bindingMutationAllowed()) {
       throw new IllegalStateException("Binding changes are not allowed during upgrade evaluation");
     }
     if (factory != null) {
@@ -487,7 +495,9 @@ public final class UpgradeBusBlockEntity extends BlockEntity implements MenuProv
 
   public void unbindFactory() {
     requireServer();
-    if (FactoryUpgradeEvents.isDispatchingAny() || !bindingMutationAllowed() || bindingRevision == Long.MAX_VALUE) {
+    if (UpgradeLifecyclePublisher.isDispatchingAny()
+        || !bindingMutationAllowed()
+        || bindingRevision == Long.MAX_VALUE) {
       throw new IllegalStateException("Upgrade bindings are read-only");
     }
     withdrawAll();
@@ -587,8 +597,8 @@ public final class UpgradeBusBlockEntity extends BlockEntity implements MenuProv
         && !rebuildingCatalog
         && !lifecycleNotification
         && !inventory.isInTransaction()
-        && !RecipeLifecycleEvents.isDispatching()
-        && !SmartInterfaceEvents.isDispatching();
+        && !RecipeLifecyclePublisher.isDispatching()
+        && !SmartInterfaceEventPublisher.isDispatching();
   }
 
   private boolean liveBus(ServerLevel server) {
@@ -644,8 +654,8 @@ public final class UpgradeBusBlockEntity extends BlockEntity implements MenuProv
     if (lifecycleNotification
         || rebuildingCatalog
         || level instanceof ServerLevel
-            && (RecipeLifecycleEvents.isDispatching() || SmartInterfaceEvents.isDispatching())
-        || FactoryUpgradeEvents.isDispatchingAny()
+            && (RecipeLifecyclePublisher.isDispatching() || SmartInterfaceEventPublisher.isDispatching())
+        || UpgradeLifecyclePublisher.isDispatchingAny()
         || !loading && (!schemaSupported() || upgradeRevision == Long.MAX_VALUE)) {
       throw new IllegalStateException("Upgrade bus inventory is read-only");
     }
@@ -757,7 +767,7 @@ public final class UpgradeBusBlockEntity extends BlockEntity implements MenuProv
     return acquireStartup(factory, expectedRevision, expectedCatalog, contents, customData);
   }
 
-  public StartCostLease acquireStartup(UpgradeBusOwner factory, long expectedRevision, FactoryUpgradeCatalog expectedCatalog, NonNullList<ItemStack> contents, FactoryUpgradeBusData.State preparedData) {
+  public StartCostLease acquireStartup(UpgradeBusOwner factory, long expectedRevision, FactoryUpgradeCatalog expectedCatalog, NonNullList<ItemStack> contents, UpgradeBusDataHandlers.State preparedData) {
     requireServer();
     var context = context(factory);
     if (expectedRevision != upgradeRevision
@@ -799,7 +809,7 @@ public final class UpgradeBusBlockEntity extends BlockEntity implements MenuProv
     return new StartCostLease(storage, customData);
   }
 
-  public StartCostLease acquireRuntime(UpgradeBusOwner factory, FactoryUpgradeRuntimeData.Phase phase, long expectedRevision, long expectedEpoch, List<StartCostSlot> expectedCosts, List<FactoryUpgradeRuntimeData.Subscription> expectedData, NonNullList<ItemStack> contents, FactoryUpgradeBusData.State preparedData) {
+  public StartCostLease acquireRuntime(UpgradeBusOwner factory, FactoryUpgradeRuntimeData.Phase phase, long expectedRevision, long expectedEpoch, List<StartCostSlot> expectedCosts, List<UpgradeRuntimeDataHandlers.Subscription> expectedData, NonNullList<ItemStack> contents, UpgradeBusDataHandlers.State preparedData) {
     requireServer();
     Objects.requireNonNull(phase, "phase");
     var context = context(factory);
@@ -827,10 +837,10 @@ public final class UpgradeBusBlockEntity extends BlockEntity implements MenuProv
 
   public final class StartCostLease implements AutoCloseable {
     private final TransactionalItemStackHandler.Lease storage;
-    private final FactoryUpgradeBusData.State beforeData;
+    private final UpgradeBusDataHandlers.State beforeData;
     private boolean resolved, committed, published;
 
-    private StartCostLease(TransactionalItemStackHandler.Lease storage, FactoryUpgradeBusData.State beforeData) {
+    private StartCostLease(TransactionalItemStackHandler.Lease storage, UpgradeBusDataHandlers.State beforeData) {
       this.storage = storage;
       this.beforeData = beforeData;
     }
@@ -944,7 +954,7 @@ public final class UpgradeBusBlockEntity extends BlockEntity implements MenuProv
     unsupportedData = null;
     bindings.clear();
     contexts.clear();
-    customData = FactoryUpgradeBusData.State.empty();
+    customData = UpgradeBusDataHandlers.State.empty();
     upgradeRevision = 0;
     bindingRevision = 0;
     definitionsEpoch = -1;
@@ -956,7 +966,7 @@ public final class UpgradeBusBlockEntity extends BlockEntity implements MenuProv
             || tag.contains("upgrade_revision")
             || tag.contains("bound_factory")
             || tag.contains("bound_machine")
-            || tag.contains(FactoryUpgradeBusData.NBT_KEY)) {
+            || tag.contains(UpgradeBusDataHandlers.NBT_KEY)) {
           throw new IllegalArgumentException("Unsupported unpublished upgrade bus format");
         }
         for (int slot = 0; slot < slots; slot++) {
@@ -985,8 +995,8 @@ public final class UpgradeBusBlockEntity extends BlockEntity implements MenuProv
         validateInventory(inventoryData);
         restored.deserializeNBT(registries, inventoryData);
         var restoredBindings = UpgradeBusBinding.read(savedBindings);
-        var restoredData = data.contains("custom_data") ? FactoryUpgradeBusData.State
-            .load(data.getCompound("custom_data")) : FactoryUpgradeBusData.State.empty();
+        var restoredData = data.contains("custom_data") ? UpgradeBusDataHandlers.State
+            .load(data.getCompound("custom_data")) : UpgradeBusDataHandlers.State.empty();
         for (int slot = 0; slot < slots; slot++) {
           inventory.setStackInSlot(slot, restored.getStackInSlot(slot));
         }
@@ -1003,7 +1013,7 @@ public final class UpgradeBusBlockEntity extends BlockEntity implements MenuProv
           "upgrade_revision",
           "bound_factory",
           "bound_machine",
-          FactoryUpgradeBusData.NBT_KEY)) {
+          UpgradeBusDataHandlers.NBT_KEY)) {
         if (tag.contains(key)) {
           unsupportedData.put(key, tag.get(key).copy());
         }
@@ -1043,7 +1053,7 @@ public final class UpgradeBusBlockEntity extends BlockEntity implements MenuProv
         || rebuildingCatalog
         || inventory.isInTransaction()
         || level instanceof ServerLevel
-            && (RecipeLifecycleEvents.isDispatching() || SmartInterfaceEvents.isDispatching())) {
+            && (RecipeLifecyclePublisher.isDispatching() || SmartInterfaceEventPublisher.isDispatching())) {
       throw new IllegalStateException("Upgrade bus load during an active transaction or callback");
     }
   }

@@ -1,9 +1,10 @@
-package com.lw.modularmachine.api;
+package com.lw.modularmachine.api.controller;
 
 import com.lw.modularmachine.block.MachineControllerBlock;
+import com.lw.modularmachine.blockentity.FactoryControllerBlockEntity;
 import com.lw.modularmachine.blockentity.MachineControllerBlockEntity;
 import com.lw.modularmachine.machine.PortKind;
-import com.lw.modularmachine.machine.orientation.MachineOrientation;
+import com.lw.modularmachine.api.orientation.MachineOrientation;
 import com.lw.modularmachine.machine.recipe.FrozenItemRun;
 import com.lw.modularmachine.machine.recipe.ItemResourceKey;
 import com.lw.modularmachine.machine.recipe.ItemRunEngine;
@@ -13,6 +14,7 @@ import com.lw.modularmachine.machine.structure.MachineDefinition.Rule;
 import com.lw.modularmachine.machine.structure.StructureService;
 import com.lw.modularmachine.machine.structure.VerificationFailure;
 import com.lw.modularmachine.machine.structure.VerificationState;
+import com.lw.modularmachine.util.thread.ServerThreadGuard;
 import java.math.BigInteger;
 import java.util.ArrayList;
 import java.util.HashMap;
@@ -21,8 +23,6 @@ import java.util.List;
 import java.util.Objects;
 import java.util.Optional;
 import java.util.UUID;
-import net.minecraft.network.chat.Component;
-import net.minecraft.network.chat.MutableComponent;
 import net.minecraft.core.BlockPos;
 import net.minecraft.resources.ResourceLocation;
 import net.minecraft.server.level.ServerLevel;
@@ -218,8 +218,24 @@ public final class MachineControllerApi {
     return structureDiagnostic(controller.registration(), level);
   }
 
-  /** Shared by the ordinary and factory Jade diagnostic displays. */
-  public static Optional<StructureDiagnostic> structureDiagnostic(StructureService.Registration registration, ServerLevel level) {
+  /** Reads a loaded ordinary or factory controller without loading chunks. */
+  public static Optional<StructureDiagnostic> structureDiagnostic(ServerLevel level, BlockPos position) {
+    Objects.requireNonNull(level, "level");
+    Objects.requireNonNull(position, "position");
+    ServerThreadGuard.require(level, "Controller structure diagnostic");
+    if (!level.hasChunkAt(position)) {
+      return Optional.empty();
+    }
+    var entity = level.getBlockEntity(position);
+    if ((entity instanceof MachineControllerBlockEntity || entity instanceof FactoryControllerBlockEntity)
+        && entity instanceof StructureService.StructureSubject controller
+        && !controller.structureRemoved()) {
+      return structureDiagnostic(controller.structureRegistration(), level);
+    }
+    return Optional.empty();
+  }
+
+  private static Optional<StructureDiagnostic> structureDiagnostic(StructureService.Registration registration, ServerLevel level) {
     if (registration == null || registration.verifier.failurePosition() < 0) {
       return Optional.empty();
     }
@@ -227,13 +243,17 @@ public final class MachineControllerApi {
     if (index >= registration.pattern.definition.parts().size()) {
       return Optional.empty();
     }
+    var position = registration.pattern.position(index);
+    if (!level.hasChunkAt(position)) {
+      return Optional.empty();
+    }
     var part = registration.pattern.definition.parts().get(index);
     String expected = expected(part.rule());
-    var state = level.getBlockState(registration.pattern.position(index));
+    var state = level.getBlockState(position);
     var values = state.getValues().entrySet().stream().map(entry -> entry.getKey().getName() + "=" + entry.getValue())
         .sorted().toList();
     String actual = bounded(state.getBlock().getDescriptionId() + (values.isEmpty() ? "" : values.toString()));
-    return Optional.of(new StructureDiagnostic(registration.pattern.position(index), part.id(), expected, actual));
+    return Optional.of(new StructureDiagnostic(position, part.id(), expected, actual));
   }
 
   private static String expected(Rule rule) {
@@ -246,32 +266,6 @@ public final class MachineControllerApi {
       return alternative.block().getDescriptionId() + (properties.isEmpty() ? "" : properties.toString());
     }).sorted().toList();
     return bounded(String.join("; ", alternatives));
-  }
-
-  /** Resolves stored description ids to client-localized names for display. */
-  public static Component localizedDiagnostic(String value) {
-    MutableComponent result = Component.empty();
-    String[] alternatives = value.split("; ");
-    for (int index = 0; index < alternatives.length; index++) {
-      if (index > 0) {
-        result.append(Component.literal(", "));
-      }
-      result.append(localizedAlternative(alternatives[index]));
-    }
-    return result;
-  }
-
-  private static Component localizedAlternative(String value) {
-    if (value.startsWith("port:")) {
-      return Component.literal(value);
-    }
-    int bracket = value.indexOf('[');
-    String key = bracket < 0 ? value : value.substring(0, bracket);
-    String suffix = bracket < 0 ? "" : value.substring(bracket);
-    if (!key.contains(".")) {
-      key = "block." + key.replace(':', '.');
-    }
-    return Component.translatable(key).append(Component.literal(suffix));
   }
 
   private static String bounded(String value) {

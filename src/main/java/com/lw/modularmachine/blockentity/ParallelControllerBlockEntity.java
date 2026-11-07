@@ -1,9 +1,11 @@
 package com.lw.modularmachine.blockentity;
 
+import com.lw.modularmachine.api.component.MachineColorable;
+
 import com.lw.modularmachine.block.ParallelControllerBlock;
 import com.lw.modularmachine.machine.ParallelControllerTier;
-import com.lw.modularmachine.machine.recipe.RecipeLifecycleEvents;
-import com.lw.modularmachine.machine.smart.SmartInterfaceEvents;
+import com.lw.modularmachine.machine.recipe.RecipeLifecyclePublisher;
+import com.lw.modularmachine.machine.smart.SmartInterfaceEventPublisher;
 import com.lw.modularmachine.machine.structure.StructureService;
 import com.lw.modularmachine.menu.ParallelControllerMenu;
 import com.lw.modularmachine.registry.MachineRegistries;
@@ -92,8 +94,8 @@ public final class ParallelControllerBlockEntity extends BlockEntity implements 
     ServerThreadGuard.require(server, "Parallel controller update");
     if (!schemaSupported()
         || isRemoved()
-        || SmartInterfaceEvents.isDispatching()
-        || RecipeLifecycleEvents.isDispatching()
+        || SmartInterfaceEventPublisher.isDispatching()
+        || RecipeLifecyclePublisher.isDispatching()
         || revision == Long.MAX_VALUE
         || revision != expectedRevision
         || value < 0
@@ -163,7 +165,7 @@ public final class ParallelControllerBlockEntity extends BlockEntity implements 
   protected void loadAdditional(CompoundTag tag, HolderLookup.Provider registries) {
     if (level instanceof ServerLevel server) {
       ServerThreadGuard.require(server, "Parallel controller load");
-      if (SmartInterfaceEvents.isDispatching() || RecipeLifecycleEvents.isDispatching()) {
+      if (SmartInterfaceEventPublisher.isDispatching() || RecipeLifecyclePublisher.isDispatching()) {
         throw new IllegalStateException("Cannot reload parallel controls during a read-only notification");
       }
     }

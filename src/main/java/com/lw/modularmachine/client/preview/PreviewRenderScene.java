@@ -1,7 +1,6 @@
 package com.lw.modularmachine.client.preview;
 
-import com.lw.modularmachine.network.ProjectionPayloads;
-import com.lw.modularmachine.machine.controller.DedicatedControllerCatalog;
+import com.lw.modularmachine.api.client.preview.PreviewSceneData;
 import it.unimi.dsi.fastutil.longs.Long2IntMap;
 import it.unimi.dsi.fastutil.longs.Long2IntMaps;
 import it.unimi.dsi.fastutil.longs.Long2IntOpenHashMap;
@@ -16,11 +15,13 @@ import net.minecraft.core.BlockPos;
 import net.minecraft.core.SectionPos;
 import net.minecraft.resources.ResourceLocation;
 import net.minecraft.world.phys.AABB;
+import org.jetbrains.annotations.ApiStatus;
 
 /**
  * Immutable scene with spatial indexes shared by projection and blueprint
  * previews.
  */
+@ApiStatus.Internal
 public final class PreviewRenderScene {
   private static final int BATCH_SIZE = 512;
   private final long request;
@@ -28,14 +29,14 @@ public final class PreviewRenderScene {
   private final int machineColor;
   private final List<Section> sections;
   private final Map<Long, List<Section>> spatial;
-  private final Long2ObjectMap<ProjectionPayloads.Entry> entries;
-  private final List<ProjectionPayloads.Entry> animated;
+  private final Long2ObjectMap<PreviewSceneData.Entry> entries;
+  private final List<PreviewSceneData.Entry> animated;
   private final Long2IntMap indices;
 
   public record Section(
       long key,
       long spatialKey,
-      List<ProjectionPayloads.Entry> entries,
+      List<PreviewSceneData.Entry> entries,
       AABB bounds,
       boolean animated) {
     public Section {
@@ -43,7 +44,7 @@ public final class PreviewRenderScene {
     }
   }
 
-  private PreviewRenderScene(long request, ResourceLocation dimension, int machineColor, List<Section> sections, Map<Long, List<Section>> spatial, Long2ObjectMap<ProjectionPayloads.Entry> entries, Long2IntMap indices, List<ProjectionPayloads.Entry> animated) {
+  private PreviewRenderScene(long request, ResourceLocation dimension, int machineColor, List<Section> sections, Map<Long, List<Section>> spatial, Long2ObjectMap<PreviewSceneData.Entry> entries, Long2IntMap indices, List<PreviewSceneData.Entry> animated) {
     this.request = request;
     this.dimension = dimension;
     this.machineColor = machineColor & 0xFFFFFF;
@@ -71,34 +72,28 @@ public final class PreviewRenderScene {
   public List<Section> atSection(long key) {
     return spatial.getOrDefault(key, List.of());
   }
-  public ProjectionPayloads.Entry at(BlockPos position) {
+  public PreviewSceneData.Entry at(BlockPos position) {
     return entries.get(position.asLong());
   }
-  public List<ProjectionPayloads.Entry> animated() {
+  public List<PreviewSceneData.Entry> animated() {
     return animated;
   }
   public int indexAt(BlockPos position) {
     return indices.get(position.asLong());
   }
 
-  public static PreviewRenderScene create(ProjectionPayloads.Snapshot header, List<ProjectionPayloads.Entry> entries) {
-    return create(header.request(), header.dimension(), header.machine(), entries);
+  public static PreviewRenderScene create(PreviewSceneData data) {
+    return create(0, ResourceLocation.fromNamespaceAndPath("minecraft", "overworld"), data);
   }
 
-  public static PreviewRenderScene create(long request, ResourceLocation dimension, List<ProjectionPayloads.Entry> entries) {
-    return create(request, dimension, 0xFFFFFF, entries);
-  }
-
-  public static PreviewRenderScene create(long request, ResourceLocation dimension, ResourceLocation machine, List<ProjectionPayloads.Entry> entries) {
-    return create(request, dimension, DedicatedControllerCatalog.color(machine), entries);
-  }
-
-  private static PreviewRenderScene create(long request, ResourceLocation dimension, int machineColor, List<ProjectionPayloads.Entry> entries) {
-    var grouped = new LinkedHashMap<Long, ArrayList<ProjectionPayloads.Entry>>();
-    var positions = new Long2ObjectOpenHashMap<ProjectionPayloads.Entry>(entries.size());
+  public static PreviewRenderScene create(long request, ResourceLocation dimension, PreviewSceneData data) {
+    var entries = data.entries();
+    int machineColor = data.machineColor();
+    var grouped = new LinkedHashMap<Long, ArrayList<PreviewSceneData.Entry>>();
+    var positions = new Long2ObjectOpenHashMap<PreviewSceneData.Entry>(entries.size());
     var indices = new Long2IntOpenHashMap(entries.size());
     indices.defaultReturnValue(-1);
-    var animated = new ArrayList<ProjectionPayloads.Entry>();
+    var animated = new ArrayList<PreviewSceneData.Entry>();
     for (var entry : entries) {
       grouped.computeIfAbsent(SectionPos.asLong(entry.position()), ignored -> new ArrayList<>()).add(entry);
       long position = entry.position().asLong();

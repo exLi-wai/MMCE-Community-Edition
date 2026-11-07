@@ -6,7 +6,7 @@ import com.google.gson.JsonParseException;
 import com.google.gson.JsonParser;
 import com.lw.modularmachine.block.MachineControllerBlock;
 import com.lw.modularmachine.blockentity.MachineControllerBlockEntity;
-import com.lw.modularmachine.machine.orientation.MachineOrientation;
+import com.lw.modularmachine.api.orientation.MachineOrientation;
 import com.lw.modularmachine.machine.structure.CheckResult;
 import com.lw.modularmachine.machine.structure.CompiledStructure;
 import com.lw.modularmachine.machine.structure.MachineDefinition;
@@ -21,6 +21,7 @@ import net.minecraft.gametest.framework.GameTest;
 import net.minecraft.gametest.framework.GameTestHelper;
 import net.minecraft.resources.ResourceLocation;
 import net.minecraft.world.level.block.Blocks;
+import net.minecraft.world.level.block.LiquidBlock;
 import net.minecraft.world.level.block.state.properties.BlockStateProperties;
 import net.minecraft.world.level.block.state.properties.Half;
 import net.minecraft.world.level.block.state.properties.StairsShape;
@@ -195,9 +196,8 @@ public final class OrientationDefinitionGameTests {
     var sourcePattern = new CompiledStructure(source, origin, MachineOrientation.IDENTITY);
     helper.getLevel().setBlockAndUpdate(sourcePattern.position(0), Blocks.WATER.defaultBlockState());
     helper.assertTrue(sourcePattern.check(helper.getLevel(), 0) == CheckResult.MATCH, "Water source did not match");
-    helper.getLevel().setBlockAndUpdate(
-        sourcePattern.position(0),
-        Blocks.WATER.defaultBlockState().setValue(net.minecraft.world.level.block.LiquidBlock.LEVEL, 1));
+    helper.getLevel()
+        .setBlockAndUpdate(sourcePattern.position(0), Blocks.WATER.defaultBlockState().setValue(LiquidBlock.LEVEL, 1));
     helper.assertTrue(
         sourcePattern.check(helper.getLevel(), 0) == CheckResult.MATCH,
         "Flowing water did not match the block-only rule");
@@ -206,9 +206,8 @@ public final class OrientationDefinitionGameTests {
     var anyLava = new CompiledStructure(parse(anyRoot), origin.offset(1, 0, 0), MachineOrientation.IDENTITY);
     helper.getLevel().setBlockAndUpdate(anyLava.position(0), Blocks.LAVA.defaultBlockState());
     helper.assertTrue(anyLava.check(helper.getLevel(), 0) == CheckResult.MATCH, "Lava source did not match");
-    helper.getLevel().setBlockAndUpdate(
-        anyLava.position(0),
-        Blocks.LAVA.defaultBlockState().setValue(net.minecraft.world.level.block.LiquidBlock.LEVEL, 7));
+    helper.getLevel()
+        .setBlockAndUpdate(anyLava.position(0), Blocks.LAVA.defaultBlockState().setValue(LiquidBlock.LEVEL, 7));
     helper.assertTrue(
         anyLava.check(helper.getLevel(), 0) == CheckResult.MATCH,
         "Flowing lava did not match block-only rule");

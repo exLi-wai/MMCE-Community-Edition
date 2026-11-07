@@ -1,4 +1,4 @@
-package com.lw.modularmachine.api;
+package com.lw.modularmachine.api.smart;
 
 import com.lw.modularmachine.blockentity.SmartInterfaceBlockEntity;
 import com.lw.modularmachine.machine.structure.MachineDefinition;

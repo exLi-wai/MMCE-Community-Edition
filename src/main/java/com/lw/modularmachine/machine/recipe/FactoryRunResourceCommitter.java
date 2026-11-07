@@ -1,12 +1,15 @@
 package com.lw.modularmachine.machine.recipe;
 
+import com.lw.modularmachine.machine.factory.UpgradeLifecyclePublisher;
+
+import com.lw.modularmachine.api.recipe.RecipeLifecycleEvents;
+
 import com.lw.modularmachine.ModularMachine;
 import com.lw.modularmachine.blockentity.FactoryControllerBlockEntity;
 import com.lw.modularmachine.blockentity.MachinePortBlockEntity;
 import com.lw.modularmachine.blockentity.UpgradeBusBlockEntity.StartCostLease;
 import com.lw.modularmachine.machine.PortKind;
-import com.lw.modularmachine.machine.factory.FactoryUpgradeEvents;
-import com.lw.modularmachine.machine.factory.FactoryUpgradeRuntimeData.Phase;
+import com.lw.modularmachine.api.upgrade.FactoryUpgradeRuntimeData.Phase;
 import com.lw.modularmachine.machine.factory.FactoryUpgradeStartCosts;
 import com.lw.modularmachine.machine.factory.FactoryUpgradeTickCosts;
 import java.util.ArrayList;
@@ -33,7 +36,7 @@ public final class FactoryRunResourceCommitter {
   public static Result tick(FactoryControllerBlockEntity factory, String threadId, FrozenItemRun run) {
     if (!(factory.getLevel() instanceof ServerLevel level)
         || run.pendingOutput()
-        || FactoryUpgradeEvents.isDispatching(factory)) {
+        || UpgradeLifecyclePublisher.isDispatching(factory)) {
       return Result.STALE;
     }
     if (!factory.canCommitStructure() || !run.matchesBindings(factory.registration().pattern.definition)) {
@@ -143,8 +146,8 @@ public final class FactoryRunResourceCommitter {
       if (committed) {
         factory.upgradeRuntimeWork().clear(Phase.TICK, threadId);
         FactoryUpgradeStartCosts.publish(factory, tickCostLeases);
-        if (RecipeLifecycleEvents.hasListeners(RecipeLifecycleEvents.Type.TICK)) {
-          RecipeLifecycleEvents.advanced(factory, threadId, List.of(beforeTick), List.of(run));
+        if (RecipeLifecyclePublisher.hasListeners(RecipeLifecycleEvents.Type.TICK)) {
+          RecipeLifecyclePublisher.advanced(factory, threadId, List.of(beforeTick), List.of(run));
         }
         energyLeases.forEach(lease -> {
           try {
@@ -167,7 +170,7 @@ public final class FactoryRunResourceCommitter {
 
   private static Result applyResourceFailure(FactoryControllerBlockEntity factory, String threadId, FrozenItemRun run, long tick, Result waiting) {
     var resource = waiting == Result.WAITING_ENERGY ? RecipeLifecycleEvents.ResourceFailure.ENERGY : RecipeLifecycleEvents.ResourceFailure.FLUID;
-    var decision = RecipeLifecycleEvents.decideResourceFailure(factory, Optional.of(threadId), run, resource);
+    var decision = RecipeLifecyclePublisher.decideResourceFailure(factory, Optional.of(threadId), run, resource);
     if (!factory.canCommitStructure()
         || factory.runSet(threadId).find(run.runId()).orElse(null) != run
         || !stillUnavailable(factory, run, resource)) {
@@ -176,14 +179,14 @@ public final class FactoryRunResourceCommitter {
     if (decision == RecipeLifecycleEvents.FailureDecision.DISCARD) {
       if (factory.removeRunIfSame(threadId, run)) {
         factory.setChanged();
-        RecipeLifecycleEvents.resourceDiscarded(factory, threadId, List.of(run), resource);
+        RecipeLifecyclePublisher.resourceDiscarded(factory, threadId, List.of(run), resource);
       }
       return waiting;
     }
-    var adjusted = RecipeLifecycleEvents.applyFailureDecision(run, tick, decision);
+    var adjusted = RecipeLifecyclePublisher.applyFailureDecision(run, tick, decision);
     if (adjusted != run && factory.replaceRunIfSame(threadId, run, adjusted)) {
       factory.setChanged();
-      RecipeLifecycleEvents.resourceFailed(factory, threadId, List.of(run), List.of(adjusted), resource);
+      RecipeLifecyclePublisher.resourceFailed(factory, threadId, List.of(run), List.of(adjusted), resource);
     }
     return waiting;
   }

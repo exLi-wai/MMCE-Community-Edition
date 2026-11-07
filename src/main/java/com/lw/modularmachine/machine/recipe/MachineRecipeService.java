@@ -1,11 +1,15 @@
 package com.lw.modularmachine.machine.recipe;
 
+import com.lw.modularmachine.machine.factory.UpgradeRecipeChecks;
+
+import com.lw.modularmachine.api.recipe.RecipeModifier;
+import com.lw.modularmachine.api.recipe.RecipeSelectors;
+
 import com.google.gson.JsonElement;
 import com.lw.modularmachine.blockentity.FactoryControllerBlockEntity;
 import com.lw.modularmachine.blockentity.MachineControllerBlockEntity;
 import com.lw.modularmachine.integration.kubejs.MachineItemRecipeKubeJSSources;
 import com.lw.modularmachine.machine.PortKind;
-import com.lw.modularmachine.machine.factory.FactoryUpgradeRecipeChecks;
 import com.lw.modularmachine.machine.structure.MachineDefinition;
 import com.lw.modularmachine.machine.structure.StructureService;
 import com.lw.modularmachine.util.thread.ServerThreadGuard;
@@ -249,7 +253,7 @@ public final class MachineRecipeService {
     compiler.advance(level.getGameTime(), level.registryAccess());
     if (compiler.failed()) {
       if (reportFailure) {
-        throw new FactoryUpgradeRecipeChecks.FailedException();
+        throw new UpgradeRecipeChecks.FailedException();
       }
       return Optional.empty();
     }

@@ -1,5 +1,9 @@
 package com.lw.modularmachine.machine.factory;
 
+import com.lw.modularmachine.api.upgrade.FactoryUpgradeEntry;
+
+import com.lw.modularmachine.api.upgrade.FactoryDynamicUpgrades;
+
 import net.minecraft.core.BlockPos;
 import net.minecraft.nbt.CompoundTag;
 import net.minecraft.resources.ResourceLocation;

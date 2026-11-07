@@ -2,7 +2,7 @@ package com.lw.modularmachine.machine.structure;
 
 import com.google.gson.JsonObject;
 import com.google.gson.JsonParser;
-import com.lw.modularmachine.machine.orientation.MachineOrientation;
+import com.lw.modularmachine.api.orientation.MachineOrientation;
 import com.lw.modularmachine.machine.orientation.StateOrientationAdapters;
 import java.util.HashSet;
 import java.util.Map;

@@ -1,11 +1,10 @@
 package com.lw.modularmachine.integration.jei;
 
-import com.mojang.blaze3d.platform.Lighting;
-import com.mojang.blaze3d.vertex.PoseStack;
-import com.mojang.blaze3d.vertex.VertexConsumer;
-import com.lw.modularmachine.client.preview.PreviewBlockView;
-import com.lw.modularmachine.client.preview.PreviewRenderScene;
-import com.lw.modularmachine.network.ProjectionPayloads;
+import com.lw.modularmachine.api.client.preview.PreviewCamera;
+import com.lw.modularmachine.api.client.preview.PreviewRenderer;
+import com.lw.modularmachine.api.client.preview.PreviewSceneData;
+import com.lw.modularmachine.api.client.preview.PreviewViewport;
+import java.util.List;
 import mezz.jei.api.gui.builder.ITooltipBuilder;
 import mezz.jei.api.gui.inputs.IJeiGuiEventListener;
 import mezz.jei.api.gui.widgets.IRecipeWidget;
@@ -14,64 +13,38 @@ import net.minecraft.client.Minecraft;
 import net.minecraft.client.gui.GuiGraphics;
 import net.minecraft.client.gui.navigation.ScreenPosition;
 import net.minecraft.client.gui.navigation.ScreenRectangle;
-import net.minecraft.client.renderer.LightTexture;
-import net.minecraft.client.renderer.RenderType;
-import net.minecraft.client.renderer.texture.OverlayTexture;
-import net.minecraft.core.BlockPos;
 import net.minecraft.network.chat.Component;
 import net.minecraft.resources.ResourceLocation;
-import net.minecraft.world.level.block.LiquidBlock;
-import net.minecraft.world.level.block.state.BlockState;
-import java.util.List;
-import org.joml.Matrix4f;
-import org.joml.Quaternionf;
-import org.joml.Vector3f;
 import org.lwjgl.glfw.GLFW;
 
-/**
- * Read-only block-model scene. Per-layout camera state replaces the old JEI
- * reflection/mixins.
- */
+/** JEI layout and input adapter for the shared structure preview API. */
 final class LegacyStructureJeiWidget implements IRecipeWidget, IJeiGuiEventListener {
   private static final ResourceLocation DETAILS_BUTTON = ResourceLocation
       .fromNamespaceAndPath("mmcece", "textures/gui/button.png");
   private final ClientMachineJeiCatalog.Machine machine;
-  private final PreviewRenderScene scene;
-  private final float centerX, centerY, centerZ, baseScale;
-  private boolean dragging;
-  private float yaw = -135, pitch = 25, zoom = 1, panX, panY;
-  private boolean cycle = true;
-  private long cycleTick = Util.getMillis() / 1500;
-  private int layer;
-  private final int minY, maxY;
+  private final PreviewSceneData scene;
+  private final PreviewRenderer renderer = PreviewRenderer.create();
+  private final PreviewCamera camera = new PreviewCamera();
+  private boolean dragging, initialized;
+
   LegacyStructureJeiWidget(ClientMachineJeiCatalog.Machine machine) {
     this.machine = machine;
-    var entries = machine.parts().stream()
-        .map(part -> new ProjectionPayloads.Entry(part.offset(), part.alternatives(), List.of())).toList();
-    scene = PreviewRenderScene
-        .create(0, ResourceLocation.fromNamespaceAndPath("minecraft", "overworld"), machine.id(), entries);
-
-    minY = machine.parts().stream().mapToInt(part -> part.offset().getY()).min().orElse(0);
-    maxY = machine.parts().stream().mapToInt(part -> part.offset().getY()).max().orElse(0);
-    layer = minY;
-    float minX = machine.parts().stream().mapToInt(part -> part.offset().getX()).min().orElse(0);
-    float maxX = machine.parts().stream().mapToInt(part -> part.offset().getX()).max().orElse(0);
-    float minZ = machine.parts().stream().mapToInt(part -> part.offset().getZ()).min().orElse(0);
-    float maxZ = machine.parts().stream().mapToInt(part -> part.offset().getZ()).max().orElse(0);
-    float extent = Math.max(maxX - minX + 1, Math.max(maxY - minY + 1, maxZ - minZ + 1));
-    centerX = (minX + maxX + 1) / 2;
-    centerY = (minY + maxY + 1) / 2F;
-    centerZ = (minZ + maxZ + 1) / 2;
-    baseScale = Math.max(1F, Math.min(24F, Math.round(90F / extent)));
+    scene = new PreviewSceneData(
+        machine.color(),
+        machine.parts().stream().map(part -> new PreviewSceneData.Entry(part.offset(), part.alternatives(), List.of()))
+            .toList());
   }
+
   @Override
   public ScreenPosition getPosition() {
     return new ScreenPosition(0, 0);
   }
+
   @Override
   public ScreenRectangle getArea() {
     return new ScreenRectangle(0, 0, 184, 220);
   }
+
   @Override
   public ScreenRectangle getScreenRectangle() {
     return getArea();
@@ -79,136 +52,22 @@ final class LegacyStructureJeiWidget implements IRecipeWidget, IJeiGuiEventListe
 
   @Override
   public void drawWidget(GuiGraphics graphics, double mouseX, double mouseY) {
-
-    var mc = Minecraft.getInstance();
+    if (!initialized) {
+      renderer.setScene(scene);
+      initialized = true;
+    }
     int width = getArea().width();
     int height = getArea().height();
     int buttonHeight = detailsButtonHeight(height);
     int previewHeight = Math.max(1, height - buttonHeight);
-    float scale = Math.max(.1F, Math.min(24F, Math.min(width, previewHeight) * .55F / structureExtent()) * zoom);
-    enablePreviewScissor(graphics);
-    graphics.pose().pushPose();
-    graphics.pose().translate(width / 2F + panX, previewHeight / 2F + panY, 150);
-    graphics.pose().scale(scale, -scale, scale);
-    graphics.pose()
-        .mulPose(new Quaternionf().rotationXYZ((float) Math.toRadians(pitch), (float) Math.toRadians(yaw), 0));
-    graphics.pose().translate(-centerX, -centerY, -centerZ);
-    Lighting.setupFor3DItems();
-    graphics.flush();
-    var buffers = mc.renderBuffers().bufferSource();
-    if (cycle) {
-      cycleTick = Util.getMillis() / 1500;
-    }
-    int tick = (int) cycleTick;
-    try (var colorScope = PreviewBlockView.pushMachineColor(machine.color())) {
-      for (var part : machine.parts()) {
-        var state = part.alternatives().get(Math.floorMod(tick, part.alternatives().size()));
-        graphics.pose().pushPose();
-        graphics.pose().translate(part.offset().getX(), part.offset().getY(), part.offset().getZ());
-        try {
-          if (state.getBlock() instanceof LiquidBlock) {
-            renderLiquid(
-                mc,
-                graphics.pose().last(),
-                buffers.getBuffer(RenderType.translucent()),
-                part.offset(),
-                state,
-                tick);
-          } else {
-            mc.getBlockRenderer().renderSingleBlock(
-                state,
-                graphics.pose(),
-                buffers,
-                LightTexture.FULL_BRIGHT,
-                OverlayTexture.NO_OVERLAY);
-          }
-        } finally {
-          graphics.pose().popPose();
-        }
-      }
-    } finally {
-      try {
-        buffers.endBatch();
-      } finally {
-        graphics.pose().popPose();
-        graphics.disableScissor();
-        Lighting.setupFor3DItems();
-      }
-    }
-
+    float baseScale = Math.max(.1F, Math.min(24F, Math.min(width, previewHeight) * .55F / scene.extent()));
+    renderer.render(
+        graphics,
+        new PreviewViewport(0, 0, width, previewHeight, baseScale),
+        camera,
+        PreviewRenderer.ALL_LAYERS,
+        (int) (Util.getMillis() / 1500));
     drawDetailsButton(graphics, mouseX, mouseY, width, height, buttonHeight);
-  }
-
-  private void renderLiquid(Minecraft minecraft, PoseStack.Pose pose, VertexConsumer target, BlockPos position, BlockState state, int step) {
-    if (state.getFluidState().isEmpty()) {
-      return;
-    }
-    var view = new PreviewBlockView(scene, Integer.MIN_VALUE, step);
-    int sectionX = position.getX() & 15;
-    int sectionY = position.getY() & 15;
-    int sectionZ = position.getZ() & 15;
-    var consumer = new SectionLocalVertexConsumer(target, pose, sectionX, sectionY, sectionZ);
-    minecraft.getBlockRenderer().renderLiquid(position, view, consumer, state, state.getFluidState());
-  }
-
-  private static final class SectionLocalVertexConsumer implements VertexConsumer {
-    private final VertexConsumer target;
-    private final PoseStack.Pose pose;
-    private final int sectionX, sectionY, sectionZ;
-
-    private SectionLocalVertexConsumer(VertexConsumer target, PoseStack.Pose pose, int sectionX, int sectionY, int sectionZ) {
-      this.target = target;
-      this.pose = pose;
-      this.sectionX = sectionX;
-      this.sectionY = sectionY;
-      this.sectionZ = sectionZ;
-    }
-
-    @Override
-    public VertexConsumer addVertex(float x, float y, float z) {
-      target.addVertex(pose.pose(), x - sectionX, y - sectionY, z - sectionZ);
-      return this;
-    }
-
-    @Override
-    public VertexConsumer setColor(int red, int green, int blue, int alpha) {
-      target.setColor(red, green, blue, alpha);
-      return this;
-    }
-
-    @Override
-    public VertexConsumer setUv(float u, float v) {
-      target.setUv(u, v);
-      return this;
-    }
-
-    @Override
-    public VertexConsumer setUv1(int u, int v) {
-      target.setUv1(u, v);
-      return this;
-    }
-
-    @Override
-    public VertexConsumer setUv2(int u, int v) {
-      target.setUv2(u, v);
-      return this;
-    }
-
-    @Override
-    public VertexConsumer setNormal(float x, float y, float z) {
-      target.setNormal(pose, x, y, z);
-      return this;
-    }
-  }
-
-  private float structureExtent() {
-    float minX = machine.parts().stream().mapToInt(part -> part.offset().getX()).min().orElse(0);
-    float maxX = machine.parts().stream().mapToInt(part -> part.offset().getX()).max().orElse(0);
-    float minY = machine.parts().stream().mapToInt(part -> part.offset().getY()).min().orElse(0);
-    float maxY = machine.parts().stream().mapToInt(part -> part.offset().getY()).max().orElse(0);
-    float minZ = machine.parts().stream().mapToInt(part -> part.offset().getZ()).min().orElse(0);
-    float maxZ = machine.parts().stream().mapToInt(part -> part.offset().getZ()).max().orElse(0);
-    return Math.max(maxX - minX + 1, Math.max(maxY - minY + 1, maxZ - minZ + 1));
   }
 
   private static int detailsButtonHeight(int height) {
@@ -237,23 +96,6 @@ final class LegacyStructureJeiWidget implements IRecipeWidget, IJeiGuiEventListe
     graphics.drawString(minecraft.font, text, textX, textY, color, false);
   }
 
-  /**
-   * JEI invokes this widget with the recipe-area transform already on the pose
-   * stack. GuiGraphics.enableScissor consumes screen coordinates and does not
-   * apply that transform, so convert the whole local recipe area first.
-   */
-  private void enablePreviewScissor(GuiGraphics graphics) {
-    var pose = new Matrix4f(graphics.pose().last().pose());
-    var topLeft = pose.transformPosition(new Vector3f(0, 0, 0));
-    var bottomRight = pose.transformPosition(
-        new Vector3f(getArea().width(), getArea().height() - detailsButtonHeight(getArea().height()), 0));
-    int left = (int) Math.floor(Math.min(topLeft.x, bottomRight.x));
-    int top = (int) Math.floor(Math.min(topLeft.y, bottomRight.y));
-    int right = (int) Math.ceil(Math.max(topLeft.x, bottomRight.x));
-    int bottom = (int) Math.ceil(Math.max(topLeft.y, bottomRight.y));
-    graphics.enableScissor(left, top, right, bottom);
-  }
-
   @Override
   public boolean mouseClicked(double x, double y, int button) {
     int width = getArea().width();
@@ -280,11 +122,11 @@ final class LegacyStructureJeiWidget implements IRecipeWidget, IJeiGuiEventListe
       return false;
     }
     if (button == 0) {
-      yaw += dx * .25F;
-      pitch = Math.max(-90, Math.min(90, pitch + (float) dy * .25F));
+      camera.rotate(dx, dy);
+
     } else {
-      panX += dx;
-      panY += dy;
+      camera.pan(dx, dy);
+
     }
     return true;
   }
@@ -293,7 +135,7 @@ final class LegacyStructureJeiWidget implements IRecipeWidget, IJeiGuiEventListe
     if (!inPreview(x, y)) {
       return false;
     }
-    zoom = Math.max(.1F, Math.min(8, zoom * (float) Math.pow(1.1, scrollY)));
+    camera.zoomBy(scrollY);
     return true;
   }
   @Override

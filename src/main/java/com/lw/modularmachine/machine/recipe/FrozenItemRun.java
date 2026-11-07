@@ -1,7 +1,10 @@
 package com.lw.modularmachine.machine.recipe;
 
+import com.lw.modularmachine.api.recipe.RecipeSelectors;
+import com.lw.modularmachine.api.recipe.RecipeFailureAction;
+
 import com.lw.modularmachine.machine.PortKind;
-import com.lw.modularmachine.machine.factory.FactoryUpgradeSnapshot;
+import com.lw.modularmachine.api.upgrade.FactoryUpgradeSnapshot;
 import com.lw.modularmachine.machine.structure.MachineDefinition;
 import com.mojang.serialization.JsonOps;
 import java.util.ArrayList;

@@ -1,5 +1,7 @@
 package com.lw.modularmachine.machine.orientation;
 
+import com.lw.modularmachine.api.orientation.MachineOrientation;
+
 import com.google.gson.JsonParseException;
 import com.lw.modularmachine.machine.structure.MachineDefinition;
 import com.lw.modularmachine.machine.structure.StructureModifierDefinition;

@@ -2,14 +2,14 @@ package com.lw.modularmachine.gametest;
 
 import net.minecraft.world.level.block.state.BlockState;
 import net.minecraft.server.level.ServerLevel;
-import com.lw.modularmachine.blockentity.MachineColorable;
+import com.lw.modularmachine.api.component.MachineColorable;
 import com.lw.modularmachine.blockentity.ParallelControllerBlockEntity;
 import com.lw.modularmachine.block.MachineControllerBlock;
 import com.lw.modularmachine.blockentity.MachineControllerBlockEntity;
 import com.lw.modularmachine.blockentity.MachinePortBlockEntity;
 import com.lw.modularmachine.blockentity.SmartInterfaceBlockEntity;
 import com.lw.modularmachine.blockentity.UpgradeBusBlockEntity;
-import com.lw.modularmachine.machine.orientation.MachineOrientation;
+import com.lw.modularmachine.api.orientation.MachineOrientation;
 import com.lw.modularmachine.machine.structure.StructureService;
 import com.lw.modularmachine.registry.MachineRegistries;
 import net.minecraft.core.BlockPos;

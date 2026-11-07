@@ -8,88 +8,30 @@ import com.lw.modularmachine.util.callback.ServerCallbackRegistry;
 import com.lw.modularmachine.util.thread.ServerThreadGuard;
 import java.util.HashMap;
 import java.util.Map;
-import java.util.Objects;
 import java.util.Optional;
 import java.util.UUID;
-import net.minecraft.core.BlockPos;
 import net.minecraft.resources.ResourceLocation;
 import net.minecraft.server.level.ServerLevel;
+
+import com.lw.modularmachine.api.smart.SmartInterfaceEvents.Change;
+import com.lw.modularmachine.api.smart.SmartInterfaceEvents.Context;
+import com.lw.modularmachine.api.smart.SmartInterfaceEvents.Listener;
 import net.neoforged.bus.api.SubscribeEvent;
 import net.neoforged.neoforge.event.server.ServerStoppedEvent;
+import org.jetbrains.annotations.ApiStatus;
 
 /**
- * Committed, read-only numerical interface notifications for ordinary and
- * factory controllers.
+ * Internal committed interface dispatch and callback guards; not an integration
+ * API.
  */
-public final class SmartInterfaceEvents {
-  public enum Reason {
-    BOUND,
-    REBOUND,
-    VALUE_CHANGED
-  }
-
-  @FunctionalInterface
-  public interface Listener {
-    void onUpdate(Context context);
-  }
-
-  public record Change(
-      Reason reason,
-      Optional<SmartInterfaceBlockEntity.Binding> before,
-      SmartInterfaceBlockEntity.Binding after) {
-    public Change {
-      Objects.requireNonNull(reason, "reason");
-      Objects.requireNonNull(before, "before");
-      Objects.requireNonNull(after, "after");
-      if ((reason == Reason.BOUND) != before.isEmpty()
-          || before.isPresent()
-              && (!before.orElseThrow().controller().equals(after.controller())
-                  || before.orElseThrow().revision() >= after.revision())) {
-        throw new IllegalArgumentException("Invalid smart interface change");
-      }
-      if (reason == Reason.VALUE_CHANGED
-          && (!before.orElseThrow().machine().equals(after.machine())
-              || !before.orElseThrow().type().equals(after.type())
-              || Double.compare(before.orElseThrow().value(), after.value()) == 0)) {
-        throw new IllegalArgumentException("Invalid smart interface value change");
-      }
-    }
-  }
-
-  public record Context(
-      ResourceLocation dimension,
-      BlockPos interfacePosition,
-      UUID interfaceInstance,
-      boolean factory,
-      long tick,
-      Optional<UUID> actor,
-      Change change) {
-    public Context {
-      Objects.requireNonNull(dimension, "dimension");
-      Objects.requireNonNull(interfaceInstance, "interfaceInstance");
-      Objects.requireNonNull(actor, "actor");
-      Objects.requireNonNull(change, "change");
-      interfacePosition = interfacePosition.immutable();
-      if (tick < 0 || actor.isPresent() && change.reason() != Reason.VALUE_CHANGED) {
-        throw new IllegalArgumentException("Invalid smart interface event context");
-      }
-    }
-
-    public BlockPos controllerPosition() {
-      return change.after().controller();
-    }
-
-    public ResourceLocation machine() {
-      return change.after().machine();
-    }
-  }
-
+@ApiStatus.Internal
+public final class SmartInterfaceEventPublisher {
   private static final ServerCallbackRegistry<Listener> HANDLERS = new ServerCallbackRegistry<>(() -> {
   });
   private static final Map<ResourceLocation, Listener> REPORTED_FAILURES = new HashMap<>();
   private static StructureService.StructureSubject activeOwner;
 
-  private SmartInterfaceEvents() {
+  private SmartInterfaceEventPublisher() {
   }
 
   public static void register(ResourceLocation id, Listener listener) {
@@ -121,7 +63,6 @@ public final class SmartInterfaceEvents {
     return activeOwner != null && activeOwner == owner;
   }
 
-  /** Internal post-commit entry; callers must not manufacture binding changes. */
   public static void publish(SmartInterfaceBlockEntity source, StructureService.StructureSubject owner, Change change, Optional<UUID> actor) {
     if (!(source.getLevel() instanceof ServerLevel level)) {
       return;

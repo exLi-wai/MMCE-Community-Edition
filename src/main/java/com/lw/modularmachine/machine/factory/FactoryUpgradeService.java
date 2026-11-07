@@ -1,5 +1,7 @@
 package com.lw.modularmachine.machine.factory;
 
+import com.lw.modularmachine.api.upgrade.FactoryUpgradeRuntimeData;
+
 import com.google.gson.JsonParseException;
 import com.lw.modularmachine.machine.recipe.ItemResourceKey;
 import java.util.ArrayList;
@@ -187,12 +189,12 @@ public final class FactoryUpgradeService {
 
   @SubscribeEvent
   public static void stopped(ServerStoppedEvent event) {
-    FactoryDynamicUpgrades.clearOnServerStop();
-    FactoryUpgradeEvents.clearOnServerStop();
-    FactoryUpgradeRecipeChecks.clearOnServerStop();
-    FactoryUpgradeItemData.clearOnServerStop();
-    FactoryUpgradeBusData.clearOnServerStop();
-    FactoryUpgradeRuntimeData.clearOnServerStop();
+    DynamicUpgradeHandlers.clearOnServerStop();
+    UpgradeLifecyclePublisher.clearOnServerStop();
+    UpgradeRecipeChecks.clearOnServerStop();
+    UpgradeItemDataHandlers.clearOnServerStop();
+    UpgradeBusDataHandlers.clearOnServerStop();
+    UpgradeRuntimeDataHandlers.clearOnServerStop();
     FactoryUpgradeKubeJSHandlers.clearOnServerStop();
     FactoryUpgradeCallbacks.clear();
     current = new Snapshot(Math.incrementExact(current.epoch()), List.of(), Map.of(), Map.of());

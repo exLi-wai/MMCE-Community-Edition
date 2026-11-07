@@ -1,5 +1,9 @@
 package com.lw.modularmachine.blockentity;
 
+import com.lw.modularmachine.machine.factory.UpgradeRecipeChecks;
+
+import com.lw.modularmachine.machine.factory.UpgradeLifecyclePublisher;
+
 import com.lw.modularmachine.block.FactoryControllerBlock;
 import com.lw.modularmachine.config.MachineConfig;
 import com.lw.modularmachine.machine.controller.GenericControllerDiscovery;
@@ -10,21 +14,19 @@ import com.lw.modularmachine.machine.factory.FactoryThreadPreset;
 import com.lw.modularmachine.machine.factory.FactoryThreadState;
 import com.lw.modularmachine.machine.factory.FactoryThreadStateCodec;
 import com.lw.modularmachine.machine.factory.FactoryUpgradeCatalog;
-import com.lw.modularmachine.machine.factory.FactoryUpgradeEntry;
-import com.lw.modularmachine.machine.factory.FactoryUpgradeEvents;
-import com.lw.modularmachine.machine.factory.FactoryUpgradeRecipeChecks;
+import com.lw.modularmachine.api.upgrade.FactoryUpgradeEntry;
 import com.lw.modularmachine.machine.factory.FactoryUpgradeRestrictions;
 import com.lw.modularmachine.machine.factory.FactoryUpgradeRestrictions.Installed;
 import com.lw.modularmachine.machine.factory.FactoryUpgradeRestrictions.Result;
 import com.lw.modularmachine.machine.factory.FactoryUpgradeRuntimeWork;
 import com.lw.modularmachine.machine.factory.FactoryUpgradeService;
-import com.lw.modularmachine.machine.factory.FactoryUpgradeSnapshot;
+import com.lw.modularmachine.api.upgrade.FactoryUpgradeSnapshot;
 import com.lw.modularmachine.machine.factory.FactoryUpgradeStartCosts;
 import com.lw.modularmachine.machine.factory.UpgradeBusOwner;
 import com.lw.modularmachine.machine.factory.UpgradeBusParts;
 import com.lw.modularmachine.machine.factory.UpgradeStartState;
 import com.lw.modularmachine.machine.orientation.ControllerPlacementData;
-import com.lw.modularmachine.machine.orientation.MachineOrientation;
+import com.lw.modularmachine.api.orientation.MachineOrientation;
 import com.lw.modularmachine.machine.parallel.ParallelCapacity;
 import com.lw.modularmachine.machine.recipe.FactoryOutputEngine;
 import com.lw.modularmachine.machine.recipe.FactoryParallelResourceCommitter;
@@ -36,9 +38,9 @@ import com.lw.modularmachine.machine.recipe.FrozenItemRun;
 import com.lw.modularmachine.machine.recipe.ItemRecipePlan;
 import com.lw.modularmachine.machine.recipe.ItemRecipeSearch;
 import com.lw.modularmachine.machine.recipe.MachineRecipeService;
-import com.lw.modularmachine.machine.recipe.RecipeLifecycleEvents;
-import com.lw.modularmachine.machine.recipe.RecipeLifecycleEvents.Type;
-import com.lw.modularmachine.machine.smart.SmartInterfaceEvents;
+import com.lw.modularmachine.api.recipe.RecipeLifecycleEvents.Type;
+import com.lw.modularmachine.machine.recipe.RecipeLifecyclePublisher;
+import com.lw.modularmachine.machine.smart.SmartInterfaceEventPublisher;
 import com.lw.modularmachine.machine.structure.MachineDefinition;
 import com.lw.modularmachine.machine.structure.StructureService;
 import com.lw.modularmachine.machine.structure.VerificationFailure;
@@ -219,9 +221,9 @@ public final class FactoryControllerBlockEntity extends BlockEntity implements M
     if (level instanceof ServerLevel server) {
       ServerThreadGuard.require(server, "Factory blueprint edit");
       if (!startingThreads.isEmpty()
-          || FactoryUpgradeEvents.isDispatchingAny()
-          || RecipeLifecycleEvents.isDispatching()
-          || SmartInterfaceEvents.isDispatching(this)) {
+          || UpgradeLifecyclePublisher.isDispatchingAny()
+          || RecipeLifecyclePublisher.isDispatching()
+          || SmartInterfaceEventPublisher.isDispatching(this)) {
         throw new IllegalStateException("Factory blueprint edit during an active transaction or callback");
       }
     }
@@ -284,7 +286,7 @@ public final class FactoryControllerBlockEntity extends BlockEntity implements M
     if (id == null || !persistentStateValid) {
       throw new IllegalArgumentException("Invalid factory machine binding");
     }
-    if (FactoryUpgradeEvents.isDispatchingAny()
+    if (UpgradeLifecyclePublisher.isDispatchingAny()
         || !startingThreads.isEmpty()
         || !runSets.isEmpty() && !id.equals(machineId)) {
       throw new IllegalStateException("Factory binding during an active callback or startup");
@@ -372,7 +374,7 @@ public final class FactoryControllerBlockEntity extends BlockEntity implements M
 
     return persistentStateValid
         && configurationRevision < Long.MAX_VALUE
-        && !FactoryUpgradeEvents.isDispatching(this)
+        && !UpgradeLifecyclePublisher.isDispatching(this)
         && !isRemoved()
         && level.hasChunkAt(worldPosition)
         && level.getBlockEntity(worldPosition) == this;
@@ -653,7 +655,7 @@ public final class FactoryControllerBlockEntity extends BlockEntity implements M
   }
 
   public boolean beginRunStart(String threadId) {
-    if (FactoryUpgradeEvents.isDispatchingAny()) {
+    if (UpgradeLifecyclePublisher.isDispatchingAny()) {
       return false;
     }
     refreshUpgradeSnapshot();
@@ -724,7 +726,7 @@ public final class FactoryControllerBlockEntity extends BlockEntity implements M
 
   public boolean removeRunIfSame(String threadId, FrozenItemRun expected) {
     requireUpgradeThread();
-    if (FactoryUpgradeEvents.isDispatchingAny()) {
+    if (UpgradeLifecyclePublisher.isDispatchingAny()) {
       return false;
     }
     var set = runSets.get(threadId);
@@ -740,7 +742,7 @@ public final class FactoryControllerBlockEntity extends BlockEntity implements M
 
   public boolean replaceRunIfSame(String threadId, FrozenItemRun expected, FrozenItemRun replacement) {
     requireUpgradeThread();
-    if (FactoryUpgradeEvents.isDispatchingAny()) {
+    if (UpgradeLifecyclePublisher.isDispatchingAny()) {
       return false;
     }
     var set = runSets.get(threadId);
@@ -753,7 +755,7 @@ public final class FactoryControllerBlockEntity extends BlockEntity implements M
 
   public boolean removeRunSetIfSame(String threadId, FactoryRunSet expected) {
     requireUpgradeThread();
-    if (FactoryUpgradeEvents.isDispatchingAny()) {
+    if (UpgradeLifecyclePublisher.isDispatchingAny()) {
       return false;
     }
     if (runSets.get(threadId) != expected) {
@@ -765,7 +767,7 @@ public final class FactoryControllerBlockEntity extends BlockEntity implements M
 
   public boolean replaceRunSetIfSame(String threadId, FactoryRunSet expected, FactoryRunSet replacement) {
     requireUpgradeThread();
-    if (FactoryUpgradeEvents.isDispatchingAny()) {
+    if (UpgradeLifecyclePublisher.isDispatchingAny()) {
       return false;
     }
     if (runSets.get(threadId) != expected || replacement == null) {
@@ -777,7 +779,7 @@ public final class FactoryControllerBlockEntity extends BlockEntity implements M
 
   public boolean applyRunFailureDecisionsIfSame(String threadId, FactoryRunSet expected, Map<UUID, FrozenItemRun> replacements, Set<UUID> discarded) {
     requireUpgradeThread();
-    if (FactoryUpgradeEvents.isDispatchingAny() || runSets.get(threadId) != expected) {
+    if (UpgradeLifecyclePublisher.isDispatchingAny() || runSets.get(threadId) != expected) {
       return false;
     }
     FactoryRunSet replacement = expected.applyFailureDecisions(replacements, discarded);
@@ -797,13 +799,13 @@ public final class FactoryControllerBlockEntity extends BlockEntity implements M
     if (!(level instanceof ServerLevel server) || !server.getServer().isSameThread()) {
       return;
     }
-    if (FactoryUpgradeEvents.isDispatchingAny()) {
+    if (UpgradeLifecyclePublisher.isDispatchingAny()) {
       return;
     }
     try {
       tickController(server);
     } finally {
-      RecipeLifecycleEvents.machineTick(this);
+      RecipeLifecyclePublisher.machineTick(this);
     }
   }
 
@@ -1162,10 +1164,10 @@ public final class FactoryControllerBlockEntity extends BlockEntity implements M
         var updated = entry.getValue().replaceAll(replacements);
         if (replaceRunSetIfSame(threadId, entry.getValue(), updated)) {
           setChanged();
-          if (RecipeLifecycleEvents.hasListeners(Type.TICK)) {
+          if (RecipeLifecyclePublisher.hasListeners(Type.TICK)) {
             var before = entry.getValue().runs().stream().filter(run -> replacements.containsKey(run.runId())).toList();
             var after = before.stream().map(run -> replacements.get(run.runId())).toList();
-            RecipeLifecycleEvents.advanced(this, threadId, before, after);
+            RecipeLifecyclePublisher.advanced(this, threadId, before, after);
           }
         } else {
           threadState = FactoryThreadState.State.WAITING;
@@ -1269,7 +1271,7 @@ public final class FactoryControllerBlockEntity extends BlockEntity implements M
         var allowed = thread.lockedRecipe() == null ? null : Set.of(thread.lockedRecipe().toString());
         try {
           search = ItemRecipeSearch.beginFactory(this, thread.threadId(), catalog, allowed).orElse(null);
-        } catch (FactoryUpgradeRecipeChecks.FailedException invalid) {
+        } catch (UpgradeRecipeChecks.FailedException invalid) {
           updateThreadState(thread, FactoryThreadState.State.WAITING, FactoryThreadState.Reason.CHECK_ERROR);
           backoffSearch(thread.threadId(), now);
           recordSearchAttempt(thread.threadId());
@@ -1359,7 +1361,7 @@ public final class FactoryControllerBlockEntity extends BlockEntity implements M
       } catch (RuntimeException failure) {
         removeSearchState(thread.threadId(), now);
         backoffSearch(thread.threadId(), now);
-        var reason = failure instanceof FactoryUpgradeRecipeChecks.StaleException ? FactoryThreadState.Reason.STALE_RESOURCES : FactoryThreadState.Reason.CHECK_ERROR;
+        var reason = failure instanceof UpgradeRecipeChecks.StaleException ? FactoryThreadState.Reason.STALE_RESOURCES : FactoryThreadState.Reason.CHECK_ERROR;
         updateThreadState(thread, FactoryThreadState.State.WAITING, reason);
       }
       recordSearchAttempt(thread.threadId());
@@ -1585,7 +1587,7 @@ public final class FactoryControllerBlockEntity extends BlockEntity implements M
   protected void loadAdditional(CompoundTag tag, HolderLookup.Provider registries) {
     if (level instanceof ServerLevel server) {
       ServerThreadGuard.require(server, "Factory load");
-      if (FactoryUpgradeEvents.isDispatchingAny() || !startingThreads.isEmpty()) {
+      if (UpgradeLifecyclePublisher.isDispatchingAny() || !startingThreads.isEmpty()) {
         throw new IllegalStateException("Factory load during an active upgrade callback or startup");
       }
     }

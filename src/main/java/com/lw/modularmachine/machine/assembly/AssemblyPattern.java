@@ -1,6 +1,6 @@
 package com.lw.modularmachine.machine.assembly;
 
-import com.lw.modularmachine.machine.orientation.MachineOrientation;
+import com.lw.modularmachine.api.orientation.MachineOrientation;
 import com.lw.modularmachine.machine.orientation.PropertySpace;
 import com.lw.modularmachine.machine.PortKind;
 import com.lw.modularmachine.machine.structure.MachineDefinition;

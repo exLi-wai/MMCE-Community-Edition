@@ -1,6 +1,6 @@
 package com.lw.modularmachine.client;
 
-import com.lw.modularmachine.machine.factory.FactoryUpgradeEntry;
+import com.lw.modularmachine.api.upgrade.FactoryUpgradeEntry;
 import com.lw.modularmachine.menu.UpgradeBusMenu;
 import com.lw.modularmachine.network.UpgradeBusPayloads;
 import java.util.ArrayList;

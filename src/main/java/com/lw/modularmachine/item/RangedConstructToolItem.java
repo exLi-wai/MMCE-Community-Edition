@@ -2,7 +2,7 @@ package com.lw.modularmachine.item;
 
 import com.lw.modularmachine.block.FactoryControllerBlock;
 import com.lw.modularmachine.block.MachineControllerBlock;
-import com.lw.modularmachine.machine.orientation.MachineOrientation;
+import com.lw.modularmachine.api.orientation.MachineOrientation;
 import com.lw.modularmachine.machine.selection.RangedSelectionService;
 import com.lw.modularmachine.registry.MachineDataComponents;
 import java.io.IOException;

@@ -1,13 +1,14 @@
 package com.lw.modularmachine.machine.recipe;
 
+import com.lw.modularmachine.machine.factory.UpgradeLifecyclePublisher;
+
 import com.lw.modularmachine.ModularMachine;
 import com.lw.modularmachine.blockentity.FactoryControllerBlockEntity;
 import com.lw.modularmachine.blockentity.MachinePortBlockEntity;
 import com.lw.modularmachine.blockentity.UpgradeBusBlockEntity;
 import com.lw.modularmachine.config.MachineConfig;
 import com.lw.modularmachine.machine.factory.FactoryRunSet;
-import com.lw.modularmachine.machine.factory.FactoryUpgradeEvents;
-import com.lw.modularmachine.machine.factory.FactoryUpgradeRuntimeData;
+import com.lw.modularmachine.api.upgrade.FactoryUpgradeRuntimeData;
 import com.lw.modularmachine.machine.factory.FactoryUpgradeStartCosts;
 import java.util.ArrayList;
 import java.util.HashMap;
@@ -79,10 +80,10 @@ public final class FactoryOutputEngine {
   public Result advance(FactoryControllerBlockEntity factory, String threadId, FactoryRunSet set) {
     if (!(factory.getLevel() instanceof ServerLevel level)
         || !level.getServer().isSameThread()
-        || FactoryUpgradeEvents.isDispatchingAny()) {
+        || UpgradeLifecyclePublisher.isDispatchingAny()) {
       throw new IllegalStateException("Factory output planning outside server thread");
     }
-    if (FactoryUpgradeEvents.isDispatchingAny()) {
+    if (UpgradeLifecyclePublisher.isDispatchingAny()) {
       return Result.STALE;
     }
     var previous = attempts.get(threadId);
@@ -235,7 +236,7 @@ public final class FactoryOutputEngine {
     factory.upgradeRuntimeWork().clear(FactoryUpgradeRuntimeData.Phase.FINISHED, threadId);
     FactoryUpgradeStartCosts.publish(factory, upgradeLeases);
     factory.setChanged();
-    FactoryUpgradeEvents.recipeFinished(factory, threadId, set.runs());
+    UpgradeLifecyclePublisher.recipeFinished(factory, threadId, set.runs());
     itemLeases.values().forEach(FactoryOutputEngine::publishItem);
     fluidLeases.values().forEach(FactoryOutputEngine::publishFluid);
 

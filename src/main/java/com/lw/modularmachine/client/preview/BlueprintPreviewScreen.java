@@ -1,9 +1,11 @@
 package com.lw.modularmachine.client.preview;
 
+import com.lw.modularmachine.api.client.preview.PreviewCamera;
+import com.lw.modularmachine.api.client.preview.PreviewRenderer;
+import com.lw.modularmachine.api.client.preview.PreviewSceneData;
+import com.lw.modularmachine.api.client.preview.PreviewViewport;
 import com.lw.modularmachine.integration.jei.ClientMachineJeiCatalog;
 import com.lw.modularmachine.item.MachineBlueprintItem;
-import com.lw.modularmachine.network.ProjectionPayloads;
-import com.mojang.blaze3d.systems.RenderSystem;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map.Entry;
@@ -18,30 +20,26 @@ import net.minecraft.world.item.Item;
 import net.minecraft.world.item.ItemStack;
 import net.minecraft.world.item.Items;
 import net.minecraft.world.level.block.state.BlockState;
-import net.minecraft.world.phys.AABB;
-import net.minecraft.world.phys.Vec3;
-import org.joml.Matrix4f;
-import org.joml.Quaternionf;
-import org.joml.Vector3f;
 
 /**
- * Original blueprint interaction and 184x220 panel using the shared bounded
- * projection mesh cache.
+ * Original blueprint interaction and 184x220 panel using the shared preview
+ * renderer.
  */
 public final class BlueprintPreviewScreen extends Screen {
   private static final ResourceLocation TEXTURE = ResourceLocation
       .fromNamespaceAndPath("mmcece", "textures/gui/guiblueprint_new.png");
   private final ResourceLocation machine;
   private final InteractionHand hand;
-  private final SectionMeshCache cache = new SectionMeshCache();
-  private List<ProjectionPayloads.Entry> entries = List.of();
+  private final PreviewRenderer renderer = PreviewRenderer.create();
+  private final PreviewCamera camera = new PreviewCamera(89.9F);
+  private List<PreviewSceneData.Entry> entries = List.of();
+  private List<PreviewSceneData.Entry> animated = List.of();
   private List<ItemStack> materials = List.of();
   private final LinkedHashMap<Item, Integer> materialCounts = new LinkedHashMap<>();
   private int materialStep;
   private boolean materialsInitialized;
-  private PreviewRenderScene scene;
-  private Matrix4f inverse;
-  private float centerX, centerY, centerZ, baseScale = 1, yaw = -135, pitch = 25, zoom = 1, panX, panY;
+  private PreviewSceneData scene;
+  private float baseScale = 1;
   private int left, top, minY, maxY, layer, step, page, selected = -1;
   private boolean layers, cycle = true, menu = true, dragging;
   private double dragDistance;
@@ -64,29 +62,22 @@ public final class BlueprintPreviewScreen extends Screen {
       return;
     }
     entries = definition.parts().stream()
-        .map(part -> new ProjectionPayloads.Entry(part.offset(), part.alternatives(), List.of())).toList();
-    float minX = entries.stream().mapToInt(entry -> entry.position().getX()).min().orElse(0);
-    float maxX = entries.stream().mapToInt(entry -> entry.position().getX()).max().orElse(0);
-    float minZ = entries.stream().mapToInt(entry -> entry.position().getZ()).min().orElse(0);
-    float maxZ = entries.stream().mapToInt(entry -> entry.position().getZ()).max().orElse(0);
+        .map(part -> new PreviewSceneData.Entry(part.offset(), part.alternatives(), List.of())).toList();
+    animated = entries.stream().filter(entry -> entry.states().size() > 1).toList();
     minY = entries.stream().mapToInt(entry -> entry.position().getY()).min().orElse(0);
     maxY = entries.stream().mapToInt(entry -> entry.position().getY()).max().orElse(0);
     layer = minY;
-    centerX = (minX + maxX + 1) / 2;
-    centerY = (minY + maxY + 1) / 2F;
-    centerZ = (minZ + maxZ + 1) / 2;
-    baseScale = Math
-        .max(.01F, Math.min(24F, 95F / Math.max(maxX - minX + 1, Math.max(maxY - minY + 1, maxZ - minZ + 1))));
-    scene = PreviewRenderScene.create(0, minecraft.level.dimension().location(), machine, entries);
-    cache.setPreviewScene(scene);
+    scene = new PreviewSceneData(definition.color(), entries);
+    baseScale = Math.max(.01F, Math.min(24F, 95F / scene.extent()));
+    renderer.setScene(scene);
     updateMaterials();
     lastCycle = Util.getMillis();
   }
-  private BlockState shown(ProjectionPayloads.Entry entry) {
+  private BlockState shown(PreviewSceneData.Entry entry) {
     return entry.states().get(Math.floorMod(step, entry.states().size()));
   }
   private void updateMaterials() {
-    var changed = materialsInitialized ? scene.animated() : entries;
+    var changed = materialsInitialized ? animated : entries;
     for (var entry : changed) {
       if (entry.states().isEmpty()) {
         continue;
@@ -124,7 +115,7 @@ public final class BlueprintPreviewScreen extends Screen {
   }
   public void invalidateMeshes() {
     if (scene != null) {
-      cache.setPreviewScene(scene);
+      renderer.invalidate();
     }
   }
   @Override
@@ -133,7 +124,7 @@ public final class BlueprintPreviewScreen extends Screen {
   }
   @Override
   public void removed() {
-    cache.close();
+    renderer.close();
     super.removed();
   }
 
@@ -152,30 +143,17 @@ public final class BlueprintPreviewScreen extends Screen {
           true);
       return;
     }
-    if (cycle && !scene.animated().isEmpty() && Util.getMillis() - lastCycle >= 1500) {
+    if (cycle && !animated.isEmpty() && Util.getMillis() - lastCycle >= 1500) {
       step++;
       lastCycle = Util.getMillis();
       updateMaterials();
     }
-    cache.setPreviewState(layers ? layer : Integer.MIN_VALUE, step);
-    graphics.flush();
-    graphics.enableScissor(left + 6, top + 26, left + 178, top + 176);
-    graphics.pose().pushPose();
-    try {
-      graphics.pose().translate(left + 92 + panX, top + 99 + panY, 150);
-      graphics.pose().scale(baseScale * zoom, -baseScale * zoom, baseScale * zoom);
-      graphics.pose().mulPose(
-          new Quaternionf()
-              .rotationXYZ((float) Math.toRadians(layers ? 90 : pitch), (float) Math.toRadians(layers ? 0 : yaw), 0));
-      graphics.pose().translate(-centerX, layers ? -layer - .5F : -centerY, -centerZ);
-      inverse = new Matrix4f(graphics.pose().last().pose()).invert();
-      cache.drawPreview(
-          new Matrix4f(RenderSystem.getModelViewMatrix()).mul(graphics.pose().last().pose()),
-          RenderSystem.getProjectionMatrix());
-    } finally {
-      graphics.pose().popPose();
-      graphics.disableScissor();
-    }
+    renderer.render(
+        graphics,
+        new PreviewViewport(left + 6, top + 26, 172, 150, baseScale, left + 92, top + 99),
+        camera,
+        layers ? layer : Integer.MIN_VALUE,
+        step);
     graphics.drawString(
         font,
         layers ? Component.translatable("jei.mmcece.legacy.layer", layer) : Component.literal("3D"),
@@ -277,11 +255,7 @@ public final class BlueprintPreviewScreen extends Screen {
       }
     }
     if (x >= 150 && x < 163 && y >= 28 && y < 41 && button == 0) {
-      yaw = -135;
-      pitch = 25;
-      panX = 0;
-      panY = 0;
-      zoom = 1;
+      camera.reset();
       return true;
     }
     if (x >= 6 && x < 178 && y >= 26 && y < 176) {
@@ -298,11 +272,9 @@ public final class BlueprintPreviewScreen extends Screen {
     }
     dragDistance += Math.abs(dx) + Math.abs(dy);
     if (button == 0) {
-      yaw += dx * .25F;
-      pitch = Math.max(-89.9F, Math.min(89.9F, pitch + (float) dy * .25F));
+      camera.rotate(dx, dy);
     } else {
-      panX += dx;
-      panY += dy;
+      camera.pan(dx, dy);
     }
     return true;
   }
@@ -312,31 +284,8 @@ public final class BlueprintPreviewScreen extends Screen {
       return super.mouseReleased(x, y, button);
     }
     dragging = false;
-    if (button == 0 && dragDistance <= 4 && inverse != null) {
-      var from = new Vector3f((float) x, (float) y, 10000);
-      inverse.transformPosition(from);
-      var to = new Vector3f((float) x, (float) y, -10000);
-      inverse.transformPosition(to);
-      var start = new Vec3(from.x, from.y, from.z);
-      var end = new Vec3(to.x, to.y, to.z);
-      double nearest = Double.MAX_VALUE;
-      selected = -1;
-      for (var section : scene.sections()) {
-        if (layers && (layer < section.bounds().minY || layer >= section.bounds().maxY)
-            || section.bounds().clip(start, end).isEmpty()) {
-          continue;
-        }
-        for (var entry : section.entries()) {
-          if (layers && entry.position().getY() != layer) {
-            continue;
-          }
-          var hit = new AABB(entry.position()).clip(start, end);
-          if (hit.isPresent() && hit.get().distanceToSqr(start) < nearest) {
-            nearest = hit.get().distanceToSqr(start);
-            selected = scene.indexAt(entry.position());
-          }
-        }
-      }
+    if (button == 0 && dragDistance <= 4 && scene != null) {
+      selected = renderer.pick(x, y);
     }
     return true;
   }
@@ -352,7 +301,7 @@ public final class BlueprintPreviewScreen extends Screen {
       if (layers) {
         layer = Math.max(minY, Math.min(maxY, layer + (int) Math.signum(scrollY)));
       } else {
-        zoom = Math.max(.1F, Math.min(8, zoom * (float) Math.pow(1.1, scrollY)));
+        camera.zoomBy(scrollY);
       }
       return true;
     }

@@ -1,14 +1,15 @@
 package com.lw.modularmachine.machine.assembly;
 
+import com.lw.modularmachine.machine.factory.UpgradeLifecyclePublisher;
+
 import com.lw.modularmachine.ModularMachine;
 import com.lw.modularmachine.block.FactoryControllerBlock;
 import com.lw.modularmachine.block.MachineControllerBlock;
 import com.lw.modularmachine.blockentity.FactoryControllerBlockEntity;
 import com.lw.modularmachine.blockentity.MachineControllerBlockEntity;
-import com.lw.modularmachine.machine.factory.FactoryUpgradeEvents;
-import com.lw.modularmachine.machine.orientation.MachineOrientation;
-import com.lw.modularmachine.machine.recipe.RecipeLifecycleEvents;
-import com.lw.modularmachine.machine.smart.SmartInterfaceEvents;
+import com.lw.modularmachine.api.orientation.MachineOrientation;
+import com.lw.modularmachine.machine.recipe.RecipeLifecyclePublisher;
+import com.lw.modularmachine.machine.smart.SmartInterfaceEventPublisher;
 import com.lw.modularmachine.machine.structure.MachineDefinition;
 import com.lw.modularmachine.machine.structure.StructureService;
 import com.lw.modularmachine.network.ProjectionPayloads;
@@ -194,9 +195,9 @@ public final class AssemblyService {
     ServerThreadGuard.require(player.serverLevel(), "Blueprint interaction");
     return !placing
         && validPlayer(player)
-        && !FactoryUpgradeEvents.isDispatchingAny()
-        && !RecipeLifecycleEvents.isDispatching()
-        && !SmartInterfaceEvents.isDispatching();
+        && !UpgradeLifecyclePublisher.isDispatchingAny()
+        && !RecipeLifecyclePublisher.isDispatching()
+        && !SmartInterfaceEventPublisher.isDispatching();
   }
 
   public static void cancelProjection(ServerPlayer player) {

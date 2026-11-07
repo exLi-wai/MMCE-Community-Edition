@@ -1,4 +1,4 @@
-package com.lw.modularmachine.machine.factory;
+package com.lw.modularmachine.api.upgrade;
 
 import com.google.gson.JsonElement;
 import java.util.Objects;

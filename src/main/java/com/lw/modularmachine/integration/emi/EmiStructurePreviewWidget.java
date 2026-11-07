@@ -1,11 +1,11 @@
 package com.lw.modularmachine.integration.emi;
 
-import com.lw.modularmachine.client.preview.PreviewRenderScene;
-import com.lw.modularmachine.client.preview.SectionMeshCache;
+import com.lw.modularmachine.api.client.preview.PreviewCamera;
+import com.lw.modularmachine.api.client.preview.PreviewRenderer;
+import com.lw.modularmachine.api.client.preview.PreviewSceneData;
+import com.lw.modularmachine.api.client.preview.PreviewViewport;
 import com.lw.modularmachine.integration.jei.ClientMachineJeiCatalog;
 import com.lw.modularmachine.integration.jei.MachineDetailsScreen;
-import com.lw.modularmachine.network.ProjectionPayloads;
-import com.mojang.blaze3d.systems.RenderSystem;
 import dev.emi.emi.api.widget.Bounds;
 import dev.emi.emi.api.widget.Widget;
 import java.util.List;
@@ -15,24 +15,22 @@ import net.minecraft.client.gui.GuiGraphics;
 import net.minecraft.resources.ResourceLocation;
 import net.minecraft.network.chat.Component;
 import org.joml.Matrix4f;
-import org.joml.Quaternionf;
-import org.joml.Vector3f;
 import org.lwjgl.glfw.GLFW;
 
+/** EMI layout and input adapter for the shared structure preview API. */
 final class EmiStructurePreviewWidget extends Widget {
   private static final ResourceLocation DETAILS_BUTTON = ResourceLocation
       .fromNamespaceAndPath("mmcece", "textures/gui/button.png");
   private static final int DETAILS_HEIGHT = 20;
   private final int x, y, width, height;
   private final ClientMachineJeiCatalog.Machine machine;
-  private final float centerX, centerY, centerZ, extent;
-  private final PreviewRenderScene scene;
-  private final SectionMeshCache cache = new SectionMeshCache();
+  private final PreviewSceneData scene;
+  private final PreviewRenderer renderer = PreviewRenderer.create();
+  private final PreviewCamera camera = new PreviewCamera();
   private long lastCycle = Util.getMillis();
   private int step;
-  private float yaw = -135F, pitch = 25F, zoom = 1F, panX, panY;
   private int dragButton = -1;
-  private boolean cacheReady;
+  private boolean initialized;
 
   EmiStructurePreviewWidget(ClientMachineJeiCatalog.Machine machine, int x, int y, int width, int height) {
     this.x = x;
@@ -40,20 +38,10 @@ final class EmiStructurePreviewWidget extends Widget {
     this.width = width;
     this.height = height;
     this.machine = machine;
-    var entries = machine.parts().stream()
-        .map(part -> new ProjectionPayloads.Entry(part.offset(), part.alternatives(), List.of())).toList();
-    scene = PreviewRenderScene
-        .create(0, ResourceLocation.fromNamespaceAndPath("minecraft", "overworld"), machine.id(), entries);
-    int minX = entries.stream().mapToInt(entry -> entry.position().getX()).min().orElse(0);
-    int maxX = entries.stream().mapToInt(entry -> entry.position().getX()).max().orElse(0);
-    int minY = entries.stream().mapToInt(entry -> entry.position().getY()).min().orElse(0);
-    int maxY = entries.stream().mapToInt(entry -> entry.position().getY()).max().orElse(0);
-    int minZ = entries.stream().mapToInt(entry -> entry.position().getZ()).min().orElse(0);
-    int maxZ = entries.stream().mapToInt(entry -> entry.position().getZ()).max().orElse(0);
-    centerX = (minX + maxX + 1) / 2F;
-    centerY = (minY + maxY + 1) / 2F;
-    centerZ = (minZ + maxZ + 1) / 2F;
-    extent = Math.max(maxX - minX + 1, Math.max(maxY - minY + 1, maxZ - minZ + 1));
+    scene = new PreviewSceneData(
+        machine.color(),
+        machine.parts().stream().map(part -> new PreviewSceneData.Entry(part.offset(), part.alternatives(), List.of()))
+            .toList());
   }
 
   @Override
@@ -63,41 +51,23 @@ final class EmiStructurePreviewWidget extends Widget {
 
   @Override
   public void render(GuiGraphics graphics, int mouseX, int mouseY, float delta) {
-    var layout = new Matrix4f(graphics.pose().last().pose());
-    EmiPreviewInput.rendered(this, layout);
-    if (!cacheReady) {
-      cache.setPreviewScene(scene);
-      cache.setPreviewState(Integer.MIN_VALUE, step);
-      cacheReady = true;
+    EmiPreviewInput.rendered(this, new Matrix4f(graphics.pose().last().pose()));
+    if (!initialized) {
+      renderer.setScene(scene);
+      initialized = true;
     }
-    if (Util.getMillis() - lastCycle >= 1500 && !scene.animated().isEmpty()) {
+    if (Util.getMillis() - lastCycle >= 1500) {
       step++;
       lastCycle = Util.getMillis();
-      cache.setPreviewState(Integer.MIN_VALUE, step);
     }
     int previewHeight = previewHeight();
-    float scale = Math.max(.1F, Math.min(24F, Math.min(width, previewHeight) * .55F / extent)) * zoom;
-    var topLeft = layout.transformPosition(new Vector3f(x, y, 0));
-    var bottomRight = layout.transformPosition(new Vector3f(x + width, y + previewHeight, 0));
-    graphics.flush();
-    graphics.enableScissor(
-        (int) Math.floor(Math.min(topLeft.x, bottomRight.x)),
-        (int) Math.floor(Math.min(topLeft.y, bottomRight.y)),
-        (int) Math.ceil(Math.max(topLeft.x, bottomRight.x)),
-        (int) Math.ceil(Math.max(topLeft.y, bottomRight.y)));
-    graphics.pose().pushPose();
-    try {
-      graphics.pose().translate(x + width / 2F + panX, y + previewHeight / 2F + panY, 150);
-      graphics.pose().scale(scale, -scale, scale);
-      graphics.pose()
-          .mulPose(new Quaternionf().rotationXYZ((float) Math.toRadians(pitch), (float) Math.toRadians(yaw), 0));
-      graphics.pose().translate(-centerX, -centerY, -centerZ);
-      var view = new Matrix4f(RenderSystem.getModelViewMatrix()).mul(graphics.pose().last().pose());
-      cache.drawPreview(view, RenderSystem.getProjectionMatrix());
-    } finally {
-      graphics.pose().popPose();
-      graphics.disableScissor();
-    }
+    float scale = Math.max(.1F, Math.min(24F, Math.min(width, previewHeight) * .55F / scene.extent()));
+    renderer.render(
+        graphics,
+        new PreviewViewport(x, y, width, previewHeight, scale),
+        camera,
+        PreviewRenderer.ALL_LAYERS,
+        step);
     int buttonLeft = x + 8;
     int buttonTop = y + height - DETAILS_HEIGHT;
     int buttonWidth = Math.max(1, width - 16);
@@ -155,11 +125,11 @@ final class EmiStructurePreviewWidget extends Widget {
       return false;
     }
     if (button == GLFW.GLFW_MOUSE_BUTTON_LEFT) {
-      yaw += dx * .25F;
-      pitch = Math.max(-90F, Math.min(90F, pitch + (float) dy * .25F));
+      camera.rotate(dx, dy);
+
     } else {
-      panX += dx;
-      panY += dy;
+      camera.pan(dx, dy);
+
     }
     return true;
   }
@@ -180,14 +150,14 @@ final class EmiStructurePreviewWidget extends Widget {
     if (!inPreview(mouseX, mouseY)) {
       return false;
     }
-    zoom = Math.max(.1F, Math.min(8F, zoom * (float) Math.pow(1.1, amount)));
+    camera.zoomBy(amount);
     return true;
   }
 
   void release() {
     stopDragging();
-    cache.close();
-    cacheReady = false;
+    renderer.close();
+
   }
 
   @Override

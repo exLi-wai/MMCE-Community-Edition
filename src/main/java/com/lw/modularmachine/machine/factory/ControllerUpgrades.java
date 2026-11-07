@@ -1,5 +1,6 @@
 package com.lw.modularmachine.machine.factory;
 
+import com.lw.modularmachine.api.upgrade.FactoryUpgradeSnapshot;
 import com.lw.modularmachine.block.UpgradeBusBlock;
 import com.lw.modularmachine.blockentity.UpgradeBusBlockEntity;
 import com.lw.modularmachine.machine.structure.StructureService;
@@ -115,7 +116,7 @@ public final class ControllerUpgrades {
 
   public void refresh() {
     var server = server();
-    if (FactoryUpgradeEvents.isDispatching(owner)) {
+    if (UpgradeLifecyclePublisher.isDispatching(owner)) {
       return;
     }
     if (!owner.canCommitStructure()) {

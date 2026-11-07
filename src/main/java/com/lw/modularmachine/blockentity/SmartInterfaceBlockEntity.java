@@ -1,8 +1,11 @@
 package com.lw.modularmachine.blockentity;
 
-import com.lw.modularmachine.machine.recipe.RecipeLifecycleEvents;
-import com.lw.modularmachine.machine.recipe.ResourceSelector;
-import com.lw.modularmachine.machine.smart.SmartInterfaceEvents;
+import com.lw.modularmachine.api.component.MachineColorable;
+import com.lw.modularmachine.api.smart.SmartInterfaceBinding;
+
+import com.lw.modularmachine.machine.recipe.RecipeLifecyclePublisher;
+import com.lw.modularmachine.machine.smart.SmartInterfaceEventPublisher;
+import com.lw.modularmachine.api.smart.SmartInterfaceEvents;
 import com.lw.modularmachine.machine.smart.SmartInterfaceType;
 import com.lw.modularmachine.machine.structure.StructureService;
 import com.lw.modularmachine.menu.SmartInterfaceMenu;
@@ -39,21 +42,11 @@ import net.minecraft.world.level.block.state.BlockState;
  */
 public final class SmartInterfaceBlockEntity extends BlockEntity implements MenuProvider, MachineColorable {
   public static final int MAX_BINDINGS = 64;
-  public record Binding(BlockPos controller, ResourceLocation machine, String type, double value, long revision) {
-    public Binding {
-      controller = controller.immutable();
-      ResourceSelector.require(type);
-      if (machine == null
-          || machine.toString().length() > 256
-          || type.isEmpty()
-          || !Double.isFinite(value)
-          || revision < 0) {
-        throw new IllegalArgumentException("Invalid numerical interface binding");
-      }
-    }
-  }
-
-  public record Entry(Binding binding, String machineName, SmartInterfaceType specification, boolean editable) {
+  public record Entry(
+      SmartInterfaceBinding binding,
+      String machineName,
+      SmartInterfaceType specification,
+      boolean editable) {
     public Entry {
       Objects.requireNonNull(binding, "binding");
       Objects.requireNonNull(specification, "specification");
@@ -73,7 +66,7 @@ public final class SmartInterfaceBlockEntity extends BlockEntity implements Menu
   private record Membership(WeakReference<StructureService.Registration> registration, int part) {
   }
 
-  private final Map<Key, Binding> bindings = new LinkedHashMap<>();
+  private final Map<Key, SmartInterfaceBinding> bindings = new LinkedHashMap<>();
   private final Map<Key, Membership> memberships = new LinkedHashMap<>();
   private final Map<BlockPos, SmartInterfaceEvents.Change> pendingNotifications = new LinkedHashMap<>();
   private UUID instance = UUID.randomUUID();
@@ -168,7 +161,7 @@ public final class SmartInterfaceBlockEntity extends BlockEntity implements Menu
 
   public void establish(StructureService.StructureSubject controller, SmartInterfaceType type, int partIndex) {
     var server = server();
-    if (SmartInterfaceEvents.isDispatching() || RecipeLifecycleEvents.isDispatching()) {
+    if (SmartInterfaceEventPublisher.isDispatching() || RecipeLifecyclePublisher.isDispatching()) {
       throw new IllegalStateException("Cannot establish interfaces during a read-only notification");
     }
     var registration = controller.structureRegistration();
@@ -208,7 +201,7 @@ public final class SmartInterfaceBlockEntity extends BlockEntity implements Menu
       bindings.remove(stale);
       memberships.remove(stale);
     }
-    var next = new Binding(
+    var next = new SmartInterfaceBinding(
         controller.structurePosition(),
         controller.structureMachineId(),
         type.id(),
@@ -217,7 +210,7 @@ public final class SmartInterfaceBlockEntity extends BlockEntity implements Menu
     bindings.put(key, next);
     revision++;
     setChanged();
-    if (SmartInterfaceEvents.hasListeners()) {
+    if (SmartInterfaceEventPublisher.hasListeners()) {
       var staged = pendingNotifications.get(controller.structurePosition());
       var before = staged == null ? Optional.ofNullable(previousBinding) : staged.before();
       pendingNotifications.put(
@@ -249,7 +242,7 @@ public final class SmartInterfaceBlockEntity extends BlockEntity implements Menu
       return;
     }
     pendingNotifications.remove(owner.structurePosition());
-    SmartInterfaceEvents.publish(this, owner, change, Optional.empty());
+    SmartInterfaceEventPublisher.publish(this, owner, change, Optional.empty());
   }
 
   /**
@@ -265,10 +258,10 @@ public final class SmartInterfaceBlockEntity extends BlockEntity implements Menu
         .filter(
             binding -> binding.controller().equals(owner.structurePosition())
                 && binding.machine().equals(owner.structureMachineId()))
-        .map(Binding::type).findFirst();
+        .map(SmartInterfaceBinding::type).findFirst();
   }
 
-  public Optional<Binding> read(StructureService.StructureSubject owner, String type) {
+  public Optional<SmartInterfaceBinding> read(StructureService.StructureSubject owner, String type) {
     server();
     var binding = bindings.get(new Key(owner.structurePosition(), type));
     var specification = binding == null ? null : specification(binding.controller(), binding.machine(), type, true);
@@ -279,7 +272,7 @@ public final class SmartInterfaceBlockEntity extends BlockEntity implements Menu
         && specification.accepts(binding.value()) ? Optional.of(binding) : Optional.empty();
   }
 
-  public boolean matchesBinding(Binding binding) {
+  public boolean matchesBinding(SmartInterfaceBinding binding) {
     server();
 
     return valid && bindings.get(new Key(binding.controller(), binding.type())) == binding;
@@ -289,11 +282,11 @@ public final class SmartInterfaceBlockEntity extends BlockEntity implements Menu
     var server = server();
     if (!valid
         || revision == Long.MAX_VALUE
-        || SmartInterfaceEvents.isDispatching()
-        || RecipeLifecycleEvents.isDispatching()) {
+        || SmartInterfaceEventPublisher.isDispatching()
+        || RecipeLifecyclePublisher.isDispatching()) {
       return;
     }
-    if (!SmartInterfaceEvents.hasListeners()) {
+    if (!SmartInterfaceEventPublisher.hasListeners()) {
       pendingNotifications.clear();
     }
     if (!pendingNotifications.isEmpty()) {
@@ -365,8 +358,8 @@ public final class SmartInterfaceBlockEntity extends BlockEntity implements Menu
   public boolean update(Player player, BlockPos controller, String type, long expectedRevision, double value) {
     var server = server();
     if (!valid
-        || SmartInterfaceEvents.isDispatching()
-        || RecipeLifecycleEvents.isDispatching()
+        || SmartInterfaceEventPublisher.isDispatching()
+        || RecipeLifecyclePublisher.isDispatching()
         || revision == Long.MAX_VALUE
         || player.level() != server
         || player.isSpectator()
@@ -397,12 +390,12 @@ public final class SmartInterfaceBlockEntity extends BlockEntity implements Menu
       return true;
     }
     // Rebinding A -> B -> A must never make an old A editor current again.
-    var next = new Binding(controller, current.machine(), type, value, revision + 1);
+    var next = new SmartInterfaceBinding(controller, current.machine(), type, value, revision + 1);
     bindings.put(key, next);
     revision++;
     setChanged();
-    if (SmartInterfaceEvents.hasListeners()) {
-      SmartInterfaceEvents.publish(
+    if (SmartInterfaceEventPublisher.hasListeners()) {
+      SmartInterfaceEventPublisher.publish(
           this,
           owner,
           new SmartInterfaceEvents.Change(SmartInterfaceEvents.Reason.VALUE_CHANGED, Optional.of(current), next),
@@ -450,7 +443,7 @@ public final class SmartInterfaceBlockEntity extends BlockEntity implements Menu
   protected void loadAdditional(CompoundTag tag, HolderLookup.Provider registries) {
     if (level instanceof ServerLevel server) {
       ServerThreadGuard.require(server, "Smart interface load");
-      if (SmartInterfaceEvents.isDispatching() || RecipeLifecycleEvents.isDispatching()) {
+      if (SmartInterfaceEventPublisher.isDispatching() || RecipeLifecyclePublisher.isDispatching()) {
         throw new IllegalStateException("Cannot reload interfaces during a read-only notification");
       }
     }
@@ -482,7 +475,7 @@ public final class SmartInterfaceBlockEntity extends BlockEntity implements Menu
             || !entry.contains("revision", Tag.TAG_LONG)) {
           throw new IllegalArgumentException("Invalid smart interface binding data");
         }
-        var binding = new Binding(
+        var binding = new SmartInterfaceBinding(
             BlockPos.of(entry.getLong("controller")),
             ResourceLocation.parse(entry.getString("machine")),
             entry.getString("type"),

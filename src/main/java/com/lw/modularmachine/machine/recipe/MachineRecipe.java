@@ -1,7 +1,10 @@
 package com.lw.modularmachine.machine.recipe;
 
+import com.lw.modularmachine.api.recipe.RecipeSelectors;
+import com.lw.modularmachine.api.recipe.RecipeFailureAction;
+
 import com.lw.modularmachine.machine.smart.SmartInterfaceType;
-import com.lw.modularmachine.machine.smart.SmartNumberRequirement;
+import com.lw.modularmachine.api.smart.SmartNumberRequirement;
 import com.mojang.serialization.Codec;
 import com.mojang.serialization.DataResult;
 import com.mojang.serialization.DynamicOps;

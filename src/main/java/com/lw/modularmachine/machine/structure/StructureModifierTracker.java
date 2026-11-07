@@ -1,8 +1,8 @@
 package com.lw.modularmachine.machine.structure;
 
-import com.lw.modularmachine.machine.orientation.MachineOrientation;
+import com.lw.modularmachine.api.orientation.MachineOrientation;
 import com.lw.modularmachine.machine.orientation.OrientationCompilation;
-import com.lw.modularmachine.machine.recipe.RecipeModifier;
+import com.lw.modularmachine.api.recipe.RecipeModifier;
 import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.HashMap;

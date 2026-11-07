@@ -1,21 +1,22 @@
 package com.lw.modularmachine.integration.kubejs;
 
+import com.lw.modularmachine.api.smart.SmartInterfaceBinding;
+
 import com.google.gson.JsonElement;
 import com.lw.modularmachine.ModularMachine;
-import com.lw.modularmachine.api.SmartInterfaceApi;
-import com.lw.modularmachine.blockentity.SmartInterfaceBlockEntity;
-import com.lw.modularmachine.machine.factory.FactoryDynamicUpgrades;
-import com.lw.modularmachine.machine.factory.FactoryUpgradeBusData;
-import com.lw.modularmachine.machine.factory.FactoryUpgradeEntry;
-import com.lw.modularmachine.machine.factory.FactoryUpgradeEvents;
-import com.lw.modularmachine.machine.factory.FactoryUpgradeItemData;
+import com.lw.modularmachine.api.smart.SmartInterfaceApi;
+import com.lw.modularmachine.api.upgrade.FactoryDynamicUpgrades;
+import com.lw.modularmachine.api.upgrade.FactoryUpgradeBusData;
+import com.lw.modularmachine.api.upgrade.FactoryUpgradeEntry;
+import com.lw.modularmachine.api.upgrade.FactoryUpgradeEvents;
+import com.lw.modularmachine.api.upgrade.FactoryUpgradeItemData;
 import com.lw.modularmachine.machine.factory.FactoryUpgradeKubeJSHandlers;
-import com.lw.modularmachine.machine.factory.FactoryUpgradeRecipeChecks;
-import com.lw.modularmachine.machine.factory.FactoryUpgradeRuntimeData;
-import com.lw.modularmachine.machine.factory.FactoryUpgradeStartCost;
+import com.lw.modularmachine.api.upgrade.FactoryUpgradeRecipeChecks;
+import com.lw.modularmachine.api.upgrade.FactoryUpgradeRuntimeData;
+import com.lw.modularmachine.api.upgrade.FactoryUpgradeStartCost;
 import com.lw.modularmachine.machine.recipe.FrozenItemRun.State;
-import com.lw.modularmachine.machine.recipe.RecipeLifecycleEvents;
-import com.lw.modularmachine.machine.smart.SmartInterfaceEvents;
+import com.lw.modularmachine.api.recipe.RecipeLifecycleEvents;
+import com.lw.modularmachine.api.smart.SmartInterfaceEvents;
 import dev.latvian.mods.kubejs.core.RecipeManagerKJS;
 import dev.latvian.mods.kubejs.event.EventGroup;
 import dev.latvian.mods.kubejs.event.EventGroupRegistry;
@@ -83,7 +84,7 @@ public final class MMCECEKubeJSPlugin implements KubeJSPlugin {
     filter.allow(SmartInterfaceEvents.Context.class);
     filter.allow(SmartInterfaceEvents.Change.class);
     filter.allow(SmartInterfaceEvents.Reason.class);
-    filter.allow(SmartInterfaceBlockEntity.Binding.class);
+    filter.allow(SmartInterfaceBinding.class);
     filter.allow(RecipeLifecycleEvents.Listener.class);
     filter.allow(RecipeLifecycleEvents.FailurePolicy.class);
     filter.allow(RecipeLifecycleEvents.FailureContext.class);

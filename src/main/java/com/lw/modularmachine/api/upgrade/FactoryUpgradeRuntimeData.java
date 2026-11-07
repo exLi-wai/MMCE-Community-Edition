@@ -1,9 +1,6 @@
-package com.lw.modularmachine.machine.factory;
+package com.lw.modularmachine.api.upgrade;
 
-import java.util.ArrayList;
-import java.util.LinkedHashMap;
 import java.util.List;
-import java.util.Map;
 import java.util.Objects;
 import java.util.Optional;
 import java.util.UUID;
@@ -11,18 +8,16 @@ import net.minecraft.core.BlockPos;
 import net.minecraft.nbt.CompoundTag;
 import net.minecraft.resources.ResourceLocation;
 
-/**
- * Pure tick proposals; callers apply them only inside the existing resource/run
- * transaction.
- */
+import com.lw.modularmachine.machine.factory.UpgradeRuntimeDataHandlers;
+import com.lw.modularmachine.machine.factory.FactoryUpgradeCatalog;
+import com.lw.modularmachine.machine.factory.FactoryUpgradeDataSnapshots;
+
+/** Controlled runtime upgrade proposals and registration. */
 public final class FactoryUpgradeRuntimeData {
   public enum Phase {
     TICK,
     FINISHED;
 
-    public ResourceLocation handler(FactoryUpgradeDefinition definition) {
-      return this == TICK ? definition.tickDataHandler() : definition.finishDataHandler();
-    }
   }
 
   @FunctionalInterface
@@ -140,92 +135,23 @@ public final class FactoryUpgradeRuntimeData {
     }
   }
 
-  public record Subscription(ResourceLocation handlerId, ResourceLocation definitionId, List<Integer> slots) {
-    public Subscription {
-      Objects.requireNonNull(handlerId, "handlerId");
-      Objects.requireNonNull(definitionId, "definitionId");
-      slots = List.copyOf(slots);
-      if (handlerId.toString().length() > 256
-          || definitionId.toString().length() > 256
-          || slots.isEmpty()
-          || slots.size() > FactoryUpgradeCatalog.MAX_SLOTS
-          || slots.stream().anyMatch(slot -> slot < 0 || slot >= FactoryUpgradeCatalog.MAX_SLOTS)
-          || slots.stream().distinct().count() != slots.size()) {
-        throw new IllegalArgumentException("Invalid grouped runtime upgrade subscription");
-      }
-    }
-  }
-
-  /**
-   * Shared static grouping for initial compilation and conservative inventory
-   * audits.
-   */
-  public static final class Subscriptions {
-    private final Phase phase;
-    private final Map<ResourceLocation, List<Integer>> slots = new LinkedHashMap<>();
-    private final Map<ResourceLocation, ResourceLocation> handlers = new LinkedHashMap<>();
-
-    public Subscriptions() {
-      this(Phase.TICK);
-    }
-
-    public Subscriptions(Phase phase) {
-      this.phase = Objects.requireNonNull(phase, "phase");
-    }
-
-    public void add(FactoryUpgradeDefinition definition, int slot) {
-      var handler = phase.handler(definition);
-      if (handler != null) {
-        slots.computeIfAbsent(definition.effect().id(), ignored -> new ArrayList<>()).add(slot);
-        handlers.put(definition.effect().id(), handler);
-      }
-    }
-
-    public List<Subscription> build() {
-      return slots.entrySet().stream()
-          .map(entry -> new Subscription(handlers.get(entry.getKey()), entry.getKey(), entry.getValue())).toList();
-    }
-  }
-
-  private static final FactoryUpgradeHandlers<Preparer> HANDLERS = new FactoryUpgradeHandlers<>();
-
   private FactoryUpgradeRuntimeData() {
   }
 
-  public static void register(ResourceLocation id, Preparer preparer) {
-    HANDLERS.register(id, preparer);
+  public static void register(ResourceLocation id, Preparer handler) {
+    UpgradeRuntimeDataHandlers.register(id, handler);
   }
 
   public static void remove(ResourceLocation id) {
-    HANDLERS.remove(id);
+    UpgradeRuntimeDataHandlers.remove(id);
   }
 
   public static void invalidate(ResourceLocation id) {
-    HANDLERS.invalidate(id);
+    UpgradeRuntimeDataHandlers.invalidate(id);
   }
 
   public static boolean isRegistered(ResourceLocation id) {
-    return HANDLERS.find(id) != null || FactoryUpgradeKubeJSHandlers.runtimeData(id) != null;
+    return UpgradeRuntimeDataHandlers.isRegistered(id);
   }
 
-  static Update prepare(Subscription subscription, Context context, CompoundTag currentData) {
-    FactoryUpgradeHandlers.requireServer();
-    var preparer = HANDLERS.find(subscription.handlerId());
-    if (preparer == null) {
-      preparer = FactoryUpgradeKubeJSHandlers.runtimeData(subscription.handlerId());
-    }
-    if (preparer == null) {
-      throw new IllegalStateException("Missing runtime upgrade handler: " + subscription.handlerId());
-    }
-    var result = Objects.requireNonNull(preparer.prepare(context, currentData.copy()), "Runtime upgrade result");
-    if (FactoryUpgradeService.snapshot().epoch() != context.epoch()) {
-      throw new IllegalStateException("Runtime upgrade result lost its definition epoch");
-    }
-
-    return result;
-  }
-
-  static void clearOnServerStop() {
-    HANDLERS.clear();
-  }
 }

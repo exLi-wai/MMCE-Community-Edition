@@ -15,8 +15,11 @@ import java.util.ArrayList;
 import java.util.Comparator;
 import java.util.LinkedHashMap;
 import java.util.Map;
+import java.util.Objects;
 import java.util.TreeSet;
 import net.minecraft.resources.ResourceLocation;
+import net.minecraft.world.item.crafting.RecipeHolder;
+import net.minecraft.world.item.ItemStack;
 
 /**
  * Optional EMI structure and machine-recipe integration. JEI remains complete.
@@ -28,14 +31,13 @@ public final class MachineEmiPlugin implements EmiPlugin {
     EmiPreviewInput.register();
     Map<ResourceLocation, MachineEmiCategory> recipeCategories = new LinkedHashMap<>();
     Map<ResourceLocation, MachineRecipeLayout> layouts = new LinkedHashMap<>();
-    Map<ResourceLocation, ArrayList<net.minecraft.world.item.crafting.RecipeHolder<MachineRecipe>>> recipes = new LinkedHashMap<>();
+    Map<ResourceLocation, ArrayList<RecipeHolder<MachineRecipe>>> recipes = new LinkedHashMap<>();
     registry.getRecipeManager().getAllRecipesFor(MachineRecipeRegistries.ITEM_TYPE.get()).stream()
         .sorted(Comparator.comparing(holder -> holder.id().toString())).forEach(
             holder -> recipes.computeIfAbsent(holder.value().machineId(), ignored -> new ArrayList<>()).add(holder));
     var machineIds = new TreeSet<ResourceLocation>(ClientMachineJeiCatalog.machines().keySet());
     machineIds.addAll(recipes.keySet());
-    var displays = machineIds.stream().map(ClientMachineJeiCatalog.machines()::get).filter(java.util.Objects::nonNull)
-        .toList();
+    var displays = machineIds.stream().map(ClientMachineJeiCatalog.machines()::get).filter(Objects::nonNull).toList();
     MachineEmiCategory structure = displays.isEmpty() ? null : new MachineEmiCategory(
         ResourceLocation.fromNamespaceAndPath(ModularMachine.MODID, "machines/structure"),
         EmiStack.of(MachineRegistries.CONTROLLER.get()),
@@ -95,7 +97,7 @@ public final class MachineEmiPlugin implements EmiPlugin {
     addWorkstation(registry, recipe, MachineJeiPlugin.blueprint(machine));
   }
 
-  private static void addWorkstation(EmiRegistry registry, MachineEmiCategory category, net.minecraft.world.item.ItemStack stack) {
+  private static void addWorkstation(EmiRegistry registry, MachineEmiCategory category, ItemStack stack) {
     if (!stack.isEmpty()) {
       registry.addWorkstation(category, EmiStack.of(stack));
     }

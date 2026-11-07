@@ -1,4 +1,4 @@
-package com.lw.modularmachine.machine.recipe;
+package com.lw.modularmachine.api.recipe;
 
 import com.mojang.serialization.Codec;
 import com.mojang.serialization.codecs.RecordCodecBuilder;

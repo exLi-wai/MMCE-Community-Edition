@@ -1,7 +1,7 @@
 package com.lw.modularmachine.network;
 
 import com.lw.modularmachine.machine.factory.FactoryUpgradeCatalog;
-import com.lw.modularmachine.machine.factory.FactoryUpgradeEntry;
+import com.lw.modularmachine.api.upgrade.FactoryUpgradeEntry;
 import java.util.ArrayList;
 import java.util.Collections;
 import java.util.List;

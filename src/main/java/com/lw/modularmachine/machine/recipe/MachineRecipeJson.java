@@ -1,9 +1,13 @@
 package com.lw.modularmachine.machine.recipe;
 
+import com.lw.modularmachine.api.recipe.RecipeModifier;
+import com.lw.modularmachine.api.recipe.RecipeSelectors;
+import com.lw.modularmachine.api.recipe.RecipeFailureAction;
+
 import com.google.gson.JsonElement;
 import com.google.gson.JsonObject;
 import com.google.gson.JsonParseException;
-import com.lw.modularmachine.machine.smart.SmartNumberRequirement;
+import com.lw.modularmachine.api.smart.SmartNumberRequirement;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Set;

@@ -1,13 +1,16 @@
 package com.lw.modularmachine.machine.recipe;
 
+import com.lw.modularmachine.machine.factory.UpgradeLifecyclePublisher;
+
+import com.lw.modularmachine.api.recipe.RecipeLifecycleEvents;
+
 import com.lw.modularmachine.ModularMachine;
 import com.lw.modularmachine.blockentity.FactoryControllerBlockEntity;
 import com.lw.modularmachine.blockentity.MachinePortBlockEntity;
 import com.lw.modularmachine.blockentity.UpgradeBusBlockEntity.StartCostLease;
 import com.lw.modularmachine.machine.PortKind;
 import com.lw.modularmachine.machine.factory.FactoryRunSet;
-import com.lw.modularmachine.machine.factory.FactoryUpgradeEvents;
-import com.lw.modularmachine.machine.factory.FactoryUpgradeRuntimeData.Phase;
+import com.lw.modularmachine.api.upgrade.FactoryUpgradeRuntimeData.Phase;
 import com.lw.modularmachine.machine.factory.FactoryUpgradeStartCosts;
 import com.lw.modularmachine.machine.factory.FactoryUpgradeTickCosts;
 import java.util.ArrayList;
@@ -48,7 +51,7 @@ public final class FactoryParallelResourceCommitter {
   public static Result tick(FactoryControllerBlockEntity factory, String threadId, FactoryRunSet set) {
     if (!(factory.getLevel() instanceof ServerLevel level)
         || set.runs().isEmpty()
-        || FactoryUpgradeEvents.isDispatching(factory)) {
+        || UpgradeLifecyclePublisher.isDispatching(factory)) {
       return Result.STALE;
     }
     var activeRuns = set.runs().stream().filter(run -> !run.pendingOutput()).toList();
@@ -172,7 +175,7 @@ public final class FactoryParallelResourceCommitter {
         }
         replacements.put(run.runId(), next);
       }
-      if (RecipeLifecycleEvents.hasListeners(RecipeLifecycleEvents.Type.TICK)) {
+      if (RecipeLifecyclePublisher.hasListeners(RecipeLifecycleEvents.Type.TICK)) {
         advancedRuns = activeRuns.stream().map(run -> replacements.get(run.runId())).toList();
       }
       var replacement = set.replaceAll(replacements);
@@ -197,7 +200,7 @@ public final class FactoryParallelResourceCommitter {
         factory.upgradeRuntimeWork().clear(Phase.TICK, threadId);
         FactoryUpgradeStartCosts.publish(factory, tickCostLeases);
         if (!advancedRuns.isEmpty()) {
-          RecipeLifecycleEvents.advanced(factory, threadId, activeRuns, advancedRuns);
+          RecipeLifecyclePublisher.advanced(factory, threadId, activeRuns, advancedRuns);
         }
         energyLeases.forEach(FactoryParallelResourceCommitter::publishEnergy);
         fluidLeases.values().forEach(FactoryParallelResourceCommitter::publishFluid);
@@ -211,13 +214,13 @@ public final class FactoryParallelResourceCommitter {
     var replacements = new HashMap<UUID, FrozenItemRun>();
     var discarded = new HashSet<UUID>();
     var resource = result == Result.WAITING_ENERGY ? RecipeLifecycleEvents.ResourceFailure.ENERGY : RecipeLifecycleEvents.ResourceFailure.FLUID;
-    boolean notify = RecipeLifecycleEvents.hasListeners(RecipeLifecycleEvents.Type.RESOURCE_FAILURE);
-    boolean notifyDiscard = RecipeLifecycleEvents.hasListeners(RecipeLifecycleEvents.Type.DISCARDED);
+    boolean notify = RecipeLifecyclePublisher.hasListeners(RecipeLifecycleEvents.Type.RESOURCE_FAILURE);
+    boolean notifyDiscard = RecipeLifecyclePublisher.hasListeners(RecipeLifecycleEvents.Type.DISCARDED);
     List<FrozenItemRun> before = notify ? new ArrayList<>() : List.of();
     List<FrozenItemRun> after = notify ? new ArrayList<>() : List.of();
     List<FrozenItemRun> discardedRuns = notifyDiscard ? new ArrayList<>() : List.of();
     for (var run : activeRuns) {
-      var decision = RecipeLifecycleEvents.decideResourceFailure(factory, Optional.of(threadId), run, resource);
+      var decision = RecipeLifecyclePublisher.decideResourceFailure(factory, Optional.of(threadId), run, resource);
       if (decision == RecipeLifecycleEvents.FailureDecision.DISCARD) {
         discarded.add(run.runId());
         if (notifyDiscard) {
@@ -225,7 +228,7 @@ public final class FactoryParallelResourceCommitter {
         }
         continue;
       }
-      var adjusted = RecipeLifecycleEvents.applyFailureDecision(run, tick, decision);
+      var adjusted = RecipeLifecyclePublisher.applyFailureDecision(run, tick, decision);
       if (adjusted != run) {
         replacements.put(run.runId(), adjusted);
         if (notify) {
@@ -245,10 +248,10 @@ public final class FactoryParallelResourceCommitter {
     if (factory.applyRunFailureDecisionsIfSame(threadId, set, replacements, discarded)) {
       factory.setChanged();
       if (notify && !before.isEmpty()) {
-        RecipeLifecycleEvents.resourceFailed(factory, threadId, before, after, resource);
+        RecipeLifecyclePublisher.resourceFailed(factory, threadId, before, after, resource);
       }
       if (notifyDiscard && !discardedRuns.isEmpty()) {
-        RecipeLifecycleEvents.resourceDiscarded(factory, threadId, discardedRuns, resource);
+        RecipeLifecyclePublisher.resourceDiscarded(factory, threadId, discardedRuns, resource);
       }
     }
     return result;

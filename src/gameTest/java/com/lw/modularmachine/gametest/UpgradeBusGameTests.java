@@ -4,7 +4,7 @@ import com.lw.modularmachine.blockentity.FactoryControllerBlockEntity;
 import com.lw.modularmachine.blockentity.UpgradeBusBlockEntity;
 import com.lw.modularmachine.machine.factory.FactoryThreadState.State;
 import com.lw.modularmachine.machine.factory.FactoryThreadState;
-import com.lw.modularmachine.machine.factory.FactoryUpgradeSnapshot;
+import com.lw.modularmachine.api.upgrade.FactoryUpgradeSnapshot;
 import com.lw.modularmachine.machine.structure.StructureService;
 import com.lw.modularmachine.registry.MachineRegistries;
 import java.util.List;

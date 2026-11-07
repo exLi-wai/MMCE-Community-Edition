@@ -1,5 +1,7 @@
 package com.lw.modularmachine.machine.recipe;
 
+import com.lw.modularmachine.machine.factory.UpgradeLifecyclePublisher;
+
 import com.lw.modularmachine.ModularMachine;
 import com.lw.modularmachine.blockentity.FactoryControllerBlockEntity;
 import com.lw.modularmachine.blockentity.MachinePortBlockEntity;
@@ -7,7 +9,6 @@ import com.lw.modularmachine.blockentity.UpgradeBusBlockEntity.StartCostLease;
 import com.lw.modularmachine.config.MachineConfig;
 import com.lw.modularmachine.machine.PortKind;
 import com.lw.modularmachine.machine.factory.FactoryThreadState;
-import com.lw.modularmachine.machine.factory.FactoryUpgradeEvents;
 import com.lw.modularmachine.machine.factory.FactoryUpgradeStartCosts;
 import java.util.ArrayList;
 import java.util.HashMap;
@@ -177,7 +178,7 @@ public final class FactoryRecipeStarter {
       if (committed) {
         factory.setChanged();
         FactoryUpgradeStartCosts.publish(factory, upgradeLeases);
-        FactoryUpgradeEvents.recipeStarted(factory, threadId, factory.runSet(threadId).runs());
+        UpgradeLifecyclePublisher.recipeStarted(factory, threadId, factory.runSet(threadId).runs());
         leases.forEach(MachinePortBlockEntity.ItemStartLease::publish);
         fluidLeases.values().forEach(MachinePortBlockEntity.FluidStartLease::publish);
       }

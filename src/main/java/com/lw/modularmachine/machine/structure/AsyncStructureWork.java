@@ -1,6 +1,6 @@
 package com.lw.modularmachine.machine.structure;
 
-import com.lw.modularmachine.machine.orientation.MachineOrientation;
+import com.lw.modularmachine.api.orientation.MachineOrientation;
 import java.util.LinkedHashMap;
 import java.util.Set;
 import java.util.concurrent.ArrayBlockingQueue;

@@ -1,6 +1,6 @@
 package com.lw.modularmachine.machine.controller;
 
-import com.lw.modularmachine.machine.orientation.MachineOrientation;
+import com.lw.modularmachine.api.orientation.MachineOrientation;
 import com.lw.modularmachine.machine.structure.AsyncStructureWork;
 import com.lw.modularmachine.machine.structure.CompiledStructure;
 import com.lw.modularmachine.machine.structure.MachineDefinition;

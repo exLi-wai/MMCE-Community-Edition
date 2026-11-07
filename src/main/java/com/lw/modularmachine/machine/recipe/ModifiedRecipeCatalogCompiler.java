@@ -1,5 +1,8 @@
 package com.lw.modularmachine.machine.recipe;
 
+import com.lw.modularmachine.api.recipe.RecipeModifier;
+import com.lw.modularmachine.api.recipe.RecipeSelectors;
+
 import com.lw.modularmachine.ModularMachine;
 import com.lw.modularmachine.machine.structure.MachineDefinition;
 import java.util.ArrayList;

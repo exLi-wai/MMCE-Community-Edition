@@ -1,5 +1,7 @@
 package com.lw.modularmachine.machine.orientation;
 
+import com.lw.modularmachine.api.orientation.MachineOrientation;
+
 import com.lw.modularmachine.machine.structure.CompiledStructure;
 import java.util.HashSet;
 import java.util.List;

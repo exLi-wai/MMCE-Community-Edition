@@ -1,7 +1,7 @@
 package com.lw.modularmachine.client.preview;
 
 import com.lw.modularmachine.ModularMachine;
-import com.lw.modularmachine.network.ProjectionPayloads;
+import com.lw.modularmachine.api.client.preview.PreviewSceneData;
 import com.mojang.blaze3d.systems.RenderSystem;
 import com.mojang.blaze3d.vertex.ByteBufferBuilder;
 import com.mojang.blaze3d.vertex.DefaultVertexFormat;
@@ -38,6 +38,7 @@ import net.minecraft.world.level.block.state.BlockState;
 import net.minecraft.world.phys.Vec3;
 import net.neoforged.neoforge.client.event.RenderLevelStageEvent;
 import net.neoforged.neoforge.client.model.data.ModelData;
+import org.jetbrains.annotations.ApiStatus;
 import org.joml.FrustumIntersection;
 import org.joml.Matrix4f;
 import org.joml.Vector3f;
@@ -47,6 +48,7 @@ import org.lwjgl.system.MemoryUtil;
  * Render-thread model capture / GPU ownership, detached background vertex
  * packing.
  */
+@ApiStatus.Internal
 public final class SectionMeshCache implements AutoCloseable {
   private static final float[] FACE_SHADE = {.5F, 1F, .8F, .8F, .6F, .6F};
   private static final Direction[] FACES = Direction.values();
@@ -194,7 +196,7 @@ public final class SectionMeshCache implements AutoCloseable {
     }
     return Collections.unmodifiableList(states);
   }
-  private BlockState shown(ProjectionPayloads.Entry entry) {
+  private BlockState shown(PreviewSceneData.Entry entry) {
     return entry.states().isEmpty() ? null : entry.states().get(Math.floorMod(previewStep, entry.states().size()));
   }
 
@@ -394,7 +396,7 @@ public final class SectionMeshCache implements AutoCloseable {
     }
   }
 
-  private void captureLiquid(Build job, ProjectionPayloads.Entry entry, BlockState state, PreviewBlockView view, Minecraft mc) {
+  private void captureLiquid(Build job, PreviewSceneData.Entry entry, BlockState state, PreviewBlockView view, Minecraft mc) {
     var fluid = state.getFluidState();
     if (fluid.isEmpty()) {
       return;

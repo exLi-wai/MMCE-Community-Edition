@@ -1,6 +1,7 @@
 package com.lw.modularmachine.client.preview;
 
 import com.lw.modularmachine.network.ProjectionPayloads;
+import com.lw.modularmachine.machine.controller.DedicatedControllerCatalog;
 import com.lw.modularmachine.config.MachineClientConfig;
 import com.lw.modularmachine.ModularMachine;
 import java.util.ArrayList;
@@ -27,6 +28,7 @@ public final class WorldProjection {
   private static PreviewRenderScene scene;
   private static List<ProjectionPayloads.Entry> indexingEntries;
   private static ProjectionPayloads.Snapshot indexingHeader;
+  private static int indexingColor;
   private static CompletableFuture<PreviewRenderScene> indexing;
   private WorldProjection() {
   }
@@ -74,6 +76,7 @@ public final class WorldProjection {
     if (pending.size() == packet.total()) {
       ModularMachine.LOGGER.debug("Projection {} received completely", packet.request());
       indexingHeader = header;
+      indexingColor = DedicatedControllerCatalog.color(header.machine());
       indexingEntries = List.copyOf(pending);
       pending.clear();
       advanceIndexing();
@@ -87,7 +90,12 @@ public final class WorldProjection {
     if (indexing == null) {
       var capturedHeader = indexingHeader;
       var capturedEntries = indexingEntries;
-      indexing = PreviewMeshData.submitWork(() -> PreviewRenderScene.create(capturedHeader, capturedEntries));
+      int capturedColor = indexingColor;
+      indexing = PreviewMeshData.submitWork(
+          () -> PreviewRenderScene.create(
+              capturedHeader.request(),
+              capturedHeader.dimension(),
+              ProjectionPreviewAdapter.sceneData(capturedColor, capturedEntries)));
     }
     if (indexing == null || !indexing.isDone()) {
       return;

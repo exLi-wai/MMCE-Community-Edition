@@ -1,12 +1,12 @@
 package com.lw.modularmachine.machine.recipe;
 
+import com.lw.modularmachine.machine.factory.UpgradeRecipeChecks;
+import com.lw.modularmachine.machine.factory.UpgradeLifecyclePublisher;
 import com.lw.modularmachine.ModularMachine;
 import com.lw.modularmachine.blockentity.MachinePortBlockEntity;
 import com.lw.modularmachine.blockentity.UpgradeBusBlockEntity;
 import com.lw.modularmachine.config.MachineConfig;
 import com.lw.modularmachine.machine.PortKind;
-import com.lw.modularmachine.machine.factory.FactoryUpgradeEvents;
-import com.lw.modularmachine.machine.factory.FactoryUpgradeRecipeChecks;
 import com.lw.modularmachine.machine.factory.FactoryUpgradeStartCosts;
 import java.util.ArrayList;
 import java.util.HashMap;
@@ -59,11 +59,11 @@ public final class AtomicRecipeStarter {
     }
     int budget = MachineConfig.RECIPE_OUTPUT_WORK.get();
     var checks = plan.advanceFactoryChecks(controller, "main", budget);
-    if (checks.status() == FactoryUpgradeRecipeChecks.Status.PENDING) {
+    if (checks.status() == UpgradeRecipeChecks.Status.PENDING) {
       return Result.BUSY;
     }
-    if (checks.status() != FactoryUpgradeRecipeChecks.Status.ALLOWED) {
-      return checks.status() == FactoryUpgradeRecipeChecks.Status.ERROR ? Result.FAILED : Result.STALE;
+    if (checks.status() != UpgradeRecipeChecks.Status.ALLOWED) {
+      return checks.status() == UpgradeRecipeChecks.Status.ERROR ? Result.FAILED : Result.STALE;
     }
     int limit = Math.min(plan.source().parallelLimit(), FactoryUpgradeStartCosts.maxRuns(controller));
     if (limit < 1) {
@@ -210,7 +210,7 @@ public final class AtomicRecipeStarter {
       warning = true;
       ModularMachine.LOGGER.warn("Committed run dirty notification failed", error);
     }
-    FactoryUpgradeEvents.recipeStarted(controller, "main", List.of(startedRun));
+    UpgradeLifecyclePublisher.recipeStarted(controller, "main", List.of(startedRun));
     for (var lease : leases) {
       try {
         lease.publish();

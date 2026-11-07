@@ -4,7 +4,7 @@ import com.lw.modularmachine.ModularMachine;
 import com.lw.modularmachine.blockentity.UpgradeBusBlockEntity;
 import com.lw.modularmachine.machine.UpgradeBusTier;
 import com.lw.modularmachine.machine.factory.FactoryUpgradeCatalog;
-import com.lw.modularmachine.machine.factory.FactoryUpgradeEntry;
+import com.lw.modularmachine.api.upgrade.FactoryUpgradeEntry;
 import com.lw.modularmachine.machine.factory.FactoryUpgradeRestrictions;
 import com.lw.modularmachine.machine.factory.UpgradeBusBinding;
 import java.util.ArrayList;

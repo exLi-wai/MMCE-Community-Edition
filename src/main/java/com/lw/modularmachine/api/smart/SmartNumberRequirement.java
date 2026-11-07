@@ -1,8 +1,9 @@
-package com.lw.modularmachine.machine.smart;
+package com.lw.modularmachine.api.smart;
 
 import com.google.gson.JsonElement;
 import com.google.gson.JsonParseException;
 import com.lw.modularmachine.machine.recipe.ResourceSelector;
+import com.lw.modularmachine.machine.smart.SmartInterfaceType;
 import com.mojang.serialization.Codec;
 import com.mojang.serialization.codecs.RecordCodecBuilder;
 import java.util.ArrayList;

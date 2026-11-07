@@ -2,7 +2,7 @@ package com.lw.modularmachine.command;
 
 import com.lw.modularmachine.machine.assembly.AssemblyService;
 import com.lw.modularmachine.machine.blueprint.MachineBlueprint;
-import com.lw.modularmachine.machine.orientation.MachineOrientation;
+import com.lw.modularmachine.api.orientation.MachineOrientation;
 import com.lw.modularmachine.machine.structure.StructureService;
 import com.lw.modularmachine.registry.MachineDataComponents;
 import com.lw.modularmachine.registry.MachineRegistries;

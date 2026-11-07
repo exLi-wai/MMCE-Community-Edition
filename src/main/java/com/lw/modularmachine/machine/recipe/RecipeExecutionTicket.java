@@ -3,13 +3,13 @@ package com.lw.modularmachine.machine.recipe;
 import com.lw.modularmachine.blockentity.FactoryControllerBlockEntity;
 import com.lw.modularmachine.blockentity.MachineControllerBlockEntity;
 import com.lw.modularmachine.blockentity.MachinePortBlockEntity;
-import com.lw.modularmachine.blockentity.SmartInterfaceBlockEntity.Binding;
+import com.lw.modularmachine.api.smart.SmartInterfaceBinding;
 import com.lw.modularmachine.blockentity.SmartInterfaceBlockEntity;
 import com.lw.modularmachine.machine.PortKind;
-import com.lw.modularmachine.machine.factory.FactoryUpgradeSnapshot;
+import com.lw.modularmachine.api.upgrade.FactoryUpgradeSnapshot;
 import com.lw.modularmachine.machine.parallel.ParallelCapacity.Snapshot;
 import com.lw.modularmachine.machine.parallel.ParallelCapacity;
-import com.lw.modularmachine.machine.smart.SmartNumberRequirement;
+import com.lw.modularmachine.api.smart.SmartNumberRequirement;
 import com.lw.modularmachine.machine.structure.StructureService;
 import com.lw.modularmachine.util.thread.ServerThreadGuard;
 import java.util.ArrayList;
@@ -258,7 +258,7 @@ public final class RecipeExecutionTicket {
     return true;
   }
 
-  private record SmartSnapshot(BlockPos position, SmartInterfaceBlockEntity identity, Binding binding) {
+  private record SmartSnapshot(BlockPos position, SmartInterfaceBlockEntity identity, SmartInterfaceBinding binding) {
   }
 
   private enum CaptureMode {

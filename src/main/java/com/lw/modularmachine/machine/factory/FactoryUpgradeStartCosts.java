@@ -1,5 +1,6 @@
 package com.lw.modularmachine.machine.factory;
 
+import com.lw.modularmachine.api.upgrade.FactoryUpgradeItemData;
 import com.lw.modularmachine.ModularMachine;
 import com.lw.modularmachine.blockentity.UpgradeBusBlockEntity;
 import com.lw.modularmachine.machine.recipe.ItemStackSnapshots;
@@ -38,10 +39,10 @@ public final class FactoryUpgradeStartCosts {
   private static final class Replacement {
     private final Source source;
     private final NonNullList<ItemStack> contents;
-    private FactoryUpgradeBusData.State busData;
+    private UpgradeBusDataHandlers.State busData;
     private boolean modified;
 
-    private Replacement(Source source, NonNullList<ItemStack> contents, boolean modified, FactoryUpgradeBusData.State busData) {
+    private Replacement(Source source, NonNullList<ItemStack> contents, boolean modified, UpgradeBusDataHandlers.State busData) {
       this.source = source;
       this.contents = contents;
       this.modified = modified;
@@ -53,21 +54,23 @@ public final class FactoryUpgradeStartCosts {
     void prepare(FactoryUpgradeItemData.Context context);
   }
 
-  private record ItemStep(Replacement replacement, FactoryUpgradeItemData.Subscription subscription)
+  private record ItemStep(Replacement replacement, UpgradeItemDataHandlers.Subscription subscription)
       implements
         DataStep {
     @Override
     public void prepare(FactoryUpgradeItemData.Context context) {
       var stack = replacement.contents.get(subscription.upgrade().slot());
-      var update = FactoryUpgradeItemData.prepare(subscription, context, stack);
-      replacement.modified |= FactoryUpgradeItemData.apply(stack, update);
+      var update = UpgradeItemDataHandlers.prepare(subscription, context, stack);
+      replacement.modified |= UpgradeItemDataHandlers.apply(stack, update);
     }
   }
 
-  private record BusStep(Replacement replacement, FactoryUpgradeBusData.Subscription subscription) implements DataStep {
+  private record BusStep(Replacement replacement, UpgradeBusDataHandlers.Subscription subscription)
+      implements
+        DataStep {
     @Override
     public void prepare(FactoryUpgradeItemData.Context context) {
-      var update = FactoryUpgradeBusData.prepare(subscription, context, replacement.busData);
+      var update = UpgradeBusDataHandlers.prepare(subscription, context, replacement.busData);
       var next = replacement.busData.with(subscription.definitionId(), update);
       replacement.modified |= next != replacement.busData;
       replacement.busData = next;

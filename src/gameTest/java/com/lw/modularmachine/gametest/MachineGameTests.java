@@ -2,7 +2,7 @@ package com.lw.modularmachine.gametest;
 
 import com.google.gson.JsonObject;
 import com.google.gson.JsonParseException;
-import com.lw.modularmachine.api.MachineControllerApi;
+import com.lw.modularmachine.api.controller.MachineControllerApi;
 import com.lw.modularmachine.block.MachineControllerBlock;
 import com.lw.modularmachine.blockentity.MachineControllerBlockEntity;
 import com.lw.modularmachine.blockentity.MachinePortBlockEntity;

@@ -1,7 +1,8 @@
-package com.lw.modularmachine.machine.recipe;
+package com.lw.modularmachine.api.recipe;
 
 import com.google.gson.JsonElement;
 import com.google.gson.JsonParseException;
+import com.lw.modularmachine.machine.recipe.ResourceSelector;
 import com.mojang.serialization.Codec;
 import com.mojang.serialization.JsonOps;
 import com.mojang.serialization.codecs.RecordCodecBuilder;

@@ -1,5 +1,17 @@
 package com.lw.modularmachine.machine.factory;
 
+import com.lw.modularmachine.api.upgrade.FactoryUpgradeSnapshot;
+
+import com.lw.modularmachine.api.upgrade.FactoryUpgradeEntry;
+
+import com.lw.modularmachine.api.upgrade.FactoryUpgradeBusData;
+
+import com.lw.modularmachine.api.upgrade.FactoryUpgradeItemData;
+
+import com.lw.modularmachine.api.upgrade.FactoryUpgradeEvents;
+
+import com.lw.modularmachine.api.upgrade.FactoryDynamicUpgrades;
+
 import java.util.ArrayList;
 import java.util.List;
 import net.minecraft.core.BlockPos;
@@ -20,7 +32,8 @@ class FactoryUpgradeBusDataTest {
   void statesOwnValuesAndClearOnlyTheSelectedDefinition() {
     var data = value(7);
     var update = new FactoryUpgradeBusData.Update(data);
-    var state = FactoryUpgradeBusData.State.empty().with(A, update).with(B, new FactoryUpgradeBusData.Update(value(9)));
+    var state = UpgradeBusDataHandlers.State.empty().with(A, update)
+        .with(B, new FactoryUpgradeBusData.Update(value(9)));
     data.putLong("runs", 99);
     update.data().putLong("runs", 100);
     state.get(A).putLong("runs", 101);
@@ -28,7 +41,7 @@ class FactoryUpgradeBusDataTest {
     assertEquals(7, state.get(A).getLong("runs"));
     assertSame(state, state.with(A, new FactoryUpgradeBusData.Update(value(7))));
     var loadedTag = state.save();
-    var loaded = FactoryUpgradeBusData.State.load(loadedTag);
+    var loaded = UpgradeBusDataHandlers.State.load(loadedTag);
     loadedTag.getCompound(A.toString()).putLong("runs", 103);
     assertEquals(7, loaded.get(A).getLong("runs"));
     var cleared = state.with(A, new FactoryUpgradeBusData.Update(new CompoundTag()));
@@ -45,7 +58,7 @@ class FactoryUpgradeBusDataTest {
     var effect = new FactoryUpgradeEntry(A, 0, 1, 1, 1, 1, 1, 1);
     var upgrade = new FactoryUpgradeEvents.Upgrade(A, B, position, 0, 2, effect, new CompoundTag(), busData);
     var values = new ArrayList<>(List.of(upgrade));
-    var subscription = new FactoryUpgradeBusData.Subscription(B, A, position, values);
+    var subscription = new UpgradeBusDataHandlers.Subscription(B, A, position, values);
     var startup = new FactoryUpgradeItemData.Context(
         A,
         B,
@@ -69,27 +82,27 @@ class FactoryUpgradeBusDataTest {
     assertThrows(UnsupportedOperationException.class, () -> context.upgrades().clear());
     assertThrows(
         IllegalArgumentException.class,
-        () -> new FactoryUpgradeBusData.Subscription(B, B, BlockPos.ZERO, List.of(upgrade)));
+        () -> new UpgradeBusDataHandlers.Subscription(B, B, BlockPos.ZERO, List.of(upgrade)));
   }
 
   @Test
   void rejectsMalformedOrNoncanonicalPersistentEntries() {
     var malformed = new CompoundTag();
     malformed.putString(A.toString(), "NA");
-    assertThrows(IllegalArgumentException.class, () -> FactoryUpgradeBusData.State.load(malformed));
+    assertThrows(IllegalArgumentException.class, () -> UpgradeBusDataHandlers.State.load(malformed));
     for (String key : List.of("unqualified", "BAD ID")) {
       var root = new CompoundTag();
       root.put(key, value(1));
-      assertThrows(IllegalArgumentException.class, () -> FactoryUpgradeBusData.State.load(root));
+      assertThrows(IllegalArgumentException.class, () -> UpgradeBusDataHandlers.State.load(root));
     }
     var cyclic = new CompoundTag();
     cyclic.put(A.toString(), cyclic);
-    assertThrows(IllegalArgumentException.class, () -> FactoryUpgradeBusData.State.load(cyclic));
+    assertThrows(IllegalArgumentException.class, () -> UpgradeBusDataHandlers.State.load(cyclic));
     var entries = new CompoundTag();
-    for (int index = 0; index <= FactoryUpgradeBusData.MAX_ENTRIES; index++) {
+    for (int index = 0; index <= UpgradeBusDataHandlers.MAX_ENTRIES; index++) {
       entries.put("test:entry_" + index, value(index));
     }
-    assertThrows(IllegalArgumentException.class, () -> FactoryUpgradeBusData.State.load(entries));
+    assertThrows(IllegalArgumentException.class, () -> UpgradeBusDataHandlers.State.load(entries));
   }
 
   @Test
@@ -100,7 +113,7 @@ class FactoryUpgradeBusDataTest {
     var payload = new CompoundTag();
     payload.putByteArray("payload", new byte[8000]);
     var update = new FactoryUpgradeBusData.Update(payload);
-    var state = FactoryUpgradeBusData.State.empty();
+    var state = UpgradeBusDataHandlers.State.empty();
     for (int index = 0; index < 8; index++) {
       state = state.with(ResourceLocation.parse("test:entry_" + index), update);
     }

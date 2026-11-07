@@ -4,6 +4,8 @@ import com.google.gson.JsonParser;
 import com.lw.modularmachine.machine.PortKind;
 import com.lw.modularmachine.machine.orientation.StateOrientationAdapters;
 import java.util.Map;
+import java.util.List;
+import java.util.LinkedHashMap;
 import net.minecraft.resources.ResourceLocation;
 import org.junit.jupiter.api.Test;
 
@@ -44,7 +46,7 @@ class MachineDefinitionVariablesTest {
 
   @Test
   void variableFilesCanBeMergedWithLaterDefinitionsWinning() {
-    var values = new java.util.LinkedHashMap<String, java.util.List<String>>();
+    var values = new LinkedHashMap<String, List<String>>();
     values.putAll(
         MachineDefinitionVariables
             .parse(JsonParser.parseString("{\"casings\":\"minecraft:stone\"}").getAsJsonObject(), "a.var.json")
@@ -53,7 +55,7 @@ class MachineDefinitionVariablesTest {
         MachineDefinitionVariables
             .parse(JsonParser.parseString("{\"casings\":\"minecraft:glass\"}").getAsJsonObject(), "b.var.json")
             .values());
-    assertEquals(Map.of("casings", java.util.List.of("minecraft:glass")), values);
+    assertEquals(Map.of("casings", List.of("minecraft:glass")), values);
   }
 
   @Test
