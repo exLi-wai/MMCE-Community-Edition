@@ -136,7 +136,9 @@ public final class FactoryRecipeStarter {
           ticket.allPorts(),
           factory.getLevel().getGameTime(),
           upgrades,
-          ticket.inputGroup());
+          ticket.inputGroup(),
+          1,
+          ticket.dynamicLengths());
       if (!plan.factoryAdmissionCurrent(factory, threadId)) {
         return Result.STALE;
       }

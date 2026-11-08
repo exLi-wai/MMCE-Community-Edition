@@ -1,9 +1,7 @@
 package com.lw.modularmachine.blockentity;
 
 import com.lw.modularmachine.machine.factory.UpgradeRecipeChecks;
-
 import com.lw.modularmachine.machine.factory.UpgradeLifecyclePublisher;
-
 import com.lw.modularmachine.block.FactoryControllerBlock;
 import com.lw.modularmachine.config.MachineConfig;
 import com.lw.modularmachine.machine.controller.GenericControllerDiscovery;
@@ -1149,6 +1147,11 @@ public final class FactoryControllerBlockEntity extends BlockEntity implements M
           }
           continue;
         }
+        if (!canCommitStructure() || !run.matchesBindings(registration.pattern.definition)) {
+          threadState = FactoryThreadState.State.WAITING;
+          threadReason = FactoryThreadState.Reason.STALE_RESOURCES;
+          break;
+        }
         var advanced = run.advanced(server.getGameTime());
         if (advanced == run) {
           continue;
@@ -1159,6 +1162,11 @@ public final class FactoryControllerBlockEntity extends BlockEntity implements M
           threadReason = FactoryThreadState.Reason.OUTPUT_PLANNING;
         }
         replacements.put(run.runId(), advanced);
+      }
+      if (threadReason == FactoryThreadState.Reason.STALE_RESOURCES) {
+        // All free-run replacements are still private; reject the whole batch.
+        updateThreadState(thread, threadState, threadReason);
+        continue;
       }
       if (!replacements.isEmpty()) {
         var updated = entry.getValue().replaceAll(replacements);

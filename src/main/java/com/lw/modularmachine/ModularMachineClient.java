@@ -227,6 +227,11 @@ public class ModularMachineClient {
         menu.acceptStatus(payload);
       }
     });
+    BlueprintPreviewPayloads.setReceiver(packet -> {
+      if (Minecraft.getInstance().screen instanceof BlueprintPreviewScreen screen) {
+        screen.receive(packet);
+      }
+    });
   }
 
   static void SetClientOpener() {

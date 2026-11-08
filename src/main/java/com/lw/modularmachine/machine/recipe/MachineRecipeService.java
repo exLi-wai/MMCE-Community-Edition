@@ -169,7 +169,7 @@ public final class MachineRecipeService {
   static void validatePorts(ResourceLocation id, MachineRecipe recipe, MachineDefinition machine) {
     for (var requirement : recipe.interfaceInputs()) {
       if (!machine.interfaceTypes().containsKey(requirement.type())
-          || machine.parts().stream()
+          || machine.declarationParts().stream()
               .noneMatch(part -> part.automaticInterface() || part.interfaceType().equals(requirement.type()))) {
         throw new IllegalArgumentException(id + ": Missing declared smart interface type/part " + requirement.type());
       }
@@ -193,15 +193,15 @@ public final class MachineRecipeService {
       requireSelectorPort(id, machine, PortKind.FLUID_INPUT, recipe.selectors().fluidPerTick());
     }
     if (recipe.energyPerTick() > 0
-        && machine.parts().stream().noneMatch(part -> part.rule().port() == PortKind.ENERGY_INPUT)) {
+        && machine.declarationParts().stream().noneMatch(part -> part.rule().port() == PortKind.ENERGY_INPUT)) {
       throw new IllegalArgumentException(id + ": FE/t recipes require an energy input port");
     }
     if ((!recipe.fluidPerTick().isEmpty() || !recipe.fluidInputs().isEmpty())
-        && machine.parts().stream().noneMatch(part -> part.rule().port() == PortKind.FLUID_INPUT)) {
+        && machine.declarationParts().stream().noneMatch(part -> part.rule().port() == PortKind.FLUID_INPUT)) {
       throw new IllegalArgumentException(id + ": Fluid input recipes require a fluid input port");
     }
     if (!recipe.fluidOutputs().isEmpty()
-        && machine.parts().stream().noneMatch(part -> part.rule().port() == PortKind.FLUID_OUTPUT)) {
+        && machine.declarationParts().stream().noneMatch(part -> part.rule().port() == PortKind.FLUID_OUTPUT)) {
       throw new IllegalArgumentException(id + ": Fluid output recipes require a fluid output port");
     }
   }
@@ -219,7 +219,8 @@ public final class MachineRecipeService {
   }
 
   private static void requireSelectorPort(ResourceLocation recipe, MachineDefinition machine, PortKind kind, String selector) {
-    if (machine.parts().stream().noneMatch(part -> part.rule().port() == kind && part.selector().equals(selector))) {
+    if (machine.declarationParts().stream()
+        .noneMatch(part -> part.rule().port() == kind && part.selector().equals(selector))) {
       throw new IllegalArgumentException(recipe + ": No " + kind + " port in selector '" + selector + "'");
     }
   }

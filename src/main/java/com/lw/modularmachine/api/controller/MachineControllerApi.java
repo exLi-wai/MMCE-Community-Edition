@@ -215,7 +215,7 @@ public final class MachineControllerApi {
   }
 
   private static Optional<StructureDiagnostic> structureDiagnostic(MachineControllerBlockEntity controller, ServerLevel level) {
-    return structureDiagnostic(controller.registration(), level);
+    return structureDiagnostic(level, controller.getBlockPos());
   }
 
   /** Reads a loaded ordinary or factory controller without loading chunks. */
@@ -230,6 +230,10 @@ public final class MachineControllerApi {
     if ((entity instanceof MachineControllerBlockEntity || entity instanceof FactoryControllerBlockEntity)
         && entity instanceof StructureService.StructureSubject controller
         && !controller.structureRemoved()) {
+      var dynamic = StructureService.dynamicFailure(controller);
+      if (dynamic != null && level.hasChunkAt(dynamic.position())) {
+        return Optional.of(diagnostic(level, dynamic.position(), dynamic.partId(), dynamic.expected()));
+      }
       return structureDiagnostic(controller.structureRegistration(), level);
     }
     return Optional.empty();
@@ -248,12 +252,16 @@ public final class MachineControllerApi {
       return Optional.empty();
     }
     var part = registration.pattern.definition.parts().get(index);
-    String expected = expected(part.rule());
+    return Optional.of(diagnostic(level, position, part.id(), part.rule()));
+  }
+
+  private static StructureDiagnostic diagnostic(ServerLevel level, BlockPos position, String partId, Rule rule) {
+    String expected = expected(rule);
     var state = level.getBlockState(position);
     var values = state.getValues().entrySet().stream().map(entry -> entry.getKey().getName() + "=" + entry.getValue())
         .sorted().toList();
     String actual = bounded(state.getBlock().getDescriptionId() + (values.isEmpty() ? "" : values.toString()));
-    return Optional.of(new StructureDiagnostic(position, part.id(), expected, actual));
+    return new StructureDiagnostic(position, partId, expected, actual);
   }
 
   private static String expected(Rule rule) {

@@ -178,7 +178,7 @@ public final class ProjectionPayloads {
             0,
             List.of()));
   }
-  private static void write(RegistryFriendlyByteBuf b, Snapshot s) {
+  static void write(RegistryFriendlyByteBuf b, Snapshot s) {
     b.writeVarLong(s.request());
     b.writeVarLong(s.epoch());
     b.writeResourceLocation(s.dimension());
@@ -199,7 +199,7 @@ public final class ProjectionPayloads {
       }
     }
   }
-  private static Snapshot read(RegistryFriendlyByteBuf b) {
+  static Snapshot read(RegistryFriendlyByteBuf b) {
     long request = b.readVarLong(), epoch = b.readVarLong();
     var dimension = b.readResourceLocation();
     var machine = b.readResourceLocation();

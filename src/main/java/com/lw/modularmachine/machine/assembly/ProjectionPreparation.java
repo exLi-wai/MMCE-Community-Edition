@@ -6,6 +6,7 @@ import com.lw.modularmachine.machine.structure.MachineDefinition;
 import com.lw.modularmachine.network.ProjectionPayloads;
 import java.util.LinkedHashMap;
 import java.util.List;
+import java.util.Map;
 import java.util.concurrent.CompletableFuture;
 import net.minecraft.core.BlockPos;
 
@@ -16,14 +17,17 @@ import net.minecraft.core.BlockPos;
 final class ProjectionPreparation {
   record Ready(AssemblyPattern pattern, List<ProjectionPayloads.Entry> entries) {
   }
-  private record Key(MachineDefinition definition, MachineOrientation orientation) {
+  private record Key(MachineDefinition definition, MachineOrientation orientation, Map<String, Integer> lengths) {
     @Override
     public int hashCode() {
-      return 31 * System.identityHashCode(definition) + orientation.hashCode();
+      return 31 * (31 * System.identityHashCode(definition) + orientation.hashCode()) + lengths.hashCode();
     }
     @Override
     public boolean equals(Object other) {
-      return other instanceof Key key && key.definition == definition && key.orientation == orientation;
+      return other instanceof Key key
+          && key.definition == definition
+          && key.orientation == orientation
+          && key.lengths.equals(lengths);
     }
   }
   private static final LinkedHashMap<Key, AssemblyPattern> TEMPLATES = new LinkedHashMap<>(8, .75F, true);
@@ -33,18 +37,24 @@ final class ProjectionPreparation {
   private final BlockPos origin;
   private final MachineOrientation orientation;
   private final Key key;
-  private CompletableFuture<List<MachineDefinition.Rule>> rules;
+  private record Compiled(MachineDefinition definition, List<MachineDefinition.Rule> rules) {
+  }
+  private CompletableFuture<Compiled> rules;
   private AssemblyPattern.Preparation candidates;
   private CompletableFuture<AssemblyPattern> templateTask;
   private AssemblyPattern template;
   private CompletableFuture<Ready> output;
 
   ProjectionPreparation(MachineDefinition definition, long epoch, BlockPos origin, MachineOrientation orientation) {
+    this(definition, epoch, origin, orientation, definition.defaultDynamicLengths(-1));
+  }
+
+  ProjectionPreparation(MachineDefinition definition, long epoch, BlockPos origin, MachineOrientation orientation, Map<String, Integer> lengths) {
     this.definition = definition;
     this.epoch = epoch;
     this.origin = origin.immutable();
     this.orientation = orientation;
-    key = new Key(definition, orientation);
+    key = new Key(definition, orientation, Map.copyOf(lengths));
     if (cacheEpoch != epoch) {
       TEMPLATES.clear();
       cacheEpoch = epoch;
@@ -58,13 +68,23 @@ final class ProjectionPreparation {
         if (rules == null) {
           var capturedDefinition = definition;
           var capturedOrientation = orientation;
-          rules = AsyncStructureWork.submit(() -> capturedDefinition.rulesFor(capturedOrientation));
+          var capturedLengths = key.lengths();
+          rules = AsyncStructureWork.submit(() -> {
+            var resolved = capturedDefinition.resolveDynamic(capturedLengths);
+            return new Compiled(resolved, resolved.rulesFor(capturedOrientation));
+          });
         }
         if (rules == null || !rules.isDone()) {
           return null;
         }
         if (candidates == null) {
-          candidates = new AssemblyPattern.Preparation(definition, epoch, BlockPos.ZERO, orientation, rules.join());
+          var compiled = rules.join();
+          candidates = new AssemblyPattern.Preparation(
+              compiled.definition(),
+              epoch,
+              BlockPos.ZERO,
+              orientation,
+              compiled.rules());
         }
         int work = 0;
         while (!candidates.complete() && work < 8192 && System.nanoTime() < deadline) {

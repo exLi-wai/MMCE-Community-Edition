@@ -136,7 +136,7 @@ public final class SmartInterfaceBlockEntity extends BlockEntity implements Menu
     if (registration == null
         || !registration.verifier.canCommit()
         || registration.epoch() != StructureService.definitionEpoch()
-        || registration.pattern.definition != StructureService.definition(machine)
+        || registration.pattern.definition.sourceDefinition() != StructureService.definition(machine)
         || ready && !registration.canCommit(server)) {
       return null;
     }

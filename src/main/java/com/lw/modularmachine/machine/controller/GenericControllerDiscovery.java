@@ -3,6 +3,7 @@ package com.lw.modularmachine.machine.controller;
 import com.lw.modularmachine.api.orientation.MachineOrientation;
 import com.lw.modularmachine.machine.structure.AsyncStructureWork;
 import com.lw.modularmachine.machine.structure.CompiledStructure;
+import com.lw.modularmachine.machine.structure.DynamicStructureMatcher;
 import com.lw.modularmachine.machine.structure.MachineDefinition;
 import com.lw.modularmachine.machine.structure.StructureService;
 import com.lw.modularmachine.machine.structure.StructureSnapshot;
@@ -31,6 +32,8 @@ public final class GenericControllerDiscovery {
   private boolean factory;
   private List<MachineDefinition> candidates = List.of();
   private CompletableFuture<CompiledStructure> layout;
+  private CompletableFuture<DynamicStructureMatcher> dynamicPreparation;
+  private DynamicStructureMatcher dynamicMatcher;
   private CompiledStructure pattern;
   private StructureSnapshot.Capture capture;
   private AsyncStructureWork.Permit permit;
@@ -92,8 +95,36 @@ public final class GenericControllerDiscovery {
         next();
         return null;
       }
+      if (definition.hasDynamicPatterns()) {
+        if (dynamicMatcher == null) {
+          if (dynamicPreparation == null) {
+            dynamicPreparation = AsyncStructureWork.submit(() -> new DynamicStructureMatcher(definition, origin, pose));
+          }
+          if (dynamicPreparation == null || !dynamicPreparation.isDone()) {
+            return null;
+          }
+          dynamicMatcher = dynamicPreparation.join();
+        }
+        while (!dynamicMatcher.complete() && System.nanoTime() < deadline) {
+          dynamicMatcher.advance(level, 128, (position, contents) -> {
+          });
+        }
+        if (!dynamicMatcher.complete()) {
+          return null;
+        }
+        if (!dynamicMatcher.matched()) {
+          next();
+          return null;
+        }
+      }
       if (layout == null) {
-        layout = AsyncStructureWork.prepare(definition, origin, pose);
+        if (definition.hasDynamicPatterns()) {
+          var lengths = dynamicMatcher.lengths();
+          layout = AsyncStructureWork
+              .submit(() -> new CompiledStructure(definition.resolveDynamic(lengths), origin, pose));
+        } else {
+          layout = AsyncStructureWork.prepare(definition, origin, pose);
+        }
       }
       if (layout == null || !layout.isDone()) {
         return null;
@@ -106,7 +137,9 @@ public final class GenericControllerDiscovery {
         if (permit == null) {
           return null;
         }
-        capture = new StructureSnapshot.Capture(pattern, IntStream.range(0, definition.parts().size()).toArray());
+        capture = new StructureSnapshot.Capture(
+            pattern,
+            IntStream.range(0, pattern.definition.parts().size()).toArray());
       }
       while (!capture.complete() && System.nanoTime() < deadline) {
         capture.advance(level, 256);
@@ -136,6 +169,8 @@ public final class GenericControllerDiscovery {
     matching = null;
     capture = null;
     layout = null;
+    dynamicPreparation = null;
+    dynamicMatcher = null;
     pattern = null;
   }
 

@@ -148,6 +148,9 @@ public final class StructureService {
     if (!changed && !force) {
       return;
     }
+    if (anchor.definition != definition || anchor.orientation != orientation) {
+      clearDynamicWatches(state, anchor);
+    }
 
     long now = level.getGameTime();
     boolean wasPending = anchor.builder != null
@@ -156,6 +159,9 @@ public final class StructureService {
     retire(state, anchor.registration);
     retire(state, anchor.draft);
     anchor.builder = null;
+    anchor.dynamicPreparation = null;
+    anchor.dynamicMatcher = null;
+    anchor.layoutDefinition = null;
     anchor.actualRevision = Long.MIN_VALUE;
     anchor.preparing = false;
     anchor.generation = state.nextGeneration = Math.incrementExact(state.nextGeneration);
@@ -307,6 +313,7 @@ public final class StructureService {
       return;
     }
     state.revision = Math.incrementExact(state.revision);
+    invalidateDynamic(state, level, SectionPos.asLong(pos), pos, false);
     Anchor anchor = state.anchors.get(pos.asLong());
     if (anchor != null && !anchor.turning && !matchesActual(level, anchor)) {
       request(anchor.controller, false, false);
@@ -333,6 +340,7 @@ public final class StructureService {
       return;
     }
     state.revision = Math.incrementExact(state.revision);
+    invalidateDynamic(state, level, SectionPos.asLong(pos), pos, true);
     Set<Registration> watched = state.sections.get(SectionPos.asLong(pos));
     if (watched == null) {
       return;
@@ -378,6 +386,10 @@ public final class StructureService {
       register(controller);
       return;
     }
+    if (anchor.definition != null && anchor.definition.hasDynamicPatterns()) {
+      request(controller, true, false);
+      return;
+    }
     long now = level.getGameTime();
     if (anchor.registration != null && matchesActual(level, anchor)) {
       markDirty(state, anchor.registration, -1, true, true, now);
@@ -393,6 +405,12 @@ public final class StructureService {
       return;
     }
     state.revision = Math.incrementExact(state.revision);
+    var dynamic = state.dynamicChunks.get(chunk.toLong());
+    if (dynamic != null) {
+      for (var anchor : List.copyOf(dynamic)) {
+        request(anchor.controller, true, false);
+      }
+    }
     Set<Registration> watched = state.chunks.get(chunk.toLong());
     if (watched == null) {
       return;
@@ -467,6 +485,92 @@ public final class StructureService {
     return !System.getProperty("neoforge.enabledGameTestNamespaces", "").isBlank();
   }
 
+  private static int advanceDynamic(LevelState state, ServerLevel level, Anchor anchor, int budget) {
+    if (anchor.dynamicMatcher == null) {
+      if (anchor.dynamicPreparation == null) {
+        var definition = anchor.definition;
+        var origin = anchor.controller.structurePosition();
+        var orientation = anchor.orientation;
+        anchor.dynamicPreparation = AsyncStructureWork
+            .submit(() -> new DynamicStructureMatcher(definition, origin, orientation));
+        if (anchor.dynamicPreparation != null) {
+          anchor.dynamicPreparation.whenComplete((ignored, failure) -> state.ready.add(anchor));
+        }
+      }
+      if (anchor.dynamicPreparation == null || !anchor.dynamicPreparation.isDone()) {
+        return 0;
+      }
+      anchor.dynamicMatcher = anchor.dynamicPreparation.join();
+      anchor.dynamicPreparation = null;
+      clearDynamicWatches(state, anchor);
+    }
+    int used = anchor.dynamicMatcher.advance(level, budget, (position, contents) -> {
+      long section = SectionPos.asLong(position);
+      long chunk = ChunkPos.asLong(SectionPos.x(section), SectionPos.z(section));
+      if (anchor.dynamicSections.add(section)) {
+        state.dynamicSections.computeIfAbsent(section, ignored -> new HashSet<>()).add(anchor);
+      }
+      if (anchor.dynamicChunks.add(chunk)) {
+        state.dynamicChunks.computeIfAbsent(chunk, ignored -> new HashSet<>()).add(anchor);
+      }
+      anchor.dynamicPositions.add(position.immutable());
+      if (contents) {
+        anchor.dynamicContents.add(position.immutable());
+      }
+    });
+    if (anchor.dynamicMatcher.complete() && !anchor.dynamicMatcher.matched()) {
+      fail(state, anchor, anchor.dynamicMatcher.failure().reason(), level.getGameTime());
+    }
+    return used;
+  }
+
+  private static void invalidateDynamic(LevelState state, ServerLevel level, long section, BlockPos position, boolean contents) {
+    var watched = state.dynamicSections.get(section);
+    if (watched == null) {
+      return;
+    }
+    for (var anchor : List.copyOf(watched)) {
+      if (anchor.alive
+          && (contents ? anchor.dynamicContents.contains(position) : anchor.dynamicPositions.contains(position))) {
+        request(anchor.controller, true, false);
+      }
+    }
+  }
+
+  private static void clearDynamicWatches(LevelState state, Anchor anchor) {
+    for (long section : anchor.dynamicSections) {
+      var watched = state.dynamicSections.get(section);
+      if (watched != null && watched.remove(anchor) && watched.isEmpty()) {
+        state.dynamicSections.remove(section);
+      }
+    }
+    for (long chunk : anchor.dynamicChunks) {
+      var watched = state.dynamicChunks.get(chunk);
+      if (watched != null && watched.remove(anchor) && watched.isEmpty()) {
+        state.dynamicChunks.remove(chunk);
+      }
+    }
+    anchor.dynamicSections.clear();
+    anchor.dynamicChunks.clear();
+    anchor.dynamicPositions.clear();
+    anchor.dynamicContents.clear();
+  }
+
+  /**
+   * Internal diagnostic for a dynamic segment that failed before layout
+   * publication.
+   */
+  public static DynamicStructureMatcher.Failure dynamicFailure(StructureSubject controller) {
+    if (!(controller.structureLevel() instanceof ServerLevel level)) {
+      return null;
+    }
+    ServerThreadGuard.require(level, "Dynamic structure diagnostic");
+    var state = LEVELS.get(level);
+    var anchor = state == null ? null : state.anchors.get(controller.structurePosition().asLong());
+    return anchor != null && anchor.controller == controller && anchor.dynamicMatcher != null ? anchor.dynamicMatcher
+        .failure() : null;
+  }
+
   private static int advanceAnchor(LevelState state, ServerLevel level, Anchor anchor, int budget) {
     if (!anchor.needsWork()) {
       return 0;
@@ -478,9 +582,25 @@ public final class StructureService {
     long now = level.getGameTime();
     int used = 0;
     if (anchor.preparing) {
+      if (anchor.definition.hasDynamicPatterns() && anchor.layoutDefinition == null) {
+        used += advanceDynamic(state, level, anchor, budget);
+        if (anchor.dynamicMatcher == null || !anchor.dynamicMatcher.matched() || used >= budget) {
+          return used;
+        }
+      }
       if (anchor.builder == null) {
         long started = anchor.roundStarted;
-        if (inlinePrepare(anchor.definition)) {
+        if (anchor.definition.hasDynamicPatterns()) {
+          var source = anchor.definition;
+          var lengths = anchor.dynamicMatcher.lengths();
+          var origin = anchor.controller.structurePosition();
+          var orientation = anchor.orientation;
+          anchor.builder = AsyncStructureWork.submit(
+              () -> new Prepared(new CompiledStructure(source.resolveDynamic(lengths), origin, orientation), started));
+          if (anchor.builder != null) {
+            anchor.builder.whenComplete((ignored, failure) -> state.ready.add(anchor));
+          }
+        } else if (inlinePrepare(anchor.definition)) {
           anchor.draft = new Registration(
               anchor,
               new Prepared(
@@ -495,11 +615,14 @@ public final class StructureService {
               anchor.orientation,
               pattern -> new Prepared(pattern, started));
           var builder = anchor.builder;
-          builder.whenComplete((ignored, failure) -> state.ready.add(anchor));
+          if (builder != null) {
+            builder.whenComplete((ignored, failure) -> state.ready.add(anchor));
+          }
         }
       }
       if (anchor.builder != null && anchor.builder.isDone() && anchor.retired == null) {
         anchor.draft = new Registration(anchor, anchor.builder.join());
+        anchor.layoutDefinition = anchor.draft.pattern.definition;
         anchor.builder = null;
         anchor.preparing = false;
         used++;
@@ -557,6 +680,7 @@ public final class StructureService {
     retire(state, anchor.registration);
     retire(state, anchor.draft);
     anchor.builder = null;
+    anchor.dynamicPreparation = null;
     anchor.preparing = false;
     anchor.failure = failure;
     anchor.controller.failPreparation(failure);
@@ -627,9 +751,11 @@ public final class StructureService {
     state.anchors.remove(anchor.controller.structurePosition().asLong(), anchor);
     anchor.alive = false;
     state.queue.remove(anchor);
+    clearDynamicWatches(state, anchor);
     retire(state, anchor.registration);
     retire(state, anchor.draft);
     anchor.builder = null;
+    anchor.dynamicPreparation = null;
     anchor.preparing = false;
     anchor.controller.failPreparation(VerificationFailure.UNVERIFIED);
   }
@@ -766,8 +892,15 @@ public final class StructureService {
     boolean actual;
     ResourceLocation machineId;
     MachineDefinition definition;
+    MachineDefinition layoutDefinition;
     MachineOrientation orientation;
     CompletableFuture<Prepared> builder;
+    CompletableFuture<DynamicStructureMatcher> dynamicPreparation;
+    DynamicStructureMatcher dynamicMatcher;
+    final Set<Long> dynamicSections = new HashSet<>();
+    final Set<Long> dynamicChunks = new HashSet<>();
+    final Set<BlockPos> dynamicPositions = new HashSet<>();
+    final Set<BlockPos> dynamicContents = new HashSet<>();
     Registration registration, draft, retired;
     VerificationFailure failure = VerificationFailure.UNVERIFIED;
 
@@ -777,10 +910,12 @@ public final class StructureService {
 
     boolean needsWork() {
       boolean waitingForBuilder = preparing && builder != null && !builder.isDone();
+      boolean waitingForDynamic = dynamicPreparation != null && !dynamicPreparation.isDone();
       boolean waitingForMatch = registration != null
           && registration.matching != null
           && !registration.matching.isDone();
       return !waitingForBuilder
+          && !waitingForDynamic
           && !waitingForMatch
           && (preparing
               || draft != null
@@ -867,6 +1002,11 @@ public final class StructureService {
 
     public int[] parallelParts() {
       return parallelParts.clone();
+    }
+
+    /** Lengths frozen by this immutable structure generation. */
+    public Map<String, Integer> dynamicLengths() {
+      return pattern.definition.dynamicLengths();
     }
 
     private void resetColors() {
@@ -1101,7 +1241,7 @@ public final class StructureService {
           && owner.generation == generation
           && matchesActual(level, owner)
           && pattern.definition.id().equals(controller.structureMachineId())
-          && pattern.definition == catalog.definitions().get(controller.structureMachineId())
+          && pattern.definition.sourceDefinition() == catalog.definitions().get(controller.structureMachineId())
           && pattern.orientation == owner.orientation
           && pattern.chunksAvailable(level);
     }
@@ -1111,6 +1251,8 @@ public final class StructureService {
     final Map<Long, Anchor> anchors = new HashMap<>();
     final Map<Long, Set<Registration>> sections = new HashMap<>();
     final Map<Long, Set<Registration>> chunks = new HashMap<>();
+    final Map<Long, Set<Anchor>> dynamicSections = new HashMap<>();
+    final Map<Long, Set<Anchor>> dynamicChunks = new HashMap<>();
     final LinkedHashSet<Work> queue = new LinkedHashSet<>();
     final ConcurrentLinkedQueue<Anchor> ready = new ConcurrentLinkedQueue<>();
     long nextGeneration, revision;
@@ -1138,6 +1280,7 @@ public final class StructureService {
           anchor.draft.valid = false;
         }
         anchor.builder = null;
+        anchor.dynamicPreparation = null;
         anchor.preparing = false;
         if (anchor.registration != null) {
           anchor.registration.discardCapture();
@@ -1150,6 +1293,8 @@ public final class StructureService {
       anchors.clear();
       sections.clear();
       chunks.clear();
+      dynamicSections.clear();
+      dynamicChunks.clear();
       queue.clear();
       ready.clear();
     }

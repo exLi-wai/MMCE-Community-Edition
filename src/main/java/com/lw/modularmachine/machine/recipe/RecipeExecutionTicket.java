@@ -103,6 +103,10 @@ public final class RecipeExecutionTicket {
     return inputGroup;
   }
 
+  Map<String, Integer> dynamicLengths() {
+    return registration.dynamicLengths();
+  }
+
   public int parallelLimit() {
     int hardware = parallel == null ? 1 : parallel.limit();
     if (ordinaryUpgrades == null) {

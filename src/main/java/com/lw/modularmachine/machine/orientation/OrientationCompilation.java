@@ -122,6 +122,34 @@ public final class OrientationCompilation {
     return allowedMask;
   }
 
+  /** Restricts a declaration to poses supported by its dynamic templates. */
+  public OrientationCompilation restrict(int mask) {
+    int restricted = allowedMask & mask;
+    if (restricted == 0) {
+      throw new IllegalArgumentException("No common representable orientation");
+    }
+    if (restricted == allowedMask) {
+      return this;
+    }
+    return new OrientationCompilation(parts, restricted, diagnostics, diagnosticsTruncated, replacementMasks);
+  }
+
+  /**
+   * Dynamic templates have already passed pose validation at load time. Keep the
+   * fixed prefix's replacement proofs while deferring per-pose rules.
+   */
+  public OrientationCompilation expanded(List<MachineDefinition.Part> expandedParts) {
+    if (expandedParts.size() < parts.size() || !expandedParts.subList(0, parts.size()).equals(parts)) {
+      throw new IllegalArgumentException("Expanded layout must preserve its fixed prefix");
+    }
+    return new OrientationCompilation(
+        expandedParts,
+        allowedMask,
+        diagnostics,
+        diagnosticsTruncated,
+        java.util.Arrays.copyOf(replacementMasks, expandedParts.size()));
+  }
+
   public boolean allows(MachineOrientation orientation) {
     return (allowedMask & Objects.requireNonNull(orientation, "orientation").maskBit()) != 0;
   }

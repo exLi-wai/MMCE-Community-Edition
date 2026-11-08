@@ -37,7 +37,7 @@ import net.minecraft.world.level.block.Block;
 import net.minecraft.world.level.block.state.BlockState;
 import net.minecraft.world.level.block.state.properties.Property;
 
-/** Immutable fixed machine definitions. */
+/** Immutable machine declarations and resolved dynamic layouts. */
 public record MachineDefinition(
     ResourceLocation id,
     String translationKey,
@@ -55,13 +55,22 @@ public record MachineDefinition(
     boolean factoryOnly,
     int color,
     boolean hideComponentsWhenFormed,
-    AABB controllerBoundingBox) {
+    AABB controllerBoundingBox,
+    List<DynamicPatternDefinition> dynamicPatterns,
+    Map<String, Integer> dynamicLengths,
+    MachineDefinition source) {
 
   /**
    * In Laozi's world, Laozi builds it however he wants.
    */
   private static final Logger LOGGER = LogUtils.getLogger();
   public static final int MAX_PARTS = Integer.MAX_VALUE;
+
+  public MachineDefinition(ResourceLocation id, String translationKey, List<Part> parts, long energyPerTick, OrientationPolicy orientationPolicy, OrientationCompilation orientationCompilation, FactoryThreadPreset factoryPreset, List<RecipeModifier> recipeModifiers, List<StructureModifierDefinition> structureModifiers, Map<String, SmartInterfaceType> interfaceTypes, int internalParallelism, int maxParallelism, boolean requiresBlueprint, boolean factoryOnly, int color, boolean hideComponentsWhenFormed, AABB controllerBoundingBox) {
+    this(id, translationKey, parts, energyPerTick, orientationPolicy, orientationCompilation, factoryPreset,
+        recipeModifiers, structureModifiers, interfaceTypes, internalParallelism, maxParallelism, requiresBlueprint,
+        factoryOnly, color, hideComponentsWhenFormed, controllerBoundingBox, List.of(), Map.of(), null);
+  }
 
   public MachineDefinition(ResourceLocation id, String translationKey, List<Part> parts, long energyPerTick, OrientationPolicy orientationPolicy, OrientationCompilation orientationCompilation, FactoryThreadPreset factoryPreset, List<RecipeModifier> recipeModifiers, List<StructureModifierDefinition> structureModifiers, Map<String, SmartInterfaceType> interfaceTypes, int internalParallelism, int maxParallelism) {
     this(id, translationKey, parts, energyPerTick, orientationPolicy, orientationCompilation, factoryPreset,
@@ -111,6 +120,11 @@ public record MachineDefinition(
     Objects.requireNonNull(factoryPreset, "factoryPreset");
     recipeModifiers = List.copyOf(recipeModifiers);
     structureModifiers = List.copyOf(structureModifiers);
+    dynamicPatterns = List.copyOf(dynamicPatterns);
+    dynamicLengths = Map.copyOf(dynamicLengths);
+    if (source != null && (source.source() != null || !dynamicPatterns.isEmpty())) {
+      throw new IllegalArgumentException("Dynamic layout source must be an original declaration");
+    }
     new RecipeModifiers(recipeModifiers);
     parts = List.copyOf(parts);
     interfaceTypes = Map.copyOf(interfaceTypes);
@@ -121,7 +135,25 @@ public record MachineDefinition(
       throw new IllegalArgumentException("Smart interface type key does not match its ID");
     }
     var assignedInterfaces = new HashSet<String>();
-    for (var part : parts) {
+    var declaredParts = new ArrayList<>(parts);
+    var dynamicIds = new HashSet<String>();
+    long maximumParts = parts.size();
+    for (var pattern : dynamicPatterns) {
+      if (!dynamicIds.add(pattern.id())) {
+        throw new IllegalArgumentException("Duplicate dynamic pattern ID");
+      }
+      maximumParts += (long) pattern.start().size() + (long) pattern.maximum() * pattern.body().size() + pattern.end()
+          .size();
+      declaredParts.addAll(pattern.declarationParts());
+      if (pattern.maximum() > 1
+          && pattern.body().stream().anyMatch(part -> !part.interfaceType().isEmpty() && !part.automaticInterface())) {
+        throw new IllegalArgumentException("Repeated smart interfaces must use automatic interface roles");
+      }
+    }
+    if (!dynamicPatterns.isEmpty() && maximumParts > DynamicPatternDefinition.MAX_EXPANDED_PARTS) {
+      throw new IllegalArgumentException("Machine exceeds 4194304 expanded parts");
+    }
+    for (var part : declaredParts) {
       if (!part.selector().isEmpty() && part.rule().port() == null) {
         throw new IllegalArgumentException("Resource selectors require typed resource ports");
       }
@@ -210,13 +242,287 @@ public record MachineDefinition(
         throw error(path + ".orientation.policy", exception.getMessage());
       }
     }
-    JsonArray elements = parts(root, path);
+    List<Part> parts = parseParts(id, parts(root, path), path + ".parts", snapshot, false);
+    var dynamicPatterns = DynamicPatternDefinition.parse(id, root, policy, snapshot);
+    long transfer = 0;
+    if (root.has("operation")) {
+      JsonObject operation = object(root.get("operation"), path + ".operation");
+      fields(operation, path + ".operation", "type", "energy_per_tick");
+      if (!string(operation.get("type"), path + ".operation.type").equals("energy_transfer")) {
+        throw error(path + ".operation.type", "Unsupported operation");
+      }
+      transfer = integer(operation.get("energy_per_tick"), path + ".operation.energy_per_tick");
+      if (transfer <= 0 || transfer > Integer.MAX_VALUE) {
+        throw error(path + ".operation.energy_per_tick", "Invalid transfer amount");
+      }
+      for (PortKind kind : new PortKind[]{PortKind.ENERGY_INPUT, PortKind.ENERGY_OUTPUT}) {
+        if (parts.stream().filter(p -> p.rule().port() == kind).count() != 1) {
+          throw error(path + ".operation", "Energy transfer needs exactly one input and output port");
+        }
+      }
+      if (dynamicPatterns.stream().flatMap(pattern -> pattern.declarationParts().stream()).anyMatch(
+          part -> part.rule().port() == PortKind.ENERGY_INPUT || part.rule().port() == PortKind.ENERGY_OUTPUT)) {
+        throw error(path + ".operation", "Energy transfer requires its single input and output in fixed parts");
+      }
+    }
+    var structureModifiers = StructureModifierDefinition.parse(id, root, parts, snapshot);
+    var compilation = OrientationCompilation.compile(id, policy, parts, structureModifiers);
+    int allowedMask = compilation.allowedMask();
+    for (var pattern : dynamicPatterns) {
+      allowedMask &= pattern.allowedOrientationMask();
+    }
+    if (allowedMask == 0) {
+      throw error(path + ".dynamic_patterns", "No common representable orientation for all dynamic templates");
+    }
+    compilation = compilation.restrict(allowedMask);
+    String translation = root.has("translation_key") ? string(
+        root.get("translation_key"),
+        path + ".translation_key") : "machine." + id.getNamespace() + "." + id.getPath();
+    var factory = root.has("factory") ? FactoryThreadPreset
+        .parse(root.get("factory"), path + ".factory") : FactoryThreadPreset.defaults();
+
+    var modifiers = root.has("recipe_modifiers") ? RecipeModifiers
+        .parse(root.get("recipe_modifiers"), path + ".recipe_modifiers") : List.<RecipeModifier>of();
+    int internalParallelism = 0;
+    int maxParallelism = Integer.MAX_VALUE;
+    if (root.has("parallel")) {
+      var parallel = object(root.get("parallel"), path + ".parallel");
+      fields(parallel, path + ".parallel", "internal", "maximum");
+      internalParallelism = Math.toIntExact(optionalInteger(parallel, "internal", 0, path + ".parallel"));
+      maxParallelism = Math.toIntExact(optionalInteger(parallel, "maximum", Integer.MAX_VALUE, path + ".parallel"));
+    }
+    var interfaceTypes = root.has("interfaces") ? SmartInterfaceType
+        .parse(root.get("interfaces"), path + ".interfaces") : Map.<String, SmartInterfaceType>of();
+    boolean hideComponentsWhenFormed = booleanAlias(
+        root,
+        "hide_components_when_formed",
+        "hide-components-when-formed",
+        false,
+        path);
+    AABB controllerBoundingBox = boundingBoxAlias(root, "controller_bounding_box", "controller-bounding-box", path);
+
+    return new MachineDefinition(
+        id,
+        translation,
+        parts,
+        transfer,
+        policy,
+        compilation,
+        factory,
+        modifiers,
+        structureModifiers,
+        interfaceTypes,
+        internalParallelism,
+        maxParallelism,
+        root.has("requires_blueprint") && bool(root.get("requires_blueprint"), path + ".requires_blueprint"),
+        root.has("factory_only") && bool(root.get("factory_only"), path + ".factory_only"),
+        machineColor(root, path),
+        hideComponentsWhenFormed,
+        controllerBoundingBox,
+        dynamicPatterns,
+        Map.of(),
+        null);
+  }
+
+  /**
+   * Collect requested literals off-thread; capture subsequently parses only those
+   * literals on-thread.
+   */
+  public static List<StateOrientationAdapters.BlockReference> blockReferences(Map<ResourceLocation, ? extends JsonElement> roots) {
+    List<StateOrientationAdapters.BlockReference> result = new ArrayList<>();
+    if (roots.size() > 1024) {
+      throw error("$", "At most 1024 machine definitions per reload");
+    }
+    int totalParts = 0;
+    for (var entry : roots.entrySet()) {
+      String path = entry.getKey() + ": $";
+      JsonObject root = object(entry.getValue(), path);
+      int schema = header(root, path);
+      var declared = parts(root, path);
+      var parts = new ArrayList<JsonElement>();
+      declared.forEach(parts::add);
+      parts.addAll(StructureModifierDefinition.captureParts(root, path));
+      parts.addAll(DynamicPatternDefinition.captureParts(root, path));
+      totalParts += parts.size();
+      if (totalParts > 4_194_304) {
+        throw error(path + ".parts", "Reload exceeds 4194304 total parts");
+      }
+      for (int index = 0; index < parts.size(); index++) {
+        String partPath = path + ".parts[" + index + "]";
+        JsonObject part = object(parts.get(index), partPath);
+        partFields(part, partPath);
+        if (!part.has("block")) {
+          continue;
+        }
+        if (candidatePort(part) != null) {
+          continue;
+        }
+        JsonObject required = part
+            .has("properties") ? object(part.get("properties"), partPath + ".properties") : new JsonObject();
+        for (var variant : propertyVariants(required, partPath + ".properties")) {
+          for (String name : blockNames(part, partPath)) {
+            String blockPath = partPath + ".block";
+            String propertyPath = partPath + ".properties";
+            List<StateOrientationAdapters.PropertyReference> variantProperties = new ArrayList<>();
+            for (var property : variant.entrySet()) {
+              variantProperties.add(
+                  new StateOrientationAdapters.PropertyReference(
+                      property.getKey(),
+                      property.getValue(),
+                      propertyPath + "." + property.getKey()));
+            }
+            ResourceLocation blockId = blockId(name, blockPath);
+            if (result.size() >= 4_194_304) {
+              throw error(partPath, "Reload exceeds 4194304 block alternatives");
+            }
+            result.add(new StateOrientationAdapters.BlockReference(blockId, partPath, variantProperties));
+          }
+        }
+      }
+    }
+    return List.copyOf(result);
+  }
+
+  public boolean allows(MachineOrientation orientation) {
+    return orientationCompilation.allows(orientation);
+  }
+
+  public int allowedOrientationMask() {
+    return orientationCompilation.allowedMask();
+  }
+
+  public List<Rule> rulesFor(MachineOrientation orientation) {
+    return orientationCompilation.rulesFor(orientation);
+  }
+
+  public MachineDefinition sourceDefinition() {
+    return source == null ? this : source;
+  }
+
+  public boolean hasDynamicPatterns() {
+    return !dynamicPatterns.isEmpty();
+  }
+
+  /** All declaration templates, without materializing their maximum length. */
+  public List<Part> declarationParts() {
+    var original = sourceDefinition();
+    if (!original.hasDynamicPatterns()) {
+      return original.parts();
+    }
+    var result = new ArrayList<>(original.parts());
+    for (var pattern : original.dynamicPatterns()) {
+      result.addAll(pattern.declarationParts());
+    }
+    return List.copyOf(result);
+  }
+
+  /**
+   * -1 selects each minimum; other values are independently clamped per segment.
+   */
+  public Map<String, Integer> defaultDynamicLengths(int requestedSize) {
+    if (requestedSize < -1) {
+      throw new IllegalArgumentException("Dynamic size must be -1 or nonnegative");
+    }
+    var result = new LinkedHashMap<String, Integer>();
+    for (var pattern : sourceDefinition().dynamicPatterns()) {
+      result.put(
+          pattern.id(),
+          requestedSize == -1 ? pattern.minimum() : Math.clamp(requestedSize, pattern.minimum(), pattern.maximum()));
+    }
+    return Map.copyOf(result);
+  }
+
+  /** Pure expansion; this immutable layout is not a structure proof. */
+  public MachineDefinition resolveDynamic(Map<String, Integer> lengths) {
+    var original = sourceDefinition();
+    if (original != this) {
+      return original.resolveDynamic(lengths);
+    }
+    Objects.requireNonNull(lengths, "lengths");
+    if (lengths.size() != dynamicPatterns.size()) {
+      throw new IllegalArgumentException("Dynamic selection must specify every declared pattern");
+    }
+    if (dynamicPatterns.isEmpty()) {
+      return this;
+    }
+    var resolved = new ArrayList<>(parts);
+    var positions = new HashSet<BlockPos>();
+    var ids = new HashSet<String>();
+    parts.forEach(part -> {
+      positions.add(part.offset());
+      ids.add(part.id());
+    });
+    for (var pattern : dynamicPatterns) {
+      Integer size = lengths.get(pattern.id());
+      if (size == null || size < pattern.minimum() || size > pattern.maximum()) {
+        throw new IllegalArgumentException("Dynamic size outside declared range: " + pattern.id());
+      }
+      appendDynamic(resolved, positions, ids, pattern, pattern.start(), "start", 0);
+      for (int repetition = 0; repetition < size; repetition++) {
+        if ((repetition & 4095) == 0 && Thread.currentThread().isInterrupted()) {
+          throw new java.util.concurrent.CancellationException();
+        }
+        appendDynamic(resolved, positions, ids, pattern, pattern.body(), "body", repetition);
+      }
+      appendDynamic(resolved, positions, ids, pattern, pattern.end(), "end", size);
+    }
+    return new MachineDefinition(
+        id,
+        translationKey,
+        resolved,
+        energyPerTick,
+        orientationPolicy,
+        orientationCompilation.expanded(resolved),
+        factoryPreset,
+        recipeModifiers,
+        structureModifiers,
+        interfaceTypes,
+        internalParallelism,
+        maxParallelism,
+        requiresBlueprint,
+        factoryOnly,
+        color,
+        hideComponentsWhenFormed,
+        controllerBoundingBox,
+        List.of(),
+        lengths,
+        this);
+  }
+
+  private static void appendDynamic(List<Part> target, Set<BlockPos> positions, Set<String> ids, DynamicPatternDefinition pattern, List<Part> template, String group, int repetition) {
+    for (int index = 0; index < template.size(); index++) {
+      var part = template.get(index);
+      var offset = DynamicPatternDefinition
+          .translated(part.offset(), pattern.startOffset(), pattern.step(), repetition);
+      String prefix = "dynamic:" + pattern.id() + ":" + group + ":" + repetition + ":";
+      String localId = part.id();
+      if (prefix.length() + localId.length() > 128) {
+        localId = java.util.UUID.nameUUIDFromBytes(localId.getBytes(java.nio.charset.StandardCharsets.UTF_8))
+            .toString();
+      }
+      String id = prefix + localId;
+      if (offset.equals(BlockPos.ZERO) || !positions.add(offset) || !ids.add(id)) {
+        throw new IllegalArgumentException("Dynamic layout overlaps a part/controller: " + id + " at " + offset);
+      }
+      target.add(
+          new Part(
+              id,
+              offset,
+              part.rule(),
+              part.field(),
+              part.propertiesSpace(),
+              part.selector(),
+              part.interfaceType()));
+    }
+  }
+
+  static List<Part> parseParts(ResourceLocation id, JsonArray elements, String path, StateOrientationAdapters.RegistrySnapshot snapshot, boolean allowAnchor) {
     List<Part> parts = new ArrayList<>();
     int skippedParts = 0;
     Set<BlockPos> offsets = new HashSet<>();
     Set<String> partIds = new HashSet<>();
     for (int index = 0; index < elements.size(); index++) {
-      String partPath = path + ".parts[" + index + "]";
+      String partPath = path + "[" + index + "]";
       JsonObject part = object(elements.get(index), partPath);
       partFields(part, partPath);
       JsonArray xyz = array(part.get("offset"), partPath + ".offset");
@@ -232,7 +538,7 @@ public record MachineDefinition(
         values[axis] = (int) value;
       }
       BlockPos offset = new BlockPos(values[0], values[1], values[2]);
-      if (offset.equals(BlockPos.ZERO) || !offsets.add(offset)) {
+      if (!allowAnchor && offset.equals(BlockPos.ZERO) || !offsets.add(offset)) {
         throw error(partPath + ".offset", "Duplicate/controller-anchor part");
       }
       String partId = part.has("part_id") ? string(
@@ -319,139 +625,7 @@ public record MachineDefinition(
           id,
           skippedParts);
     }
-    long transfer = 0;
-    if (root.has("operation")) {
-      JsonObject operation = object(root.get("operation"), path + ".operation");
-      fields(operation, path + ".operation", "type", "energy_per_tick");
-      if (!string(operation.get("type"), path + ".operation.type").equals("energy_transfer")) {
-        throw error(path + ".operation.type", "Unsupported operation");
-      }
-      transfer = integer(operation.get("energy_per_tick"), path + ".operation.energy_per_tick");
-      if (transfer <= 0 || transfer > Integer.MAX_VALUE) {
-        throw error(path + ".operation.energy_per_tick", "Invalid transfer amount");
-      }
-      for (PortKind kind : new PortKind[]{PortKind.ENERGY_INPUT, PortKind.ENERGY_OUTPUT}) {
-        if (parts.stream().filter(p -> p.rule().port() == kind).count() != 1) {
-          throw error(path + ".operation", "Energy transfer needs exactly one input and output port");
-        }
-      }
-    }
-    var structureModifiers = StructureModifierDefinition.parse(id, root, parts, snapshot);
-    var compilation = OrientationCompilation.compile(id, policy, parts, structureModifiers);
-    String translation = root.has("translation_key") ? string(
-        root.get("translation_key"),
-        path + ".translation_key") : "machine." + id.getNamespace() + "." + id.getPath();
-    var factory = root.has("factory") ? FactoryThreadPreset
-        .parse(root.get("factory"), path + ".factory") : FactoryThreadPreset.defaults();
-
-    var modifiers = root.has("recipe_modifiers") ? RecipeModifiers
-        .parse(root.get("recipe_modifiers"), path + ".recipe_modifiers") : List.<RecipeModifier>of();
-    int internalParallelism = 0;
-    int maxParallelism = Integer.MAX_VALUE;
-    if (root.has("parallel")) {
-      var parallel = object(root.get("parallel"), path + ".parallel");
-      fields(parallel, path + ".parallel", "internal", "maximum");
-      internalParallelism = Math.toIntExact(optionalInteger(parallel, "internal", 0, path + ".parallel"));
-      maxParallelism = Math.toIntExact(optionalInteger(parallel, "maximum", Integer.MAX_VALUE, path + ".parallel"));
-    }
-    var interfaceTypes = root.has("interfaces") ? SmartInterfaceType
-        .parse(root.get("interfaces"), path + ".interfaces") : Map.<String, SmartInterfaceType>of();
-    boolean hideComponentsWhenFormed = booleanAlias(
-        root,
-        "hide_components_when_formed",
-        "hide-components-when-formed",
-        false,
-        path);
-    AABB controllerBoundingBox = boundingBoxAlias(root, "controller_bounding_box", "controller-bounding-box", path);
-
-    return new MachineDefinition(
-        id,
-        translation,
-        parts,
-        transfer,
-        policy,
-        compilation,
-        factory,
-        modifiers,
-        structureModifiers,
-        interfaceTypes,
-        internalParallelism,
-        maxParallelism,
-        root.has("requires_blueprint") && bool(root.get("requires_blueprint"), path + ".requires_blueprint"),
-        root.has("factory_only") && bool(root.get("factory_only"), path + ".factory_only"),
-        machineColor(root, path),
-        hideComponentsWhenFormed,
-        controllerBoundingBox);
-  }
-
-  /**
-   * Collect requested literals off-thread; capture subsequently parses only those
-   * literals on-thread.
-   */
-  public static List<StateOrientationAdapters.BlockReference> blockReferences(Map<ResourceLocation, ? extends JsonElement> roots) {
-    List<StateOrientationAdapters.BlockReference> result = new ArrayList<>();
-    if (roots.size() > 1024) {
-      throw error("$", "At most 1024 machine definitions per reload");
-    }
-    int totalParts = 0;
-    for (var entry : roots.entrySet()) {
-      String path = entry.getKey() + ": $";
-      JsonObject root = object(entry.getValue(), path);
-      int schema = header(root, path);
-      var declared = parts(root, path);
-      var parts = new ArrayList<JsonElement>();
-      declared.forEach(parts::add);
-      parts.addAll(StructureModifierDefinition.captureParts(root, path));
-      totalParts += parts.size();
-      if (totalParts > 4_194_304) {
-        throw error(path + ".parts", "Reload exceeds 4194304 total parts");
-      }
-      for (int index = 0; index < parts.size(); index++) {
-        String partPath = path + ".parts[" + index + "]";
-        JsonObject part = object(parts.get(index), partPath);
-        partFields(part, partPath);
-        if (!part.has("block")) {
-          continue;
-        }
-        if (candidatePort(part) != null) {
-          continue;
-        }
-        JsonObject required = part
-            .has("properties") ? object(part.get("properties"), partPath + ".properties") : new JsonObject();
-        for (var variant : propertyVariants(required, partPath + ".properties")) {
-          for (String name : blockNames(part, partPath)) {
-            String blockPath = partPath + ".block";
-            String propertyPath = partPath + ".properties";
-            List<StateOrientationAdapters.PropertyReference> variantProperties = new ArrayList<>();
-            for (var property : variant.entrySet()) {
-              variantProperties.add(
-                  new StateOrientationAdapters.PropertyReference(
-                      property.getKey(),
-                      property.getValue(),
-                      propertyPath + "." + property.getKey()));
-            }
-            ResourceLocation blockId = blockId(name, blockPath);
-            if (result.size() >= 4_194_304) {
-              throw error(partPath, "Reload exceeds 4194304 block alternatives");
-            }
-            result.add(new StateOrientationAdapters.BlockReference(blockId, partPath, variantProperties));
-          }
-        }
-      }
-    }
-    return List.copyOf(result);
-  }
-
-  public boolean allows(MachineOrientation orientation) {
-    return orientationCompilation.allows(orientation);
-  }
-
-  public int allowedOrientationMask() {
-    return orientationCompilation.allowedMask();
-  }
-
-  public List<Rule> rulesFor(MachineOrientation orientation) {
-    return orientationCompilation.rulesFor(orientation);
+    return List.copyOf(parts);
   }
 
   private static int header(JsonObject root, String path) {
@@ -466,6 +640,8 @@ public record MachineDefinition(
         "factory",
         "recipe_modifiers",
         "structure_modifiers",
+        "dynamic_patterns",
+        "dynamic-patterns",
         "interfaces",
         "parallel",
         "requires_blueprint",

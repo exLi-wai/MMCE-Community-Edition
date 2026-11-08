@@ -13,6 +13,7 @@ import com.lw.modularmachine.machine.recipe.RecipeLifecyclePublisher;
 import com.lw.modularmachine.machine.smart.SmartInterfaceEventPublisher;
 import com.lw.modularmachine.machine.structure.StructureService;
 import com.lw.modularmachine.network.GroupInputPayloads;
+import com.lw.modularmachine.network.BlueprintPreviewPayloads;
 import com.lw.modularmachine.network.MachineJeiPayloads;
 import com.lw.modularmachine.network.MachineColorPayloads;
 import com.lw.modularmachine.network.MachinePayloads;
@@ -51,6 +52,7 @@ public class ModularMachine {
     modEventBus.addListener(this::commonSetup);
     modEventBus.addListener(DedicatedControllerResources::register);
     modEventBus.addListener(ProjectionPayloads::register);
+    modEventBus.addListener(BlueprintPreviewPayloads::register);
     modEventBus.addListener(MachinePayloads::register);
     modEventBus.addListener(UpgradeBusPayloads::register);
     modEventBus.addListener(SmartInterfacePayloads::register);

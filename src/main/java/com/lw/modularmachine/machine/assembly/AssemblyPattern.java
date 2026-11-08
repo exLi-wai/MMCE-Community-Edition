@@ -27,6 +27,8 @@ public record AssemblyPattern(
     long epoch,
     BlockPos origin,
     MachineOrientation orientation,
+    MachineDefinition sourceDefinition,
+    Map<String, Integer> dynamicLengths,
     List<Part> parts) {
   public record Part(BlockPos position, MachineDefinition.Rule rule, List<BlockState> states) {
     public Part {
@@ -39,10 +41,16 @@ public record AssemblyPattern(
   }
   public AssemblyPattern {
     origin = origin.immutable();
+    dynamicLengths = Map.copyOf(dynamicLengths);
     parts = List.copyOf(parts);
   }
 
   public static AssemblyPattern compile(MachineDefinition definition, long epoch, BlockPos origin, MachineOrientation orientation) {
+    return compile(definition, epoch, origin, orientation, definition.defaultDynamicLengths(-1));
+  }
+
+  public static AssemblyPattern compile(MachineDefinition definition, long epoch, BlockPos origin, MachineOrientation orientation, Map<String, Integer> lengths) {
+    definition = definition.resolveDynamic(lengths);
     if (!definition.allows(orientation)) {
       throw new IllegalArgumentException("Unsupported assembly orientation");
     }
@@ -146,7 +154,14 @@ public record AssemblyPattern(
       parts.sort(
           Comparator.comparingInt((Part part) -> part.position().getY())
               .thenComparingInt(part -> part.position().getX()).thenComparingInt(part -> part.position().getZ()));
-      return new AssemblyPattern(definition.id(), epoch, origin, orientation, parts);
+      return new AssemblyPattern(
+          definition.id(),
+          epoch,
+          origin,
+          orientation,
+          definition.sourceDefinition(),
+          definition.dynamicLengths(),
+          parts);
     }
   }
 
@@ -164,7 +179,7 @@ public record AssemblyPattern(
               part.rule(),
               part.states()));
     }
-    return new AssemblyPattern(machine, epoch, target, orientation, relocated);
+    return new AssemblyPattern(machine, epoch, target, orientation, sourceDefinition, dynamicLengths, relocated);
   }
   private static <T extends Comparable<T>> BlockState property(BlockState state, Property<T> property, Comparable<?> value) {
     return state.setValue(property, property.getValueClass().cast(value));

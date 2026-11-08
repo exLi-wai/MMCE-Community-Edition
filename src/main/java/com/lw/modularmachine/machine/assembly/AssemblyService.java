@@ -7,16 +7,19 @@ import com.lw.modularmachine.block.FactoryControllerBlock;
 import com.lw.modularmachine.block.MachineControllerBlock;
 import com.lw.modularmachine.blockentity.FactoryControllerBlockEntity;
 import com.lw.modularmachine.blockentity.MachineControllerBlockEntity;
+import com.lw.modularmachine.item.MachineBlueprintItem;
 import com.lw.modularmachine.api.orientation.MachineOrientation;
 import com.lw.modularmachine.machine.recipe.RecipeLifecyclePublisher;
 import com.lw.modularmachine.machine.smart.SmartInterfaceEventPublisher;
 import com.lw.modularmachine.machine.structure.MachineDefinition;
 import com.lw.modularmachine.machine.structure.StructureService;
 import com.lw.modularmachine.network.ProjectionPayloads;
+import com.lw.modularmachine.network.BlueprintPreviewPayloads;
 import com.lw.modularmachine.util.thread.ServerThreadGuard;
 import java.util.ArrayList;
 import java.util.HashMap;
 import java.util.LinkedHashSet;
+import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.UUID;
@@ -54,12 +57,47 @@ public final class AssemblyService {
   private static final Map<UUID, Job> JOBS = new HashMap<>();
   private static final Map<UUID, Job> PROJECTIONS = new HashMap<>();
   private static final Map<UUID, PendingProjection> PENDING_PROJECTIONS = new HashMap<>();
+  private static final Map<UUID, PendingBlueprint> PENDING_BLUEPRINTS = new HashMap<>();
+  private static final Map<UUID, LinkedHashMap<ResourceLocation, LengthSelection>> LENGTH_SELECTIONS = new HashMap<>();
   private static final int BULK_FLAGS = Block.UPDATE_KNOWN_SHAPE | Block.UPDATE_SUPPRESS_DROPS;
   private static long request;
   private static boolean placing;
   private static int playerCursor;
   private static long budgetTick = -1;
   private static int budget;
+
+  private record LengthSelection(MachineDefinition definition, long epoch, int size) {
+  }
+
+  private static final class PendingBlueprint {
+    final BlueprintPreviewPayloads.Request request;
+    final MachineDefinition definition;
+    final ServerLevel level;
+    final MachineOrientation orientation;
+    final long epoch;
+    final int size, minimum, maximum;
+    final ProjectionPreparation preparation;
+    ProjectionPreparation.Ready ready;
+    boolean selectionCommitted;
+    int sent;
+
+    PendingBlueprint(ServerPlayer player, BlueprintPreviewPayloads.Request request, MachineDefinition definition, MachineOrientation orientation, int size) {
+      this.request = request;
+      this.definition = definition;
+      this.orientation = orientation;
+      this.size = size;
+      level = player.serverLevel();
+      epoch = StructureService.definitionEpoch();
+      minimum = definition.dynamicPatterns().stream().mapToInt(pattern -> pattern.minimum()).min().orElse(0);
+      maximum = definition.dynamicPatterns().stream().mapToInt(pattern -> pattern.maximum()).max().orElse(0);
+      preparation = new ProjectionPreparation(
+          definition,
+          epoch,
+          BlockPos.ZERO,
+          orientation,
+          definition.defaultDynamicLengths(size));
+    }
+  }
 
   private static final class Job {
     final StructureService.StructureSubject owner;
@@ -92,16 +130,18 @@ public final class AssemblyService {
     final long epoch, request;
     final InteractionHand hand;
     final ProjectionPreparation preparation;
-    PendingProjection(StructureService.StructureSubject owner, ServerLevel level, MachineDefinition definition, MachineOrientation orientation, long request, InteractionHand hand) {
+    final Map<String, Integer> lengths;
+    PendingProjection(StructureService.StructureSubject owner, ServerLevel level, MachineDefinition definition, MachineOrientation orientation, Map<String, Integer> lengths, long request, InteractionHand hand) {
       this.owner = owner;
       this.level = level;
       this.definition = definition;
       this.orientation = orientation;
       this.request = request;
       this.hand = hand;
+      this.lengths = Map.copyOf(lengths);
       origin = owner.structurePosition().immutable();
       epoch = StructureService.definitionEpoch();
-      preparation = new ProjectionPreparation(definition, epoch, origin, orientation);
+      preparation = new ProjectionPreparation(definition, epoch, origin, orientation, lengths);
     }
   }
 
@@ -129,12 +169,14 @@ public final class AssemblyService {
     if (!definition.allows(orientation)) {
       return;
     }
+    var lengths = selectedLengths(player, owner, definition);
     if (!build) {
       var id = player.getUUID();
       var pending = PENDING_PROJECTIONS.get(id);
       if (pending != null
           && pending.owner == owner
           && pending.definition == definition
+          && pending.lengths.equals(lengths)
           && pending.orientation == orientation
           && pending.epoch == StructureService.definitionEpoch()) {
         return;
@@ -143,6 +185,7 @@ public final class AssemblyService {
       if (previous != null
           && previous.owner == owner
           && previous.pattern.machine().equals(machine)
+          && previous.pattern.dynamicLengths().equals(lengths)
           && previous.pattern.orientation() == orientation
           && previous.pattern.epoch() == StructureService.definitionEpoch()) {
         return;
@@ -150,8 +193,9 @@ public final class AssemblyService {
       PROJECTIONS.remove(id);
       ProjectionPayloads.clear(player, request = Math.incrementExact(request));
       long selectedRequest = request = Math.incrementExact(request);
-      PENDING_PROJECTIONS
-          .put(id, new PendingProjection(owner, player.serverLevel(), definition, orientation, selectedRequest, hand));
+      PENDING_PROJECTIONS.put(
+          id,
+          new PendingProjection(owner, player.serverLevel(), definition, orientation, lengths, selectedRequest, hand));
       // Header lets the client cancel by distance even during preparation.
       ProjectionPayloads.begin(
           player,
@@ -159,11 +203,17 @@ public final class AssemblyService {
           StructureService.definitionEpoch(),
           machine,
           owner.structurePosition(),
-          definition.parts().size());
+          Math.max(1, definition.parts().size()));
       return;
     }
-    var pattern = AssemblyPattern
-        .compile(definition, StructureService.definitionEpoch(), owner.structurePosition(), orientation);
+    final AssemblyPattern pattern;
+    try {
+      pattern = AssemblyPattern
+          .compile(definition, StructureService.definitionEpoch(), owner.structurePosition(), orientation, lengths);
+    } catch (IllegalArgumentException invalid) {
+      player.displayClientMessage(Component.translatable("message.mmcece.assembly.failed", invalid.getMessage()), true);
+      return;
+    }
     if (build && player.isCreative()) {
       try {
         var result = creativeBuild(player, pattern);
@@ -198,6 +248,168 @@ public final class AssemblyService {
         && !UpgradeLifecyclePublisher.isDispatchingAny()
         && !RecipeLifecyclePublisher.isDispatching()
         && !SmartInterfaceEventPublisher.isDispatching();
+  }
+
+  private static LengthSelection lengthSelection(ServerPlayer player, MachineDefinition definition) {
+    var selections = LENGTH_SELECTIONS.get(player.getUUID());
+    var selected = selections == null ? null : selections.get(definition.id());
+    if (selected != null
+        && (selected.definition() != definition || selected.epoch() != StructureService.definitionEpoch())) {
+      selections.remove(definition.id());
+      return null;
+    }
+    return selected;
+  }
+
+  private static Map<String, Integer> selectedLengths(ServerPlayer player, StructureService.StructureSubject owner, MachineDefinition definition) {
+    var selected = lengthSelection(player, definition);
+    if (selected != null) {
+      return definition.defaultDynamicLengths(selected.size());
+    }
+    var registration = owner.structureRegistration();
+    if (registration != null
+        && registration.pattern.definition.sourceDefinition() == definition
+        && registration.canCommit(player.serverLevel())) {
+      return registration.dynamicLengths();
+    }
+    return definition.defaultDynamicLengths(-1);
+  }
+
+  /**
+   * Read-only preview plus a bounded, session-local construction length choice.
+   */
+  public static void requestBlueprintPreview(ServerPlayer player, BlueprintPreviewPayloads.Request request) {
+    ServerThreadGuard.require(player.serverLevel(), "Blueprint preview request");
+    var held = MachineBlueprintItem.binding(player.getItemInHand(request.hand()));
+    var definition = StructureService.definition(request.machine());
+    if (!player.isAlive()
+        || UpgradeLifecyclePublisher.isDispatchingAny()
+        || RecipeLifecyclePublisher.isDispatching()
+        || SmartInterfaceEventPublisher.isDispatching()
+        || held == null
+        || !held.machine().equals(request.machine())
+        || definition == null) {
+      BlueprintPreviewPayloads.invalidate(player, request);
+      return;
+    }
+    int maximum = definition.dynamicPatterns().stream().mapToInt(pattern -> pattern.maximum()).max().orElse(0);
+    if (request.size() > maximum) {
+      BlueprintPreviewPayloads.invalidate(player, request);
+      return;
+    }
+    var previous = lengthSelection(player, definition);
+    int size = request.size();
+    if (size < 0 && previous != null) {
+      size = previous.size();
+    }
+    var orientation = previewOrientation(definition, held.orientation());
+    PENDING_BLUEPRINTS.put(player.getUUID(), new PendingBlueprint(player, request, definition, orientation, size));
+  }
+
+  private static MachineOrientation previewOrientation(MachineDefinition definition, MachineOrientation requested) {
+    return definition.allows(requested) ? requested : MachineOrientation.all().stream().filter(definition::allows)
+        .findFirst().orElseThrow();
+  }
+
+  private static void commitLengthSelection(ServerPlayer player, PendingBlueprint pending) {
+    pending.selectionCommitted = true;
+    if (pending.request.size() < 0 || !pending.definition.hasDynamicPatterns()) {
+      return;
+    }
+    var definition = pending.definition;
+    var selected = pending.ready.pattern().dynamicLengths();
+    var choices = LENGTH_SELECTIONS.computeIfAbsent(player.getUUID(), ignored -> new LinkedHashMap<>(16, .75F, true));
+    choices.put(definition.id(), new LengthSelection(definition, pending.epoch, pending.size));
+    while (choices.size() > 16) {
+      choices.remove(choices.keySet().iterator().next());
+    }
+    var job = JOBS.get(player.getUUID());
+    if (job != null
+        && job.pattern.machine().equals(definition.id())
+        && !job.pattern.dynamicLengths().equals(selected)) {
+      JOBS.remove(player.getUUID());
+    }
+    var projection = PROJECTIONS.get(player.getUUID());
+    var preparing = PENDING_PROJECTIONS.get(player.getUUID());
+    if (projection != null
+        && projection.pattern.machine().equals(definition.id())
+        && !projection.pattern.dynamicLengths().equals(selected)
+        || preparing != null && preparing.definition == definition && !preparing.lengths.equals(selected)) {
+      PROJECTIONS.remove(player.getUUID());
+      PENDING_PROJECTIONS.remove(player.getUUID());
+      ProjectionPayloads.clear(player, request = Math.incrementExact(request));
+    }
+  }
+
+  private static boolean current(ServerPlayer player, PendingBlueprint pending) {
+    var held = MachineBlueprintItem.binding(player.getItemInHand(pending.request.hand()));
+    return player.level() == pending.level
+        && player.isAlive()
+        && pending.epoch == StructureService.definitionEpoch()
+        && StructureService.definition(pending.definition.id()) == pending.definition
+        && held != null
+        && held.machine().equals(pending.definition.id())
+        && previewOrientation(pending.definition, held.orientation()) == pending.orientation;
+  }
+
+  private static int advanceBlueprint(ServerPlayer player, long deadline, int packetBudget) {
+    var pending = PENDING_BLUEPRINTS.get(player.getUUID());
+    if (pending == null) {
+      return 0;
+    }
+    if (!current(player, pending)) {
+      PENDING_BLUEPRINTS.remove(player.getUUID());
+      BlueprintPreviewPayloads.invalidate(player, pending.request);
+      return 0;
+    }
+    if (System.nanoTime() >= deadline || packetBudget <= 0) {
+      return 0;
+    }
+    try {
+      if (pending.ready == null) {
+        pending.ready = pending.preparation.advance(deadline);
+      }
+      if (pending.ready == null || !current(player, pending)) {
+        return 0;
+      }
+      if (!pending.selectionCommitted) {
+        commitLengthSelection(player, pending);
+      }
+      int packets = 0;
+      do {
+        pending.sent = BlueprintPreviewPayloads.sendChunk(
+            player,
+            pending.request,
+            pending.epoch,
+            pending.definition.hasDynamicPatterns(),
+            pending.size,
+            pending.minimum,
+            pending.maximum,
+            pending.definition.color(),
+            pending.orientation,
+            pending.ready.entries(),
+            pending.sent);
+        packets++;
+        if (pending.sent == pending.ready.entries().size()) {
+          PENDING_BLUEPRINTS.remove(player.getUUID(), pending);
+          break;
+        }
+      } while (packets < packetBudget && System.nanoTime() < deadline);
+      return packets;
+    } catch (RuntimeException failure) {
+      PENDING_BLUEPRINTS.remove(player.getUUID(), pending);
+      BlueprintPreviewPayloads.invalidate(
+          player,
+          pending.request,
+          pending.definition.hasDynamicPatterns(),
+          pending.size,
+          pending.minimum,
+          pending.maximum,
+          pending.definition.color(),
+          pending.orientation);
+      ModularMachine.LOGGER.warn("Blueprint preview preparation failed for {}", pending.definition.id(), failure);
+      return 0;
+    }
   }
 
   public static void cancelProjection(ServerPlayer player) {
@@ -329,6 +541,7 @@ public final class AssemblyService {
     if (!validPlayer(player)
         || player.level() != job.level
         || job.pattern.epoch() != StructureService.definitionEpoch()
+        || job.pattern.sourceDefinition() != StructureService.definition(job.pattern.machine())
         || !job.level.hasChunkAt(job.pattern.origin())
         || !job.level.mayInteract(player, job.pattern.origin())
         || job.build && !player.canInteractWithBlock(job.pattern.origin(), 0)) {
@@ -346,6 +559,7 @@ public final class AssemblyService {
     var identities = new LinkedHashSet<>(JOBS.keySet());
     identities.addAll(PROJECTIONS.keySet());
     identities.addAll(PENDING_PROJECTIONS.keySet());
+    identities.addAll(PENDING_BLUEPRINTS.keySet());
     var players = new ArrayList<>(identities);
     if (players.isEmpty()) {
       return;
@@ -361,6 +575,8 @@ public final class AssemblyService {
         JOBS.remove(id);
         PROJECTIONS.remove(id);
         PENDING_PROJECTIONS.remove(id);
+        PENDING_BLUEPRINTS.remove(id);
+        LENGTH_SELECTIONS.remove(id);
       } else {
         prepareProjection(player, projectionDeadline);
         var projection = PROJECTIONS.get(id);
@@ -380,6 +596,7 @@ public final class AssemblyService {
           }
         }
         advance(player);
+        packets += advanceBlueprint(player, projectionDeadline, Math.min(32, 64 - packets));
       }
     }
     playerCursor = (start + 1) % players.size();
@@ -614,12 +831,16 @@ public final class AssemblyService {
     JOBS.remove(event.getEntity().getUUID());
     PROJECTIONS.remove(event.getEntity().getUUID());
     PENDING_PROJECTIONS.remove(event.getEntity().getUUID());
+    PENDING_BLUEPRINTS.remove(event.getEntity().getUUID());
+    LENGTH_SELECTIONS.remove(event.getEntity().getUUID());
   }
   @SubscribeEvent
   public static void stopped(ServerStoppedEvent event) {
     JOBS.clear();
     PROJECTIONS.clear();
     PENDING_PROJECTIONS.clear();
+    PENDING_BLUEPRINTS.clear();
+    LENGTH_SELECTIONS.clear();
     ProjectionPreparation.clearCache();
     placing = false;
     budgetTick = -1;

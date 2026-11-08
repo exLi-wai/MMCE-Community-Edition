@@ -189,7 +189,9 @@ public final class FactoryParallelStarter {
                 ticket.allPorts(),
                 factory.getLevel().getGameTime(),
                 upgrades,
-                ticket.inputGroup()));
+                ticket.inputGroup(),
+                1,
+                ticket.dynamicLengths()));
       }
       if (uniquePlans.stream().anyMatch(plan -> !plan.factoryAdmissionCurrent(factory, threadId))) {
         return Result.STALE;

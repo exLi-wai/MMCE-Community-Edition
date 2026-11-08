@@ -113,7 +113,8 @@ public final class AtomicRecipeStarter {
           controller.getLevel().getGameTime(),
           plan.source().ordinaryUpgrades(),
           effectivePlan.source().inputGroup(),
-          instances);
+          instances,
+          effectivePlan.source().dynamicLengths());
       startedRun = run;
       Map<String, NonNullList<ItemStack>> replacements = new HashMap<>();
       var deductions = new HashSet<ItemSlotRef>();

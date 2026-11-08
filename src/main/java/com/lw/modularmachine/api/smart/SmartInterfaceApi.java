@@ -81,7 +81,7 @@ public final class SmartInterfaceApi {
       return Optional.empty();
     }
     MachineDefinition definition = registration.pattern.definition;
-    if (definition != StructureService.definition(controller.structureMachineId())) {
+    if (definition.sourceDefinition() != StructureService.definition(controller.structureMachineId())) {
       return Optional.empty();
     }
     var values = new ArrayList<Value>();

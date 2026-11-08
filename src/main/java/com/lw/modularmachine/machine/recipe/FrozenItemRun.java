@@ -47,6 +47,7 @@ public final class FrozenItemRun {
       "definition_epoch",
       "definition",
       "ports",
+      "dynamic_lengths",
       "input_group",
       "parallel_instances",
       "parallel_base",
@@ -72,6 +73,7 @@ public final class FrozenItemRun {
   private final Map<String, Integer> logicalInputGroups;
   private final int parallelInstances;
   private final int parallelBase;
+  private final Map<String, Integer> dynamicLengths;
 
   private FrozenItemRun(CompoundTag source, HolderLookup.Provider registries) {
     for (String key : source.getAllKeys()) {
@@ -96,6 +98,24 @@ public final class FrozenItemRun {
       throw new IllegalArgumentException("Invalid or future run header");
     }
     schema = source.getInt("schema");
+    if (source.contains("dynamic_lengths") && !source.contains("dynamic_lengths", Tag.TAG_COMPOUND)) {
+      throw new IllegalArgumentException("Invalid frozen dynamic lengths");
+    }
+    var frozenLengths = source.getCompound("dynamic_lengths");
+    var lengths = new LinkedHashMap<String, Integer>();
+    if (frozenLengths.size() > 64) {
+      throw new IllegalArgumentException("Too many frozen dynamic segments");
+    }
+    for (String id : frozenLengths.getAllKeys()) {
+      if (id.isBlank()
+          || id.length() > 128
+          || !frozenLengths.contains(id, Tag.TAG_INT)
+          || frozenLengths.getInt(id) < 0) {
+        throw new IllegalArgumentException("Invalid frozen dynamic segment length");
+      }
+      lengths.put(id, frozenLengths.getInt(id));
+    }
+    dynamicLengths = Map.copyOf(lengths);
     if (source.contains("input_group") && !source.contains("input_group", Tag.TAG_INT)) {
       throw new IllegalArgumentException("Invalid frozen input group");
     }
@@ -221,6 +241,7 @@ public final class FrozenItemRun {
     logicalInputGroups = before.logicalInputGroups;
     parallelInstances = before.parallelInstances;
     parallelBase = before.parallelBase;
+    dynamicLengths = before.dynamicLengths;
     schema = 3;
     this.progress = progress;
     this.state = state;
@@ -248,6 +269,10 @@ public final class FrozenItemRun {
   }
 
   static FrozenItemRun freeze(ResourceLocation recipeId, MachineRecipe recipe, long epoch, HolderLookup.Provider registries, List<RecipeExecutionTicket.PortSnapshot> ports, long tick, FactoryUpgradeSnapshot upgrades, int inputGroup, int parallelInstances) {
+    return freeze(recipeId, recipe, epoch, registries, ports, tick, upgrades, inputGroup, parallelInstances, Map.of());
+  }
+
+  static FrozenItemRun freeze(ResourceLocation recipeId, MachineRecipe recipe, long epoch, HolderLookup.Provider registries, List<RecipeExecutionTicket.PortSnapshot> ports, long tick, FactoryUpgradeSnapshot upgrades, int inputGroup, int parallelInstances, Map<String, Integer> dynamicLengths) {
     var encodedDefinition = Recipe.CODEC.encodeStart(registries.createSerializationContext(NbtOps.INSTANCE), recipe)
         .getOrThrow();
     if (!(encodedDefinition instanceof CompoundTag)) {
@@ -287,6 +312,11 @@ public final class FrozenItemRun {
       mapping.add(entry);
     }
     tag.put("ports", mapping);
+    if (!dynamicLengths.isEmpty()) {
+      var lengths = new CompoundTag();
+      dynamicLengths.forEach(lengths::putInt);
+      tag.put("dynamic_lengths", lengths);
+    }
 
     return read(tag, registries);
   }
@@ -428,7 +458,10 @@ public final class FrozenItemRun {
       }
     }
 
-    return machineId.equals(definition.id()) && logicalPorts.equals(roles) && logicalSelectors.equals(labels);
+    return machineId.equals(definition.id())
+        && dynamicLengths.equals(definition.dynamicLengths())
+        && logicalPorts.equals(roles)
+        && logicalSelectors.equals(labels);
   }
 
   public boolean pendingOutput() {
@@ -505,6 +538,7 @@ public final class FrozenItemRun {
         && machineId.equals(other.machineId)
         && recipeId.equals(other.recipeId)
         && duration == other.duration
+        && dynamicLengths.equals(other.dynamicLengths)
         && logicalPorts.equals(other.logicalPorts)
         && logicalSelectors.equals(other.logicalSelectors)
         && (data == other.data || data.getCompound("definition").equals(other.data.getCompound("definition")));

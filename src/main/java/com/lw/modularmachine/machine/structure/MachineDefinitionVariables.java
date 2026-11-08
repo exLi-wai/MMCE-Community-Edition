@@ -64,11 +64,23 @@ final class MachineDefinitionVariables {
   }
 
   JsonObject expandParts(JsonObject root, String source) {
-    if (!root.has("parts") || !root.get("parts").isJsonArray()) {
-      return root;
-    }
     JsonObject copy = root.deepCopy();
-    var parts = copy.getAsJsonArray("parts");
+    if (copy.has("parts") && copy.get("parts").isJsonArray()) {
+      expandParts(copy.getAsJsonArray("parts"), source + ": $.parts");
+    }
+    var patterns = DynamicPatternDefinition.sources(copy, source + ": $");
+    for (int patternIndex = 0; patternIndex < patterns.size(); patternIndex++) {
+      var pattern = patterns.get(patternIndex);
+      for (String key : List.of("parts_start", "parts-start", "parts", "parts_end", "parts-end")) {
+        if (pattern.has(key) && pattern.get(key).isJsonArray()) {
+          expandParts(pattern.getAsJsonArray(key), source + ": $.dynamic_patterns[" + patternIndex + "]." + key);
+        }
+      }
+    }
+    return copy;
+  }
+
+  private void expandParts(JsonArray parts, String path) {
     for (int index = 0; index < parts.size(); index++) {
       if (!parts.get(index).isJsonObject()) {
         continue;
@@ -79,14 +91,13 @@ final class MachineDefinitionVariables {
       }
       JsonElement block = part.get("block");
       if (block.isJsonPrimitive() && block.getAsJsonPrimitive().isString() && values.containsKey(block.getAsString())) {
-        part.add("block", expandCandidates(block, source + ": $.parts[" + index + "].block"));
+        part.add("block", expandCandidates(block, path + "[" + index + "].block"));
       } else if (block.isJsonArray()) {
-        part.add("block", expandCandidates(block, source + ": $.parts[" + index + "].block"));
+        part.add("block", expandCandidates(block, path + "[" + index + "].block"));
       } else if (!block.isJsonPrimitive() || !block.getAsJsonPrimitive().isString()) {
-        throw new JsonParseException(source + ": $.parts[" + index + "].block must be a string or string array");
+        throw new JsonParseException(path + "[" + index + "].block must be a string or string array");
       }
     }
-    return copy;
   }
 
   private JsonArray expandCandidates(JsonElement value, String path) {

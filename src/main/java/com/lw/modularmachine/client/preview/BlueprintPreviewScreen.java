@@ -4,13 +4,20 @@ import com.lw.modularmachine.api.client.preview.PreviewCamera;
 import com.lw.modularmachine.api.client.preview.PreviewRenderer;
 import com.lw.modularmachine.api.client.preview.PreviewSceneData;
 import com.lw.modularmachine.api.client.preview.PreviewViewport;
+import com.lw.modularmachine.api.orientation.MachineOrientation;
 import com.lw.modularmachine.integration.jei.ClientMachineJeiCatalog;
 import com.lw.modularmachine.item.MachineBlueprintItem;
+import com.lw.modularmachine.block.MachineControllerBlock;
+import com.lw.modularmachine.block.FactoryControllerBlock;
+import com.lw.modularmachine.network.BlueprintPreviewPayloads;
+import com.lw.modularmachine.network.ProjectionPayloads;
+import java.util.ArrayList;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map.Entry;
 import java.util.Optional;
 import net.minecraft.Util;
+import net.minecraft.core.BlockPos;
 import net.minecraft.client.gui.GuiGraphics;
 import net.minecraft.client.gui.screens.Screen;
 import net.minecraft.network.chat.Component;
@@ -30,6 +37,13 @@ public final class BlueprintPreviewScreen extends Screen {
       .fromNamespaceAndPath("mmcece", "textures/gui/guiblueprint_new.png");
   private final ResourceLocation machine;
   private final InteractionHand hand;
+  private static long nextRequest;
+  private long previewRequest = -1;
+  private BlueprintPreviewPayloads.Snapshot previewHeader;
+  private final ArrayList<ProjectionPayloads.Entry> incoming = new ArrayList<>();
+  private ClientMachineJeiCatalog.Machine catalogDefinition;
+  private boolean awaitingPreview, previewFailed, dynamic;
+  private int dynamicSize = -1, dynamicMinimum, dynamicMaximum;
   private final PreviewRenderer renderer = PreviewRenderer.create();
   private final PreviewCamera camera = new PreviewCamera(89.9F);
   private List<PreviewSceneData.Entry> entries = List.of();
@@ -61,17 +75,115 @@ public final class BlueprintPreviewScreen extends Screen {
     if (definition == null) {
       return;
     }
+    catalogDefinition = definition;
     entries = definition.parts().stream()
         .map(part -> new PreviewSceneData.Entry(part.offset(), part.alternatives(), List.of())).toList();
+    applyScene(definition.color());
+    if (previewRequest < 0) {
+      requestPreview(-1);
+    }
+  }
+
+  private void applyScene(int color) {
     animated = entries.stream().filter(entry -> entry.states().size() > 1).toList();
     minY = entries.stream().mapToInt(entry -> entry.position().getY()).min().orElse(0);
     maxY = entries.stream().mapToInt(entry -> entry.position().getY()).max().orElse(0);
     layer = minY;
-    scene = new PreviewSceneData(definition.color(), entries);
+    selected = -1;
+    materialCounts.clear();
+    materialsInitialized = false;
+    scene = new PreviewSceneData(color, entries);
     baseScale = Math.max(.01F, Math.min(24F, 95F / scene.extent()));
     renderer.setScene(scene);
     updateMaterials();
     lastCycle = Util.getMillis();
+  }
+
+  private void requestPreview(int size) {
+    previewRequest = nextRequest = Math.incrementExact(nextRequest);
+    previewHeader = null;
+    incoming.clear();
+    awaitingPreview = true;
+    previewFailed = false;
+    BlueprintPreviewPayloads.request(previewRequest, hand, machine, size);
+  }
+
+  public void receive(BlueprintPreviewPayloads.Snapshot snapshot) {
+    var packet = snapshot.preview();
+    if (!awaitingPreview
+        || packet.request() != previewRequest
+        || !packet.machine().equals(machine)
+        || minecraft.level == null
+        || !packet.dimension().equals(minecraft.level.dimension().location())) {
+      return;
+    }
+    if (packet.start() == -1) {
+      awaitingPreview = false;
+      previewFailed = true;
+      incoming.clear();
+      if (snapshot.dynamic()) {
+        dynamic = true;
+        dynamicSize = snapshot.size();
+        dynamicMinimum = snapshot.minimum();
+        dynamicMaximum = snapshot.maximum();
+        if (scene == null) {
+          entries = List.of();
+          applyScene(snapshot.color());
+        }
+      }
+      return;
+    }
+    if (packet.start() == 0) {
+      previewHeader = snapshot;
+      incoming.clear();
+    }
+    if (previewHeader == null
+        || previewHeader.preview().epoch() != packet.epoch()
+        || previewHeader.preview().total() != packet.total()
+        || previewHeader.size() != snapshot.size()
+        || previewHeader.minimum() != snapshot.minimum()
+        || previewHeader.maximum() != snapshot.maximum()
+        || previewHeader.dynamic() != snapshot.dynamic()
+        || previewHeader.color() != snapshot.color()
+        || previewHeader.orientation() != snapshot.orientation()
+        || incoming.size() != packet.start()) {
+      return;
+    }
+    incoming.addAll(packet.entries());
+    if (incoming.size() != packet.total()) {
+      return;
+    }
+    var complete = new ArrayList<PreviewSceneData.Entry>();
+    if (catalogDefinition != null) {
+      catalogDefinition.parts().stream().filter(part -> part.offset().equals(BlockPos.ZERO)).findFirst().ifPresent(
+          part -> complete.add(
+              new PreviewSceneData.Entry(
+                  part.offset(),
+                  part.alternatives().stream().map(state -> controllerOrientation(state, snapshot.orientation()))
+                      .toList(),
+                  List.of())));
+    }
+    incoming.stream().map(part -> new PreviewSceneData.Entry(part.position(), part.states(), part.properties()))
+        .forEach(complete::add);
+    entries = List.copyOf(complete);
+    dynamic = snapshot.dynamic();
+    dynamicSize = snapshot.size();
+    dynamicMinimum = snapshot.minimum();
+    dynamicMaximum = snapshot.maximum();
+    incoming.clear();
+    awaitingPreview = false;
+    previewHeader = null;
+    applyScene(snapshot.color());
+  }
+
+  private static BlockState controllerOrientation(BlockState state, MachineOrientation orientation) {
+    if (state.getBlock() instanceof MachineControllerBlock) {
+      return MachineControllerBlock.withOrientation(state, orientation);
+    }
+    if (state.getBlock() instanceof FactoryControllerBlock) {
+      return FactoryControllerBlock.withOrientation(state, orientation);
+    }
+    return state;
   }
   private BlockState shown(PreviewSceneData.Entry entry) {
     return entry.states().get(Math.floorMod(step, entry.states().size()));
@@ -105,7 +217,14 @@ public final class BlueprintPreviewScreen extends Screen {
       onClose();
       return;
     }
-    if (scene == null) {
+    var currentDefinition = ClientMachineJeiCatalog.machines().get(machine);
+    if (catalogDefinition != null && currentDefinition != catalogDefinition) {
+      catalogDefinition = currentDefinition;
+      scene = null;
+      renderer.close();
+      requestPreview(-1);
+    }
+    if (scene == null && !previewFailed && !awaitingPreview) {
       init();
     }
     var held = MachineBlueprintItem.binding(minecraft.player.getItemInHand(hand));
@@ -124,6 +243,8 @@ public final class BlueprintPreviewScreen extends Screen {
   }
   @Override
   public void removed() {
+    awaitingPreview = false;
+    incoming.clear();
     renderer.close();
     super.removed();
   }
@@ -136,7 +257,8 @@ public final class BlueprintPreviewScreen extends Screen {
     if (scene == null) {
       graphics.drawString(
           font,
-          Component.translatable("message.mmcece.blueprint.invalid"),
+          Component.translatable(
+              awaitingPreview ? "gui.mmcece.blueprint.dynamic_waiting" : "message.mmcece.blueprint.invalid"),
           left + 6,
           top + 30,
           0xFFFF5555,
@@ -165,9 +287,22 @@ public final class BlueprintPreviewScreen extends Screen {
     if (menu) {
       button(graphics, 150, 161, 30, layers, mouseX, mouseY);
       button(graphics, 135, 161, 105, cycle, mouseX, mouseY);
+      if (dynamic) {
+        button(graphics, 120, 161, 60, false, mouseX, mouseY);
+        button(graphics, 105, 161, 75, false, mouseX, mouseY);
+      }
     }
     button(graphics, 150, 28, 229, false, mouseX, mouseY);
     button(graphics, 165, 28, 214, false, mouseX, mouseY);
+    if (previewFailed) {
+      graphics.drawString(
+          font,
+          Component.translatable("gui.mmcece.blueprint.dynamic_invalid"),
+          left + 8,
+          top + 145,
+          0xFFFF5555,
+          true);
+    }
     for (int index = 0; index < 18 && page * 18 + index < materials.size(); index++) {
       var stack = materials.get(page * 18 + index);
       int x = left + 6 + index % 9 * 19, y = top + 180 + index / 9 * 18;
@@ -227,6 +362,14 @@ public final class BlueprintPreviewScreen extends Screen {
             Component.translatable(
                 cycle ? "gui.preview.button.disable_cycle_replaceable_blocks.tip" : "gui.preview.button.enable_cycle_replaceable_blocks.tip.0"));
       }
+      if (menu && dynamic && x >= 105 && x < 133) {
+        return List.of(
+            Component.translatable(
+                x >= 120 ? "gui.preview.button.dynamic_pattern_plus.tip" : "gui.preview.button.dynamic_pattern_subtract.tip",
+                dynamicSize < 0 ? dynamicMinimum : dynamicSize),
+            Component.translatable(
+                awaitingPreview ? "gui.mmcece.blueprint.dynamic_waiting" : "gui.mmcece.blueprint.dynamic_selection"));
+      }
     }
     if (y >= 28 && y < 41 && x >= 150 && x < 163) {
       return List.of(Component.translatable("gui.preview.button.reset_center.tip"));
@@ -251,6 +394,14 @@ public final class BlueprintPreviewScreen extends Screen {
       if (menu && x >= 135 && x < 148) {
         cycle = !cycle;
         lastCycle = Util.getMillis();
+        return true;
+      }
+      if (menu && dynamic && (x >= 105 && x < 118 || x >= 120 && x < 133)) {
+        if (!awaitingPreview) {
+          long current = dynamicSize < 0 ? dynamicMinimum : dynamicSize;
+          int target = (int) Math.max(0L, Math.min(dynamicMaximum, current + (x >= 120 ? 1L : -1L)));
+          requestPreview(target);
+        }
         return true;
       }
     }

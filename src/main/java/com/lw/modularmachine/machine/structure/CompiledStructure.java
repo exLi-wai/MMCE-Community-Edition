@@ -229,6 +229,9 @@ public final class CompiledStructure {
     private CompiledStructure result;
 
     private Builder(MachineDefinition definition, BlockPos origin, MachineOrientation orientation) {
+      if (definition.hasDynamicPatterns()) {
+        throw new IllegalArgumentException("Resolve dynamic structure lengths before compiling a layout");
+      }
       this.definition = definition;
       this.origin = origin.immutable();
       this.orientation = orientation;
@@ -343,15 +346,24 @@ public final class CompiledStructure {
 
   public CheckResult checkBase(ServerLevel level, int index) {
     BlockPos pos = positions.get(index);
+    return checkPart(
+        level,
+        pos,
+        definition.parts().get(index),
+        resolvedRules.get(index),
+        rotateProperties[index] ? inverseRotation : Rotation.NONE);
+  }
+
+  /** Shared main-thread predicate for fixed layouts and dynamic length probes. */
+  static CheckResult checkPart(ServerLevel level, BlockPos pos, MachineDefinition.Part part, MachineDefinition.Rule rule, Rotation inverse) {
     if (level.isOutsideBuildHeight(pos) || !level.hasChunkAt(pos)) {
       return CheckResult.UNAVAILABLE;
     }
-    var part = definition.parts().get(index);
     var state = level.getBlockState(pos);
-    if (rotateProperties[index]) {
-      state = state.rotate(inverseRotation);
+    if (inverse != Rotation.NONE) {
+      state = state.rotate(inverse);
     }
-    if (!resolvedRules.get(index).matches(state)) {
+    if (!rule.matches(state)) {
       return CheckResult.MISMATCH;
     }
     if (part.rule().port() != null) {
