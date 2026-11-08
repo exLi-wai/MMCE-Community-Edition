@@ -158,7 +158,6 @@ dependencies {
     localRuntime "curse.maven:modonomicon-538392:${modonomicon_file_id}"
     localRuntime "curse.maven:observerlib-316833:${observerlib_file_id}"
     localRuntime "curse.maven:thaumaturge-1628024:${thaumaturge_file_id}"
-    localRuntime "curse.maven:emi-580555:${emi_file_id}"
     localRuntime "curse.maven:Lithostitched-936015:${Lithostitched_file_id}"
     localRuntime("vazkii.botania:botania-neoforge-1.21.1:${botania_version}") {exclude group: 'mezz.jei'}
 }

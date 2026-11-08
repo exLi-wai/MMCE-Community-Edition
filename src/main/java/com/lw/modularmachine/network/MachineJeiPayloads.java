@@ -34,6 +34,37 @@ public final class MachineJeiPayloads {
   private static Consumer<Snapshot> receiver = ignored -> {
   };
   public static final int CHUNK_PARTS = 32;
+  public static final int MAX_PARTS = 4_194_305;
+
+  /** Template counts refer to the declaration stream after the fixed parts. */
+  public record Segment(
+      String id,
+      int minimum,
+      int maximum,
+      BlockPos origin,
+      BlockPos step,
+      int head,
+      int body,
+      int tail) {
+    public Segment {
+      origin = origin.immutable();
+      step = step.immutable();
+      if (!id.matches("[a-zA-Z0-9_.-]{1,64}")
+          || minimum < 0
+          || maximum < minimum
+          || step.equals(BlockPos.ZERO)
+          || head < 0
+          || body <= 0
+          || tail < 0
+          || (long) head + (long) maximum * body + tail >= MAX_PARTS) {
+        throw new IllegalArgumentException("Invalid display segment");
+      }
+    }
+
+    public int templates() {
+      return Math.addExact(Math.addExact(head, body), tail);
+    }
+  }
   public record Part(BlockPos offset, List<BlockState> alternatives) {
     public Part {
       offset = offset.immutable();
@@ -51,9 +82,12 @@ public final class MachineJeiPayloads {
       int color,
       int start,
       int total,
+      int fixed,
+      List<Segment> segments,
       List<Part> parts) implements CustomPacketPayload {
     public Snapshot {
       parts = List.copyOf(parts);
+      segments = List.copyOf(segments);
       if (epoch < 0
           || machines < 0
           || machines > 1024
@@ -62,6 +96,11 @@ public final class MachineJeiPayloads {
           || color > 0xFFFFFF
           || start < -2
           || total < 0
+          || total > MAX_PARTS
+          || fixed < 0
+          || fixed > total
+          || segments.size() > 64
+          || start != 0 && !segments.isEmpty()
           || parts.size() > CHUNK_PARTS
           || start >= 0 && start + parts.size() > total) {
         throw new IllegalArgumentException("Invalid JEI snapshot");
@@ -78,7 +117,7 @@ public final class MachineJeiPayloads {
     receiver = Objects.requireNonNull(value);
   }
   public static void register(RegisterPayloadHandlersEvent event) {
-    event.registrar("2").playToClient(
+    event.registrar("3").playToClient(
         TYPE,
         StreamCodec.of(MachineJeiPayloads::write, MachineJeiPayloads::read),
         (payload, context) -> context.enqueueWork(() -> receiver.accept(payload)));
@@ -91,6 +130,18 @@ public final class MachineJeiPayloads {
     buffer.writeInt(value.color());
     buffer.writeInt(value.start());
     buffer.writeVarInt(value.total());
+    buffer.writeVarInt(value.fixed());
+    buffer.writeVarInt(value.segments().size());
+    for (var segment : value.segments()) {
+      buffer.writeUtf(segment.id(), 64);
+      buffer.writeVarInt(segment.minimum());
+      buffer.writeVarInt(segment.maximum());
+      writePosition(buffer, segment.origin());
+      writePosition(buffer, segment.step());
+      buffer.writeVarInt(segment.head());
+      buffer.writeVarInt(segment.body());
+      buffer.writeVarInt(segment.tail());
+    }
     buffer.writeVarInt(value.parts().size());
     for (var part : value.parts()) {
       buffer.writeBlockPos(part.offset());
@@ -108,6 +159,24 @@ public final class MachineJeiPayloads {
     int color = buffer.readInt();
     int start = buffer.readInt();
     int total = buffer.readVarInt();
+    int fixed = buffer.readVarInt();
+    int segmentCount = buffer.readVarInt();
+    if (segmentCount < 0 || segmentCount > 64) {
+      throw new IllegalArgumentException("Too many display segments");
+    }
+    var segments = new ArrayList<Segment>();
+    for (int i = 0; i < segmentCount; i++) {
+      segments.add(
+          new Segment(
+              buffer.readUtf(64),
+              buffer.readVarInt(),
+              buffer.readVarInt(),
+              readPosition(buffer),
+              readPosition(buffer),
+              buffer.readVarInt(),
+              buffer.readVarInt(),
+              buffer.readVarInt()));
+    }
     int count = buffer.readVarInt();
     if (count < 0 || count > CHUNK_PARTS) {
       throw new IllegalArgumentException("Too many preview parts");
@@ -125,7 +194,17 @@ public final class MachineJeiPayloads {
       }
       parts.add(new Part(offset, states));
     }
-    return new Snapshot(epoch, machines, machine, translation, color, start, total, parts);
+    return new Snapshot(epoch, machines, machine, translation, color, start, total, fixed, segments, parts);
+  }
+
+  private static void writePosition(RegistryFriendlyByteBuf buffer, BlockPos position) {
+    buffer.writeInt(position.getX());
+    buffer.writeInt(position.getY());
+    buffer.writeInt(position.getZ());
+  }
+
+  private static BlockPos readPosition(RegistryFriendlyByteBuf buffer) {
+    return new BlockPos(buffer.readInt(), buffer.readInt(), buffer.readInt());
   }
   @SubscribeEvent
   public static void sync(OnDatapackSyncEvent event) {
@@ -134,12 +213,23 @@ public final class MachineJeiPayloads {
     var packets = new ArrayList<Snapshot>();
     long epoch = StructureService.definitionEpoch();
     var marker = ResourceLocation.fromNamespaceAndPath(ModularMachine.MODID, "catalog");
-    packets.add(new Snapshot(epoch, definitions.size(), marker, "", 0xFFFFFF, -1, 0, List.of()));
+    packets.add(new Snapshot(epoch, definitions.size(), marker, "", 0xFFFFFF, -1, 0, 0, List.of(), List.of()));
     for (var definition : definitions) {
+      var segments = definition.dynamicPatterns().stream()
+          .map(
+              segment -> new Segment(
+                  segment.id(),
+                  segment.minimum(),
+                  segment.maximum(),
+                  segment.startOffset(),
+                  segment.step(),
+                  segment.start().size(),
+                  segment.body().size(),
+                  segment.end().size()))
+          .toList();
       var parts = new ArrayList<Part>();
       parts.add(new Part(BlockPos.ZERO, List.of(controllerState(definition))));
-      for (int index = 0; index < definition.parts().size(); index++) {
-        var part = definition.parts().get(index);
+      for (var part : definition.declarationParts()) {
         var states = new LinkedHashSet<BlockState>(states(part.rule()));
         parts.add(new Part(part.offset(), new ArrayList<>(states)));
       }
@@ -153,10 +243,12 @@ public final class MachineJeiPayloads {
                 definition.color(),
                 start,
                 parts.size(),
+                definition.parts().size() + 1,
+                start == 0 ? segments : List.of(),
                 parts.subList(start, Math.min(parts.size(), start + CHUNK_PARTS))));
       }
     }
-    packets.add(new Snapshot(epoch, definitions.size(), marker, "", 0xFFFFFF, -2, 0, List.of()));
+    packets.add(new Snapshot(epoch, definitions.size(), marker, "", 0xFFFFFF, -2, 0, 0, List.of(), List.of()));
     List<ServerPlayer> players = event.getPlayer() == null ? event.getPlayerList().getPlayers() : List
         .of(event.getPlayer());
     for (var player : players) {

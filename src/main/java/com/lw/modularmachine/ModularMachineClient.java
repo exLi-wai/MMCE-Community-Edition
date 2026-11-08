@@ -12,6 +12,7 @@ import com.lw.modularmachine.client.preview.CachedPreviewRenderer;
 import com.lw.modularmachine.client.preview.BlueprintPreviewScreen;
 import com.lw.modularmachine.client.preview.PreviewBlockView;
 import com.lw.modularmachine.client.preview.WorldProjection;
+import com.lw.modularmachine.client.selection.RangedSelectionClient;
 import com.lw.modularmachine.block.FactoryControllerBlock;
 import com.lw.modularmachine.block.MachineCasingBlock;
 import com.lw.modularmachine.block.MachineControllerBlock;
@@ -209,6 +210,8 @@ public class ModularMachineClient {
   }
 
   static void SetClientReceiver() {
+    RangedSelectionPayloads.setReceiver(RangedSelectionClient::receive);
+    RangedSelectionPayloads.setPreviewReceiver(RangedSelectionClient::receivePreview);
     ParallelControllerPayloads.setClientReceiver(payload -> {
       var player = Minecraft.getInstance().player;
       if (player != null && player.containerMenu instanceof ParallelControllerMenu menu) {

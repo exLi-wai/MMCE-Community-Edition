@@ -33,6 +33,11 @@ public final class DynamicStructureMatcher {
     CheckResult check(BlockPos position, MachineDefinition.Part part, MachineDefinition.Rule rule, Rotation inverse);
   }
 
+  @FunctionalInterface
+  interface Watch {
+    void accept(int segment, BlockPos position, boolean contents);
+  }
+
   private record Probe(MachineDefinition.Part part, MachineDefinition.Rule rule, Rotation inverse) {
   }
 
@@ -47,6 +52,7 @@ public final class DynamicStructureMatcher {
   private final List<Segment> segments;
   private final Map<String, Integer> lengths = new LinkedHashMap<>();
   private int segmentIndex, count, cursor;
+  private long pendingSegments;
   private Phase phase = Phase.START;
   private Failure failure;
 
@@ -64,6 +70,7 @@ public final class DynamicStructureMatcher {
               probes(segment.end(), segment.endCompilation(), orientation)));
     }
     segments = List.copyOf(prepared);
+    pendingSegments = segments.isEmpty() ? 0 : -1L >>> (64 - segments.size());
   }
 
   private static List<Probe> probes(List<MachineDefinition.Part> parts, OrientationCompilation compilation, MachineOrientation orientation) {
@@ -91,6 +98,10 @@ public final class DynamicStructureMatcher {
   }
 
   public int advance(ServerLevel level, int budget, BiConsumer<BlockPos, Boolean> watch) {
+    return advance(level, budget, (segment, position, contents) -> watch.accept(position, contents));
+  }
+
+  int advance(ServerLevel level, int budget, Watch watch) {
     ServerThreadGuard.require(level, "Dynamic structure length discovery");
     return advance(
         budget,
@@ -100,6 +111,10 @@ public final class DynamicStructureMatcher {
 
   /** Detached predicate driver; live reads remain in the guarded server entry. */
   int advance(int budget, BiConsumer<BlockPos, Boolean> watch, PartCheck check) {
+    return advance(budget, (segment, position, contents) -> watch.accept(position, contents), check);
+  }
+
+  int advance(int budget, Watch watch, PartCheck check) {
     int used = 0;
     while (used < budget && !complete()) {
       var segment = segments.get(segmentIndex);
@@ -122,7 +137,7 @@ public final class DynamicStructureMatcher {
           Math.addExact(origin.getY(), offset.getY()),
           Math.addExact(origin.getZ(), offset.getZ()));
       // Subscribe before reading, including the first nonmatching boundary.
-      watch.accept(position, probe.part().field() != null);
+      watch.accept(segmentIndex, position, probe.part().field() != null);
       var result = check.check(position, probe.part(), probe.rule(), probe.inverse());
       used++;
       if (result == CheckResult.MATCH) {
@@ -179,10 +194,39 @@ public final class DynamicStructureMatcher {
         return;
       }
       lengths.put(segment.definition().id(), length);
-      segmentIndex++;
+      pendingSegments &= ~(1L << segmentIndex);
+      segmentIndex = Long.numberOfTrailingZeros(pendingSegments);
       count = 0;
       phase = Phase.START;
     }
+  }
+
+  /**
+   * Main-thread invalidation keeps completed, independent segments and their
+   * rules.
+   */
+  long invalidate(long affected) {
+    long all = segments.isEmpty() ? 0 : -1L >>> (64 - segments.size());
+    affected &= all;
+    if (affected == 0) {
+      return 0;
+    }
+    if (failure != null) {
+      affected |= 1L << segmentIndex;
+    }
+    boolean restart = pendingSegments == 0 || failure != null || (affected & (1L << segmentIndex)) != 0;
+    for (long remaining = affected; remaining != 0; remaining &= remaining - 1) {
+      lengths.remove(segments.get(Long.numberOfTrailingZeros(remaining)).definition().id());
+    }
+    pendingSegments |= affected;
+    if (restart) {
+      segmentIndex = Long.numberOfTrailingZeros(pendingSegments);
+      count = 0;
+      cursor = 0;
+      phase = Phase.START;
+      failure = null;
+    }
+    return affected;
   }
 
   private static BlockPos translated(DynamicPatternDefinition segment, BlockPos part, int repetition) {
@@ -190,7 +234,7 @@ public final class DynamicStructureMatcher {
   }
 
   public boolean complete() {
-    return failure != null || segmentIndex == segments.size();
+    return failure != null || pendingSegments == 0;
   }
 
   public boolean matched() {

@@ -6,6 +6,7 @@ import com.google.gson.JsonParseException;
 import com.lw.modularmachine.machine.structure.MachineDefinition;
 import com.lw.modularmachine.machine.structure.StructureModifierDefinition;
 import java.util.ArrayList;
+import java.util.Arrays;
 import java.util.HashMap;
 import java.util.Iterator;
 import java.util.List;
@@ -147,7 +148,7 @@ public final class OrientationCompilation {
         allowedMask,
         diagnostics,
         diagnosticsTruncated,
-        java.util.Arrays.copyOf(replacementMasks, expandedParts.size()));
+        Arrays.copyOf(replacementMasks, expandedParts.size()));
   }
 
   public boolean allows(MachineOrientation orientation) {

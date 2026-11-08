@@ -14,6 +14,8 @@ import com.lw.modularmachine.machine.smart.SmartInterfaceEventPublisher;
 import com.lw.modularmachine.machine.structure.StructureService;
 import com.lw.modularmachine.network.GroupInputPayloads;
 import com.lw.modularmachine.network.BlueprintPreviewPayloads;
+import com.lw.modularmachine.network.RangedSelectionPayloads;
+import com.lw.modularmachine.machine.selection.RangedSelectionService;
 import com.lw.modularmachine.network.MachineJeiPayloads;
 import com.lw.modularmachine.network.MachineColorPayloads;
 import com.lw.modularmachine.network.MachinePayloads;
@@ -53,6 +55,7 @@ public class ModularMachine {
     modEventBus.addListener(DedicatedControllerResources::register);
     modEventBus.addListener(ProjectionPayloads::register);
     modEventBus.addListener(BlueprintPreviewPayloads::register);
+    modEventBus.addListener(RangedSelectionPayloads::register);
     modEventBus.addListener(MachinePayloads::register);
     modEventBus.addListener(UpgradeBusPayloads::register);
     modEventBus.addListener(SmartInterfacePayloads::register);
@@ -69,6 +72,7 @@ public class ModularMachine {
     modEventBus.addListener(MachineCapabilities::register);
     modContainer.registerConfig(ModConfig.Type.COMMON, MachineConfig.SPEC, "modularmachinery/mmcece-common.toml");
     NeoForge.EVENT_BUS.register(AssemblyService.class);
+    NeoForge.EVENT_BUS.register(RangedSelectionService.class);
     NeoForge.EVENT_BUS.register(StructureService.class);
     NeoForge.EVENT_BUS.register(MachineRecipeService.class);
     NeoForge.EVENT_BUS.register(MachineJeiPayloads.class);

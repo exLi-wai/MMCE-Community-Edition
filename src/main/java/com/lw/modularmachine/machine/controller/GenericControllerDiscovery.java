@@ -120,8 +120,7 @@ public final class GenericControllerDiscovery {
       if (layout == null) {
         if (definition.hasDynamicPatterns()) {
           var lengths = dynamicMatcher.lengths();
-          layout = AsyncStructureWork
-              .submit(() -> new CompiledStructure(definition.resolveDynamic(lengths), origin, pose));
+          layout = AsyncStructureWork.prepare(definition, lengths, origin, pose);
         } else {
           layout = AsyncStructureWork.prepare(definition, origin, pose);
         }

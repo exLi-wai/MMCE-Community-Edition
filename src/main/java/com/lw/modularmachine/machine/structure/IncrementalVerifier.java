@@ -68,6 +68,15 @@ public final class IncrementalVerifier {
     cursor = 0;
   }
 
+  /**
+   * An external dependency must be rechecked before accepting any pending
+   * snapshot.
+   */
+  void invalidateDependency(long now) {
+    beginRound(now);
+    revision = Math.incrementExact(revision);
+  }
+
   private void beginRound(long now) {
     if (state != VerificationState.PENDING) {
       roundStarted = now;

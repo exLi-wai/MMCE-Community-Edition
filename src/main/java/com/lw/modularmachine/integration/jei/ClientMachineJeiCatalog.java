@@ -2,6 +2,7 @@ package com.lw.modularmachine.integration.jei;
 
 import com.lw.modularmachine.ModularMachine;
 import com.lw.modularmachine.network.MachineJeiPayloads;
+import com.lw.modularmachine.client.preview.MachinePreviewDefinition;
 import java.util.ArrayList;
 import java.util.LinkedHashMap;
 import java.util.List;
@@ -18,14 +19,32 @@ import net.neoforged.neoforge.client.event.ClientPlayerNetworkEvent;
  */
 @EventBusSubscriber(modid = ModularMachine.MODID, value = Dist.CLIENT)
 public final class ClientMachineJeiCatalog {
-  public record Machine(ResourceLocation id, String translation, int color, List<MachineJeiPayloads.Part> parts) {
-    public Machine {
-      parts = List.copyOf(parts);
+  public record Machine(ResourceLocation id, String translation, int color, MachinePreviewDefinition preview) {
+    public List<MachineJeiPayloads.Part> parts() {
+      return preview.minimum();
+    }
+  }
+  private static final class Pending {
+    final MachineJeiPayloads.Snapshot header;
+    final List<MachineJeiPayloads.Part> parts = new ArrayList<>();
+
+    Pending(MachineJeiPayloads.Snapshot header) {
+      this.header = header;
+    }
+
+    Machine finish() {
+      if (parts.size() != header.total()) {
+        throw new IllegalArgumentException("Incomplete display template stream");
+      }
+      return new Machine(
+          header.machine(),
+          header.translation(),
+          header.color(),
+          new MachinePreviewDefinition(parts, header.fixed(), header.segments()));
     }
   }
   private static Map<ResourceLocation, Machine> active = Map.of();
-  private static final Map<ResourceLocation, Machine> pending = new LinkedHashMap<>();
-  private static final Map<ResourceLocation, Integer> totals = new LinkedHashMap<>();
+  private static final Map<ResourceLocation, Pending> pending = new LinkedHashMap<>();
   private static boolean receiving;
   private static long epoch = -1;
   private static int expected;
@@ -42,7 +61,6 @@ public final class ClientMachineJeiCatalog {
   public static void receive(MachineJeiPayloads.Snapshot packet) {
     if (packet.start() == -1) {
       pending.clear();
-      totals.clear();
       receiving = true;
       epoch = packet.epoch();
       expected = packet.machines();
@@ -53,38 +71,44 @@ public final class ClientMachineJeiCatalog {
       throw new IllegalArgumentException("Unpaired preview generation");
     }
     if (packet.start() == -2) {
-      if (pending.size() != expected
-          || pending.entrySet().stream()
-              .anyMatch(entry -> entry.getValue().parts().size() != totals.get(entry.getKey()))) {
+      if (pending.size() != expected) {
         throw new IllegalArgumentException("Incomplete preview generation");
       }
-      active = Map.copyOf(pending);
+      var complete = new LinkedHashMap<ResourceLocation, Machine>();
+      pending.forEach((id, value) -> complete.put(id, value.finish()));
+      active = Map.copyOf(complete);
       receiving = false;
-      totals.clear();
       pending.clear();
       return;
     }
-    var declared = totals.putIfAbsent(packet.machine(), packet.total());
-    if (packet.parts().isEmpty() || declared != null && declared != packet.total()) {
+    if (packet.parts().isEmpty()) {
       throw new IllegalArgumentException("Invalid preview total");
     }
     var previous = pending.get(packet.machine());
-    int size = previous == null ? 0 : previous.parts().size();
-    if (size != packet.start() || (positions += packet.parts().size()) > 4_194_304) {
+    if (previous == null) {
+      if (packet.start() != 0) {
+        throw new IllegalArgumentException("Missing preview header");
+      }
+      previous = new Pending(packet);
+      pending.put(packet.machine(), previous);
+    } else if (packet.start() == 0
+        || !packet.segments().isEmpty()
+        || previous.header.total() != packet.total()
+        || previous.header.fixed() != packet.fixed()
+        || previous.header.color() != packet.color()
+        || !previous.header.translation().equals(packet.translation())) {
+      throw new IllegalArgumentException("Changed preview metadata");
+    }
+    if (previous.parts.size() != packet.start()
+        || (positions += packet.parts().size()) > MachineJeiPayloads.MAX_PARTS) {
       throw new IllegalArgumentException("Invalid preview chunk ordering/size");
     }
-    var parts = new ArrayList<MachineJeiPayloads.Part>();
-    if (previous != null) {
-      parts.addAll(previous.parts());
-    }
-    parts.addAll(packet.parts());
-    pending.put(packet.machine(), new Machine(packet.machine(), packet.translation(), packet.color(), parts));
+    previous.parts.addAll(packet.parts());
   }
   @SubscribeEvent
   public static void logout(ClientPlayerNetworkEvent.LoggingOut event) {
     active = Map.of();
     pending.clear();
-    totals.clear();
     receiving = false;
     epoch = -1;
   }

@@ -9,13 +9,15 @@ import java.util.List;
 import java.util.Map;
 import java.util.concurrent.CompletableFuture;
 import net.minecraft.core.BlockPos;
+import org.jetbrains.annotations.ApiStatus;
 
 /**
  * Main-thread candidate capture, pure worker rule compilation/sort/packet
  * preparation.
  */
-final class ProjectionPreparation {
-  record Ready(AssemblyPattern pattern, List<ProjectionPayloads.Entry> entries) {
+@ApiStatus.Internal
+public final class ProjectionPreparation {
+  public record Ready(AssemblyPattern pattern, List<ProjectionPayloads.Entry> entries) {
   }
   private record Key(MachineDefinition definition, MachineOrientation orientation, Map<String, Integer> lengths) {
     @Override
@@ -49,7 +51,7 @@ final class ProjectionPreparation {
     this(definition, epoch, origin, orientation, definition.defaultDynamicLengths(-1));
   }
 
-  ProjectionPreparation(MachineDefinition definition, long epoch, BlockPos origin, MachineOrientation orientation, Map<String, Integer> lengths) {
+  public ProjectionPreparation(MachineDefinition definition, long epoch, BlockPos origin, MachineOrientation orientation, Map<String, Integer> lengths) {
     this.definition = definition;
     this.epoch = epoch;
     this.origin = origin.immutable();
@@ -62,7 +64,7 @@ final class ProjectionPreparation {
     template = TEMPLATES.get(key);
   }
 
-  Ready advance(long deadline) {
+  public Ready advance(long deadline) {
     if (template == null) {
       if (templateTask == null) {
         if (rules == null) {
@@ -133,5 +135,17 @@ final class ProjectionPreparation {
   static void clearCache() {
     TEMPLATES.clear();
     cacheEpoch = -1;
+  }
+
+  public void cancel() {
+    if (rules != null) {
+      rules.cancel(false);
+    }
+    if (templateTask != null) {
+      templateTask.cancel(false);
+    }
+    if (output != null) {
+      output.cancel(false);
+    }
   }
 }

@@ -12,6 +12,7 @@ import com.lw.modularmachine.machine.recipe.RecipeLifecyclePublisher;
 import com.lw.modularmachine.api.recipe.RecipeModifier;
 import com.lw.modularmachine.machine.smart.SmartInterfaceAssignment;
 import com.lw.modularmachine.machine.smart.SmartInterfaceEventPublisher;
+import com.lw.modularmachine.machine.selection.RangedSelectionTask;
 import com.lw.modularmachine.util.thread.ServerThreadGuard;
 import com.mojang.logging.LogUtils;
 import java.util.ArrayList;
@@ -308,6 +309,7 @@ public final class StructureService {
 
   public static void blockChanged(ServerLevel level, BlockPos pos) {
     ServerThreadGuard.require(level, "Structure state accessed");
+    RangedSelectionTask.blockChanged(level, pos);
     LevelState state = LEVELS.get(level);
     if (state == null) {
       return;
@@ -335,6 +337,7 @@ public final class StructureService {
 
   public static void resourceChanged(ServerLevel level, BlockPos pos) {
     ServerThreadGuard.require(level, "Structure state accessed");
+    RangedSelectionTask.resourceChanged(level, pos);
     LevelState state = LEVELS.get(level);
     if (state == null) {
       return;
@@ -408,7 +411,7 @@ public final class StructureService {
     var dynamic = state.dynamicChunks.get(chunk.toLong());
     if (dynamic != null) {
       for (var anchor : List.copyOf(dynamic)) {
-        request(anchor.controller, true, false);
+        restartDynamic(state, level, anchor, anchor.dynamicWatches.affectedChunk(chunk.toLong()));
       }
     }
     Set<Registration> watched = state.chunks.get(chunk.toLong());
@@ -504,19 +507,23 @@ public final class StructureService {
       anchor.dynamicPreparation = null;
       clearDynamicWatches(state, anchor);
     }
-    int used = anchor.dynamicMatcher.advance(level, budget, (position, contents) -> {
+    int used = anchor.dynamicWatches.advanceCleanup(
+        budget,
+        section -> removeDynamicWatch(state.dynamicSections, section, anchor),
+        chunk -> removeDynamicWatch(state.dynamicChunks, chunk, anchor));
+    if (!anchor.dynamicWatches.ready() || used >= budget) {
+      return used;
+    }
+    used += anchor.dynamicMatcher.advance(level, budget - used, (segment, position, contents) -> {
       long section = SectionPos.asLong(position);
       long chunk = ChunkPos.asLong(SectionPos.x(section), SectionPos.z(section));
-      if (anchor.dynamicSections.add(section)) {
+      if (!anchor.dynamicWatches.sections().contains(section)) {
         state.dynamicSections.computeIfAbsent(section, ignored -> new HashSet<>()).add(anchor);
       }
-      if (anchor.dynamicChunks.add(chunk)) {
+      if (!anchor.dynamicWatches.chunks().contains(chunk)) {
         state.dynamicChunks.computeIfAbsent(chunk, ignored -> new HashSet<>()).add(anchor);
       }
-      anchor.dynamicPositions.add(position.immutable());
-      if (contents) {
-        anchor.dynamicContents.add(position.immutable());
-      }
+      anchor.dynamicWatches.add(segment, position, contents);
     });
     if (anchor.dynamicMatcher.complete() && !anchor.dynamicMatcher.matched()) {
       fail(state, anchor, anchor.dynamicMatcher.failure().reason(), level.getGameTime());
@@ -530,30 +537,53 @@ public final class StructureService {
       return;
     }
     for (var anchor : List.copyOf(watched)) {
-      if (anchor.alive
-          && (contents ? anchor.dynamicContents.contains(position) : anchor.dynamicPositions.contains(position))) {
-        request(anchor.controller, true, false);
-      }
+      restartDynamic(state, level, anchor, anchor.dynamicWatches.affected(position, contents));
+    }
+  }
+
+  private static void restartDynamic(LevelState state, ServerLevel level, Anchor anchor, long affected) {
+    if (!anchor.alive || affected == 0) {
+      return;
+    }
+    if (anchor.dynamicMatcher == null || !matchesActual(level, anchor)) {
+      request(anchor.controller, true, false);
+      return;
+    }
+    long now = level.getGameTime();
+    if (!anchor.preparing
+        && (anchor.registration == null || anchor.registration.verifier.state() != VerificationState.PENDING)) {
+      anchor.roundStarted = now;
+    }
+    anchor.dynamicWatches.invalidate(anchor.dynamicMatcher.invalidate(affected));
+    retire(state, anchor.draft);
+    anchor.builder = null;
+    anchor.layoutDefinition = null;
+    anchor.preparing = true;
+    anchor.failure = VerificationFailure.UNVERIFIED;
+    if (anchor.registration != null) {
+      anchor.registration.verifier.invalidateDependency(now);
+      anchor.registration.discardCapture();
+    } else {
+      anchor.controller.attach(null);
+    }
+    state.enqueue(anchor);
+  }
+
+  private static void removeDynamicWatch(Map<Long, Set<Anchor>> index, long key, Anchor anchor) {
+    var watched = index.get(key);
+    if (watched != null && watched.remove(anchor) && watched.isEmpty()) {
+      index.remove(key);
     }
   }
 
   private static void clearDynamicWatches(LevelState state, Anchor anchor) {
-    for (long section : anchor.dynamicSections) {
-      var watched = state.dynamicSections.get(section);
-      if (watched != null && watched.remove(anchor) && watched.isEmpty()) {
-        state.dynamicSections.remove(section);
-      }
+    for (long section : anchor.dynamicWatches.sections()) {
+      removeDynamicWatch(state.dynamicSections, section, anchor);
     }
-    for (long chunk : anchor.dynamicChunks) {
-      var watched = state.dynamicChunks.get(chunk);
-      if (watched != null && watched.remove(anchor) && watched.isEmpty()) {
-        state.dynamicChunks.remove(chunk);
-      }
+    for (long chunk : anchor.dynamicWatches.chunks()) {
+      removeDynamicWatch(state.dynamicChunks, chunk, anchor);
     }
-    anchor.dynamicSections.clear();
-    anchor.dynamicChunks.clear();
-    anchor.dynamicPositions.clear();
-    anchor.dynamicContents.clear();
+    anchor.dynamicWatches.clear();
   }
 
   /**
@@ -587,16 +617,27 @@ public final class StructureService {
         if (anchor.dynamicMatcher == null || !anchor.dynamicMatcher.matched() || used >= budget) {
           return used;
         }
+        if (anchor.registration != null) {
+          if (anchor.registration.dynamicLengths().equals(anchor.dynamicMatcher.lengths())) {
+            // Preserve the layout, subscriptions and bindings when only predicates changed.
+            anchor.layoutDefinition = anchor.registration.pattern.definition;
+            anchor.preparing = false;
+          } else {
+            retire(state, anchor.registration);
+            anchor.generation = state.nextGeneration = Math.incrementExact(state.nextGeneration);
+            anchor.controller.attach(null);
+          }
+        }
       }
-      if (anchor.builder == null) {
+      if (anchor.preparing && anchor.builder == null) {
         long started = anchor.roundStarted;
         if (anchor.definition.hasDynamicPatterns()) {
           var source = anchor.definition;
           var lengths = anchor.dynamicMatcher.lengths();
           var origin = anchor.controller.structurePosition();
           var orientation = anchor.orientation;
-          anchor.builder = AsyncStructureWork.submit(
-              () -> new Prepared(new CompiledStructure(source.resolveDynamic(lengths), origin, orientation), started));
+          anchor.builder = AsyncStructureWork
+              .prepare(source, lengths, origin, orientation, pattern -> new Prepared(pattern, started));
           if (anchor.builder != null) {
             anchor.builder.whenComplete((ignored, failure) -> state.ready.add(anchor));
           }
@@ -823,6 +864,7 @@ public final class StructureService {
   @SubscribeEvent
   public static void onChunkUnload(ChunkEvent.Unload event) {
     if (event.getLevel() instanceof ServerLevel level) {
+      RangedSelectionTask.chunkUnloaded(level, event.getChunk().getPos());
       chunkChanged(level, event.getChunk().getPos(), false);
     }
   }
@@ -839,6 +881,7 @@ public final class StructureService {
 
   @SubscribeEvent
   public static void onServerStopped(ServerStoppedEvent event) {
+    RangedSelectionTask.stop();
     LEVELS.values().forEach(LevelState::clear);
     LEVELS.clear();
     AsyncStructureWork.stop();
@@ -897,10 +940,7 @@ public final class StructureService {
     CompletableFuture<Prepared> builder;
     CompletableFuture<DynamicStructureMatcher> dynamicPreparation;
     DynamicStructureMatcher dynamicMatcher;
-    final Set<Long> dynamicSections = new HashSet<>();
-    final Set<Long> dynamicChunks = new HashSet<>();
-    final Set<BlockPos> dynamicPositions = new HashSet<>();
-    final Set<BlockPos> dynamicContents = new HashSet<>();
+    final DynamicStructureWatches dynamicWatches = new DynamicStructureWatches();
     Registration registration, draft, retired;
     VerificationFailure failure = VerificationFailure.UNVERIFIED;
 
@@ -911,7 +951,8 @@ public final class StructureService {
     boolean needsWork() {
       boolean waitingForBuilder = preparing && builder != null && !builder.isDone();
       boolean waitingForDynamic = dynamicPreparation != null && !dynamicPreparation.isDone();
-      boolean waitingForMatch = registration != null
+      boolean waitingForMatch = !preparing
+          && registration != null
           && registration.matching != null
           && !registration.matching.isDone();
       return !waitingForBuilder
@@ -1227,6 +1268,7 @@ public final class StructureService {
       LevelState state = LEVELS.get(level);
       return valid
           && published
+          && !owner.preparing
           && !SmartInterfaceEventPublisher.isDispatching(controller)
           && !RecipeLifecyclePublisher.isDispatching()
           && epoch == catalog.epoch()

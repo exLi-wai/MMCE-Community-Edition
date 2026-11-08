@@ -17,12 +17,13 @@ import net.minecraft.nbt.LongArrayTag;
 import net.minecraft.nbt.NbtIo;
 import net.minecraft.nbt.StringTag;
 import net.minecraft.nbt.Tag;
+import org.jetbrains.annotations.ApiStatus;
 
 /**
  * Shared upgrade-domain NBT limits; validation precedes recursive defensive
  * copy.
  */
-@org.jetbrains.annotations.ApiStatus.Internal
+@ApiStatus.Internal
 public final class FactoryUpgradeDataSnapshots {
   private record Visit(Tag tag, int depth, boolean exit) {
   }

@@ -24,6 +24,11 @@ public final class RangedConstructToolEvents {
     if (event.getHand() != InteractionHand.MAIN_HAND) {
       return;
     }
+    if (event.getUseBlock().isFalse() || event.getUseItem().isFalse()) {
+      event.setCanceled(true);
+      event.setCancellationResult(InteractionResult.FAIL);
+      return;
+    }
     var level = event.getLevel();
     if (!level.hasChunkAt(event.getPos())) {
       return;
@@ -33,11 +38,12 @@ public final class RangedConstructToolEvents {
     if (level.isClientSide) {
       return;
     }
-    RangedConstructToolItem.interact(
-        level,
-        event.getEntity(),
-        event.getEntity().getMainHandItem(),
-        event.getPos(),
-        InteractionHand.MAIN_HAND);
+    event.setCancellationResult(
+        RangedConstructToolItem.interact(
+            level,
+            event.getEntity(),
+            event.getEntity().getMainHandItem(),
+            event.getPos(),
+            InteractionHand.MAIN_HAND));
   }
 }

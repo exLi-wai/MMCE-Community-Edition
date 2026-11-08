@@ -21,6 +21,7 @@ import com.lw.modularmachine.machine.recipe.RecipeModifiers;
 import com.lw.modularmachine.machine.recipe.ResourceSelector;
 import com.lw.modularmachine.machine.smart.SmartInterfaceAssignment;
 import com.lw.modularmachine.machine.smart.SmartInterfaceType;
+import java.nio.charset.StandardCharsets;
 import java.util.ArrayList;
 import java.util.HashMap;
 import java.util.HashSet;
@@ -29,6 +30,8 @@ import java.util.List;
 import java.util.Map;
 import java.util.Objects;
 import java.util.Set;
+import java.util.UUID;
+import java.util.concurrent.CancellationException;
 import net.minecraft.core.BlockPos;
 import net.minecraft.resources.ResourceLocation;
 import net.minecraft.world.phys.AABB;
@@ -460,7 +463,7 @@ public record MachineDefinition(
       appendDynamic(resolved, positions, ids, pattern, pattern.start(), "start", 0);
       for (int repetition = 0; repetition < size; repetition++) {
         if ((repetition & 4095) == 0 && Thread.currentThread().isInterrupted()) {
-          throw new java.util.concurrent.CancellationException();
+          throw new CancellationException();
         }
         appendDynamic(resolved, positions, ids, pattern, pattern.body(), "body", repetition);
       }
@@ -497,8 +500,7 @@ public record MachineDefinition(
       String prefix = "dynamic:" + pattern.id() + ":" + group + ":" + repetition + ":";
       String localId = part.id();
       if (prefix.length() + localId.length() > 128) {
-        localId = java.util.UUID.nameUUIDFromBytes(localId.getBytes(java.nio.charset.StandardCharsets.UTF_8))
-            .toString();
+        localId = UUID.nameUUIDFromBytes(localId.getBytes(StandardCharsets.UTF_8)).toString();
       }
       String id = prefix + localId;
       if (offset.equals(BlockPos.ZERO) || !positions.add(offset) || !ids.add(id)) {

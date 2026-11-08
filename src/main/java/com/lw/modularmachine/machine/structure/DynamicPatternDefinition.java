@@ -11,6 +11,7 @@ import java.util.ArrayList;
 import java.util.HashSet;
 import java.util.List;
 import java.util.Set;
+import java.util.Locale;
 import net.minecraft.core.BlockPos;
 import net.minecraft.core.Direction;
 import net.minecraft.resources.ResourceLocation;
@@ -262,7 +263,7 @@ public record DynamicPatternDefinition(
     for (var face : value.getAsJsonArray()) {
       if (!face.isJsonPrimitive()
           || !face.getAsJsonPrimitive().isString()
-          || Direction.byName(face.getAsString().toLowerCase(java.util.Locale.ROOT)) == null) {
+          || Direction.byName(face.getAsString().toLowerCase(Locale.ROOT)) == null) {
         throw error(path, "Unknown direction");
       }
     }

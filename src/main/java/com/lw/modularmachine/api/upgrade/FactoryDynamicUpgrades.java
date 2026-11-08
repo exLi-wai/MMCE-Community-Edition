@@ -8,10 +8,11 @@ import net.minecraft.resources.ResourceLocation;
 import com.lw.modularmachine.machine.factory.DynamicUpgradeHandlers;
 import com.lw.modularmachine.machine.factory.FactoryUpgradeCatalog;
 import com.lw.modularmachine.machine.factory.FactoryUpgradeDataSnapshots;
+import com.lw.modularmachine.util.callback.ServerCallbackRegistry;
 
 /** Dynamic upgrade registration and immutable callback data. */
 public final class FactoryDynamicUpgrades {
-  public static final int MAX_HANDLERS = com.lw.modularmachine.util.callback.ServerCallbackRegistry.MAX_HANDLERS;
+  public static final int MAX_HANDLERS = ServerCallbackRegistry.MAX_HANDLERS;
 
   @FunctionalInterface
   public interface Evaluator {
