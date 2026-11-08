@@ -4,6 +4,7 @@ import com.lw.modularmachine.ModularMachine;
 import com.lw.modularmachine.machine.recipe.MachineRecipe;
 import com.lw.modularmachine.machine.recipe.MachineRecipeRegistries;
 import com.lw.modularmachine.registry.MachineRegistries;
+import com.lw.modularmachine.util.minecraft.registry.RegisteredMachineItems;
 import java.util.ArrayList;
 import java.util.Comparator;
 import java.util.LinkedHashMap;
@@ -83,9 +84,9 @@ public final class MachineJeiPlugin implements IModPlugin {
           MachineRegistries.FACTORY_CONTROLLER.get());
     }
     for (var entry : categories.entrySet()) {
-      var ordinary = controller(entry.getKey());
-      var factory = factory(entry.getKey());
-      var blueprint = blueprint(entry.getKey());
+      var ordinary = RegisteredMachineItems.controller(entry.getKey());
+      var factory = RegisteredMachineItems.factory(entry.getKey());
+      var blueprint = RegisteredMachineItems.blueprint(entry.getKey());
       for (var stack : List.of(ordinary, factory, blueprint)) {
         if (!stack.isEmpty()) {
           registration.addRecipeCatalyst(stack, entry.getValue().getRecipeType());
@@ -94,22 +95,6 @@ public final class MachineJeiPlugin implements IModPlugin {
     }
   }
 
-  public static ItemStack controller(ResourceLocation machine) {
-    return MachineRegistries.DEDICATED_CONTROLLERS.values().stream().map(holder -> holder.get())
-        .filter(block -> block.dedicated().machine().equals(machine)).map(ItemStack::new).findFirst()
-        .orElse(ItemStack.EMPTY);
-  }
-
-  public static ItemStack factory(ResourceLocation machine) {
-    return MachineRegistries.DEDICATED_FACTORIES.values().stream().map(holder -> holder.get())
-        .filter(block -> block.dedicated().machine().equals(machine)).map(ItemStack::new).findFirst()
-        .orElse(ItemStack.EMPTY);
-  }
-
-  public static ItemStack blueprint(ResourceLocation machine) {
-    var registered = MachineRegistries.BLUEPRINTS.get(machine);
-    return registered == null ? ItemStack.EMPTY : registered.get().getDefaultInstance();
-  }
   static void bookmark(ItemStack stack) {
     if (runtime != null) {
       runtime.getIngredientManager().createTypedIngredient(VanillaTypes.ITEM_STACK, stack, false)

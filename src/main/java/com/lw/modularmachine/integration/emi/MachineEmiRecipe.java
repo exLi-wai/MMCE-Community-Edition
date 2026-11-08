@@ -1,7 +1,7 @@
 package com.lw.modularmachine.integration.emi;
 
 import com.lw.modularmachine.integration.jei.ClientMachineJeiCatalog;
-import com.lw.modularmachine.integration.jei.MachineJeiPlugin;
+import com.lw.modularmachine.util.minecraft.registry.RegisteredMachineItems;
 import com.lw.modularmachine.registry.MachineRegistries;
 import dev.emi.emi.api.recipe.BasicEmiRecipe;
 import dev.emi.emi.api.recipe.EmiRecipeCategory;
@@ -29,9 +29,9 @@ final class MachineEmiRecipe extends BasicEmiRecipe {
     var result = new ArrayList<EmiIngredient>();
     result.add(EmiStack.of(MachineRegistries.CONTROLLER.get()));
     result.add(EmiStack.of(MachineRegistries.FACTORY_CONTROLLER.get()));
-    add(result, MachineJeiPlugin.controller(machine.id()));
-    add(result, MachineJeiPlugin.factory(machine.id()));
-    add(result, MachineJeiPlugin.blueprint(machine.id()));
+    add(result, RegisteredMachineItems.controller(machine.id()));
+    add(result, RegisteredMachineItems.factory(machine.id()));
+    add(result, RegisteredMachineItems.blueprint(machine.id()));
     return result;
   }
 

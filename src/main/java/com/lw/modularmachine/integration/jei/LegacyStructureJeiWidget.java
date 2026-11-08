@@ -4,6 +4,8 @@ import com.lw.modularmachine.api.client.preview.PreviewCamera;
 import com.lw.modularmachine.api.client.preview.PreviewRenderer;
 import com.lw.modularmachine.api.client.preview.PreviewSceneData;
 import com.lw.modularmachine.api.client.preview.PreviewViewport;
+import com.lw.modularmachine.util.client.gui.GuiTextures;
+import com.lw.modularmachine.util.minecraft.registry.RegisteredMachineItems;
 import java.util.List;
 import mezz.jei.api.gui.builder.ITooltipBuilder;
 import mezz.jei.api.gui.inputs.IJeiGuiEventListener;
@@ -19,8 +21,15 @@ import org.lwjgl.glfw.GLFW;
 
 /** JEI layout and input adapter for the shared structure preview API. */
 final class LegacyStructureJeiWidget implements IRecipeWidget, IJeiGuiEventListener {
-  private static final ResourceLocation DETAILS_BUTTON = ResourceLocation
-      .fromNamespaceAndPath("mmcece", "textures/gui/button.png");
+  private static final GuiTextures.NineSlice DETAILS_BUTTON = new GuiTextures.NineSlice(
+      ResourceLocation.fromNamespaceAndPath("mmcece", "textures/gui/button.png"),
+      0,
+      0,
+      200,
+      20,
+      200,
+      20,
+      2);
   private final ClientMachineJeiCatalog.Machine machine;
   private final PreviewSceneData scene;
   private final PreviewRenderer renderer = PreviewRenderer.create();
@@ -87,7 +96,7 @@ final class LegacyStructureJeiWidget implements IRecipeWidget, IJeiGuiEventListe
     int left = detailsButtonLeft(width);
     int top = height - buttonHeight;
     boolean hovered = mouseX >= left && mouseX < left + buttonWidth && mouseY >= top && mouseY < height;
-    graphics.blit(DETAILS_BUTTON, left, top, buttonWidth, buttonHeight, 0, 0, 200, 20, 200, 20);
+    GuiTextures.blitNineSlice(graphics, DETAILS_BUTTON, left, top, buttonWidth, buttonHeight);
     Minecraft minecraft = Minecraft.getInstance();
     int color = hovered ? 0xFF202020 : 0xFF404040;
     Component text = Component.translatable("jei.mmcece.view_details");
@@ -160,7 +169,7 @@ final class LegacyStructureJeiWidget implements IRecipeWidget, IJeiGuiEventListe
   @Override
   public boolean keyPressed(double x, double y, int key, int scan, int modifiers) {
     if (x >= 0 && x < 184 && y >= 0 && y < 26 && key == GLFW.GLFW_KEY_A) {
-      MachineJeiPlugin.bookmark(MachineJeiPlugin.blueprint(machine.id()));
+      MachineJeiPlugin.bookmark(RegisteredMachineItems.blueprint(machine.id()));
       return true;
     }
     return false;

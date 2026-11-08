@@ -4,6 +4,9 @@ import com.lw.modularmachine.ModularMachine;
 import com.lw.modularmachine.machine.structure.MachineDefinition;
 import com.lw.modularmachine.machine.structure.StructureService;
 import com.lw.modularmachine.registry.MachineRegistries;
+import com.lw.modularmachine.util.minecraft.state.BlockStateValues;
+import com.lw.modularmachine.util.minecraft.network.BlockPosCodecs;
+import com.lw.modularmachine.util.minecraft.registry.RegisteredMachineItems;
 import java.util.ArrayList;
 import java.util.Comparator;
 import java.util.LinkedHashSet;
@@ -18,7 +21,6 @@ import net.minecraft.resources.ResourceLocation;
 import net.minecraft.server.level.ServerPlayer;
 import net.minecraft.world.level.block.Block;
 import net.minecraft.world.level.block.state.BlockState;
-import net.minecraft.world.level.block.state.properties.Property;
 import net.neoforged.bus.api.SubscribeEvent;
 import net.neoforged.neoforge.event.OnDatapackSyncEvent;
 import net.neoforged.neoforge.network.PacketDistributor;
@@ -136,8 +138,8 @@ public final class MachineJeiPayloads {
       buffer.writeUtf(segment.id(), 64);
       buffer.writeVarInt(segment.minimum());
       buffer.writeVarInt(segment.maximum());
-      writePosition(buffer, segment.origin());
-      writePosition(buffer, segment.step());
+      BlockPosCodecs.INT_VECTOR.encode(buffer, segment.origin());
+      BlockPosCodecs.INT_VECTOR.encode(buffer, segment.step());
       buffer.writeVarInt(segment.head());
       buffer.writeVarInt(segment.body());
       buffer.writeVarInt(segment.tail());
@@ -171,8 +173,8 @@ public final class MachineJeiPayloads {
               buffer.readUtf(64),
               buffer.readVarInt(),
               buffer.readVarInt(),
-              readPosition(buffer),
-              readPosition(buffer),
+              BlockPosCodecs.INT_VECTOR.decode(buffer),
+              BlockPosCodecs.INT_VECTOR.decode(buffer),
               buffer.readVarInt(),
               buffer.readVarInt(),
               buffer.readVarInt()));
@@ -197,15 +199,6 @@ public final class MachineJeiPayloads {
     return new Snapshot(epoch, machines, machine, translation, color, start, total, fixed, segments, parts);
   }
 
-  private static void writePosition(RegistryFriendlyByteBuf buffer, BlockPos position) {
-    buffer.writeInt(position.getX());
-    buffer.writeInt(position.getY());
-    buffer.writeInt(position.getZ());
-  }
-
-  private static BlockPos readPosition(RegistryFriendlyByteBuf buffer) {
-    return new BlockPos(buffer.readInt(), buffer.readInt(), buffer.readInt());
-  }
   @SubscribeEvent
   public static void sync(OnDatapackSyncEvent event) {
     var definitions = StructureService.definitionsSnapshot().values().stream()
@@ -262,28 +255,18 @@ public final class MachineJeiPayloads {
       return MachineRegistries.PORTS.values().stream().map(holder -> holder.get())
           .filter(block -> block.kind() == rule.port()).map(Block::defaultBlockState).toList();
     }
-    return rule.alternatives().stream().map(alternative -> {
-      var state = alternative.block().defaultBlockState();
-      for (var property : alternative.properties().entrySet()) {
-        state = property(state, property.getKey(), property.getValue());
-      }
-      return state;
-    }).toList();
+    return rule.alternatives().stream()
+        .map(alternative -> BlockStateValues.apply(alternative.block().defaultBlockState(), alternative.properties()))
+        .toList();
   }
 
   private static BlockState controllerState(MachineDefinition definition) {
     if (definition.factoryOnly()) {
-      return MachineRegistries.DEDICATED_FACTORIES.values().stream().map(holder -> holder.get())
-          .filter(block -> block.dedicated() != null && block.dedicated().machine().equals(definition.id())).findFirst()
-          .map(Block::defaultBlockState)
+      return RegisteredMachineItems.factoryBlock(definition.id()).map(Block::defaultBlockState)
           .orElseGet(() -> MachineRegistries.FACTORY_CONTROLLER.get().defaultBlockState());
     }
-    return MachineRegistries.DEDICATED_CONTROLLERS.values().stream().map(holder -> holder.get())
-        .filter(block -> block.dedicated() != null && block.dedicated().machine().equals(definition.id())).findFirst()
-        .map(Block::defaultBlockState).orElseGet(() -> MachineRegistries.CONTROLLER.get().defaultBlockState());
+    return RegisteredMachineItems.controllerBlock(definition.id()).map(Block::defaultBlockState)
+        .orElseGet(() -> MachineRegistries.CONTROLLER.get().defaultBlockState());
   }
 
-  private static <T extends Comparable<T>> BlockState property(BlockState state, Property<T> property, Comparable<?> value) {
-    return state.setValue(property, property.getValueClass().cast(value));
-  }
 }

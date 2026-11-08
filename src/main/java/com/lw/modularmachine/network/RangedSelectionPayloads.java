@@ -1,5 +1,7 @@
 package com.lw.modularmachine.network;
 
+import com.lw.modularmachine.util.minecraft.network.BlockPosCodecs;
+
 import com.lw.modularmachine.machine.selection.RangedSelectionData;
 import com.lw.modularmachine.machine.selection.RangedSelectionData.*;
 import com.lw.modularmachine.machine.selection.RangedSelectionService;
@@ -164,9 +166,9 @@ public final class RangedSelectionPayloads {
     buffer.writeEnum(settings.direction());
     buffer.writeVarInt(settings.gap());
     buffer.writeBoolean(settings.customStep());
-    writeVector(buffer, settings.step());
+    BlockPosCodecs.INT_VECTOR.encode(buffer, settings.step());
     buffer.writeBoolean(settings.customOrigin());
-    writeVector(buffer, settings.origin());
+    BlockPosCodecs.INT_VECTOR.encode(buffer, settings.origin());
     buffer.writeVarInt(settings.sampleLength());
     buffer.writeUtf(settings.selector(), 64);
     buffer.writeUtf(settings.interfaceType(), 64);
@@ -180,9 +182,9 @@ public final class RangedSelectionPayloads {
         buffer.readEnum(Direction.class),
         buffer.readVarInt(),
         buffer.readBoolean(),
-        readVector(buffer),
+        BlockPosCodecs.INT_VECTOR.decode(buffer),
         buffer.readBoolean(),
-        readVector(buffer),
+        BlockPosCodecs.INT_VECTOR.decode(buffer),
         buffer.readVarInt(),
         buffer.readUtf(64),
         buffer.readUtf(64));
@@ -212,7 +214,7 @@ public final class RangedSelectionPayloads {
     buffer.writeEnum(snapshot.picking());
     buffer.writeBoolean(snapshot.first() != null);
     if (snapshot.first() != null) {
-      writeVector(buffer, snapshot.first());
+      BlockPosCodecs.INT_VECTOR.encode(buffer, snapshot.first());
     }
     ComponentSerialization.STREAM_CODEC.encode(buffer, snapshot.status());
     buffer.writeBoolean(snapshot.busy());
@@ -243,7 +245,7 @@ public final class RangedSelectionPayloads {
     }
     int selected = buffer.readVarInt();
     var picking = buffer.readEnum(PickTarget.class);
-    var first = buffer.readBoolean() ? readVector(buffer) : null;
+    var first = buffer.readBoolean() ? BlockPosCodecs.INT_VECTOR.decode(buffer) : null;
     var status = ComponentSerialization.STREAM_CODEC.decode(buffer);
     boolean busy = buffer.readBoolean();
     int fileCount = count(buffer, 32);
@@ -292,19 +294,13 @@ public final class RangedSelectionPayloads {
   private static void writeBox(RegistryFriendlyByteBuf buffer, Box box) {
     buffer.writeBoolean(box != null);
     if (box != null) {
-      writeVector(buffer, box.first());
-      writeVector(buffer, box.second());
+      BlockPosCodecs.INT_VECTOR.encode(buffer, box.first());
+      BlockPosCodecs.INT_VECTOR.encode(buffer, box.second());
     }
   }
   private static Box readBox(RegistryFriendlyByteBuf buffer) {
-    return buffer.readBoolean() ? new Box(readVector(buffer), readVector(buffer)) : null;
-  }
-  private static void writeVector(RegistryFriendlyByteBuf buffer, BlockPos value) {
-    buffer.writeInt(value.getX());
-    buffer.writeInt(value.getY());
-    buffer.writeInt(value.getZ());
-  }
-  private static BlockPos readVector(RegistryFriendlyByteBuf buffer) {
-    return new BlockPos(buffer.readInt(), buffer.readInt(), buffer.readInt());
+    return buffer.readBoolean() ? new Box(
+        BlockPosCodecs.INT_VECTOR.decode(buffer),
+        BlockPosCodecs.INT_VECTOR.decode(buffer)) : null;
   }
 }

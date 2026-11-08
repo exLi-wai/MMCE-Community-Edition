@@ -7,14 +7,12 @@ import com.mojang.serialization.MapCodec;
 import java.util.List;
 import net.minecraft.core.BlockPos;
 import net.minecraft.ChatFormatting;
-import net.minecraft.nbt.CompoundTag;
 import net.minecraft.server.level.ServerPlayer;
 import net.minecraft.world.InteractionHand;
 import net.minecraft.world.InteractionResult;
 import net.minecraft.world.ItemInteractionResult;
 import net.minecraft.world.entity.player.Player;
 import net.minecraft.world.item.Item;
-import net.minecraft.world.item.BlockItem;
 import net.minecraft.world.item.ItemStack;
 import net.minecraft.network.chat.Component;
 import net.minecraft.world.item.TooltipFlag;
@@ -23,8 +21,6 @@ import net.minecraft.world.level.block.BaseEntityBlock;
 import net.minecraft.world.level.block.RenderShape;
 import net.minecraft.world.level.block.entity.BlockEntity;
 import net.minecraft.world.level.block.state.BlockState;
-import net.minecraft.world.level.storage.loot.LootParams;
-import net.minecraft.world.level.storage.loot.parameters.LootContextParams;
 import net.minecraft.world.phys.BlockHitResult;
 import net.neoforged.neoforge.fluids.FluidUtil;
 
@@ -144,20 +140,4 @@ public final class MachinePortBlock extends BaseEntityBlock {
     super.onRemove(state, level, pos, newState, isMoving);
   }
 
-  @Override
-  protected List<ItemStack> getDrops(BlockState state, LootParams.Builder params) {
-    List<ItemStack> drops = super.getDrops(state, params);
-    if (params.getOptionalParameter(LootContextParams.BLOCK_ENTITY) instanceof MachinePortBlockEntity port) {
-      for (ItemStack stack : drops) {
-        if (stack.is(asItem())) {
-          CompoundTag data = port.saveWithoutMetadata(params.getLevel().registryAccess());
-          if (kind.resource() == PortKind.Resource.ITEM && data.get("mmcece") instanceof CompoundTag portData) {
-            portData.remove("items");
-          }
-          BlockItem.setBlockEntityData(stack, port.getType(), data);
-        }
-      }
-    }
-    return drops;
-  }
 }

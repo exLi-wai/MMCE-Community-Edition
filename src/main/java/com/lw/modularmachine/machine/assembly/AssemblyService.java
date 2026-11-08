@@ -16,6 +16,9 @@ import com.lw.modularmachine.machine.structure.StructureService;
 import com.lw.modularmachine.network.ProjectionPayloads;
 import com.lw.modularmachine.network.BlueprintPreviewPayloads;
 import com.lw.modularmachine.util.thread.ServerThreadGuard;
+import com.lw.modularmachine.util.minecraft.placement.PlacementMaterials;
+import com.lw.modularmachine.util.minecraft.placement.PlacementOutcome;
+import com.lw.modularmachine.util.minecraft.inventory.PlayerInventoryItems;
 import java.util.ArrayList;
 import java.util.HashMap;
 import java.util.LinkedHashSet;
@@ -35,12 +38,8 @@ import net.minecraft.world.item.BlockItem;
 import net.minecraft.world.item.ItemStack;
 import net.minecraft.world.item.component.BlockItemStateProperties;
 import net.minecraft.world.item.context.BlockPlaceContext;
-import net.minecraft.world.level.block.BedBlock;
 import net.minecraft.world.level.block.Block;
-import net.minecraft.world.level.block.DoorBlock;
-import net.minecraft.world.level.block.DoublePlantBlock;
 import net.minecraft.world.level.block.state.BlockState;
-import net.minecraft.world.level.block.state.properties.Property;
 import net.minecraft.world.phys.BlockHitResult;
 import net.minecraft.world.phys.Vec3;
 import net.minecraft.world.phys.shapes.CollisionContext;
@@ -105,7 +104,8 @@ public final class AssemblyService {
     final ServerLevel level;
     final InteractionHand hand;
     final boolean build;
-    int cursor, matched, placed;
+    final AssemblyReport report = new AssemblyReport();
+    int cursor, matched, placed, passPlaced;
     long nextPass;
     long projectionRequest = -1;
     List<ProjectionPayloads.Entry> projectionEntries = List.of();
@@ -206,6 +206,11 @@ public final class AssemblyService {
           Math.max(1, definition.parts().size()));
       return;
     }
+    var reporting = JOBS.get(player.getUUID());
+    if (reporting != null && reporting.report.finishing()) {
+      player.displayClientMessage(Component.translatable("message.mmcece.assembly.reporting"), true);
+      return;
+    }
     final AssemblyPattern pattern;
     try {
       pattern = AssemblyPattern
@@ -214,19 +219,17 @@ public final class AssemblyService {
       player.displayClientMessage(Component.translatable("message.mmcece.assembly.failed", invalid.getMessage()), true);
       return;
     }
-    if (build && player.isCreative()) {
+    if (build && player.hasInfiniteMaterials()) {
       try {
         var result = creativeBuild(player, pattern);
-        player.displayClientMessage(
+        player.sendSystemMessage(
             Component.translatable(
                 "message.mmcece.assembly.complete",
                 result.matched(),
                 pattern.parts().size(),
-                result.placed()),
-            true);
+                result.placed()));
       } catch (IllegalStateException failure) {
-        player
-            .displayClientMessage(Component.translatable("message.mmcece.assembly.failed", failure.getMessage()), true);
+        player.sendSystemMessage(Component.translatable("message.mmcece.assembly.failed", failure.getMessage()));
       }
       return;
     }
@@ -544,6 +547,7 @@ public final class AssemblyService {
         || job.pattern.sourceDefinition() != StructureService.definition(job.pattern.machine())
         || !job.level.hasChunkAt(job.pattern.origin())
         || !job.level.mayInteract(player, job.pattern.origin())
+        || job.build && player.hasInfiniteMaterials()
         || job.build && !player.canInteractWithBlock(job.pattern.origin(), 0)) {
       return false;
     }
@@ -656,6 +660,12 @@ public final class AssemblyService {
     if (job == null) {
       return;
     }
+    if (job.report.finishing()) {
+      if (job.report.send(player, 4)) {
+        JOBS.remove(player.getUUID(), job);
+      }
+      return;
+    }
     if (!current(player, job)) {
       cancelConstruction(player);
       return;
@@ -679,20 +689,46 @@ public final class AssemblyService {
       }
       var part = job.pattern.parts().get(job.cursor);
       var pos = part.position();
-      if (!job.level.isOutsideBuildHeight(pos)
-          && job.level.hasChunkAt(pos)
-          && job.level.getWorldBorder().isWithinBounds(pos)) {
-        if (part.matches(job.level.getBlockState(pos))) {
+      if (job.level.isOutsideBuildHeight(pos) || !job.level.getWorldBorder().isWithinBounds(pos)) {
+        job.report.problem(pos, PlacementOutcome.OUTSIDE_WORLD);
+      } else if (!job.level.hasChunkAt(pos)) {
+        job.report.problem(pos, PlacementOutcome.UNLOADED);
+      } else {
+        var actual = job.level.getBlockState(pos);
+        if (part.matches(actual)) {
           job.matched++;
-        } else if (player.canInteractWithBlock(pos, 0)
-            && job.level.mayInteract(player, pos)
-            && job.level.getBlockState(pos).isAir()) {
+        } else if (!PlacementMaterials.canReplace(part.states(), actual)) {
+          job.report.occupied(pos, actual);
+        } else if (!player.canInteractWithBlock(pos, 0)) {
+          job.report.problem(pos, PlacementOutcome.OUT_OF_REACH);
+        } else if (!job.level.mayInteract(player, pos)) {
+          job.report.problem(pos, PlacementOutcome.NO_PERMISSION);
+        } else {
           placing = true;
           try {
-            if (place(player, job, part)) {
-              job.matched++;
-              job.placed++;
-              writes++;
+            var result = place(player, job, part);
+            if (JOBS.get(player.getUUID()) != job) {
+              return;
+            }
+            // Observe only after the placement's rollback/refund scope has resolved.
+            if (!job.level.hasChunkAt(pos)) {
+              job.report.problem(pos, PlacementOutcome.UNLOADED);
+            } else {
+              var after = job.level.getBlockState(pos);
+              if (part.matches(after)) {
+                job.matched++;
+                job.passPlaced++;
+                if (result == PlacementOutcome.PLACED) {
+                  job.placed++;
+                  writes++;
+                }
+              } else if (!PlacementMaterials.canReplace(part.states(), after)) {
+                job.report.occupied(pos, after);
+              } else if (result == PlacementOutcome.MISSING) {
+                job.report.missing(part);
+              } else {
+                job.report.problem(pos, result == PlacementOutcome.PLACED ? PlacementOutcome.REJECTED : result);
+              }
             }
           } finally {
             placing = false;
@@ -704,43 +740,43 @@ public final class AssemblyService {
       }
       if (++job.cursor == job.pattern.parts().size()) {
         boolean complete = job.matched == job.pattern.parts().size();
-        player.displayClientMessage(
-            Component.translatable(
-                complete ? "message.mmcece.assembly.complete" : "message.mmcece.assembly.waiting",
-                job.matched,
-                job.pattern.parts().size(),
-                job.placed),
-            true);
-        if (complete) {
-          JOBS.remove(player.getUUID(), job);
+        if (complete || job.passPlaced == 0) {
+          job.report.finish(job.matched, job.pattern.parts().size(), job.placed);
+          if (job.report.send(player, 4)) {
+            JOBS.remove(player.getUUID(), job);
+          }
           return;
         }
         job.cursor = 0;
         job.matched = 0;
+        job.passPlaced = 0;
+        job.report.nextPass();
         job.nextPass = job.level.getGameTime() + 20;
         return;
       }
     }
   }
 
-  private static boolean place(ServerPlayer player, Job job, AssemblyPattern.Part part) {
+  private static PlacementOutcome place(ServerPlayer player, Job job, AssemblyPattern.Part part) {
     var inventory = player.getInventory();
+    if (job.level.captureBlockSnapshots) {
+      return PlacementOutcome.BUSY;
+    }
+    if (!job.level.getBlockState(part.position()).isAir()) {
+      return placeFluid(player, job, part);
+    }
+    var outcome = PlacementOutcome.MISSING;
     for (int slot = 0; slot < inventory.items.size(); slot++) {
       var material = inventory.getItem(slot);
       // Existing saved inventories/run data and custom placement implementations need
       // dedicated adapters.
       if (job.level.captureBlockSnapshots
           || material.isEmpty()
-          || material.getItem().getClass() != BlockItem.class
+          || !PlacementMaterials.automaticItem(material.getItem())
           || !material.getComponentsPatch().isEmpty()) {
         continue;
       }
       var blockItem = (BlockItem) material.getItem();
-      if (blockItem.getBlock() instanceof BedBlock
-          || blockItem.getBlock() instanceof DoorBlock
-          || blockItem.getBlock() instanceof DoublePlantBlock) {
-        continue;
-      }
       var candidate = part.states().stream().filter(state -> state.getBlock() == blockItem.getBlock()).findFirst()
           .orElse(null);
       if (candidate == null) {
@@ -752,7 +788,7 @@ public final class AssemblyService {
       for (var property : part.rule().alternatives()) {
         if (property.block() == candidate.getBlock()) {
           for (var key : property.properties().keySet()) {
-            properties = stateProperty(properties, key, candidate);
+            properties = properties.with(key, candidate);
           }
           break;
         }
@@ -764,35 +800,45 @@ public final class AssemblyService {
       var context = new BlockPlaceContext(job.level, player, job.hand, reserved, hit);
       var initial = blockItem.getBlock().getStateForPlacement(context);
       var desired = initial == null ? null : properties.apply(initial);
-      if (!context.getClickedPos().equals(part.position())
-          || desired == null
-          || !part.matches(desired)
-          || !desired.canSurvive(job.level, part.position())
-          || !job.level.isUnobstructed(desired, part.position(), CollisionContext.of(player))) {
+      if (!context.getClickedPos().equals(part.position()) || desired == null || !part.matches(desired)) {
+        outcome = PlacementOutcome.INVALID_STATE;
+        continue;
+      }
+      if (!desired.canSurvive(job.level, part.position())) {
+        outcome = PlacementOutcome.SUPPORT;
+        continue;
+      }
+      if (!job.level.isUnobstructed(desired, part.position(), CollisionContext.of(player))) {
+        outcome = PlacementOutcome.COLLISION;
         continue;
       }
       if (!current(player, job)
           || inventory.getItem(slot).isEmpty()
           || !ItemStack.matches(inventory.getItem(slot), expected)
           || !job.level.getBlockState(part.position()).isAir()) {
-        return false;
+        return PlacementOutcome.CHANGED;
       }
-      ItemStack taken = player.isCreative() ? ItemStack.EMPTY : inventory.removeItem(slot, 1);
-      if (!player.isCreative() && taken.isEmpty()) {
-        return false;
+      ItemStack taken = inventory.removeItem(slot, 1);
+      if (taken.isEmpty()) {
+        return PlacementOutcome.CHANGED;
       }
       boolean rollback = false;
       boolean failed = false;
+      boolean actionCommitted = false;
       try {
         // ItemStack.useOn owns NeoForge snapshots, place events, cancelled placement
         // rollback and consumption.
         var result = reserved.useOn(context);
-        return result.consumesAction() && part.matches(job.level.getBlockState(part.position()));
+        actionCommitted = result.consumesAction();
+        return actionCommitted
+            && part.matches(
+                job.level.getBlockState(part.position())) ? PlacementOutcome.PLACED : PlacementOutcome.REJECTED;
       } catch (RuntimeException failure) {
         failed = true;
         JOBS.remove(player.getUUID());
         ModularMachine.LOGGER.error("Assembly placement failed at {}", part.position(), failure);
-        return false;
+        player.sendSystemMessage(AssemblyReport.problemMessage(part.position(), PlacementOutcome.ERROR));
+        return PlacementOutcome.ERROR;
       } finally {
         if (job.level.captureBlockSnapshots) {
           job.level.captureBlockSnapshots = false;
@@ -810,21 +856,35 @@ public final class AssemblyService {
           }
         }
         // Never overwrite a callback-edited slot. Return the actual unused reservation
-        // to inventory or drop it.
+        // to inventory or drop it. A successful action stays paid if a callback enabled
+        // infinite materials before the native stack consumption.
         if (!taken.isEmpty()
-            && (rollback || !reserved.isEmpty() && (!failed || job.level.getBlockState(part.position()).isAir()))) {
-          if (!inventory.add(taken)) {
-            player.drop(taken, false);
-          }
+            && (rollback
+                || !actionCommitted
+                    && !reserved.isEmpty()
+                    && (!failed || job.level.getBlockState(part.position()).isAir()))) {
+          PlayerInventoryItems.returnOrDrop(player, slot, taken);
         }
         inventory.setChanged();
         player.inventoryMenu.broadcastChanges();
       }
     }
-    return false;
+    if (!PlacementMaterials.sourceFluids(part.states()).isEmpty()) {
+      var fluid = placeFluid(player, job, part);
+      return fluid == PlacementOutcome.MISSING && outcome != PlacementOutcome.MISSING ? outcome : fluid;
+    }
+    return outcome;
   }
-  private static <T extends Comparable<T>> BlockItemStateProperties stateProperty(BlockItemStateProperties properties, Property<T> property, BlockState state) {
-    return properties.with(property, state);
+
+  private static PlacementOutcome placeFluid(ServerPlayer player, Job job, AssemblyPattern.Part part) {
+    try {
+      return AssemblyFluidPlacement.place(player, part, () -> current(player, job));
+    } catch (RuntimeException failure) {
+      JOBS.remove(player.getUUID(), job);
+      ModularMachine.LOGGER.error("Fluid assembly failed at {}", part.position(), failure);
+      player.sendSystemMessage(AssemblyReport.problemMessage(part.position(), PlacementOutcome.ERROR));
+      return PlacementOutcome.ERROR;
+    }
   }
   @SubscribeEvent
   public static void logout(PlayerEvent.PlayerLoggedOutEvent event) {

@@ -10,7 +10,6 @@ import net.minecraft.server.level.ServerPlayer;
 import net.minecraft.world.InteractionResult;
 import net.minecraft.world.entity.player.Player;
 import net.minecraft.world.item.Item;
-import net.minecraft.world.item.BlockItem;
 import net.minecraft.world.item.ItemStack;
 import net.minecraft.network.chat.Component;
 import net.minecraft.world.item.TooltipFlag;
@@ -19,8 +18,6 @@ import net.minecraft.world.level.block.BaseEntityBlock;
 import net.minecraft.world.level.block.RenderShape;
 import net.minecraft.world.level.block.entity.BlockEntity;
 import net.minecraft.world.level.block.state.BlockState;
-import net.minecraft.world.level.storage.loot.LootParams;
-import net.minecraft.world.level.storage.loot.parameters.LootContextParams;
 import net.minecraft.world.phys.BlockHitResult;
 
 public final class ParallelControllerBlock extends BaseEntityBlock {
@@ -69,21 +66,4 @@ public final class ParallelControllerBlock extends BaseEntityBlock {
     return InteractionResult.sidedSuccess(level.isClientSide);
   }
 
-  @Override
-  protected List<ItemStack> getDrops(BlockState state, LootParams.Builder parameters) {
-    var drops = super.getDrops(state, parameters);
-    if (parameters
-        .getOptionalParameter(LootContextParams.BLOCK_ENTITY) instanceof ParallelControllerBlockEntity parallel) {
-      for (var stack : drops) {
-        if (stack.is(asItem())) {
-          BlockItem.setBlockEntityData(
-              stack,
-              parallel.getType(),
-              parallel.saveWithoutMetadata(parameters.getLevel().registryAccess()));
-        }
-      }
-    }
-
-    return drops;
-  }
 }

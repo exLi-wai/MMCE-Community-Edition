@@ -5,6 +5,7 @@ import com.lw.modularmachine.machine.orientation.PropertySpace;
 import com.lw.modularmachine.machine.PortKind;
 import com.lw.modularmachine.machine.structure.MachineDefinition;
 import com.lw.modularmachine.registry.MachineRegistries;
+import com.lw.modularmachine.util.minecraft.state.BlockStateValues;
 import java.util.ArrayList;
 import java.util.Comparator;
 import java.util.HashMap;
@@ -121,10 +122,7 @@ public record AssemblyPattern(
                       .filter(block -> block.kind() == kind).map(Block::defaultBlockState).toList()));
         } else {
           for (var alternative : rule.alternatives()) {
-            var state = alternative.block().defaultBlockState();
-            for (var property : alternative.properties().entrySet()) {
-              state = property(state, property.getKey(), property.getValue());
-            }
+            var state = BlockStateValues.apply(alternative.block().defaultBlockState(), alternative.properties());
             var properties = alternative.properties();
             if (definition.parts().get(index).propertiesSpace() == PropertySpace.LEGACY) {
               state = state.rotate(rotation);
@@ -180,8 +178,5 @@ public record AssemblyPattern(
               part.states()));
     }
     return new AssemblyPattern(machine, epoch, target, orientation, sourceDefinition, dynamicLengths, relocated);
-  }
-  private static <T extends Comparable<T>> BlockState property(BlockState state, Property<T> property, Comparable<?> value) {
-    return state.setValue(property, property.getValueClass().cast(value));
   }
 }

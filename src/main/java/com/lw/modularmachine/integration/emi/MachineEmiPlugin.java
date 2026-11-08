@@ -3,7 +3,7 @@ package com.lw.modularmachine.integration.emi;
 import com.lw.modularmachine.ModularMachine;
 import com.lw.modularmachine.client.recipe.MachineRecipeLayout;
 import com.lw.modularmachine.integration.jei.ClientMachineJeiCatalog;
-import com.lw.modularmachine.integration.jei.MachineJeiPlugin;
+import com.lw.modularmachine.util.minecraft.registry.RegisteredMachineItems;
 import com.lw.modularmachine.machine.recipe.MachineRecipe;
 import com.lw.modularmachine.machine.recipe.MachineRecipeRegistries;
 import com.lw.modularmachine.registry.MachineRegistries;
@@ -85,16 +85,16 @@ public final class MachineEmiPlugin implements EmiPlugin {
   }
 
   private static EmiStack icon(ResourceLocation machine) {
-    var controller = MachineJeiPlugin.controller(machine);
+    var controller = RegisteredMachineItems.controller(machine);
     return controller.isEmpty() ? EmiStack.of(MachineRegistries.CONTROLLER.get()) : EmiStack.of(controller);
   }
 
   private static void addRecipeWorkstations(EmiRegistry registry, MachineEmiCategory recipe, ResourceLocation machine) {
     registry.addWorkstation(recipe, EmiStack.of(MachineRegistries.CONTROLLER.get()));
     registry.addWorkstation(recipe, EmiStack.of(MachineRegistries.FACTORY_CONTROLLER.get()));
-    addWorkstation(registry, recipe, MachineJeiPlugin.controller(machine));
-    addWorkstation(registry, recipe, MachineJeiPlugin.factory(machine));
-    addWorkstation(registry, recipe, MachineJeiPlugin.blueprint(machine));
+    addWorkstation(registry, recipe, RegisteredMachineItems.controller(machine));
+    addWorkstation(registry, recipe, RegisteredMachineItems.factory(machine));
+    addWorkstation(registry, recipe, RegisteredMachineItems.blueprint(machine));
   }
 
   private static void addWorkstation(EmiRegistry registry, MachineEmiCategory category, ItemStack stack) {

@@ -3,6 +3,7 @@ package com.lw.modularmachine.integration.jei;
 import com.lw.modularmachine.machine.recipe.MachineRecipe;
 import com.lw.modularmachine.client.recipe.MachineRecipeDisplay;
 import com.lw.modularmachine.client.recipe.MachineRecipeLayout;
+import com.lw.modularmachine.util.minecraft.registry.RegisteredMachineItems;
 import java.util.List;
 import mezz.jei.api.constants.VanillaTypes;
 import mezz.jei.api.gui.builder.IRecipeLayoutBuilder;
@@ -37,7 +38,7 @@ final class MachineItemRecipeJeiCategory implements IRecipeCategory<MachineRecip
     layout = new MachineRecipeLayout(recipes);
     var gui = helpers.getGuiHelper();
     fluidType = ((IPlatformFluidHelper<FluidStack>) helpers.getPlatformFluidHelper()).getFluidIngredientType();
-    var registeredController = MachineJeiPlugin.controller(machine);
+    var registeredController = RegisteredMachineItems.controller(machine);
     icon = registeredController.isEmpty() ? gui.createBlankDrawable(16, 16) : gui
         .createDrawableIngredient(VanillaTypes.ITEM_STACK, registeredController);
     cell = gui.createDrawable(MachineRecipeDisplay.TEXTURE, 54, 0, 18, 18);

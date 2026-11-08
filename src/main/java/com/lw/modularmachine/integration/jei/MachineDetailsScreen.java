@@ -5,6 +5,8 @@ import com.lw.modularmachine.api.client.preview.PreviewRenderer;
 import com.lw.modularmachine.api.client.preview.PreviewSceneData;
 import com.lw.modularmachine.api.client.preview.PreviewViewport;
 import com.lw.modularmachine.client.preview.MachinePreviewSelection;
+import com.lw.modularmachine.util.client.gui.GuiTextures;
+import com.lw.modularmachine.util.minecraft.registry.RegisteredMachineItems;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Optional;
@@ -32,8 +34,15 @@ public final class MachineDetailsScreen extends Screen {
   private static final int CARD_GAP = 4;
   private static final int INCLUDE_BUTTON_WIDTH = 20;
   private static final int INCLUDE_BUTTON_HEIGHT = 22;
-  private static final ResourceLocation CONTROL_TEXTURE = ResourceLocation
-      .fromNamespaceAndPath("mmcece", "textures/gui/button.png");
+  private static final GuiTextures.NineSlice CONTROL_TEXTURE = new GuiTextures.NineSlice(
+      ResourceLocation.fromNamespaceAndPath("mmcece", "textures/gui/button.png"),
+      0,
+      0,
+      200,
+      20,
+      200,
+      20,
+      2);
   private static final ResourceLocation SETTINGS_BACKGROUND = ResourceLocation
       .fromNamespaceAndPath("mmcece", "textures/gui/button_2.png");
   private static final ResourceLocation SETTINGS_ICON = ResourceLocation
@@ -145,9 +154,9 @@ public final class MachineDetailsScreen extends Screen {
   }
 
   private void drawHeader(GuiGraphics graphics, int left, int top) {
-    ItemStack icon = MachineJeiPlugin.controller(machine.id());
+    ItemStack icon = RegisteredMachineItems.controller(machine.id());
     if (icon.isEmpty()) {
-      icon = MachineJeiPlugin.factory(machine.id());
+      icon = RegisteredMachineItems.factory(machine.id());
     }
     if (!icon.isEmpty()) {
       graphics.renderItem(icon, left + 18, top + 12);
@@ -346,32 +355,7 @@ public final class MachineDetailsScreen extends Screen {
   }
 
   private void drawStepButton(GuiGraphics graphics, int x, int y, String text, boolean active, int mouseX, int mouseY) {
-    // Preserve the two-pixel outer border and inner highlight when narrowing the
-    // button.
-    for (int row = 0; row < 3; row++) {
-      int sourceY = row == 0 ? 0 : row == 1 ? 2 : 18;
-      int targetY = row == 0 ? 0 : row == 1 ? 2 : 16;
-      int sourceHeight = row == 1 ? 16 : 2;
-      int targetHeight = row == 1 ? 14 : 2;
-      for (int column = 0; column < 3; column++) {
-        int sourceX = column == 0 ? 0 : column == 1 ? 2 : 198;
-        int targetX = column == 0 ? 0 : column == 1 ? 2 : 20;
-        int sourceWidth = column == 1 ? 196 : 2;
-        int targetWidth = column == 1 ? 18 : 2;
-        graphics.blit(
-            CONTROL_TEXTURE,
-            x + targetX,
-            y + targetY,
-            targetWidth,
-            targetHeight,
-            sourceX,
-            sourceY,
-            sourceWidth,
-            sourceHeight,
-            200,
-            20);
-      }
-    }
+    GuiTextures.blitNineSlice(graphics, CONTROL_TEXTURE, x, y, 22, 18);
     if (active && mouseX >= x && mouseX < x + 22 && mouseY >= y && mouseY < y + 18) {
       graphics.renderOutline(x, y, 22, 18, 0xFF205A70);
     }

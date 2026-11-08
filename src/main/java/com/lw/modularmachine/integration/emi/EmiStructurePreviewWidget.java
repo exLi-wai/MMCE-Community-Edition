@@ -6,6 +6,7 @@ import com.lw.modularmachine.api.client.preview.PreviewSceneData;
 import com.lw.modularmachine.api.client.preview.PreviewViewport;
 import com.lw.modularmachine.integration.jei.ClientMachineJeiCatalog;
 import com.lw.modularmachine.integration.jei.MachineDetailsScreen;
+import com.lw.modularmachine.util.client.gui.GuiTextures;
 import dev.emi.emi.api.widget.Bounds;
 import dev.emi.emi.api.widget.Widget;
 import java.util.List;
@@ -19,8 +20,15 @@ import org.lwjgl.glfw.GLFW;
 
 /** EMI layout and input adapter for the shared structure preview API. */
 final class EmiStructurePreviewWidget extends Widget {
-  private static final ResourceLocation DETAILS_BUTTON = ResourceLocation
-      .fromNamespaceAndPath("mmcece", "textures/gui/button.png");
+  private static final GuiTextures.NineSlice DETAILS_BUTTON = new GuiTextures.NineSlice(
+      ResourceLocation.fromNamespaceAndPath("mmcece", "textures/gui/button.png"),
+      0,
+      0,
+      200,
+      20,
+      200,
+      20,
+      2);
   private static final int DETAILS_HEIGHT = 20;
   private final int x, y, width, height;
   private final ClientMachineJeiCatalog.Machine machine;
@@ -75,7 +83,7 @@ final class EmiStructurePreviewWidget extends Widget {
         && mouseX < buttonLeft + buttonWidth
         && mouseY >= buttonTop
         && mouseY < buttonTop + DETAILS_HEIGHT;
-    graphics.blit(DETAILS_BUTTON, buttonLeft, buttonTop, buttonWidth, DETAILS_HEIGHT, 0, 0, 200, 20, 200, 20);
+    GuiTextures.blitNineSlice(graphics, DETAILS_BUTTON, buttonLeft, buttonTop, buttonWidth, DETAILS_HEIGHT);
     var text = Component.translatable("jei.mmcece.view_details");
     var font = Minecraft.getInstance().font;
     graphics.drawString(

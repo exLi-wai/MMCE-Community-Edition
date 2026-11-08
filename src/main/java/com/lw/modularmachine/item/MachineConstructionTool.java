@@ -23,13 +23,16 @@ import net.minecraft.world.level.LevelReader;
  * item.
  */
 public final class MachineConstructionTool extends Item {
+
   public MachineConstructionTool(Properties properties) {
     super(properties);
   }
+
   @Override
   public InteractionResult onItemUseFirst(ItemStack stack, UseOnContext context) {
     return useOn(context);
   }
+
   @Override
   public InteractionResult useOn(UseOnContext context) {
     if (context.getLevel().isClientSide) {
@@ -50,6 +53,7 @@ public final class MachineConstructionTool extends Item {
     }
     return InteractionResult.CONSUME;
   }
+
   @Override
   public InteractionResultHolder<ItemStack> use(Level level, Player player, InteractionHand hand) {
     if (!level.isClientSide && player instanceof ServerPlayer server && player.isShiftKeyDown()) {
@@ -57,10 +61,12 @@ public final class MachineConstructionTool extends Item {
     }
     return InteractionResultHolder.sidedSuccess(player.getItemInHand(hand), level.isClientSide);
   }
+
   @Override
   public boolean doesSneakBypassUse(ItemStack stack, LevelReader level, BlockPos pos, Player player) {
     return true;
   }
+
   @Override
   public void appendHoverText(ItemStack stack, TooltipContext context, List<Component> tooltip, TooltipFlag flag) {
     tooltip.add(Component.translatable("tooltip.mmcece.machine_projector").withStyle(ChatFormatting.WHITE));

@@ -392,6 +392,7 @@ public final class MachineGameTests {
     ItemStack diamonds = new ItemStack(Items.DIAMOND, 5);
     diamonds.set(DataComponents.CUSTOM_NAME, Component.literal("preserved"));
     port.inventory().setStackInSlot(0, diamonds);
+    port.setMachineColor(0x38A6D2);
     IItemHandler capability = helper.getLevel().getCapability(Capabilities.ItemHandler.BLOCK, pos, Direction.UP);
     helper.assertTrue(capability != null, "Item capability not registered");
     helper.assertTrue(
@@ -402,11 +403,8 @@ public final class MachineGameTests {
         "Simulation mutated output");
     var drops = Block.getDrops(port.getBlockState(), helper.getLevel(), pos, port);
     helper.assertTrue(
-        drops.size() == 1
-            && drops.getFirst().has(DataComponents.BLOCK_ENTITY_DATA)
-            && !drops.getFirst().get(DataComponents.BLOCK_ENTITY_DATA).copyTag().getCompound("mmcece")
-                .contains("items"),
-        "Port block item retained an inventory that should be dropped separately");
+        drops.size() == 1 && !drops.getFirst().has(DataComponents.BLOCK_ENTITY_DATA),
+        "Mined port must be a plain block item without saved color, inventory or configuration");
     helper.getLevel().destroyBlock(pos, false);
     int droppedCount = helper.getLevel().getEntitiesOfClass(ItemEntity.class, new AABB(pos).inflate(2.0D)).stream()
         .filter(entity -> entity.getItem().is(Items.DIAMOND)).mapToInt(entity -> entity.getItem().getCount()).sum();

@@ -1,6 +1,7 @@
 package com.lw.modularmachine.integration.jei;
 
 import com.lw.modularmachine.registry.MachineRegistries;
+import com.lw.modularmachine.util.minecraft.registry.RegisteredMachineItems;
 import java.util.List;
 import mezz.jei.api.gui.builder.IRecipeLayoutBuilder;
 import mezz.jei.api.gui.drawable.IDrawable;
@@ -65,10 +66,10 @@ final class MachineStructureJeiCategory implements IRecipeCategory<ClientMachine
     // dedicated controller/blueprint only matches its own machine.
     focus(builder, new ItemStack(MachineRegistries.CONTROLLER.get().asItem()));
     focus(builder, new ItemStack(MachineRegistries.FACTORY_CONTROLLER.get().asItem()));
-    focus(builder, MachineJeiPlugin.controller(machine.id()));
-    focus(builder, MachineJeiPlugin.factory(machine.id()));
-    focus(builder, MachineJeiPlugin.blueprint(machine.id()));
-    focus(builder, MachineJeiPlugin.blueprint(machine.id()), RecipeIngredientRole.OUTPUT);
+    focus(builder, RegisteredMachineItems.controller(machine.id()));
+    focus(builder, RegisteredMachineItems.factory(machine.id()));
+    focus(builder, RegisteredMachineItems.blueprint(machine.id()));
+    focus(builder, RegisteredMachineItems.blueprint(machine.id()), RecipeIngredientRole.OUTPUT);
   }
   private static void focus(IRecipeLayoutBuilder builder, ItemStack stack) {
     focus(builder, stack, RecipeIngredientRole.INPUT);
