@@ -51,10 +51,8 @@ public final class ProjectionPayloads {
       if (properties.size() > 64) {
         throw new IllegalArgumentException("Too many preview constraints");
       }
-      if (states.size() > 256) {
-        throw new IllegalArgumentException("Too many candidates");
-      }
     }
+
     public boolean matches(BlockState actual) {
       for (var state : states) {
         if (state.getBlock() != actual.getBlock()) {
@@ -75,6 +73,7 @@ public final class ProjectionPayloads {
       return false;
     }
   }
+
   public record Snapshot(
       long request,
       long epoch,
@@ -107,11 +106,11 @@ public final class ProjectionPayloads {
     receiver = Objects.requireNonNull(value);
   }
   public static void register(RegisterPayloadHandlersEvent event) {
-    event.registrar("1").playToClient(
+    event.registrar("2").playToClient(
         TYPE,
         StreamCodec.of(ProjectionPayloads::write, ProjectionPayloads::read),
         (packet, context) -> context.enqueueWork(() -> receiver.accept(packet)));
-    event.registrar("1").playToServer(
+    event.registrar("2").playToServer(
         STOP,
         StreamCodec
             .of((buffer, value) -> buffer.writeVarLong(value.request()), buffer -> new Stop(buffer.readVarLong())),
@@ -150,12 +149,12 @@ public final class ProjectionPayloads {
 
   static int chunkEnd(List<Entry> entries, int start) {
     int end = start;
-    int bytes = 512;
+    long bytes = 512;
     while (end < entries.size() && end - start < MAX_PACKET_ENTRIES) {
       var entry = entries.get(end);
-      int cost = 32 + entry.states().size() * 5;
+      long cost = 32L + (long) entry.states().size() * 5;
       for (String property : entry.properties()) {
-        cost += 5 + property.length() * 3;
+        cost += 5L + (long) property.length() * 3;
       }
       if (end > start && bytes + cost > PACKET_BYTE_TARGET) {
         break;
@@ -220,8 +219,10 @@ public final class ProjectionPayloads {
       }
       var pos = b.readBlockPos();
       int count = b.readVarInt();
-      if (count < 0 || count > 256) {
-        throw new IllegalArgumentException("Too many projection candidates");
+      // Each state ID needs at least one byte; never trust a count beyond this
+      // packet.
+      if (count < 0 || count > b.readableBytes()) {
+        throw new IllegalArgumentException("Invalid projection candidate count");
       }
       var states = new ArrayList<BlockState>();
       for (int j = 0; j < count; j++) {

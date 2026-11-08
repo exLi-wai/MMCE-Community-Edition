@@ -1,6 +1,8 @@
 package com.lw.modularmachine.machine.structure;
 
 import com.google.gson.JsonParser;
+import com.google.gson.JsonArray;
+import com.google.gson.JsonObject;
 import com.lw.modularmachine.machine.PortKind;
 import com.lw.modularmachine.machine.orientation.StateOrientationAdapters;
 import java.util.Map;
@@ -13,6 +15,34 @@ import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 
 class MachineDefinitionVariablesTest {
+  @Test
+  void largeVariablesAndLiteralArraysExpandWithoutPerPositionCapsOrDuplicates() {
+    var choices = new JsonArray();
+    for (int index = 0; index < 600; index++) {
+      choices.add("example:block_" + index);
+    }
+    choices.add("example:block_0");
+    var source = new JsonObject();
+    source.add("all", choices);
+    var variables = MachineDefinitionVariables.parse(source, "large.var.json");
+    var root = JsonParser
+        .parseString("{\"parts\":[{\"offset\":[1,0,0],\"block\":[\"all\",\"all\",\"example:block_0\"]}]}")
+        .getAsJsonObject();
+    var expanded = variables.expandParts(root, "machine.json").getAsJsonArray("parts").get(0).getAsJsonObject()
+        .getAsJsonArray("block");
+    assertEquals(600, expanded.size());
+    assertEquals("example:block_0", expanded.get(0).getAsString());
+    assertEquals("example:block_599", expanded.get(599).getAsString());
+    assertEquals(
+        "all",
+        root.getAsJsonArray("parts").get(0).getAsJsonObject().getAsJsonArray("block").get(0).getAsString());
+    root.getAsJsonArray("parts").get(0).getAsJsonObject().add("block", choices);
+    assertEquals(
+        expanded,
+        variables.expandParts(root, "literal.json").getAsJsonArray("parts").get(0).getAsJsonObject()
+            .getAsJsonArray("block"));
+  }
+
   @Test
   void stringAndArrayVariablesExpandBlockCandidates() {
     var variables = MachineDefinitionVariables.parse(

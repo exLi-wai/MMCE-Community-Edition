@@ -59,6 +59,7 @@ public final class MachineDetailsScreen extends Screen {
   private boolean cycle = true, dragging, settingsOpen = true;
   private double dragDistance;
   private int selected = -1;
+  private long candidateScroll;
   private long lastCycle;
 
   public MachineDetailsScreen(ClientMachineJeiCatalog.Machine machine) {
@@ -114,7 +115,7 @@ public final class MachineDetailsScreen extends Screen {
       machine = current;
       selection = null;
       scene = null;
-      selected = -1;
+      selectPosition(-1);
       materialScroll = 0;
       renderer.close();
       init();
@@ -124,7 +125,7 @@ public final class MachineDetailsScreen extends Screen {
       scene = selection.scene();
       animated = scene.entries().stream().filter(entry -> entry.states().size() > 1).toList();
       renderer.setScene(scene);
-      selected = -1;
+      selectPosition(-1);
     }
     if (cycle && !animated.isEmpty() && Util.getMillis() - lastCycle >= 1500) {
       step++;
@@ -150,7 +151,7 @@ public final class MachineDetailsScreen extends Screen {
     if (settingsOpen) {
       drawRequiredBlocks(graphics, mouseX, mouseY, partialTick);
     }
-    drawSelectedCandidates(graphics, left, top, panelWidth, panelHeight, mouseX, mouseY);
+    drawSelectedCandidates(graphics, mouseX, mouseY);
   }
 
   private void drawHeader(GuiGraphics graphics, int left, int top) {
@@ -375,33 +376,107 @@ public final class MachineDetailsScreen extends Screen {
         step);
   }
 
-  private void drawSelectedCandidates(GuiGraphics graphics, int panelLeft, int panelTop, int panelWidth, int panelHeight, int mouseX, int mouseY) {
+  private record CandidatePanel(int left, int top, int width, int height, int columns, int count) {
+    int bodyTop() {
+      return top + 24;
+    }
+    int bodyBottom() {
+      return top + height - 14;
+    }
+    long contentHeight() {
+      return ((long) (count - 1) / columns + 1) * CANDIDATE_VERTICAL_SPACING;
+    }
+    long maximumScroll() {
+      return Math.max(0L, contentHeight() - (bodyBottom() - bodyTop()));
+    }
+    boolean contains(double x, double y) {
+      return x >= left && x < left + width && y >= top && y < top + height;
+    }
+    boolean bodyContains(double x, double y) {
+      return contains(x, y) && y >= bodyTop() && y < bodyBottom();
+    }
+    boolean closeContains(double x, double y) {
+      return contains(x, y) && x >= left + width - 24 && y < top + 24;
+    }
+  }
+
+  private CandidatePanel candidatePanel() {
     if (selected < 0 || selected >= selection.parts().size()) {
+      return null;
+    }
+    int count = selection.parts().get(selected).alternatives().size();
+    if (count == 0) {
+      return null;
+    }
+    int parentLeft = Math.max(12, (width - Math.min(760, width - 24)) / 2);
+    int parentTop = Math.max(12, (height - Math.min(900, height - 24)) / 2);
+    int parentWidth = Math.min(760, width - parentLeft * 2);
+    int parentHeight = Math.min(900, height - parentTop * 2);
+    int availableWidth = Math.max(36, Math.min(CANDIDATE_MAX_WIDTH, parentWidth - 36));
+    int columns = Math.max(1, Math.min(CANDIDATE_COLUMNS, (availableWidth - 16) / CANDIDATE_HORIZONTAL_SPACING));
+    int panelWidth = Math.min(availableWidth, 16 + columns * CANDIDATE_HORIZONTAL_SPACING);
+    long rows = (long) (count - 1) / columns + 1;
+    int panelHeight = (int) Math.min(Math.max(38, parentHeight - 76), 38L + rows * CANDIDATE_VERTICAL_SPACING);
+
+    return new CandidatePanel(parentLeft + 18, parentTop + 58, panelWidth, panelHeight, columns, count);
+  }
+
+  private void drawSelectedCandidates(GuiGraphics graphics, int mouseX, int mouseY) {
+    var panel = candidatePanel();
+    if (panel == null) {
       return;
     }
     var alternatives = selection.parts().get(selected).alternatives();
-    if (alternatives.isEmpty()) {
-      return;
-    }
-    int left = candidateLeft(panelLeft);
-    int top = candidateTop(panelTop);
-    int columns = CANDIDATE_COLUMNS;
-    int rows = (alternatives.size() + columns - 1) / columns;
-    int width = Math.min(panelWidth - 36, Math.min(CANDIDATE_MAX_WIDTH, 16 + columns * CANDIDATE_HORIZONTAL_SPACING));
-    int height = Math.min(panelHeight - 76, 38 + rows * CANDIDATE_VERTICAL_SPACING);
-    graphics.fill(left, top, left + width, top + height, 0xE6D5D5D5);
-    graphics.renderOutline(left, top, width, height, 0xFF555555);
-    graphics.drawString(font, Component.translatable("jei.mmcece.candidates"), left + 8, top + 8, 0xFF202020, false);
-    graphics.drawString(font, "X", left + width - 16, top + 8, 0xFF202020, false);
-    for (int index = 0; index < alternatives.size(); index++) {
-      var stack = new ItemStack(alternatives.get(index).getBlock());
-      int x = left + 8 + index % columns * CANDIDATE_HORIZONTAL_SPACING;
-      int y = top + 24 + index / columns * CANDIDATE_VERTICAL_SPACING;
-      graphics.renderItem(stack, x, y);
-      graphics.renderItemDecorations(font, stack, x, y);
-      if (mouseX >= x && mouseX < x + 18 && mouseY >= y && mouseY < y + 18) {
-        graphics.renderTooltip(font, stack, mouseX, mouseY);
+    candidateScroll = Math.max(0L, Math.min(candidateScroll, panel.maximumScroll()));
+    graphics.fill(panel.left(), panel.top(), panel.left() + panel.width(), panel.top() + panel.height(), 0xE6D5D5D5);
+    graphics.renderOutline(panel.left(), panel.top(), panel.width(), panel.height(), 0xFF555555);
+    graphics.drawString(
+        font,
+        font.plainSubstrByWidth(tr("candidates").getString(), panel.width() - 36),
+        panel.left() + 8,
+        panel.top() + 8,
+        0xFF202020,
+        false);
+    graphics.drawString(font, "X", panel.left() + panel.width() - 16, panel.top() + 8, 0xFF202020, false);
+    int visibleHeight = panel.bodyBottom() - panel.bodyTop();
+    ItemStack hovered = ItemStack.EMPTY;
+    if (visibleHeight > 0) {
+      long firstRow = candidateScroll / CANDIDATE_VERTICAL_SPACING;
+      long lastRow = (candidateScroll + visibleHeight + CANDIDATE_VERTICAL_SPACING - 1) / CANDIDATE_VERTICAL_SPACING;
+      int first = (int) Math.min(panel.count(), firstRow * panel.columns());
+      int end = (int) Math.min(panel.count(), lastRow * panel.columns());
+      graphics.enableScissor(panel.left() + 2, panel.bodyTop(), panel.left() + panel.width() - 2, panel.bodyBottom());
+      try {
+        for (int index = first; index < end; index++) {
+          var stack = new ItemStack(alternatives.get(index).getBlock());
+          int x = panel.left() + 8 + index % panel.columns() * CANDIDATE_HORIZONTAL_SPACING;
+          int y = panel
+              .bodyTop() + (int) ((long) (index / panel.columns()) * CANDIDATE_VERTICAL_SPACING - candidateScroll);
+          graphics.renderItem(stack, x, y);
+          graphics.renderItemDecorations(font, stack, x, y);
+          if (panel.bodyContains(mouseX, mouseY) && mouseX >= x && mouseX < x + 18 && mouseY >= y && mouseY < y + 18) {
+            hovered = stack;
+          }
+        }
+      } finally {
+        graphics.disableScissor();
       }
+    }
+    if (panel.maximumScroll() > 0 && visibleHeight > 0) {
+      int thumb = (int) Math
+          .min(visibleHeight, Math.max(12L, (long) visibleHeight * visibleHeight / panel.contentHeight()));
+      int y = panel.bodyTop() + (int) ((visibleHeight - thumb) * ((double) candidateScroll / panel.maximumScroll()));
+      graphics.fill(panel.left() + panel.width() - 4, y, panel.left() + panel.width() - 2, y + thumb, 0xFF707070);
+    }
+    if (!hovered.isEmpty()) {
+      graphics.renderTooltip(font, hovered, mouseX, mouseY);
+    }
+  }
+
+  private void selectPosition(int index) {
+    if (selected != index) {
+      selected = index;
+      candidateScroll = 0;
     }
   }
 
@@ -415,6 +490,14 @@ public final class MachineDetailsScreen extends Screen {
     if (button == 0 && x >= settingsX && x < settingsX + 20 && y >= settingsY && y < settingsY + 22) {
       settingsOpen = !settingsOpen;
       positionFields(materialPanel());
+      return true;
+    }
+    var candidates = candidatePanel();
+    if (candidates != null && candidates.contains(x, y)) {
+      setFocused(null);
+      if (button == 0 && candidates.closeContains(x, y)) {
+        selectPosition(-1);
+      }
       return true;
     }
     var panel = materialPanel();
@@ -437,18 +520,6 @@ public final class MachineDetailsScreen extends Screen {
       return true;
     }
     setFocused(null);
-    if (button == 0
-        && selected >= 0
-        && x >= candidateLeft(Math.max(12, (width - Math.min(760, width - 24)) / 2)) + 180
-        && x < candidateLeft(Math.max(12, (width - Math.min(760, width - 24)) / 2)) + 220
-        && y >= candidateTop(Math.max(12, (height - Math.min(900, height - 24)) / 2))
-        && y < candidateTop(Math.max(12, (height - Math.min(900, height - 24)) / 2)) + 24) {
-      selected = -1;
-      return true;
-    }
-    if (button == 0 && selected >= 0 && candidateBounds(x, y)) {
-      return true;
-    }
     int left = Math.max(12, (width - Math.min(760, width - 24)) / 2);
     int top = Math.max(12, (height - Math.min(900, height - 24)) / 2);
     int panelHeight = Math.min(900, height - top * 2);
@@ -524,27 +595,10 @@ public final class MachineDetailsScreen extends Screen {
       return super.mouseReleased(x, y, button);
     }
     if (dragging && button == 0 && dragDistance <= 4 && scene != null) {
-      selected = renderer.pick(x, y);
+      selectPosition(renderer.pick(x, y));
     }
     dragging = false;
     return true;
-  }
-
-  private boolean candidateBounds(double x, double y) {
-    int panelLeft = Math.max(12, (width - Math.min(760, width - 24)) / 2);
-    int panelTop = Math.max(12, (height - Math.min(900, height - 24)) / 2);
-    return x >= candidateLeft(panelLeft)
-        && x < candidateLeft(panelLeft) + 212
-        && y >= candidateTop(panelTop)
-        && y < candidateTop(panelTop) + 500;
-  }
-
-  private static int candidateLeft(int panelLeft) {
-    return panelLeft + 18;
-  }
-
-  private static int candidateTop(int panelTop) {
-    return panelTop + 58;
   }
 
   @Override
@@ -558,7 +612,7 @@ public final class MachineDetailsScreen extends Screen {
       return true;
     }
     if (keyCode == GLFW.GLFW_KEY_X && selected >= 0) {
-      selected = -1;
+      selectPosition(-1);
       return true;
     }
     return super.keyPressed(keyCode, scanCode, modifiers);
@@ -566,6 +620,12 @@ public final class MachineDetailsScreen extends Screen {
 
   @Override
   public boolean mouseScrolled(double x, double y, double scrollX, double scrollY) {
+    var candidates = candidatePanel();
+    if (candidates != null && candidates.contains(x, y)) {
+      candidateScroll = Math.round(
+          Math.max(0D, Math.min(candidates.maximumScroll(), candidateScroll - scrollY * CANDIDATE_VERTICAL_SPACING)));
+      return true;
+    }
     var panel = materialPanel();
     if (settingsOpen && panel.contains(x, y)) {
       materialScroll = (int) Math.clamp(materialScroll - Math.round(scrollY * 20), 0, maximumScroll(panel));

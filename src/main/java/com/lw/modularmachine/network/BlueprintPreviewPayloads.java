@@ -71,7 +71,7 @@ public final class BlueprintPreviewPayloads {
   }
 
   public static void register(RegisterPayloadHandlersEvent event) {
-    event.registrar("1").playToServer(REQUEST, StreamCodec.of((buffer, request) -> {
+    event.registrar("2").playToServer(REQUEST, StreamCodec.of((buffer, request) -> {
       buffer.writeVarLong(request.request());
       buffer.writeEnum(request.hand());
       buffer.writeResourceLocation(request.machine());
@@ -87,7 +87,7 @@ public final class BlueprintPreviewPayloads {
             AssemblyService.requestBlueprintPreview(player, request);
           }
         }));
-    event.registrar("1").playToClient(
+    event.registrar("2").playToClient(
         SNAPSHOT,
         StreamCodec.of(BlueprintPreviewPayloads::write, BlueprintPreviewPayloads::read),
         (snapshot, context) -> context.enqueueWork(() -> receiver.accept(snapshot)));

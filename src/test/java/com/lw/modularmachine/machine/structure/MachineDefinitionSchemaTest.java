@@ -1,6 +1,7 @@
 package com.lw.modularmachine.machine.structure;
 
 import com.google.gson.JsonElement;
+import com.google.gson.JsonArray;
 import com.google.gson.JsonObject;
 import com.google.gson.JsonParseException;
 import com.google.gson.JsonParser;
@@ -232,11 +233,79 @@ class MachineDefinitionSchemaTest {
   }
 
   @Test
-  void propertyArraysExpandStateAlternatives() {
+  void propertyArraysCaptureLiteralsWithoutMaterializingTheirProduct() {
     JsonObject root = json(
         "{\"parts\":[{\"offset\":[1,0,0],\"block\":\"minecraft:oak_stairs\",\"properties\":{\"half\":[\"bottom\",\"top\"],\"shape\":[\"straight\",\"outer_left\"]}}]}");
     var references = MachineDefinition.blockReferences(Map.of(ID, root));
-    assertEquals(4, references.size());
+    assertEquals(1, references.size());
+    assertEquals(
+        List.of("bottom", "top", "straight", "outer_left"),
+        references.getFirst().properties().stream().map(StateOrientationAdapters.PropertyReference::literal).toList());
+    assertEquals(
+        List.of("half", "half", "shape", "shape"),
+        references.getFirst().properties().stream().map(StateOrientationAdapters.PropertyReference::name).toList());
+  }
+
+  @Test
+  void referenceCollectionAcceptsLargeChoicesAndKeepsOnlyTheirFirstOccurrence() {
+    var root = json(PORTS);
+    var part = root.getAsJsonArray("parts").get(0).getAsJsonObject();
+    var blocks = new JsonArray();
+    var values = new JsonArray();
+    for (int i = 0; i < 300; i++) {
+      blocks.add("example:block_" + i);
+      values.add(i);
+    }
+    blocks.add("example:block_0");
+    values.add(0);
+    part.add("block", blocks);
+    var properties = new JsonObject();
+    properties.add("variant", values);
+    part.add("properties", properties);
+    var references = MachineDefinition.blockReferences(Map.of(ID, root));
+    assertEquals(300, references.size());
+    assertEquals(ResourceLocation.parse("example:block_0"), references.getFirst().id());
+    assertEquals(ResourceLocation.parse("example:block_299"), references.getLast().id());
+    assertEquals(300, references.getFirst().properties().size());
+    assertEquals("0", references.getFirst().properties().getFirst().literal());
+    assertEquals("299", references.getFirst().properties().getLast().literal());
+  }
+
+  @Test
+  void directSnapshotParsingCannotBypassTheSharedAlternativeResourceBudget() {
+    var root = oversizedAlternatives(4097, 1024);
+    var references = assertThrows(JsonParseException.class, () -> MachineDefinition.blockReferences(Map.of(ID, root)));
+    var direct = assertThrows(JsonParseException.class, () -> MachineDefinition.parse(ID, root, EMPTY));
+    assertTrue(references.getMessage().contains("4194304 block alternatives"));
+    assertTrue(direct.getMessage().contains("4194304 block alternatives"));
+  }
+
+  @Test
+  void alternativeResourceBudgetIsSharedAcrossTheReloadGeneration() {
+    var root = oversizedAlternatives(4096, 512);
+    var failure = assertThrows(
+        JsonParseException.class,
+        () -> MachineDefinition.blockReferences(Map.of(id("a"), root, id("b"), root, id("c"), root)));
+    assertTrue(failure.getMessage().contains("4194304 block alternatives"));
+  }
+
+  private static JsonObject oversizedAlternatives(int first, int second) {
+    var root = json(PORTS);
+    var part = root.getAsJsonArray("parts").get(0).getAsJsonObject();
+    part.addProperty("block", "example:unregistered");
+    var properties = new JsonObject();
+    var a = new JsonArray();
+    var b = new JsonArray();
+    for (int i = 0; i < first; i++) {
+      a.add(i);
+    }
+    for (int i = 0; i < second; i++) {
+      b.add(i);
+    }
+    properties.add("a", a);
+    properties.add("b", b);
+    part.add("properties", properties);
+    return root;
   }
 
   @Test

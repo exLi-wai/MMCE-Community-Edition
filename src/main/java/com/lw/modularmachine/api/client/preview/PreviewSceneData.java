@@ -15,13 +15,17 @@ public record PreviewSceneData(int machineColor, List<Entry> entries) {
     entries = List.copyOf(entries);
   }
 
+  /**
+   * Candidate counts have no per-position cap; producers retain their overall
+   * resource budgets.
+   */
   public record Entry(BlockPos position, List<BlockState> states, List<String> properties) {
     public Entry {
       position = Objects.requireNonNull(position, "position").immutable();
       states = List.copyOf(states);
       properties = List.copyOf(properties);
-      if (states.size() > 256 || properties.size() > 64) {
-        throw new IllegalArgumentException("Too many preview candidates or constraints");
+      if (properties.size() > 64) {
+        throw new IllegalArgumentException("Too many preview constraints");
       }
     }
 

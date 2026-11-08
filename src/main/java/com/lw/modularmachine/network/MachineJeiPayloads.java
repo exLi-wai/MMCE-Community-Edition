@@ -36,6 +36,7 @@ public final class MachineJeiPayloads {
   private static Consumer<Snapshot> receiver = ignored -> {
   };
   public static final int CHUNK_PARTS = 32;
+  private static final int PACKET_BYTE_TARGET = 48 * 1024;
   public static final int MAX_PARTS = 4_194_305;
 
   /** Template counts refer to the declaration stream after the fixed parts. */
@@ -71,7 +72,7 @@ public final class MachineJeiPayloads {
     public Part {
       offset = offset.immutable();
       alternatives = List.copyOf(alternatives);
-      if (alternatives.isEmpty() || alternatives.size() > 512) {
+      if (alternatives.isEmpty()) {
         throw new IllegalArgumentException("Invalid preview alternatives");
       }
     }
@@ -119,7 +120,7 @@ public final class MachineJeiPayloads {
     receiver = Objects.requireNonNull(value);
   }
   public static void register(RegisterPayloadHandlersEvent event) {
-    event.registrar("3").playToClient(
+    event.registrar("4").playToClient(
         TYPE,
         StreamCodec.of(MachineJeiPayloads::write, MachineJeiPayloads::read),
         (payload, context) -> context.enqueueWork(() -> receiver.accept(payload)));
@@ -187,8 +188,8 @@ public final class MachineJeiPayloads {
     for (int i = 0; i < count; i++) {
       var offset = buffer.readBlockPos();
       int size = buffer.readVarInt();
-      if (size < 1 || size > 512) {
-        throw new IllegalArgumentException("Too many preview alternatives");
+      if (size < 1 || size > buffer.readableBytes()) {
+        throw new IllegalArgumentException("Invalid preview alternative count");
       }
       var states = new ArrayList<BlockState>();
       for (int j = 0; j < size; j++) {
@@ -226,7 +227,8 @@ public final class MachineJeiPayloads {
         var states = new LinkedHashSet<BlockState>(states(part.rule()));
         parts.add(new Part(part.offset(), new ArrayList<>(states)));
       }
-      for (int start = 0; start < parts.size(); start += CHUNK_PARTS) {
+      for (int start = 0; start < parts.size();) {
+        int end = chunkEnd(parts, start);
         packets.add(
             new Snapshot(
                 epoch,
@@ -238,7 +240,8 @@ public final class MachineJeiPayloads {
                 parts.size(),
                 definition.parts().size() + 1,
                 start == 0 ? segments : List.of(),
-                parts.subList(start, Math.min(parts.size(), start + CHUNK_PARTS))));
+                parts.subList(start, end)));
+        start = end;
       }
     }
     packets.add(new Snapshot(epoch, definitions.size(), marker, "", 0xFFFFFF, -2, 0, 0, List.of(), List.of()));
@@ -249,6 +252,24 @@ public final class MachineJeiPayloads {
         PacketDistributor.sendToPlayer(player, packet);
       }
     }
+  }
+
+  /**
+   * Oversized single entries use NeoForge's negotiated packet splitter, never
+   * truncation.
+   */
+  private static int chunkEnd(List<Part> parts, int start) {
+    int end = start;
+    long bytes = 16 * 1024;
+    while (end < parts.size() && end - start < CHUNK_PARTS) {
+      long cost = 16L + (long) parts.get(end).alternatives().size() * 5;
+      if (end > start && bytes + cost > PACKET_BYTE_TARGET) {
+        break;
+      }
+      bytes += cost;
+      end++;
+    }
+    return end;
   }
   private static List<BlockState> states(MachineDefinition.Rule rule) {
     if (rule.port() != null) {

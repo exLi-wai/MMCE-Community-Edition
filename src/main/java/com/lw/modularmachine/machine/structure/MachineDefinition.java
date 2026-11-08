@@ -23,9 +23,11 @@ import com.lw.modularmachine.machine.smart.SmartInterfaceAssignment;
 import com.lw.modularmachine.machine.smart.SmartInterfaceType;
 import java.nio.charset.StandardCharsets;
 import java.util.ArrayList;
-import java.util.HashMap;
 import java.util.HashSet;
 import java.util.LinkedHashMap;
+import java.util.LinkedHashSet;
+import java.util.Iterator;
+import java.util.NoSuchElementException;
 import java.util.List;
 import java.util.Map;
 import java.util.Objects;
@@ -68,6 +70,7 @@ public record MachineDefinition(
    */
   private static final Logger LOGGER = LogUtils.getLogger();
   public static final int MAX_PARTS = Integer.MAX_VALUE;
+  static final long ALTERNATIVE_RESOURCE_BUDGET = 4_194_304L;
 
   public MachineDefinition(ResourceLocation id, String translationKey, List<Part> parts, long energyPerTick, OrientationPolicy orientationPolicy, OrientationCompilation orientationCompilation, FactoryThreadPreset factoryPreset, List<RecipeModifier> recipeModifiers, List<StructureModifierDefinition> structureModifiers, Map<String, SmartInterfaceType> interfaceTypes, int internalParallelism, int maxParallelism, boolean requiresBlueprint, boolean factoryOnly, int color, boolean hideComponentsWhenFormed, AABB controllerBoundingBox) {
     this(id, translationKey, parts, energyPerTick, orientationPolicy, orientationCompilation, factoryPreset,
@@ -235,6 +238,7 @@ public record MachineDefinition(
   public static MachineDefinition parse(ResourceLocation id, JsonObject root, StateOrientationAdapters.RegistrySnapshot snapshot) {
     String path = id + ": $";
     header(root, path);
+    checkAlternativeBudget(Map.of(id, root));
     OrientationPolicy policy = OrientationPolicy.HORIZONTAL;
     if (root.has("orientation")) {
       JsonObject orientation = object(root.get("orientation"), path + ".orientation");
@@ -332,6 +336,7 @@ public record MachineDefinition(
    * literals on-thread.
    */
   public static List<StateOrientationAdapters.BlockReference> blockReferences(Map<ResourceLocation, ? extends JsonElement> roots) {
+    checkAlternativeBudget(roots);
     List<StateOrientationAdapters.BlockReference> result = new ArrayList<>();
     if (roots.size() > 1024) {
       throw error("$", "At most 1024 machine definitions per reload");
@@ -362,24 +367,20 @@ public record MachineDefinition(
         }
         JsonObject required = part
             .has("properties") ? object(part.get("properties"), partPath + ".properties") : new JsonObject();
-        for (var variant : propertyVariants(required, partPath + ".properties")) {
-          for (String name : blockNames(part, partPath)) {
-            String blockPath = partPath + ".block";
-            String propertyPath = partPath + ".properties";
-            List<StateOrientationAdapters.PropertyReference> variantProperties = new ArrayList<>();
-            for (var property : variant.entrySet()) {
-              variantProperties.add(
-                  new StateOrientationAdapters.PropertyReference(
-                      property.getKey(),
-                      property.getValue(),
-                      propertyPath + "." + property.getKey()));
-            }
-            ResourceLocation blockId = blockId(name, blockPath);
-            if (result.size() >= 4_194_304) {
-              throw error(partPath, "Reload exceeds 4194304 block alternatives");
-            }
-            result.add(new StateOrientationAdapters.BlockReference(blockId, partPath, variantProperties));
+        var requested = new ArrayList<StateOrientationAdapters.PropertyReference>();
+        for (var property : propertyOptions(required, partPath + ".properties").entrySet()) {
+          for (String literal : property.getValue()) {
+            requested.add(
+                new StateOrientationAdapters.PropertyReference(
+                    property.getKey(),
+                    literal,
+                    partPath + ".properties." + property.getKey()));
           }
+        }
+        var literals = List.copyOf(requested);
+        for (String name : blockNames(part, partPath)) {
+          ResourceLocation blockId = blockId(name, partPath + ".block");
+          result.add(new StateOrientationAdapters.BlockReference(blockId, partPath, literals));
         }
       }
     }
@@ -520,6 +521,7 @@ public record MachineDefinition(
 
   static List<Part> parseParts(ResourceLocation id, JsonArray elements, String path, StateOrientationAdapters.RegistrySnapshot snapshot, boolean allowAnchor) {
     List<Part> parts = new ArrayList<>();
+    var alternativeBudget = new AlternativeBudget();
     int skippedParts = 0;
     Set<BlockPos> offsets = new HashSet<>();
     Set<String> partIds = new HashSet<>();
@@ -568,6 +570,7 @@ public record MachineDefinition(
       } else {
         JsonObject properties = part
             .has("properties") ? object(part.get("properties"), partPath + ".properties") : new JsonObject();
+        var options = propertyOptions(properties, partPath + ".properties");
         for (String name : blockNames(part, partPath)) {
           ResourceLocation blockId = blockId(name, partPath);
           if (!snapshot.has(blockId)) {
@@ -575,13 +578,9 @@ public record MachineDefinition(
             continue;
           }
           var block = snapshot.block(blockId, partPath);
-          for (var variant : propertyVariants(properties, partPath + ".properties")) {
-            Map<Property<?>, Comparable<?>> required = new HashMap<>();
-            for (var entry : variant.entrySet()) {
-              String propertyPath = partPath + ".properties." + entry.getKey();
-              var property = block.property(entry.getKey(), propertyPath);
-              required.put(property.property(), property.value(entry.getValue(), propertyPath));
-            }
+          var resolved = resolveProperties(block, options, partPath + ".properties");
+          int count = alternativeBudget.add(1, resolved, partPath);
+          for (var required : propertyVariants(resolved, count)) {
             alternatives.add(new Alternative(block, required));
           }
         }
@@ -772,48 +771,143 @@ public record MachineDefinition(
       return List.of(string(part.get("block"), path + ".block"));
     }
     JsonArray elements = array(part.get("block"), path + ".block");
-    if (elements.isEmpty() || elements.size() > 256) {
-      throw error(path + ".block", "Expected 1..256 alternatives");
+    if (elements.isEmpty()) {
+      throw error(path + ".block", "Expected at least one alternative");
     }
-    List<String> result = new ArrayList<>();
+    var result = new LinkedHashSet<String>();
     for (int i = 0; i < elements.size(); i++) {
       result.add(string(elements.get(i), path + ".block[" + i + "]"));
     }
-    return result;
+    return List.copyOf(result);
   }
 
-  private static List<Map<String, String>> propertyVariants(JsonObject properties, String path) {
-    List<Map<String, String>> variants = new ArrayList<>();
-    variants.add(new LinkedHashMap<>());
+  private static Map<String, List<String>> propertyOptions(JsonObject properties, String path) {
+    var result = new LinkedHashMap<String, List<String>>();
     for (var entry : properties.entrySet()) {
       String propertyPath = path + "." + entry.getKey();
-      List<String> values;
+      var values = new LinkedHashSet<String>();
       if (entry.getValue().isJsonArray()) {
         JsonArray array = entry.getValue().getAsJsonArray();
-        if (array.isEmpty() || array.size() > 256) {
-          throw error(propertyPath, "Expected 1..256 property values");
+        if (array.isEmpty()) {
+          throw error(propertyPath, "Expected at least one property value");
         }
-        values = new ArrayList<>();
         for (int index = 0; index < array.size(); index++) {
           values.add(literal(array.get(index), propertyPath + "[" + index + "]"));
         }
       } else {
-        values = List.of(literal(entry.getValue(), propertyPath));
+        values.add(literal(entry.getValue(), propertyPath));
       }
-      List<Map<String, String>> expanded = new ArrayList<>();
-      for (var variant : variants) {
-        for (String value : values) {
-          if (expanded.size() >= 256) {
-            throw error(path, "Property state combinations exceed 256 variants");
-          }
-          var copy = new LinkedHashMap<>(variant);
-          copy.put(entry.getKey(), value);
-          expanded.add(copy);
-        }
-      }
-      variants = expanded;
+      result.put(entry.getKey(), List.copyOf(values));
     }
-    return variants;
+    return result;
+  }
+
+  private static Map<Property<?>, List<Comparable<?>>> resolveProperties(StateOrientationAdapters.BlockSnapshot block, Map<String, List<String>> options, String path) {
+    var result = new LinkedHashMap<Property<?>, List<Comparable<?>>>();
+    for (var entry : options.entrySet()) {
+      String propertyPath = path + "." + entry.getKey();
+      var property = block.property(entry.getKey(), propertyPath);
+      var values = new LinkedHashSet<Comparable<?>>();
+      for (var literal : entry.getValue()) {
+        values.add(property.value(literal, propertyPath));
+      }
+      result.put(property.property(), List.copyOf(values));
+    }
+    return result;
+  }
+
+  /**
+   * Only the current combination is materialized; declared property order is
+   * preserved.
+   */
+  private static Iterable<Map<Property<?>, Comparable<?>>> propertyVariants(Map<Property<?>, List<Comparable<?>>> options, int count) {
+    var properties = List.copyOf(options.keySet());
+    var values = List.copyOf(options.values());
+    return () -> new Iterator<>() {
+      private int cursor;
+
+      @Override
+      public boolean hasNext() {
+        return cursor < count;
+      }
+
+      @Override
+      public Map<Property<?>, Comparable<?>> next() {
+        if (!hasNext()) {
+          throw new NoSuchElementException();
+        }
+        if ((cursor & 4095) == 0 && Thread.currentThread().isInterrupted()) {
+          throw new CancellationException();
+        }
+        int combination = cursor++;
+        var selected = new Comparable<?>[properties.size()];
+        for (int index = properties.size() - 1; index >= 0; index--) {
+          var choices = values.get(index);
+          selected[index] = choices.get(combination % choices.size());
+          combination /= choices.size();
+        }
+        var result = new LinkedHashMap<Property<?>, Comparable<?>>();
+        for (int index = 0; index < properties.size(); index++) {
+          result.put(properties.get(index), selected[index]);
+        }
+        return result;
+      }
+    };
+  }
+
+  /**
+   * Shared reload/direct-parse resource budget, separate from per-position
+   * candidate semantics.
+   */
+  private static final class AlternativeBudget {
+    private long used;
+
+    int add(int blocks, Map<?, ? extends List<?>> options, String path) {
+      long count = blocks;
+      long remaining = ALTERNATIVE_RESOURCE_BUDGET - used;
+      if (count > remaining) {
+        throw error(path, "Reload exceeds 4194304 block alternatives");
+      }
+      for (var values : options.values()) {
+        if (count > remaining / values.size()) {
+          throw error(path, "Reload exceeds 4194304 block alternatives");
+        }
+        count *= values.size();
+      }
+      used += count;
+      return Math.toIntExact(count);
+    }
+  }
+
+  private static void checkAlternativeBudget(Map<ResourceLocation, ? extends JsonElement> roots) {
+    if (roots.size() > 1024) {
+      throw error("$", "At most 1024 machine definitions per reload");
+    }
+    var budget = new AlternativeBudget();
+    long totalParts = 0;
+    for (var entry : roots.entrySet()) {
+      String path = entry.getKey() + ": $";
+      var root = object(entry.getValue(), path);
+      header(root, path);
+      var declarations = new ArrayList<JsonElement>();
+      parts(root, path).forEach(declarations::add);
+      declarations.addAll(StructureModifierDefinition.captureParts(root, path));
+      declarations.addAll(DynamicPatternDefinition.captureParts(root, path));
+      totalParts += declarations.size();
+      if (totalParts > 4_194_304L) {
+        throw error(path + ".parts", "Reload exceeds 4194304 total parts");
+      }
+      for (int index = 0; index < declarations.size(); index++) {
+        String partPath = path + ".parts[" + index + "]";
+        var part = object(declarations.get(index), partPath);
+        if (!part.has("block") || candidatePort(part) != null) {
+          continue;
+        }
+        var properties = part
+            .has("properties") ? object(part.get("properties"), partPath + ".properties") : new JsonObject();
+        budget.add(blockNames(part, partPath).size(), propertyOptions(properties, partPath + ".properties"), partPath);
+      }
+    }
   }
 
   private static PortKind blockPort(JsonElement value) {
