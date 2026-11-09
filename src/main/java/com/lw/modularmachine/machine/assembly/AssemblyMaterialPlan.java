@@ -55,6 +55,10 @@ final class AssemblyMaterialPlan {
     final Set<Item> reservedBlocks;
     private final List<Resource> resources;
     private final long[] remaining;
+    private final Map<Resource, Integer> resourceIndices = new HashMap<>();
+    private final Map<Resource, Long> assignedPerResource = new HashMap<>();
+    private final Set<Resource> unavailable = new HashSet<>();
+    private long availablePositions;
 
     Result(Map<Choices, LinkedHashMap<Resource, Long>> assignments, List<Shortage> shortages, boolean incomplete) {
       this(assignments, shortages, incomplete, List.of());
@@ -70,18 +74,60 @@ final class AssemblyMaterialPlan {
       remaining = supplies.stream()
           .mapToLong(supply -> supply.quantity() / (supply.resource().item() == null ? FluidType.BUCKET_VOLUME : 1))
           .toArray();
+      for (int index = 0; index < resources.size(); index++) {
+        resourceIndices.put(resources.get(index), index);
+      }
+      countAssignments();
     }
 
     Resource next(Choices choices) {
       var assigned = assignments.get(choices);
-      return assigned == null || assigned.isEmpty() ? null : assigned.keySet().iterator().next();
+      if (assigned == null) {
+        return null;
+      }
+      for (var entry : assigned.entrySet()) {
+        if (entry.getValue() > 0 && !unavailable.contains(entry.getKey())) {
+          return entry.getKey();
+        }
+      }
+
+      return null;
+    }
+
+    boolean hasAvailableMaterials() {
+      return availablePositions > 0;
+    }
+
+    /** Mark only a resource whose current physical supply was confirmed missing. */
+    void unavailable(Resource resource) {
+      if (resource == null || !unavailable.add(resource)) {
+        return;
+      }
+      availablePositions -= assignedPerResource.getOrDefault(resource, 0L);
+      var index = resourceIndices.get(resource);
+      if (index != null) {
+        remaining[index] = 0;
+      }
     }
 
     void used(Choices choices, Resource resource) {
       var assigned = assignments.get(choices);
-      if (assigned != null && resource != null) {
-        assigned.computeIfPresent(resource, (key, count) -> count <= 1 ? null : count - 1);
-        remaining[resources.indexOf(resource)]--;
+      Long count = assigned == null || resource == null ? null : assigned.get(resource);
+      if (count == null || count <= 0) {
+        return;
+      }
+      if (count == 1) {
+        assigned.remove(resource);
+      } else {
+        assigned.put(resource, count - 1);
+      }
+      assignedPerResource.computeIfPresent(resource, (key, total) -> total <= 1 ? null : total - 1);
+      if (!unavailable.contains(resource)) {
+        availablePositions--;
+      }
+      var index = resourceIndices.get(resource);
+      if (index != null && remaining[index] > 0) {
+        remaining[index]--;
       }
     }
 
@@ -122,6 +168,23 @@ final class AssemblyMaterialPlan {
     void install(Replacement replacement) {
       assignments.clear();
       assignments.putAll(replacement.assignments());
+      countAssignments();
+    }
+
+    private void countAssignments() {
+      assignedPerResource.clear();
+      availablePositions = 0;
+      for (var group : assignments.values()) {
+        for (var entry : group.entrySet()) {
+          long count = entry.getValue();
+          if (count > 0) {
+            assignedPerResource.merge(entry.getKey(), count, Math::addExact);
+            if (!unavailable.contains(entry.getKey())) {
+              availablePositions = Math.addExact(availablePositions, count);
+            }
+          }
+        }
+      }
     }
   }
 

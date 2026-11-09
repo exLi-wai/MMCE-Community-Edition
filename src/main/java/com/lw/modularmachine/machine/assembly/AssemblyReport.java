@@ -6,11 +6,13 @@ import com.lw.modularmachine.util.minecraft.placement.PlacementMaterials.Choices
 import com.lw.modularmachine.util.minecraft.placement.PlacementOutcome;
 import java.util.ArrayList;
 import java.util.HashMap;
+import java.util.HashSet;
 import java.util.Iterator;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Locale;
 import java.util.Map;
+import java.util.Set;
 import net.minecraft.core.BlockPos;
 import net.minecraft.network.chat.Component;
 import net.minecraft.network.chat.MutableComponent;
@@ -21,26 +23,33 @@ import net.neoforged.neoforge.fluids.FluidType;
 import org.jetbrains.annotations.ApiStatus;
 
 /**
- * Internal, final-pass diagnostics. Delivery reads no world or inventory state.
+ * Internal placement exceptions followed by one compact, snapshot-based
+ * missing-material line.
  */
 @ApiStatus.Internal
 final class AssemblyReport {
   record Send(boolean done, int work) {
   }
 
-  private record Message(Component value, int work, boolean done) {
+  private record ProblemKey(PlacementOutcome reason, boolean occupied) {
+  }
+
+  private record Row(Component example, int count) {
+  }
+
+  private static final class ProblemGroup {
+    final Component example;
+    final Set<BlockPos> positions = new HashSet<>();
+
+    ProblemGroup(Component example) {
+      this.example = example;
+    }
   }
 
   private final Map<MachineDefinition.Rule, Choices> candidates = new HashMap<>();
+  private final Map<ProblemKey, ProblemGroup> problems = new LinkedHashMap<>();
   private final Map<Choices, Integer> missing = new LinkedHashMap<>();
-  private final List<Component> problems = new ArrayList<>();
-  private int missingPositions;
   private Delivery delivery;
-  private AssemblyMaterialPlan planning;
-  private AssemblyMaterialPlan.Result plan;
-  private Iterator<Map.Entry<Choices, Integer>> fallback;
-  private final List<AssemblyMaterialPlan.Shortage> fallbackShortages = new ArrayList<>();
-  private Component pendingMessage;
 
   Choices choices(AssemblyPattern.Part part) {
     return candidates.computeIfAbsent(part.rule(), ignored -> PlacementMaterials.choices(part.states()));
@@ -51,26 +60,34 @@ final class AssemblyReport {
   }
 
   void missing(AssemblyPattern.Part part, Choices choices) {
-    if (choices.items().isEmpty() && choices.fluids().isEmpty()) {
-      problem(part.position(), PlacementOutcome.MANUAL);
-      return;
+    if (!choices.items().isEmpty() || !choices.fluids().isEmpty()) {
+      missing.merge(choices, 1, Integer::sum);
     }
-    missing.merge(choices, 1, Integer::sum);
-    missingPositions++;
   }
 
   void occupied(BlockPos position, BlockState actual) {
-    problems.add(
-        Component.translatable(
-            "message.mmcece.assembly.occupied",
-            position.getX(),
-            position.getY(),
-            position.getZ(),
-            actual.getBlock().getName()));
+    var key = new ProblemKey(PlacementOutcome.REJECTED, true);
+    var group = problems.get(key);
+    if (group == null) {
+      group = new ProblemGroup(
+          Component.translatable(
+              "message.mmcece.assembly.occupied",
+              position.getX(),
+              position.getY(),
+              position.getZ(),
+              actual.getBlock().getName()));
+      problems.put(key, group);
+    }
+    group.positions.add(position.immutable());
   }
 
   void problem(BlockPos position, PlacementOutcome reason) {
-    problems.add(problemMessage(position, reason));
+    if (reason == PlacementOutcome.PLACED || reason == PlacementOutcome.MISSING) {
+      return;
+    }
+    var key = new ProblemKey(reason, false);
+    var group = problems.computeIfAbsent(key, ignored -> new ProblemGroup(problemMessage(position, reason)));
+    group.positions.add(position.immutable());
   }
 
   static Component problemMessage(BlockPos position, PlacementOutcome reason) {
@@ -82,19 +99,57 @@ final class AssemblyReport {
         Component.translatable("message.mmcece.assembly.reason." + reason.name().toLowerCase(Locale.ROOT)));
   }
 
+  boolean hasProblems() {
+    return !problems.isEmpty();
+  }
+
   void nextPass() {
-    missing.clear();
     problems.clear();
-    missingPositions = 0;
+    missing.clear();
+    delivery = null;
+  }
+
+  void finish() {
+    finish(null, Map.of());
+  }
+
+  void finish(ServerPlayer player, Map<Choices, Integer> remainingDemand) {
+    var rows = new ArrayList<Row>(problems.size());
+    for (var group : problems.values()) {
+      rows.add(new Row(group.example.copy(), group.positions.size()));
+    }
+    var planning = remainingDemand.isEmpty() ? null : new AssemblyMaterialPlan(remainingDemand, player);
+    delivery = new Delivery(List.copyOf(rows), planning);
   }
 
   void finish(ServerPlayer player, int matched, int total, int placed) {
-    planning = new AssemblyMaterialPlan(missing, player);
-    delivery = new Delivery(matched, total, placed);
+    finish(player, missing);
   }
 
   boolean finishing() {
     return delivery != null;
+  }
+
+  /**
+   * Detach pure messages before disposing the construction job and its
+   * reservations.
+   */
+  Delivery takeDelivery() {
+    if (delivery == null) {
+      finish();
+    }
+    var detached = delivery;
+    delivery = null;
+    problems.clear();
+    missing.clear();
+
+    return detached;
+  }
+
+  Delivery takeDelivery(ServerPlayer player, Map<Choices, Integer> remainingDemand) {
+    finish(player, remainingDemand);
+
+    return takeDelivery();
   }
 
   boolean send(ServerPlayer player, int limit) {
@@ -102,199 +157,171 @@ final class AssemblyReport {
   }
 
   Send send(ServerPlayer player, int limit, long deadline, int workBudget) {
-    int work = 0;
-    if (plan == null) {
-      if (fallback == null) {
-        try {
-          var advanced = planning.advance(deadline, workBudget);
-          plan = advanced.result();
-          work += advanced.work();
-        } catch (RuntimeException failure) {
-          com.lw.modularmachine.ModularMachine.LOGGER.warn("Assembly material report planning failed", failure);
-          fallback = missing.entrySet().iterator();
-        }
-      }
-      if (fallback != null) {
-        while (fallback.hasNext() && work < workBudget && System.nanoTime() < deadline) {
-          var entry = fallback.next();
-          fallbackShortages.add(
-              new AssemblyMaterialPlan.Shortage(
-                  entry.getKey(),
-                  entry.getValue(),
-                  FluidStack.EMPTY,
-                  (long) entry.getValue() * FluidType.BUCKET_VOLUME));
-          work++;
-        }
-        if (!fallback.hasNext()) {
-          plan = new AssemblyMaterialPlan.Result(Map.of(), fallbackShortages, true);
-        }
-      }
-      if (plan == null) {
-        return new Send(false, work);
-      }
-      delivery.materials = plan.shortages.iterator();
-    }
-    int sent = 0;
-    while (sent < limit && work < workBudget && System.nanoTime() < deadline) {
-      if (pendingMessage == null) {
-        var message = delivery.next(deadline, workBudget - work);
-        work += message.work();
-        if (message.done()) {
-          return new Send(true, work);
-        }
-        pendingMessage = message.value();
-        if (pendingMessage == null) {
-          break;
-        }
-      }
-      if (work >= workBudget || System.nanoTime() >= deadline) {
-        break;
-      }
-      player.sendSystemMessage(pendingMessage);
-      pendingMessage = null;
-      sent++;
-      work++;
-    }
-
-    return new Send(false, work);
+    return delivery == null ? new Send(true, 0) : delivery.send(player, limit, deadline, workBudget);
   }
 
   void cancel() {
-    if (planning != null) {
-      planning.cancel();
+    if (delivery != null) {
+      delivery.cancel();
     }
+    problems.clear();
+    missing.clear();
+    candidates.clear();
+    delivery = null;
   }
 
-  private final class Delivery {
-    final int matched, total, placed;
-    Iterator<AssemblyMaterialPlan.Shortage> materials;
-    final Iterator<Component> issues = problems.iterator();
-    AssemblyMaterialPlan.Shortage material;
-    MutableComponent materialNames;
-    int itemName, fluidName;
-    int phase;
+  /**
+   * Internal snapshot delivery; it does not keep live player, world, owner or job
+   * references.
+   */
+  @ApiStatus.Internal
+  static final class Delivery {
+    private final List<Row> rows;
+    private final AssemblyMaterialPlan planning;
+    private int cursor;
+    private AssemblyMaterialPlan.Result plan;
+    private Iterator<AssemblyMaterialPlan.Shortage> shortages;
+    private AssemblyMaterialPlan.Shortage shortage;
+    private MutableComponent shortageNames;
+    private final MutableComponent summary = Component.empty();
+    private int itemName, fluidName, entries;
+    private boolean summaryReady, summarySent;
+    private Component summaryMessage;
 
-    Delivery(int matched, int total, int placed) {
-      this.matched = matched;
-      this.total = total;
-      this.placed = placed;
+    private Delivery(List<Row> rows, AssemblyMaterialPlan planning) {
+      this.rows = rows;
+      this.planning = planning;
+      summaryReady = planning == null;
+      summarySent = planning == null;
     }
 
-    Message next(long deadline, int workBudget) {
-      int work = 0;
-      while (work < workBudget && System.nanoTime() < deadline) {
+    boolean done() {
+      return cursor == rows.size() && summarySent;
+    }
+
+    Send send(ServerPlayer player, int limit, long deadline, int workBudget) {
+      int work = 0, sent = 0;
+      while (cursor < rows.size() && work < workBudget && sent < limit && System.nanoTime() < deadline) {
+        var row = rows.get(cursor);
+        var message = row.count() == 1 ? row.example() : Component
+            .translatable("message.mmcece.assembly.problem_group", row.example(), row.count());
+        player.sendSystemMessage(message);
+        cursor++;
+        sent++;
         work++;
-        switch (phase) {
-          case 0 -> {
-            phase++;
-            var message = matched == total ? Component
-                .translatable("message.mmcece.assembly.complete", matched, total, placed) : Component.translatable(
-                    "message.mmcece.assembly.finished_partial",
-                    matched,
-                    total,
-                    placed,
-                    missingPositions,
-                    problems.size());
-            return new Message(message, work, false);
-          }
-          case 1 -> {
-            phase++;
-            if (plan.incomplete) {
-              return new Message(
-                  Component.translatable("message.mmcece.assembly.material_snapshot_incomplete"),
-                  work,
-                  false);
-            }
-          }
-          case 2 -> {
-            phase++;
-            if (!plan.shortages.isEmpty()) {
-              return new Message(Component.translatable("message.mmcece.assembly.net_missing_header"), work, false);
-            }
-          }
-          case 3 -> {
-            if (material == null) {
-              if (!materials.hasNext()) {
-                phase++;
-                continue;
-              }
-              material = materials.next();
-              materialNames = Component.empty();
-              itemName = 0;
-              fluidName = 0;
-              if (!material.fluid().isEmpty()) {
-                var message = Component.translatable(
-                    "message.mmcece.assembly.net_missing_fluid",
-                    material.fluid().getHoverName(),
-                    material.millibuckets());
-                material = null;
-                return new Message(message, work, false);
-              }
-              continue;
-            }
-            var choices = material.choices();
-            if (itemName < choices.items().size()) {
-              appendName(Component.translatable(choices.items().get(itemName++).getDescriptionId()));
-              continue;
-            }
-            if (fluidName < choices.fluids().size()) {
-              appendName(new FluidStack(choices.fluids().get(fluidName++), FluidType.BUCKET_VOLUME).getHoverName());
-              if (!choices.items().isEmpty()) {
-                materialNames.append(" (" + FluidType.BUCKET_VOLUME + " mB)");
-              }
-              continue;
-            }
-            Component message;
-            if (!choices.fluids().isEmpty()) {
-              message = choices.items().isEmpty() ? Component.translatable(
-                  "message.mmcece.assembly.net_missing_fluid_choices",
-                  materialNames,
-                  material.positions(),
-                  material.millibuckets()) : Component
-                      .translatable("message.mmcece.assembly.missing_mixed", materialNames, material.positions());
-            } else {
-              message = Component.translatable(
-                  choices.items()
-                      .size() == 1 ? "message.mmcece.assembly.missing_item" : "message.mmcece.assembly.missing_choices",
-                  materialNames,
-                  material.positions());
-            }
-            material = null;
-            materialNames = null;
-            return new Message(message, work, false);
-          }
-          case 4 -> {
-            phase++;
-            if (!problems.isEmpty()) {
-              return new Message(Component.translatable("message.mmcece.assembly.problems_header"), work, false);
-            }
-          }
-          case 5 -> {
-            if (issues.hasNext()) {
-              return new Message(issues.next(), work, false);
-            }
-            phase++;
-          }
-          case 6 -> {
-            phase++;
-            if (matched < total) {
-              return new Message(Component.translatable("message.mmcece.assembly.retry"), work, false);
-            }
-          }
-          default -> {
-            return new Message(null, work, true);
-          }
+      }
+      if (cursor < rows.size() || work >= workBudget || System.nanoTime() >= deadline) {
+        return new Send(done(), work);
+      }
+      if (!summaryReady) {
+        work += prepareSummary(deadline, workBudget - work);
+      }
+      if (summaryReady && !summarySent && sent < limit && work < workBudget && System.nanoTime() < deadline) {
+        if (summaryMessage != null) {
+          player.sendSystemMessage(summaryMessage);
+          work++;
         }
+        summarySent = true;
       }
 
-      return new Message(null, work, false);
+      return new Send(done(), work);
+    }
+
+    private int prepareSummary(long deadline, int workBudget) {
+      int work = 0;
+      if (plan == null) {
+        try {
+          var advanced = planning.advance(deadline, workBudget);
+          work += advanced.work();
+          plan = advanced.result();
+        } catch (RuntimeException failure) {
+          com.lw.modularmachine.ModularMachine.LOGGER.warn("Assembly missing-material summary failed", failure);
+          summaryMessage = Component.translatable("message.mmcece.assembly.missing_unavailable");
+          summaryReady = true;
+          return Math.min(workBudget, Math.max(1, work));
+        }
+        if (plan == null) {
+          return work;
+        }
+        shortages = plan.shortages.iterator();
+      }
+      while (work < workBudget && System.nanoTime() < deadline) {
+        work++;
+        if (shortage == null) {
+          if (!shortages.hasNext()) {
+            summaryMessage = entries == 0 ? null : Component
+                .translatable("message.mmcece.assembly.missing_compact", summary);
+            summaryReady = true;
+            return work;
+          }
+          shortage = shortages.next();
+          shortageNames = Component.empty();
+          itemName = 0;
+          fluidName = 0;
+        }
+        if (!shortage.fluid().isEmpty()) {
+          appendShortage(
+              Component.translatable(
+                  "message.mmcece.assembly.missing_compact_fluid",
+                  shortage.fluid().getHoverName(),
+                  shortage.millibuckets()));
+          continue;
+        }
+        var choices = shortage.choices();
+        if (itemName < choices.items().size()) {
+          appendName(Component.translatable(choices.items().get(itemName++).getDescriptionId()));
+          continue;
+        }
+        if (fluidName < choices.fluids().size()) {
+          Component name = new FluidStack(choices.fluids().get(fluidName++), FluidType.BUCKET_VOLUME).getHoverName();
+          if (!choices.items().isEmpty()) {
+            name = Component
+                .translatable("message.mmcece.assembly.missing_fluid_option", name, FluidType.BUCKET_VOLUME);
+          }
+          appendName(name);
+          continue;
+        }
+        if (choices.items().isEmpty() && choices.fluids().isEmpty()) {
+          shortage = null;
+          continue;
+        }
+        Component names = shortageNames;
+        if (choices.items().size() + choices.fluids().size() > 1) {
+          names = Component.literal("(").append(names).append(")");
+        }
+        Component entry;
+        if (choices.items().isEmpty()) {
+          entry = Component
+              .translatable("message.mmcece.assembly.missing_compact_fluid", names, shortage.millibuckets());
+        } else {
+          entry = Component.translatable("message.mmcece.assembly.missing_compact_entry", names, shortage.positions());
+        }
+        appendShortage(entry);
+      }
+
+      return work;
     }
 
     private void appendName(Component name) {
-      if (!materialNames.getSiblings().isEmpty()) {
-        materialNames.append(" / ");
+      if (!shortageNames.getSiblings().isEmpty()) {
+        shortageNames.append(" / ");
       }
-      materialNames.append(name);
+      shortageNames.append(name);
+    }
+
+    private void appendShortage(Component entry) {
+      if (entries++ > 0) {
+        summary.append(Component.translatable("message.mmcece.assembly.missing_separator"));
+      }
+      summary.append(entry);
+      shortage = null;
+      shortageNames = null;
+    }
+
+    void cancel() {
+      if (planning != null) {
+        planning.cancel();
+      }
     }
   }
 }

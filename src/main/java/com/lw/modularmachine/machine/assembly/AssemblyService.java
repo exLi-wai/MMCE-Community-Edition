@@ -21,6 +21,7 @@ import com.lw.modularmachine.util.minecraft.placement.PlacementMaterials;
 import com.lw.modularmachine.util.minecraft.placement.PlacementOutcome;
 import com.lw.modularmachine.util.minecraft.inventory.PlayerInventoryItems;
 import java.util.ArrayList;
+import java.util.BitSet;
 import java.util.HashMap;
 import java.util.HashSet;
 import java.util.LinkedHashSet;
@@ -60,6 +61,7 @@ import net.neoforged.neoforge.event.tick.ServerTickEvent.Post;
  */
 public final class AssemblyService {
   private static final Map<UUID, Job> JOBS = new LinkedHashMap<>();
+  private static final Map<UUID, Warnings> WARNINGS = new LinkedHashMap<>();
   private static final Map<UUID, Job> PROJECTIONS = new HashMap<>();
   private static final Map<UUID, PendingProjection> PENDING_PROJECTIONS = new HashMap<>();
   private static final Map<UUID, PendingConstruction> PENDING_CONSTRUCTIONS = new HashMap<>();
@@ -113,13 +115,16 @@ public final class AssemblyService {
     final boolean build;
     final AssemblyReport report = new AssemblyReport();
     final Map<PlacementMaterials.Choices, Integer> materialDemand = new LinkedHashMap<>();
+    final BitSet demandPositions = new BitSet();
+    final BitSet fluidOnlyDemand = new BitSet();
     AssemblyMaterialPlan materialPlanning;
     AssemblyMaterialPlan.Result materials;
     int materialCursor;
     MaterialAttempt materialAttempt;
     int cursor, matched, placed, passPlaced;
     long nextPass;
-    long lastReportTick = -1, waitedTick = -1;
+    long waitedTick = -1;
+    boolean refreshMaterials;
     long projectionRequest = -1;
     List<ProjectionPayloads.Entry> projectionEntries = List.of();
     int sent;
@@ -129,6 +134,15 @@ public final class AssemblyService {
       this.level = level;
       this.hand = hand;
       this.build = build;
+    }
+  }
+
+  private static final class Warnings {
+    final AssemblyReport.Delivery delivery;
+    long lastTick = -1;
+
+    Warnings(AssemblyReport.Delivery delivery) {
+      this.delivery = delivery;
     }
   }
 
@@ -265,11 +279,6 @@ public final class AssemblyService {
           Math.max(1, definition.parts().size()));
       return;
     }
-    var reporting = JOBS.get(player.getUUID());
-    if (reporting != null && reporting.report.finishing()) {
-      player.displayClientMessage(Component.translatable("message.mmcece.assembly.reporting"), true);
-      return;
-    }
     var id = player.getUUID();
     var pending = PENDING_CONSTRUCTIONS.get(id);
     boolean creative = player.hasInfiniteMaterials();
@@ -296,9 +305,6 @@ public final class AssemblyService {
     removePendingConstruction(id);
     removeJob(id);
     PENDING_CONSTRUCTIONS.put(id, new PendingConstruction(player, owner, definition, orientation, lengths, hand));
-    player.displayClientMessage(
-        Component.translatable("message.mmcece.assembly.preparing", definition.id().toString()),
-        true);
   }
 
   public static boolean canEdit(ServerPlayer player) {
@@ -492,7 +498,25 @@ public final class AssemblyService {
   private static void cancelConstruction(ServerPlayer player) {
     removeJob(player.getUUID());
     removePendingConstruction(player.getUUID());
-    player.displayClientMessage(Component.translatable("message.mmcece.assembly.cancelled"), true);
+  }
+
+  private static void finishConstruction(ServerPlayer player, Job job) {
+    if (JOBS.get(player.getUUID()) != job) {
+      return;
+    }
+    var delivery = job.report.takeDelivery(player, job.materialDemand);
+    removeJob(player.getUUID(), job);
+    if (!delivery.done()) {
+      removeWarnings(player.getUUID());
+      WARNINGS.put(player.getUUID(), new Warnings(delivery));
+    }
+  }
+
+  private static void removeWarnings(UUID player) {
+    var warnings = WARNINGS.remove(player);
+    if (warnings != null) {
+      warnings.delivery.cancel();
+    }
   }
 
   private static void removeJob(UUID player) {
@@ -676,6 +700,7 @@ public final class AssemblyService {
     identities.addAll(PENDING_BLUEPRINTS.keySet());
     var players = new ArrayList<>(identities);
     if (players.isEmpty()) {
+      advanceConstructions(event.getServer());
       return;
     }
     int start = Math.floorMod(playerCursor, players.size());
@@ -691,6 +716,7 @@ public final class AssemblyService {
         removePendingProjection(id);
         removePendingConstruction(id);
         removePendingBlueprint(id);
+        removeWarnings(id);
         LENGTH_SELECTIONS.remove(id);
       } else {
         prepareConstruction(player, projectionDeadline);
@@ -719,7 +745,9 @@ public final class AssemblyService {
   }
 
   private static void advanceConstructions(MinecraftServer server) {
-    var players = new ArrayList<>(JOBS.keySet());
+    var identities = new LinkedHashSet<>(JOBS.keySet());
+    identities.addAll(WARNINGS.keySet());
+    var players = new ArrayList<>(identities);
     if (players.isEmpty()) {
       return;
     }
@@ -731,14 +759,19 @@ public final class AssemblyService {
       var id = players.get((start + visits++) % players.size());
       var player = server.getPlayerList().getPlayer(id);
       int used;
-      if (!JOBS.containsKey(id)) {
+      if (!JOBS.containsKey(id) && !WARNINGS.containsKey(id)) {
         used = 0;
       } else if (player == null) {
         removeJob(id);
+        removeWarnings(id);
         used = 1;
       } else {
         long sliceDeadline = Math.min(deadline, System.nanoTime() + BUILD_SLICE_NANOS);
-        used = advance(player, Math.min(remaining, MachineConfig.assemblySliceWork()), sliceDeadline);
+        int workBudget = Math.min(remaining, MachineConfig.assemblySliceWork());
+        used = sendWarnings(player, workBudget, sliceDeadline);
+        if (used < workBudget && System.nanoTime() < sliceDeadline) {
+          used += advance(player, workBudget - used, sliceDeadline);
+        }
       }
       remaining -= used;
       idle = used == 0 ? idle + 1 : 0;
@@ -747,6 +780,23 @@ public final class AssemblyService {
       }
     }
     assemblyCursor = (start + visits) % players.size();
+  }
+
+  private static int sendWarnings(ServerPlayer player, int workBudget, long deadline) {
+    var warnings = WARNINGS.get(player.getUUID());
+    long tick = player.server.getTickCount();
+    if (warnings == null || warnings.lastTick == tick) {
+      return 0;
+    }
+    warnings.lastTick = tick;
+    var sent = warnings.delivery.send(player, 4, deadline, workBudget);
+    if (sent.done()) {
+      if (WARNINGS.get(player.getUUID()) == warnings) {
+        removeWarnings(player.getUUID());
+      }
+    }
+
+    return sent.work();
   }
 
   private static void prepareConstruction(ServerPlayer player, long deadline) {
@@ -777,18 +827,9 @@ public final class AssemblyService {
       PENDING_CONSTRUCTIONS.remove(id, pending);
       if (pending.creative) {
         // The world mutation retains the existing creative all-or-nothing batch.
-        var result = creativeBuild(player, pattern);
-        player.sendSystemMessage(
-            Component.translatable(
-                "message.mmcece.assembly.complete",
-                result.matched(),
-                pattern.parts().size(),
-                result.placed()));
+        creativeBuild(player, pattern);
       } else {
         JOBS.put(id, new Job(pending.owner, pattern, pending.level, pending.hand, true));
-        player.displayClientMessage(
-            Component.translatable("message.mmcece.assembly.started", pattern.machine().toString()),
-            true);
       }
     } catch (RuntimeException failure) {
       if (PENDING_CONSTRUCTIONS.get(id) == pending) {
@@ -875,17 +916,6 @@ public final class AssemblyService {
       return 0;
     }
     long serverTick = player.server.getTickCount();
-    if (job.report.finishing()) {
-      if (job.lastReportTick == serverTick) {
-        return 0;
-      }
-      job.lastReportTick = serverTick;
-      var sent = job.report.send(player, 4, deadline, workBudget);
-      if (sent.done()) {
-        removeJob(player.getUUID(), job);
-      }
-      return sent.done() ? Math.max(1, sent.work()) : sent.work();
-    }
     if (!current(player, job)) {
       cancelConstruction(player);
       return 1;
@@ -903,6 +933,10 @@ public final class AssemblyService {
         return used;
       }
     }
+    if (job.materialAttempt == null && !job.materials.hasAvailableMaterials()) {
+      finishConstruction(player, job);
+      return Math.max(1, used);
+    }
     while (used < workBudget && System.nanoTime() < deadline) {
       if (!current(player, job)) {
         cancelConstruction(player);
@@ -911,6 +945,7 @@ public final class AssemblyService {
       used++;
       var part = job.pattern.parts().get(job.cursor);
       var pos = part.position();
+      boolean missing = false;
       if (job.level.isOutsideBuildHeight(pos) || !job.level.getWorldBorder().isWithinBounds(pos)) {
         job.report.problem(pos, PlacementOutcome.OUTSIDE_WORLD);
       } else if (!job.level.hasChunkAt(pos)) {
@@ -951,10 +986,7 @@ public final class AssemblyService {
               } else if (!PlacementMaterials.canReplace(part.states(), after)) {
                 job.report.occupied(pos, after);
               } else if (result == PlacementOutcome.MISSING) {
-                var choices = job.report.choices(part);
-                job.report.missing(
-                    part,
-                    after.isAir() ? choices : new PlacementMaterials.Choices(List.of(), choices.fluids()));
+                missing = true;
               } else {
                 job.report.problem(pos, result == PlacementOutcome.PLACED ? PlacementOutcome.REJECTED : result);
               }
@@ -971,10 +1003,29 @@ public final class AssemblyService {
         job.materialAttempt.cancel();
         job.materialAttempt = null;
       }
+      if (!missing) {
+        releaseDemand(job, job.cursor);
+      }
+      if (job.refreshMaterials) {
+        job.refreshMaterials = false;
+        job.materials = null;
+        if (job.materialPlanning != null) {
+          job.materialPlanning.cancel();
+        }
+        job.materialPlanning = null;
+        job.cursor = 0;
+        job.matched = 0;
+        job.passPlaced = 0;
+        return used;
+      }
+      if (!job.materials.hasAvailableMaterials()) {
+        finishConstruction(player, job);
+        return used;
+      }
       if (++job.cursor == job.pattern.parts().size()) {
         boolean complete = job.matched == job.pattern.parts().size();
         if (complete || job.passPlaced == 0) {
-          job.report.finish(player, job.matched, job.pattern.parts().size(), job.placed);
+          finishConstruction(player, job);
           return used;
         }
         job.cursor = 0;
@@ -985,12 +1036,27 @@ public final class AssemblyService {
         job.materialPlanning = null;
         job.materialCursor = 0;
         job.materialDemand.clear();
+        job.demandPositions.clear();
+        job.fluidOnlyDemand.clear();
         job.nextPass = job.level.getGameTime() + 20;
         return used;
       }
     }
 
     return used;
+  }
+
+  private static void releaseDemand(Job job, int index) {
+    if (!job.demandPositions.get(index)) {
+      return;
+    }
+    var choices = job.report.choices(job.pattern.parts().get(index));
+    if (job.fluidOnlyDemand.get(index)) {
+      choices = new PlacementMaterials.Choices(List.of(), choices.fluids());
+    }
+    job.materialDemand.computeIfPresent(choices, (key, count) -> count <= 1 ? null : count - 1);
+    job.demandPositions.clear(index);
+    job.fluidOnlyDemand.clear(index);
   }
 
   private static int prepareMaterials(ServerPlayer player, Job job, int workBudget, long deadline) {
@@ -1002,20 +1068,35 @@ public final class AssemblyService {
           return Math.max(1, used);
         }
         used++;
-        var part = job.pattern.parts().get(job.materialCursor++);
+        int index = job.materialCursor++;
+        var part = job.pattern.parts().get(index);
         var pos = part.position();
-        if (!job.level.isOutsideBuildHeight(pos)
-            && job.level.getWorldBorder().isWithinBounds(pos)
-            && job.level.hasChunkAt(pos)
-            && player.canInteractWithBlock(pos, 0)
-            && job.level.mayInteract(player, pos)) {
+        if (job.level.isOutsideBuildHeight(pos) || !job.level.getWorldBorder().isWithinBounds(pos)) {
+          job.report.problem(pos, PlacementOutcome.OUTSIDE_WORLD);
+        } else if (!job.level.hasChunkAt(pos)) {
+          job.report.problem(pos, PlacementOutcome.UNLOADED);
+        } else {
           var actual = job.level.getBlockState(pos);
-          if (!part.matches(actual) && PlacementMaterials.canReplace(part.states(), actual)) {
+          if (part.matches(actual)) {
+            continue;
+          } else if (!PlacementMaterials.canReplace(part.states(), actual)) {
+            job.report.occupied(pos, actual);
+          } else if (!player.canInteractWithBlock(pos, 0)) {
+            job.report.problem(pos, PlacementOutcome.OUT_OF_REACH);
+          } else if (!job.level.mayInteract(player, pos)) {
+            job.report.problem(pos, PlacementOutcome.NO_PERMISSION);
+          } else {
             var choices = job.report.choices(part);
             if (!actual.isAir()) {
               choices = new PlacementMaterials.Choices(List.of(), choices.fluids());
             }
-            job.materialDemand.merge(choices, 1, Integer::sum);
+            if (choices.items().isEmpty() && choices.fluids().isEmpty()) {
+              job.report.problem(pos, PlacementOutcome.MANUAL);
+            } else {
+              job.materialDemand.merge(choices, 1, Integer::sum);
+              job.demandPositions.set(index);
+              job.fluidOnlyDemand.set(index, !actual.isAir());
+            }
           }
         }
       }
@@ -1094,6 +1175,15 @@ public final class AssemblyService {
       return PlacementOutcome.MISSING;
     }
     var result = placeResource(player, job, part, choices, resource);
+    if (result == PlacementOutcome.MISSING) {
+      job.materials.unavailable(resource);
+      if (job.materialPlanning != null && !job.materialPlanning.inventoryMatches(player)) {
+        // Another actor changed the backpack since planning. Re-capture its
+        // remaining partial supply instead of requiring a full group replacement.
+        job.refreshMaterials = true;
+        return result;
+      }
+    }
     boolean retryable = switch (result) {
       case MISSING, INVALID_STATE, SUPPORT, COLLISION, FLUID_VAPORIZES, FLUID_CONTAINER -> true;
       default -> false;
@@ -1243,6 +1333,7 @@ public final class AssemblyService {
   @SubscribeEvent
   public static void logout(PlayerEvent.PlayerLoggedOutEvent event) {
     removeJob(event.getEntity().getUUID());
+    removeWarnings(event.getEntity().getUUID());
     PROJECTIONS.remove(event.getEntity().getUUID());
     removePendingProjection(event.getEntity().getUUID());
     removePendingConstruction(event.getEntity().getUUID());
@@ -1253,6 +1344,8 @@ public final class AssemblyService {
   public static void stopped(ServerStoppedEvent event) {
     JOBS.values().forEach(AssemblyService::disposeJob);
     JOBS.clear();
+    WARNINGS.values().forEach(warnings -> warnings.delivery.cancel());
+    WARNINGS.clear();
     PROJECTIONS.clear();
     PENDING_PROJECTIONS.values().forEach(pending -> pending.preparation.cancel());
     PENDING_PROJECTIONS.clear();
