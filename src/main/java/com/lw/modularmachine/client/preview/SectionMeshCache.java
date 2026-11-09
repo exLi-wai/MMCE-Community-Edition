@@ -37,7 +37,6 @@ import net.minecraft.world.level.block.RenderShape;
 import net.minecraft.world.level.block.state.BlockState;
 import net.minecraft.world.phys.Vec3;
 import net.neoforged.neoforge.client.event.RenderLevelStageEvent;
-import net.neoforged.neoforge.client.model.data.ModelData;
 import org.jetbrains.annotations.ApiStatus;
 import org.joml.FrustumIntersection;
 import org.joml.Matrix4f;
@@ -61,24 +60,46 @@ public final class SectionMeshCache implements AutoCloseable {
   private final Map<Long, List<BlockState>> observed = new HashMap<>();
   private final Set<Long> dirty = new HashSet<>();
   private final Set<Long> worldChecks = new HashSet<>();
+  private final Set<Long> modelSensitive = new HashSet<>();
+  private final Set<Long> modelChanges = new HashSet<>();
   private final List<PreviewRenderScene.Section> visible = new ArrayList<>();
   private final Set<Long> resident = new HashSet<>();
   private PreviewRenderScene scene;
+  private PreviewBlockView blockView;
+  private PreviewBlockEntityRenderer blockEntities;
   private boolean preview;
   private int previewLayer = Integer.MIN_VALUE, previewStep, inspect;
   private long usedBytes;
   private final Map<Long, Build> builds = new LinkedHashMap<>();
+  private List<TransparentPage> transparentPages = List.of();
+  private CompletableFuture<TransparentQuadOrder.Result> sorting;
+  private TransparentQuadOrder.Result pendingOrder;
+  private CompletableFuture<List<byte[]>> merging;
+  private List<byte[]> mergedVertices;
+  private TransparentMesh transparentMesh;
+  private int vertexPage, indexCursor;
+  private long vertexOffset;
+  private Vec3 transparentOrigin = Vec3.ZERO;
+  private boolean transparentFailed;
+  private Vec3 sortingEye = Vec3.ZERO, sortedEye = new Vec3(Double.MAX_VALUE, 0, 0);
+
+  private record TransparentPage(Page page, Vec3 origin) {
+  }
 
   private static final class Page implements AutoCloseable {
     final VertexBuffer buffer;
     final boolean translucent;
     final MeshData.SortState sorting;
+    final float[] centers;
+    final int[] vertices;
     Vec3 sortedEye;
-    Page(VertexBuffer buffer, boolean translucent, MeshData.SortState sorting, Vec3 sortedEye) {
+    Page(VertexBuffer buffer, boolean translucent, MeshData.SortState sorting, Vec3 sortedEye, int[] vertices) {
       this.buffer = buffer;
       this.translucent = translucent;
       this.sorting = sorting;
       this.sortedEye = sortedEye;
+      this.vertices = vertices;
+      centers = TransparentQuadOrder.centers(vertices);
     }
     @Override
     public void close() {
@@ -100,6 +121,7 @@ public final class SectionMeshCache implements AutoCloseable {
     final List<Page> uploaded = new ArrayList<>();
     final RandomSource random = RandomSource.create();
     int cursor, uploadCursor, bytes;
+    boolean modelSensitive;
     CompletableFuture<List<PreviewMeshData.Page>> packing;
     List<PreviewMeshData.Page> packed;
     Build(PreviewRenderScene.Section section, long revision, List<BlockState> states) {
@@ -121,10 +143,13 @@ public final class SectionMeshCache implements AutoCloseable {
   void setScene(PreviewRenderScene value) {
     close();
     scene = value;
+    blockView = new PreviewBlockView(scene, Integer.MIN_VALUE, 0, true);
+    blockEntities = new PreviewBlockEntityRenderer(scene);
   }
   public void setPreviewScene(PreviewRenderScene value) {
     setScene(value);
     preview = true;
+    blockView = new PreviewBlockView(scene, Integer.MIN_VALUE, 0);
   }
 
   private void invalidate(PreviewRenderScene.Section section) {
@@ -136,8 +161,15 @@ public final class SectionMeshCache implements AutoCloseable {
     if (scene == null || preview) {
       return;
     }
-    for (var section : scene.atSection(SectionPos.asLong(x, y, z))) {
-      worldChecks.add(section.key());
+    for (int dx = -1; dx <= 1; dx++) {
+      for (int dy = -1; dy <= 1; dy++) {
+        for (int dz = -1; dz <= 1; dz++) {
+          for (var section : scene.atSection(SectionPos.asLong(x + dx, y + dy, z + dz))) {
+            worldChecks.add(section.key());
+            modelChanges.add(section.key());
+          }
+        }
+      }
     }
   }
 
@@ -156,6 +188,7 @@ public final class SectionMeshCache implements AutoCloseable {
     int previousLayer = previewLayer, previousStep = previewStep;
     previewLayer = layer;
     previewStep = step;
+    blockView.setState(layer, step);
     if (layer != previousLayer) {
       for (var section : scene.sections()) {
         if (intersects(section, layer) || intersects(section, previousLayer)) {
@@ -238,7 +271,9 @@ public final class SectionMeshCache implements AutoCloseable {
       }
       var current = builds.get(section.key());
       var baseline = current == null ? observed.get(section.key()) : current.states;
-      if (baseline != null && !captureStates(section).equals(baseline)) {
+      boolean modelChanged = modelChanges.remove(section.key())
+          && (modelSensitive.contains(section.key()) || current != null && current.modelSensitive);
+      if (baseline != null && (modelChanged || !captureStates(section).equals(baseline))) {
         invalidate(section);
       }
     }
@@ -300,6 +335,11 @@ public final class SectionMeshCache implements AutoCloseable {
           }
           usedBytes += mesh.bytes();
           observed.put(current.section.key(), current.states);
+          if (current.modelSensitive) {
+            modelSensitive.add(current.section.key());
+          } else {
+            modelSensitive.remove(current.section.key());
+          }
           dirty.remove(current.section.key());
           current.close();
           iterator.remove();
@@ -351,16 +391,20 @@ public final class SectionMeshCache implements AutoCloseable {
       return;
     }
     var mc = Minecraft.getInstance();
-    var view = new PreviewBlockView(scene, previewLayer, previewStep);
+    var view = blockView;
     if (state.getBlock() instanceof LiquidBlock) {
-      captureLiquid(job, entry, state, view, mc);
+      job.modelSensitive = true;
+      captureLiquid(job, entry, state, actual, view, mc);
       return;
     }
     var model = mc.getBlockRenderer().getBlockModel(state);
+    var seedData = view.modelData(entry.position(), state);
+    var modelData = model.getModelData(view, entry.position(), state, seedData);
+    job.modelSensitive |= state.hasBlockEntity() || !modelData.getProperties().isEmpty();
     var random = job.random;
     long seed = state.getSeed(entry.position());
     random.setSeed(seed);
-    var types = model.getRenderTypes(state, random, ModelData.EMPTY);
+    var types = model.getRenderTypes(state, random, modelData);
     for (var type : types) {
       boolean translucent = !preview || type == RenderType.translucent();
       for (int side = -1; side < 6; side++) {
@@ -373,7 +417,7 @@ public final class SectionMeshCache implements AutoCloseable {
           continue;
         }
         random.setSeed(seed);
-        for (var quad : model.getQuads(state, face, random, ModelData.EMPTY, type)) {
+        for (var quad : model.getQuads(state, face, random, modelData, type)) {
           int tint = quad.isTinted() ? mc.getBlockColors()
               .getColor(state, view, entry.position(), quad.getTintIndex()) : 0xFFFFFF;
           float r = preview ? 1F : actual.isAir() ? .45F : 1F;
@@ -396,7 +440,7 @@ public final class SectionMeshCache implements AutoCloseable {
     }
   }
 
-  private void captureLiquid(Build job, PreviewSceneData.Entry entry, BlockState state, PreviewBlockView view, Minecraft mc) {
+  private void captureLiquid(Build job, PreviewSceneData.Entry entry, BlockState state, BlockState actual, PreviewBlockView view, Minecraft mc) {
     var fluid = state.getFluidState();
     if (fluid.isEmpty()) {
       return;
@@ -408,16 +452,24 @@ public final class SectionMeshCache implements AutoCloseable {
     int sectionZ = entry.position().getZ() & 15;
     for (var quad : collector.quads()) {
       int color = quad.color();
+      float red = color >> 16 & 255, green = color >> 8 & 255, blue = color & 255;
+      int alpha = color >>> 24;
+      if (!preview) {
+        red *= actual.isAir() ? .45F : 1F;
+        green *= actual.isAir() ? .85F : .25F;
+        blue *= actual.isAir() ? 1F : .25F;
+        alpha = alpha * 100 / 255;
+      }
       job.quads.add(
           new PreviewMeshData.Quad(
               toBlockLocalVertices(quad.vertices(), sectionX, sectionY, sectionZ),
               (float) (entry.position().getX() - job.origin.x),
               (float) (entry.position().getY() - job.origin.y),
               (float) (entry.position().getZ() - job.origin.z),
-              color >> 16 & 255,
-              color >> 8 & 255,
-              color & 255,
-              color >>> 24,
+              red,
+              green,
+              blue,
+              alpha,
               true));
     }
   }
@@ -536,7 +588,7 @@ public final class SectionMeshCache implements AutoCloseable {
       } finally {
         VertexBuffer.unbind();
       }
-      return new Page(buffer, page.translucent(), sorting, eye);
+      return new Page(buffer, page.translucent(), sorting, eye, page.translucent() ? page.vertices() : new int[0]);
     }
   }
 
@@ -579,6 +631,7 @@ public final class SectionMeshCache implements AutoCloseable {
   }
 
   private void drawMeshes(Matrix4f view, Matrix4f projection, Vec3 translation, Vec3 eye) {
+    updateTransparentOrder(eye);
     RenderSystem.enableBlend();
     RenderSystem.defaultBlendFunc();
     RenderSystem.enableDepthTest();
@@ -591,6 +644,21 @@ public final class SectionMeshCache implements AutoCloseable {
     try {
       for (int pass = 0; pass < 2; pass++) {
         boolean transparent = pass == 1;
+        if (transparent) {
+          blockEntities.draw(visible, blockView, preview, previewLayer, view, translation);
+          RenderSystem.enableBlend();
+          RenderSystem.defaultBlendFunc();
+          RenderSystem.enableDepthTest();
+          RenderSystem.disableCull();
+          RenderSystem.setShaderColor(1, 1, 1, 1);
+          RenderSystem.setShader(GameRenderer::getPositionTexColorShader);
+          RenderSystem.setShaderTexture(0, InventoryMenu.BLOCK_ATLAS);
+          if (transparentMesh != null && mergedVertices == null && merging == null && transparentMesh.ready()) {
+            RenderSystem.depthMask(false);
+            drawTransparentOrder(view, projection, translation);
+            continue;
+          }
+        }
         RenderSystem.depthMask(preview && !transparent);
         for (int i = 0; i < visible.size(); i++) {
           var section = visible.get(transparent ? visible.size() - 1 - i : i);
@@ -639,8 +707,137 @@ public final class SectionMeshCache implements AutoCloseable {
     }
   }
 
+  private void updateTransparentOrder(Vec3 eye) {
+    var pages = new ArrayList<TransparentPage>();
+    for (var section : visible.stream().sorted(Comparator.comparingLong(PreviewRenderScene.Section::key)).toList()) {
+      var mesh = meshes.get(section.key());
+      if (mesh != null) {
+        for (var page : mesh.pages()) {
+          if (page.translucent) {
+            pages.add(new TransparentPage(page, mesh.origin()));
+          }
+        }
+      }
+    }
+    if (!pages.equals(transparentPages)) {
+      clearTransparentOrder();
+      transparentPages = List.copyOf(pages);
+      transparentOrigin = pages.isEmpty() ? Vec3.ZERO : pages.getFirst().origin();
+    }
+    if (pages.isEmpty() || transparentFailed) {
+      return;
+    }
+    try {
+      advanceTransparentOrder(eye);
+    } catch (RuntimeException failure) {
+      var sources = transparentPages;
+      clearTransparentOrder();
+      transparentPages = sources;
+      transparentFailed = true;
+      ModularMachine.LOGGER.warn("Merged transparent preview failed; using section meshes", failure);
+    }
+  }
+
+  private void advanceTransparentOrder(Vec3 eye) {
+    if (transparentMesh == null && merging == null) {
+      // Only detached arrays/coordinates cross the worker boundary. Rebase once
+      // per geometry generation; camera movement uploads only global indices.
+      var vertices = transparentPages.stream().map(page -> page.page().vertices).toList();
+      var offsets = transparentPages.stream().map(page -> page.origin().subtract(transparentOrigin)).toList();
+      merging = PreviewMeshData.submitWork(() -> {
+        var result = new ArrayList<byte[]>(vertices.size());
+        for (int page = 0; page < vertices.size(); page++) {
+          var offset = offsets.get(page);
+          result.add(TransparentQuadOrder.relocate(vertices.get(page), offset.x, offset.y, offset.z));
+        }
+        return result;
+      });
+    }
+    if (sorting == null && pendingOrder == null && sortedEye.distanceToSqr(eye) > .25D) {
+      var sources = transparentPages.stream()
+          .map(
+              page -> new TransparentQuadOrder.Source(
+                  page.page().centers,
+                  page.origin().x,
+                  page.origin().y,
+                  page.origin().z))
+          .toList();
+      sortingEye = eye;
+      sorting = PreviewMeshData.submitWork(() -> TransparentQuadOrder.sort(sources, eye.x, eye.y, eye.z));
+    }
+    if (merging != null && merging.isDone()) {
+      mergedVertices = merging.join();
+      merging = null;
+      transparentMesh = new TransparentMesh(mergedVertices.stream().mapToLong(page -> page.length).sum());
+    }
+    if (sorting != null && sorting.isDone()) {
+      pendingOrder = sorting.join();
+      sorting = null;
+    }
+    if (transparentMesh == null) {
+      return;
+    }
+    long deadline = System.nanoTime() + 1_000_000L;
+    int uploaded = 0;
+    while (mergedVertices != null && uploaded < UPLOAD_BYTES && System.nanoTime() < deadline) {
+      var page = mergedVertices.get(vertexPage++);
+      transparentMesh.uploadVertices(page, vertexOffset);
+      vertexOffset += page.length;
+      uploaded += page.length;
+      if (vertexPage == mergedVertices.size()) {
+        mergedVertices = null;
+      }
+    }
+    while (pendingOrder != null && uploaded < UPLOAD_BYTES && System.nanoTime() < deadline) {
+      var indices = pendingOrder.indices();
+      int count = Math.min(indices.length - indexCursor, Math.min(65536, (UPLOAD_BYTES - uploaded) / Integer.BYTES));
+      if (count == 0) {
+        break;
+      }
+      transparentMesh.uploadIndices(indices, indexCursor, count);
+      uploaded += count * Integer.BYTES;
+      indexCursor += count;
+      if (indexCursor == indices.length) {
+        pendingOrder = null;
+        indexCursor = 0;
+        sortedEye = sortingEye;
+      }
+    }
+  }
+
+  private void drawTransparentOrder(Matrix4f view, Matrix4f projection, Vec3 translation) {
+    var matrix = new Matrix4f(view).translate(
+        (float) (transparentOrigin.x - translation.x),
+        (float) (transparentOrigin.y - translation.y),
+        (float) (transparentOrigin.z - translation.z));
+    transparentMesh.draw(matrix, projection);
+  }
+
+  private void clearTransparentOrder() {
+    if (sorting != null) {
+      sorting.cancel(false);
+      sorting = null;
+    }
+    if (merging != null) {
+      merging.cancel(false);
+      merging = null;
+    }
+    if (transparentMesh != null) {
+      transparentMesh.close();
+      transparentMesh = null;
+    }
+    pendingOrder = null;
+    mergedVertices = null;
+    vertexPage = indexCursor = 0;
+    vertexOffset = 0;
+    transparentFailed = false;
+    transparentPages = List.of();
+    sortedEye = new Vec3(Double.MAX_VALUE, 0, 0);
+  }
+
   @Override
   public void close() {
+    clearTransparentOrder();
     builds.values().forEach(Build::close);
     builds.clear();
     meshes.values().forEach(Mesh::close);
@@ -650,9 +847,16 @@ public final class SectionMeshCache implements AutoCloseable {
     observed.clear();
     dirty.clear();
     worldChecks.clear();
+    modelSensitive.clear();
+    modelChanges.clear();
     visible.clear();
     resident.clear();
     scene = null;
+    blockView = null;
+    if (blockEntities != null) {
+      blockEntities.close();
+      blockEntities = null;
+    }
     usedBytes = 0;
     inspect = 0;
     preview = false;

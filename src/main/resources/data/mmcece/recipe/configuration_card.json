@@ -1,0 +1,12 @@
+{
+  "type": "minecraft:crafting_shapeless",
+  "category": "misc",
+  "ingredients": [
+    {"item": "minecraft:paper"},
+    {"item": "minecraft:redstone"}
+  ],
+  "result": {
+    "id": "mmcece:configuration_card",
+    "count": 1
+  }
+}

@@ -39,7 +39,7 @@ final class AssemblyFluidPlacement {
   private AssemblyFluidPlacement() {
   }
 
-  static PlacementOutcome place(ServerPlayer player, AssemblyPattern.Part part, BooleanSupplier current) {
+  static PlacementOutcome place(ServerPlayer player, AssemblyPattern.Part part, FluidStack preferred, java.util.Set<net.minecraft.world.item.Item> reservedBlocks, BooleanSupplier current) {
     var level = player.serverLevel();
     ServerThreadGuard.require(level, "Backpack fluid assembly");
     if (level.captureBlockSnapshots || level.restoringBlockSnapshots || !level.capturedBlockSnapshots.isEmpty()) {
@@ -54,7 +54,13 @@ final class AssemblyFluidPlacement {
     var identities = new ArrayList<FluidStack>();
     boolean unsupported = false;
     for (var original : inventory.items) {
-      sources.add(original.copy());
+      boolean reserved = original.getComponentsPatch().isEmpty()
+          && reservedBlocks.contains(original.getItem())
+          && PlacementMaterials.automaticItem(original.getItem());
+      sources.add(reserved ? ItemStack.EMPTY : original.copy());
+      if (reserved) {
+        continue;
+      }
       if (original.isEmpty()) {
         continue;
       }
@@ -70,7 +76,9 @@ final class AssemblyFluidPlacement {
       }
       for (int tank = 0; tank < tanks; tank++) {
         var stored = handler.getFluidInTank(tank).copy();
-        if (stored.isEmpty() || !fluids.contains(stored.getFluid())) {
+        if (stored.isEmpty()
+            || !fluids.contains(stored.getFluid())
+            || !FluidStack.isSameFluidSameComponents(preferred, stored)) {
           continue;
         }
         if (identities.stream().anyMatch(identity -> FluidStack.isSameFluidSameComponents(identity, stored))) {

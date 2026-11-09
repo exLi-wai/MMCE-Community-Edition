@@ -4,19 +4,14 @@ import com.lw.modularmachine.api.client.preview.PreviewCamera;
 import com.lw.modularmachine.api.client.preview.PreviewRenderer;
 import com.lw.modularmachine.api.client.preview.PreviewSceneData;
 import com.lw.modularmachine.api.client.preview.PreviewViewport;
-import com.mojang.blaze3d.platform.Lighting;
 import com.mojang.blaze3d.systems.RenderSystem;
 import java.util.IdentityHashMap;
-import java.util.List;
 import java.util.Map;
 import java.util.Objects;
 import java.lang.ref.WeakReference;
 import net.minecraft.client.Minecraft;
 import net.minecraft.client.gui.GuiGraphics;
 import net.minecraft.client.gui.screens.Screen;
-import net.minecraft.client.renderer.LightTexture;
-import net.minecraft.client.renderer.texture.OverlayTexture;
-import net.minecraft.world.level.block.RenderShape;
 import net.minecraft.world.phys.AABB;
 import net.minecraft.world.phys.Vec3;
 import net.neoforged.api.distmarker.Dist;
@@ -37,7 +32,6 @@ public final class CachedPreviewRenderer implements PreviewRenderer {
   private static long frame;
   private final SectionMeshCache cache = new SectionMeshCache();
   private PreviewRenderScene scene;
-  private List<PreviewSceneData.Entry> entityRenderedEntries = List.of();
   private AABB bounds;
   private Matrix4f inverse;
   private Matrix4f guiTransform;
@@ -58,9 +52,6 @@ public final class CachedPreviewRenderer implements PreviewRenderer {
     Objects.requireNonNull(data, "scene");
     close();
     scene = PreviewRenderScene.create(data);
-    entityRenderedEntries = data.entries().stream().filter(
-        entry -> entry.states().stream().anyMatch(state -> state.getRenderShape() == RenderShape.ENTITYBLOCK_ANIMATED))
-        .toList();
     bounds = data.bounds();
   }
 
@@ -107,57 +98,13 @@ public final class CachedPreviewRenderer implements PreviewRenderer {
       var transform = new Matrix4f(graphics.pose().last().pose());
       inverse = new Matrix4f(transform).invert();
       clip = rectangle;
-      renderEntityBlocks(graphics, layer, step);
+
       cache.drawPreview(
           new Matrix4f(RenderSystem.getModelViewMatrix()).mul(transform),
           RenderSystem.getProjectionMatrix());
     } finally {
       graphics.pose().popPose();
       graphics.disableScissor();
-    }
-  }
-
-  /** Item-rendered block entities cannot be captured as baked model quads. */
-  private void renderEntityBlocks(GuiGraphics graphics, int layer, int step) {
-    if (entityRenderedEntries.isEmpty()) {
-      return;
-    }
-    var minecraft = Minecraft.getInstance();
-    var buffers = graphics.bufferSource();
-    Lighting.setupFor3DItems();
-    RenderSystem.enableDepthTest();
-    RenderSystem.depthMask(true);
-    RenderSystem.setShaderColor(1, 1, 1, 1);
-    try (var colorScope = PreviewBlockView.pushMachineColor(scene.machineColor())) {
-      try {
-        for (var entry : entityRenderedEntries) {
-          if (layer != ALL_LAYERS && entry.position().getY() != layer) {
-            continue;
-          }
-          var state = entry.states().get(Math.floorMod(step, entry.states().size()));
-          if (state.getRenderShape() != RenderShape.ENTITYBLOCK_ANIMATED) {
-            continue;
-          }
-          graphics.pose().pushPose();
-          try {
-            var position = entry.position();
-            graphics.pose().translate(position.getX(), position.getY(), position.getZ());
-            minecraft.getBlockRenderer().renderSingleBlock(
-                state,
-                graphics.pose(),
-                buffers,
-                LightTexture.FULL_BRIGHT,
-                OverlayTexture.NO_OVERLAY);
-          } finally {
-            graphics.pose().popPose();
-          }
-        }
-      } finally {
-        // Flush under the preview scissor, before cached translucent geometry.
-        buffers.endBatch();
-      }
-    } finally {
-      Lighting.setupFor3DItems();
     }
   }
 

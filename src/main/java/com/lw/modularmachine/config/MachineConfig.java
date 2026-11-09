@@ -39,7 +39,7 @@ public final class MachineConfig {
     builder.pop();
     builder.translation("mmcece.config.factory_controller").push("factory_controller");
     FACTORY_THREADS_PER_TICK = builder.translation("mmcece.config.factory_controller.threadsPerTick")
-        .comment("Maximum number of factory recipe channels visited per controller tick.")
+        .comment("Maximum number of factory recipe threads visited per controller tick.")
         .defineInRange("threadsPerTick", 4, 1, 256);
     FACTORY_SEARCH_WORK = builder.translation("mmcece.config.factory_controller.searchWorkPerThreadTick")
         .comment("Maximum recipe search, parallel admission, and startup-check work for one factory thread per tick.")

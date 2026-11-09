@@ -9,6 +9,7 @@ import java.util.HashMap;
 import java.util.Iterator;
 import java.util.LinkedHashMap;
 import java.util.List;
+import java.util.Locale;
 import java.util.Map;
 import net.minecraft.core.BlockPos;
 import net.minecraft.network.chat.Component;
@@ -28,9 +29,18 @@ final class AssemblyReport {
   private final List<Component> problems = new ArrayList<>();
   private int missingPositions;
   private Delivery delivery;
+  private AssemblyMaterialPlan planning;
+  private AssemblyMaterialPlan.Result plan;
+
+  Choices choices(AssemblyPattern.Part part) {
+    return candidates.computeIfAbsent(part.rule(), ignored -> PlacementMaterials.choices(part.states()));
+  }
 
   void missing(AssemblyPattern.Part part) {
-    var choices = candidates.computeIfAbsent(part.rule(), ignored -> PlacementMaterials.choices(part.states()));
+    missing(part, choices(part));
+  }
+
+  void missing(AssemblyPattern.Part part, Choices choices) {
     if (choices.items().isEmpty() && choices.fluids().isEmpty()) {
       problem(part.position(), PlacementOutcome.MANUAL);
       return;
@@ -59,7 +69,7 @@ final class AssemblyReport {
         position.getX(),
         position.getY(),
         position.getZ(),
-        Component.translatable("message.mmcece.assembly.reason." + reason.name().toLowerCase(java.util.Locale.ROOT)));
+        Component.translatable("message.mmcece.assembly.reason." + reason.name().toLowerCase(Locale.ROOT)));
   }
 
   void nextPass() {
@@ -68,7 +78,8 @@ final class AssemblyReport {
     missingPositions = 0;
   }
 
-  void finish(int matched, int total, int placed) {
+  void finish(ServerPlayer player, int matched, int total, int placed) {
+    planning = new AssemblyMaterialPlan(missing, player);
     delivery = new Delivery(matched, total, placed);
   }
 
@@ -77,6 +88,26 @@ final class AssemblyReport {
   }
 
   boolean send(ServerPlayer player, int limit) {
+    if (plan == null) {
+      try {
+        plan = planning.advance();
+      } catch (RuntimeException failure) {
+        com.lw.modularmachine.ModularMachine.LOGGER.warn("Assembly material report planning failed", failure);
+        var shortage = missing.entrySet().stream()
+            .map(
+                entry -> new AssemblyMaterialPlan.Shortage(
+                    entry.getKey(),
+                    entry.getValue(),
+                    FluidStack.EMPTY,
+                    (long) entry.getValue() * FluidType.BUCKET_VOLUME))
+            .toList();
+        plan = new AssemblyMaterialPlan.Result(Map.of(), shortage, true);
+      }
+      if (plan == null) {
+        return false;
+      }
+      delivery.materials = plan.shortages.iterator();
+    }
     for (int sent = 0; sent < limit; sent++) {
       var message = delivery.next();
       if (message == null) {
@@ -87,9 +118,15 @@ final class AssemblyReport {
     return false;
   }
 
+  void cancel() {
+    if (planning != null) {
+      planning.cancel();
+    }
+  }
+
   private final class Delivery {
     final int matched, total, placed;
-    final Iterator<Map.Entry<Choices, Integer>> materials = missing.entrySet().iterator();
+    Iterator<AssemblyMaterialPlan.Shortage> materials;
     final Iterator<Component> issues = problems.iterator();
     int phase;
 
@@ -115,15 +152,27 @@ final class AssemblyReport {
           }
           case 1 -> {
             phase++;
-            if (!missing.isEmpty()) {
-              return Component.translatable("message.mmcece.assembly.missing_header");
+            if (plan.incomplete) {
+              return Component.translatable("message.mmcece.assembly.material_snapshot_incomplete");
             }
           }
           case 2 -> {
+            phase++;
+            if (!plan.shortages.isEmpty()) {
+              return Component.translatable("message.mmcece.assembly.net_missing_header");
+            }
+          }
+          case 3 -> {
             if (materials.hasNext()) {
               var entry = materials.next();
               var names = Component.empty();
-              var choices = entry.getKey();
+              var choices = entry.choices();
+              if (!entry.fluid().isEmpty()) {
+                return Component.translatable(
+                    "message.mmcece.assembly.net_missing_fluid",
+                    entry.fluid().getHoverName(),
+                    entry.millibuckets());
+              }
               for (var item : choices.items()) {
                 if (!names.getSiblings().isEmpty()) {
                   names.append(" / ");
@@ -141,33 +190,33 @@ final class AssemblyReport {
               }
               if (!choices.fluids().isEmpty()) {
                 return choices.items().isEmpty() ? Component.translatable(
-                    "message.mmcece.assembly.required_fluid",
+                    "message.mmcece.assembly.net_missing_fluid_choices",
                     names,
-                    entry.getValue(),
-                    (long) entry.getValue() * FluidType.BUCKET_VOLUME) : Component
-                        .translatable("message.mmcece.assembly.missing_mixed", names, entry.getValue());
+                    entry.positions(),
+                    entry.millibuckets()) : Component
+                        .translatable("message.mmcece.assembly.missing_mixed", names, entry.positions());
               }
               return Component.translatable(
                   choices.items()
                       .size() == 1 ? "message.mmcece.assembly.missing_item" : "message.mmcece.assembly.missing_choices",
                   names,
-                  entry.getValue());
+                  entry.positions());
             }
             phase++;
           }
-          case 3 -> {
+          case 4 -> {
             phase++;
             if (!problems.isEmpty()) {
               return Component.translatable("message.mmcece.assembly.problems_header");
             }
           }
-          case 4 -> {
+          case 5 -> {
             if (issues.hasNext()) {
               return issues.next();
             }
             phase++;
           }
-          case 5 -> {
+          case 6 -> {
             phase++;
             if (matched < total) {
               return Component.translatable("message.mmcece.assembly.retry");

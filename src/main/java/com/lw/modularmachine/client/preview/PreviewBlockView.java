@@ -7,6 +7,7 @@ import net.minecraft.world.level.BlockAndTintGetter;
 import net.minecraft.world.level.ColorResolver;
 import net.minecraft.world.level.LightLayer;
 import net.minecraft.world.level.block.Blocks;
+import net.minecraft.world.level.block.EntityBlock;
 import net.minecraft.world.level.block.entity.BlockEntity;
 import net.minecraft.world.level.block.state.BlockState;
 import net.minecraft.world.level.lighting.LevelLightEngine;
@@ -18,10 +19,24 @@ import org.jetbrains.annotations.ApiStatus;
 public final class PreviewBlockView implements BlockAndTintGetter {
   private static final ThreadLocal<Integer> ACTIVE_MACHINE_COLOR = new ThreadLocal<>();
   private final PreviewRenderScene scene;
-  private final int layer, step;
+  private int layer, step;
+  private final boolean worldNeighbors;
+  private PreviewLevel level;
+  private final java.util.LinkedHashMap<Long, BlockEntity> entities = new java.util.LinkedHashMap<>(16, .75F, true);
+  private final java.util.Set<BlockState> failedEntities = new java.util.HashSet<>();
 
   public PreviewBlockView(PreviewRenderScene scene, int layer, int step) {
+    this(scene, layer, step, false);
+  }
+
+  PreviewBlockView(PreviewRenderScene scene, int layer, int step, boolean worldNeighbors) {
     this.scene = scene;
+    this.layer = layer;
+    this.step = step;
+    this.worldNeighbors = worldNeighbors;
+  }
+
+  void setState(int layer, int step) {
     this.layer = layer;
     this.step = step;
   }
@@ -55,6 +70,11 @@ public final class PreviewBlockView implements BlockAndTintGetter {
   @Override
   public BlockState getBlockState(BlockPos position) {
     var entry = scene.at(position);
+    if (entry == null && worldNeighbors) {
+      var level = Minecraft.getInstance().level;
+      return level != null && level.hasChunkAt(position) ? level.getBlockState(position) : Blocks.AIR
+          .defaultBlockState();
+    }
     if (entry == null || entry.states().isEmpty() || layer != Integer.MIN_VALUE && position.getY() != layer) {
       return Blocks.AIR.defaultBlockState();
     }
@@ -67,7 +87,51 @@ public final class PreviewBlockView implements BlockAndTintGetter {
   }
   @Override
   public BlockEntity getBlockEntity(BlockPos pos) {
-    return null;
+    var state = getBlockState(pos);
+    if (!state.hasBlockEntity()
+        || !(state.getBlock() instanceof EntityBlock factory)
+        || failedEntities.contains(state)) {
+      return null;
+    }
+    var cached = entities.get(pos.asLong());
+    if (cached != null && cached.getBlockState() == state) {
+      return cached;
+    }
+    try {
+      // Detached visual instances: never inserted into a level, ticked, or fed
+      // live inventory/NBT. Models query schematic neighbors through this view.
+      var entity = factory.newBlockEntity(pos, state);
+      if (entity != null) {
+        if (level == null) {
+          level = new PreviewLevel(this, Minecraft.getInstance().level);
+        }
+        entity.setLevel(level);
+        entities.put(pos.asLong(), entity);
+        while (entities.size() > 2048) {
+          entities.remove(entities.keySet().iterator().next());
+        }
+      }
+      return entity;
+    } catch (RuntimeException failure) {
+      failedEntities.add(state);
+      com.lw.modularmachine.ModularMachine.LOGGER.warn("Cannot create preview block entity for {}", state, failure);
+      return null;
+    }
+  }
+
+  net.neoforged.neoforge.client.model.data.ModelData modelData(BlockPos pos, BlockState state) {
+    var world = Minecraft.getInstance().level;
+    if (worldNeighbors
+        && world != null
+        && world.hasChunkAt(pos)
+        && world.getBlockState(pos).getBlock() == state.getBlock()) {
+      var entity = world.getBlockEntity(pos);
+      if (entity != null) {
+        return entity.getModelData();
+      }
+    }
+    var entity = getBlockEntity(pos);
+    return entity == null ? net.neoforged.neoforge.client.model.data.ModelData.EMPTY : entity.getModelData();
   }
   @Override
   public int getHeight() {

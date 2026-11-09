@@ -9,6 +9,7 @@ import com.lw.modularmachine.machine.orientation.StateOrientationAdapters;
 import com.lw.modularmachine.machine.selection.RangedSelectionData.Box;
 import com.lw.modularmachine.machine.selection.RangedSelectionData.Segment;
 import com.lw.modularmachine.machine.selection.RangedSelectionData.Settings;
+import com.lw.modularmachine.machine.selection.RangedSelectionData.PartEdit;
 import com.lw.modularmachine.machine.structure.DynamicLayoutValidator;
 import com.lw.modularmachine.machine.structure.MachineDefinition;
 import com.lw.modularmachine.machine.structure.MachineDefinitionFiles;
@@ -57,7 +58,12 @@ public final class DynamicDefinitionEditor {
       List<Segment> segments,
       boolean deduplicate,
       boolean includeAir,
-      List<Captured> captured) {
+      List<Captured> captured,
+      Map<BlockPos, PartEdit> edits) {
+    public Input(ResourceLocation machine, JsonObject original, MachineDefinitionFiles.Variables variables, MachineOrientation orientation, BlockPos controller, Box main, List<Segment> segments, boolean deduplicate, boolean includeAir, List<Captured> captured) {
+      this(machine, original, variables, orientation, controller, main, segments, deduplicate, includeAir, captured,
+          Map.of());
+    }
     public Input {
       Objects.requireNonNull(machine);
       original = original == null ? null : original.deepCopy();
@@ -66,7 +72,12 @@ public final class DynamicDefinitionEditor {
       controller = Objects.requireNonNull(controller).immutable();
       segments = List.copyOf(segments);
       captured = List.copyOf(captured);
-      if (segments.size() > RangedSelectionData.MAX_SEGMENTS || captured.size() > RangedSelectionData.MAX_CAPTURE) {
+      var frozen = new LinkedHashMap<BlockPos, PartEdit>();
+      edits.forEach((position, edit) -> frozen.put(position.immutable(), edit));
+      edits = Map.copyOf(frozen);
+      if (segments.size() > RangedSelectionData.MAX_SEGMENTS
+          || captured.size() > RangedSelectionData.MAX_CAPTURE
+          || edits.size() > RangedSelectionData.MAX_PART_EDITS) {
         throw new IllegalArgumentException("Selection exceeds the editor capture budget");
       }
     }
@@ -101,6 +112,7 @@ public final class DynamicDefinitionEditor {
   private final Map<BlockPos, Existing> fixed = new LinkedHashMap<>();
   private final Set<BlockPos> assigned = new HashSet<>();
   private final Set<BlockPos> moved = new HashSet<>();
+  private final Set<BlockPos> appliedEdits = new HashSet<>();
   private final Set<String> protectedParts = new HashSet<>();
   private MachineDefinition original;
   private int dynamicParts;
@@ -128,6 +140,28 @@ public final class DynamicDefinitionEditor {
       references.addAll(
           MachineDefinition.blockReferences(
               Map.of(input.machine(), input.variables().expand(input.original(), input.machine().toString()))));
+      // An edited existing declaration may keep a variable/multi-block candidate
+      // list.
+      // Capture the new literals for every retained candidate, not just the observed
+      // block.
+      var localEdits = new HashMap<BlockPos, PartEdit>();
+      input.edits()
+          .forEach((position, edit) -> localEdits.put(local(position, input.controller(), input.orientation()), edit));
+      var edited = new JsonArray();
+      for (var element : input.original().getAsJsonArray("parts")) {
+        var part = element.getAsJsonObject();
+        var override = localEdits.get(vector(part.get("offset")));
+        if (override != null) {
+          edited.add(PartOverrides.apply(part, override));
+        }
+      }
+      if (!edited.isEmpty()) {
+        var root = new JsonObject();
+        root.add("parts", edited);
+        references.addAll(
+            MachineDefinition
+                .blockReferences(Map.of(input.machine(), input.variables().expand(root, input.machine().toString()))));
+      }
     }
     if (!input.captured().isEmpty()) {
       var root = new JsonObject();
@@ -135,7 +169,7 @@ public final class DynamicDefinitionEditor {
       // The reference reader does not interpret offsets or part IDs.
       var declarations = new HashSet<JsonObject>();
       for (var value : input.captured()) {
-        var part = value.part().deepCopy();
+        var part = PartOverrides.apply(value.part(), input.edits().get(value.world()));
         part.remove("offset");
         if (declarations.add(part)) {
           var declaration = part.deepCopy();
@@ -255,7 +289,7 @@ public final class DynamicDefinitionEditor {
           deduplicated++;
           continue;
         }
-        parts.add(value.part().deepCopy());
+        parts.add(edited(value.part(), value.world()));
       }
     } else {
       for (var element : input.original().getAsJsonArray("parts")) {
@@ -269,6 +303,9 @@ public final class DynamicDefinitionEditor {
           "At least one fixed part besides the controller must remain after deduplication");
     }
     root.add("parts", parts);
+    if (!appliedEdits.containsAll(input.edits().keySet())) {
+      throw RangedSelectionMessages.invalid("unused_part_edits");
+    }
     var definition = MachineDefinition
         .parse(input.machine(), input.variables().expand(root, input.machine().toString()), registry);
     if (!definition.allows(input.orientation())) {
@@ -375,6 +412,7 @@ public final class DynamicDefinitionEditor {
         moved.add(absolute);
         deduplicated++;
       }
+      part = edited(part, value.world());
       part.add("offset", coordinates(relative(absolute, base, step, repetition)));
       result.add(part);
       dynamicParts++;
@@ -401,10 +439,23 @@ public final class DynamicDefinitionEditor {
         throw new IllegalArgumentException("World field does not satisfy the original rule for " + part.id());
       }
     }
-    if (!settings.selector().isEmpty() && !settings.selector().equals(part.selector())
-        || !settings.interfaceType().isEmpty() && !settings.interfaceType().equals(part.interfaceType())) {
+    var edit = input.edits().get(value.world());
+    if ((edit == null || !edit.changeSelector())
+        && !settings.selector().isEmpty()
+        && !settings.selector().equals(part.selector())
+        || (edit == null || !edit.changeInterface())
+            && !settings.interfaceType().isEmpty()
+            && !settings.interfaceType().equals(part.interfaceType())) {
       throw new IllegalArgumentException("Explicit selector/interface conflicts with fixed part " + part.id());
     }
+  }
+
+  private JsonObject edited(JsonObject original, BlockPos position) {
+    var edit = input.edits().get(position);
+    if (edit != null) {
+      appliedEdits.add(position);
+    }
+    return PartOverrides.apply(original, edit);
   }
 
   private List<Captured> selection(Box box, boolean dynamic) {

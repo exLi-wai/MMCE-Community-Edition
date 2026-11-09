@@ -10,6 +10,8 @@ import com.lw.modularmachine.util.minecraft.registry.RegisteredMachineItems;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Optional;
+import java.util.NavigableMap;
+import java.util.TreeMap;
 import net.minecraft.Util;
 import net.minecraft.client.gui.GuiGraphics;
 import net.minecraft.client.gui.components.EditBox;
@@ -61,6 +63,59 @@ public final class MachineDetailsScreen extends Screen {
   private int selected = -1;
   private long candidateScroll;
   private long lastCycle;
+  private SceneStatistics statistics;
+  private Integer shownY;
+  private boolean pickReady;
+
+  /**
+   * Statistics belong to the complete scene, independently of material-list
+   * inclusion.
+   */
+  private static final class SceneStatistics {
+    final PreviewSceneData scene;
+    final NavigableMap<Integer, Integer> layers = new TreeMap<>();
+    int cursor, blocks;
+    int minX = Integer.MAX_VALUE, minY = Integer.MAX_VALUE, minZ = Integer.MAX_VALUE;
+    int maxX = Integer.MIN_VALUE, maxY = Integer.MIN_VALUE, maxZ = Integer.MIN_VALUE;
+
+    SceneStatistics(PreviewSceneData scene) {
+      this.scene = scene;
+    }
+
+    boolean ready() {
+      return cursor == scene.entries().size();
+    }
+
+    void advance(int budget, long deadline) {
+      for (int work = 0; work < budget && !ready() && System.nanoTime() < deadline; work++) {
+        var entry = scene.entries().get(cursor++);
+        var pos = entry.position();
+        minX = Math.min(minX, pos.getX());
+        minY = Math.min(minY, pos.getY());
+        minZ = Math.min(minZ, pos.getZ());
+        maxX = Math.max(maxX, pos.getX());
+        maxY = Math.max(maxY, pos.getY());
+        maxZ = Math.max(maxZ, pos.getZ());
+        boolean block = entry.states().stream().anyMatch(state -> !state.isAir());
+        layers.merge(pos.getY(), block ? 1 : 0, Integer::sum);
+        if (block) {
+          blocks++;
+        }
+      }
+    }
+
+    long width() {
+      return scene.entries().isEmpty() ? 0 : (long) maxX - minX + 1;
+    }
+
+    long height() {
+      return scene.entries().isEmpty() ? 0 : (long) maxY - minY + 1;
+    }
+
+    long depth() {
+      return scene.entries().isEmpty() ? 0 : (long) maxZ - minZ + 1;
+    }
+  }
 
   public MachineDetailsScreen(ClientMachineJeiCatalog.Machine machine) {
     super(Component.translatable("jei.mmcece.details.title", Component.translatable(machine.translation())));
@@ -115,6 +170,9 @@ public final class MachineDetailsScreen extends Screen {
       machine = current;
       selection = null;
       scene = null;
+      statistics = null;
+      shownY = null;
+      pickReady = false;
       selectPosition(-1);
       materialScroll = 0;
       renderer.close();
@@ -125,7 +183,13 @@ public final class MachineDetailsScreen extends Screen {
       scene = selection.scene();
       animated = scene.entries().stream().filter(entry -> entry.states().size() > 1).toList();
       renderer.setScene(scene);
+      statistics = new SceneStatistics(scene);
+      shownY = null;
+      pickReady = false;
       selectPosition(-1);
+    }
+    if (statistics != null && !statistics.ready()) {
+      statistics.advance(2048, System.nanoTime() + 2_000_000L);
     }
     if (cycle && !animated.isEmpty() && Util.getMillis() - lastCycle >= 1500) {
       step++;
@@ -143,6 +207,7 @@ public final class MachineDetailsScreen extends Screen {
     graphics.fill(left, top, left + panelWidth, top + panelHeight, 0xFFC6C6C6);
     graphics.renderOutline(left, top, panelWidth, panelHeight, 0xFF555555);
     drawHeader(graphics, left, top);
+    drawStatistics(graphics, left, top, panelWidth);
     if (scene != null) {
       drawScene(graphics, left, top, panelWidth, panelHeight);
     }
@@ -152,6 +217,123 @@ public final class MachineDetailsScreen extends Screen {
       drawRequiredBlocks(graphics, mouseX, mouseY, partialTick);
     }
     drawSelectedCandidates(graphics, mouseX, mouseY);
+    drawLayerControls(graphics, mouseX, mouseY);
+    if (mouseX >= left + 18 && mouseX < left + panelWidth - 18 && mouseY >= top + 30 && mouseY < top + 44) {
+      graphics.renderTooltip(
+          font,
+          List.of(statisticsText(), tr("details.statistics_help")),
+          Optional.empty(),
+          mouseX,
+          mouseY);
+    }
+  }
+
+  private Component statisticsText() {
+    if (statistics == null || !statistics.ready()) {
+      return tr("details.statistics_pending");
+    }
+    if (shownY == null) {
+      return tr("details.dimensions", statistics.width(), statistics.height(), statistics.depth(), statistics.blocks);
+    }
+    return tr(
+        "details.dimensions_layer",
+        statistics.width(),
+        statistics.height(),
+        statistics.depth(),
+        statistics.blocks,
+        statistics.layers.getOrDefault(shownY, 0));
+  }
+
+  private void drawStatistics(GuiGraphics graphics, int left, int top, int panelWidth) {
+    graphics.drawString(
+        font,
+        font.plainSubstrByWidth(statisticsText().getString(), Math.max(0, panelWidth - 36)),
+        left + 18,
+        top + 34,
+        0xFF404040,
+        false);
+  }
+
+  private record LayerControls(int left, int top, int labelWidth) {
+    int labelX() {
+      return left + 26;
+    }
+
+    int nextX() {
+      return labelX() + labelWidth + 4;
+    }
+
+    int allX() {
+      return nextX() + 26;
+    }
+
+    boolean contains(double x, double y) {
+      return x >= left && x < allX() + 52 && y >= top && y < top + 18;
+    }
+  }
+
+  private LayerControls layerControls() {
+    int left = Math.max(12, (width - Math.min(760, width - 24)) / 2);
+    int top = Math.max(12, (height - Math.min(900, height - 24)) / 2);
+    int panelWidth = Math.min(760, width - left * 2);
+    int panelHeight = Math.min(900, height - top * 2);
+    int labelWidth = Math.max(40, Math.min(116, panelWidth - 132));
+    int controlsWidth = labelWidth + 108;
+    return new LayerControls(left + (panelWidth - controlsWidth) / 2, top + panelHeight - 28, labelWidth);
+  }
+
+  private Integer adjacentLayer(boolean next) {
+    if (statistics == null || !statistics.ready() || statistics.layers.isEmpty()) {
+      return null;
+    }
+    if (shownY == null) {
+      return next ? statistics.layers.firstKey() : statistics.layers.lastKey();
+    }
+    return next ? statistics.layers.higherKey(shownY) : statistics.layers.lowerKey(shownY);
+  }
+
+  private void showLayer(Integer layer) {
+    shownY = layer;
+    pickReady = false;
+    dragging = false;
+    selectPosition(-1);
+  }
+
+  private void moveLayer(boolean next) {
+    var layer = adjacentLayer(next);
+    if (layer != null) {
+      showLayer(layer);
+    }
+  }
+
+  private void drawLayerControls(GuiGraphics graphics, int mouseX, int mouseY) {
+    var controls = layerControls();
+    drawStepButton(graphics, controls.left(), controls.top(), "<", adjacentLayer(false) != null, mouseX, mouseY);
+    drawStepButton(graphics, controls.nextX(), controls.top(), ">", adjacentLayer(true) != null, mouseX, mouseY);
+    var label = shownY == null ? tr("details.layer_all") : tr("details.layer_current", shownY);
+    GuiTextures.blitNineSlice(graphics, CONTROL_TEXTURE, controls.labelX(), controls.top(), controls.labelWidth(), 18);
+    String visible = font.plainSubstrByWidth(label.getString(), controls.labelWidth() - 8);
+    graphics.drawString(
+        font,
+        visible,
+        controls.labelX() + (controls.labelWidth() - font.width(visible)) / 2,
+        controls.top() + 5,
+        0xFF404040,
+        false);
+    GuiTextures.blitNineSlice(graphics, CONTROL_TEXTURE, controls.allX(), controls.top(), 52, 18);
+    var all = tr("details.layer_show_all");
+    graphics.drawString(
+        font,
+        all,
+        controls.allX() + (52 - font.width(all)) / 2,
+        controls.top() + 5,
+        shownY == null ? 0xFF888888 : 0xFF202020,
+        false);
+    if (controls.contains(mouseX, mouseY)) {
+      var action = mouseX < controls.labelX() ? tr("details.layer_previous") : mouseX >= controls.allX() ? tr(
+          "details.layer_show_all") : mouseX >= controls.nextX() ? tr("details.layer_next") : label;
+      graphics.renderTooltip(font, List.of(action, tr("details.layer_help")), Optional.empty(), mouseX, mouseY);
+    }
   }
 
   private void drawHeader(GuiGraphics graphics, int left, int top) {
@@ -204,7 +386,7 @@ public final class MachineDetailsScreen extends Screen {
     int parentWidth = Math.min(760, width - left * 2);
     int parentHeight = Math.min(900, height - top * 2);
     int panelWidth = Math.max(120, Math.min(REQUIRED_BLOCK_MAX_WIDTH, parentWidth - 36));
-    int panelHeight = Math.max(74, Math.min(parentHeight - 76, contentHeight(panelWidth) + 42));
+    int panelHeight = Math.max(74, Math.min(parentHeight - 92, contentHeight(panelWidth) + 42));
     return new MaterialPanel(left + parentWidth - panelWidth - 18, top + 58, panelWidth, panelHeight);
   }
 
@@ -372,8 +554,9 @@ public final class MachineDetailsScreen extends Screen {
         graphics,
         new PreviewViewport(left, top, right - left, bottom - top, baseScale),
         camera,
-        Integer.MIN_VALUE,
+        shownY == null ? PreviewRenderer.ALL_LAYERS : shownY,
         step);
+    pickReady = true;
   }
 
   private record CandidatePanel(int left, int top, int width, int height, int columns, int count) {
@@ -416,7 +599,7 @@ public final class MachineDetailsScreen extends Screen {
     int columns = Math.max(1, Math.min(CANDIDATE_COLUMNS, (availableWidth - 16) / CANDIDATE_HORIZONTAL_SPACING));
     int panelWidth = Math.min(availableWidth, 16 + columns * CANDIDATE_HORIZONTAL_SPACING);
     long rows = (long) (count - 1) / columns + 1;
-    int panelHeight = (int) Math.min(Math.max(38, parentHeight - 76), 38L + rows * CANDIDATE_VERTICAL_SPACING);
+    int panelHeight = (int) Math.min(Math.max(38, parentHeight - 92), 38L + rows * CANDIDATE_VERTICAL_SPACING);
 
     return new CandidatePanel(parentLeft + 18, parentTop + 58, panelWidth, panelHeight, columns, count);
   }
@@ -474,6 +657,12 @@ public final class MachineDetailsScreen extends Screen {
   }
 
   private void selectPosition(int index) {
+    if (index >= 0
+        && (scene == null
+            || index >= scene.entries().size()
+            || shownY != null && scene.entries().get(index).position().getY() != shownY)) {
+      index = -1;
+    }
     if (selected != index) {
       selected = index;
       candidateScroll = 0;
@@ -490,6 +679,20 @@ public final class MachineDetailsScreen extends Screen {
     if (button == 0 && x >= settingsX && x < settingsX + 20 && y >= settingsY && y < settingsY + 22) {
       settingsOpen = !settingsOpen;
       positionFields(materialPanel());
+      return true;
+    }
+    var layers = layerControls();
+    if (layers.contains(x, y)) {
+      setFocused(null);
+      if (button == 0) {
+        if (x < layers.left() + 22) {
+          moveLayer(false);
+        } else if (x >= layers.nextX() && x < layers.nextX() + 22) {
+          moveLayer(true);
+        } else if (x >= layers.allX()) {
+          showLayer(null);
+        }
+      }
       return true;
     }
     var candidates = candidatePanel();
@@ -523,7 +726,7 @@ public final class MachineDetailsScreen extends Screen {
     int left = Math.max(12, (width - Math.min(760, width - 24)) / 2);
     int top = Math.max(12, (height - Math.min(900, height - 24)) / 2);
     int panelHeight = Math.min(900, height - top * 2);
-    if (y >= top + 48 && y < top + panelHeight - 20) {
+    if (x >= left + 8 && x < left + panelWidth - 8 && y >= top + 48 && y < top + panelHeight - 42) {
       dragging = true;
       dragDistance = 0;
       return true;
@@ -582,7 +785,11 @@ public final class MachineDetailsScreen extends Screen {
     }
     if (button == 0) {
       dragDistance += Math.abs(dx) + Math.abs(dy);
-      camera.rotate(dx, dy);
+      if (shownY == null) {
+        camera.rotate(dx, dy);
+      } else {
+        camera.pan(dx, dy);
+      }
     } else {
       camera.pan(dx, dy);
     }
@@ -594,7 +801,7 @@ public final class MachineDetailsScreen extends Screen {
     if (!dragging) {
       return super.mouseReleased(x, y, button);
     }
-    if (dragging && button == 0 && dragDistance <= 4 && scene != null) {
+    if (dragging && button == 0 && dragDistance <= 4 && scene != null && pickReady) {
       selectPosition(renderer.pick(x, y));
     }
     dragging = false;
@@ -620,6 +827,12 @@ public final class MachineDetailsScreen extends Screen {
 
   @Override
   public boolean mouseScrolled(double x, double y, double scrollX, double scrollY) {
+    if (layerControls().contains(x, y)) {
+      if (scrollY != 0) {
+        moveLayer(scrollY < 0);
+      }
+      return true;
+    }
     var candidates = candidatePanel();
     if (candidates != null && candidates.contains(x, y)) {
       candidateScroll = Math.round(

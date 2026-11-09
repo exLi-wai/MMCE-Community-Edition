@@ -1,6 +1,7 @@
 package com.lw.modularmachine.registry;
 
 import com.lw.modularmachine.machine.blueprint.MachineBlueprint;
+import com.lw.modularmachine.machine.configuration.ConfigurationCardData;
 import net.minecraft.core.BlockPos;
 import net.minecraft.core.component.DataComponentType;
 import net.minecraft.core.registries.Registries;
@@ -11,6 +12,11 @@ import net.neoforged.neoforge.registries.DeferredRegister;
 public final class MachineDataComponents {
   private static final DeferredRegister<DataComponentType<?>> TYPES = DeferredRegister
       .create(Registries.DATA_COMPONENT_TYPE, "mmcece");
+  public static final DeferredHolder<DataComponentType<?>, DataComponentType<ConfigurationCardData>> CONFIGURATION_CARD = TYPES
+      .register(
+          "configuration_card",
+          () -> DataComponentType.<ConfigurationCardData>builder().persistent(ConfigurationCardData.CODEC)
+              .networkSynchronized(ConfigurationCardData.STREAM_CODEC).build());
   public static final DeferredHolder<DataComponentType<?>, DataComponentType<MachineBlueprint>> BLUEPRINT = TYPES
       .register(
           "blueprint_orientation",

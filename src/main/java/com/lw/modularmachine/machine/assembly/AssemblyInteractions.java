@@ -2,6 +2,7 @@ package com.lw.modularmachine.machine.assembly;
 
 import com.lw.modularmachine.config.MachineConfig;
 import com.lw.modularmachine.item.RangedConstructToolItem;
+import com.lw.modularmachine.item.ConfigurationCardItem;
 import com.lw.modularmachine.machine.structure.StructureService;
 import net.minecraft.core.registries.BuiltInRegistries;
 import net.minecraft.resources.ResourceLocation;
@@ -32,6 +33,7 @@ public final class AssemblyInteractions {
   public static void rightClick(PlayerInteractEvent.RightClickBlock event) {
     if (event.isCanceled()
         || event.getItemStack().getItem() instanceof RangedConstructToolItem
+        || event.getItemStack().getItem() instanceof ConfigurationCardItem
         || event.getHand() != InteractionHand.MAIN_HAND
         || event.getEntity().isShiftKeyDown()
         || !matches(event.getItemStack())) {

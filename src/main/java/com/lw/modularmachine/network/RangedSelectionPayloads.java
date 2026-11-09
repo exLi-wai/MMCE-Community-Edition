@@ -73,7 +73,7 @@ public final class RangedSelectionPayloads {
   }
 
   public static void register(RegisterPayloadHandlersEvent event) {
-    var registrar = event.registrar("2");
+    var registrar = event.registrar("3");
     registrar.playToServer(
         ACTION,
         StreamCodec.of(
@@ -144,6 +144,10 @@ public final class RangedSelectionPayloads {
     writeSettings(buffer, request.settings());
     buffer.writeBoolean(request.deduplicate());
     buffer.writeBoolean(request.includeAir());
+    buffer.writeBoolean(request.partEdit() != null);
+    if (request.partEdit() != null) {
+      writePartEdit(buffer, request.partEdit());
+    }
   }
 
   private static Request readRequest(RegistryFriendlyByteBuf buffer) {
@@ -156,7 +160,29 @@ public final class RangedSelectionPayloads {
         buffer.readUtf(256),
         readSettings(buffer),
         buffer.readBoolean(),
-        buffer.readBoolean());
+        buffer.readBoolean(),
+        buffer.readBoolean() ? readPartEdit(buffer) : null);
+  }
+
+  private static void writePartEdit(RegistryFriendlyByteBuf buffer, PartEdit edit) {
+    buffer.writeUtf(edit.blocks(), 4096);
+    buffer.writeUtf(edit.properties(), 4096);
+    buffer.writeUtf(edit.propertiesSpace(), 5);
+    buffer.writeBoolean(edit.changeSelector());
+    buffer.writeUtf(edit.selector(), 64);
+    buffer.writeBoolean(edit.changeInterface());
+    buffer.writeUtf(edit.interfaceType(), 64);
+  }
+
+  private static PartEdit readPartEdit(RegistryFriendlyByteBuf buffer) {
+    return new PartEdit(
+        buffer.readUtf(4096),
+        buffer.readUtf(4096),
+        buffer.readUtf(5),
+        buffer.readBoolean(),
+        buffer.readUtf(64),
+        buffer.readBoolean(),
+        buffer.readUtf(64));
   }
 
   private static void writeSettings(RegistryFriendlyByteBuf buffer, Settings settings) {
@@ -228,6 +254,15 @@ public final class RangedSelectionPayloads {
     buffer.writeVarInt(snapshot.filePage());
     buffer.writeVarInt(snapshot.filePages());
     buffer.writeBoolean(snapshot.hasResult());
+    buffer.writeBoolean(snapshot.partEditor() != null);
+    if (snapshot.partEditor() != null) {
+      var editor = snapshot.partEditor();
+      BlockPosCodecs.INT_VECTOR.encode(buffer, editor.position());
+      buffer.writeUtf(editor.observedBlock(), 512);
+      buffer.writeUtf(editor.observedProperties(), 4096);
+      writePartEdit(buffer, editor.edit());
+    }
+    buffer.writeVarInt(snapshot.partEdits());
   }
 
   private static Snapshot readSnapshot(RegistryFriendlyByteBuf buffer) {
@@ -280,7 +315,13 @@ public final class RangedSelectionPayloads {
         files,
         buffer.readVarInt(),
         buffer.readVarInt(),
-        buffer.readBoolean());
+        buffer.readBoolean(),
+        buffer.readBoolean() ? new PartEditor(
+            BlockPosCodecs.INT_VECTOR.decode(buffer),
+            buffer.readUtf(512),
+            buffer.readUtf(4096),
+            readPartEdit(buffer)) : null,
+        count(buffer, RangedSelectionData.MAX_PART_EDITS));
   }
 
   private static int count(RegistryFriendlyByteBuf buffer, int maximum) {

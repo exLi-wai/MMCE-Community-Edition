@@ -24,7 +24,7 @@ public final class RangedSelectionPreview {
       var segment = definition.dynamicPatterns().stream().filter(pattern -> pattern.id().equals(id)).findFirst()
           .orElseThrow();
       if (length < segment.minimum() || length > segment.maximum()) {
-        throw new IllegalArgumentException("预览长度超出所选动态段范围");
+        throw RangedSelectionMessages.invalid("preview_length_out_of_range");
       }
       lengths.put(segment.id(), length);
     }

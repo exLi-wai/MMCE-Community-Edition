@@ -5,6 +5,7 @@ import com.lw.modularmachine.machine.orientation.PropertySpace;
 import com.lw.modularmachine.machine.PortKind;
 import com.lw.modularmachine.machine.structure.MachineDefinition;
 import com.lw.modularmachine.registry.MachineRegistries;
+import com.lw.modularmachine.block.MachinePortBlock;
 import com.lw.modularmachine.util.minecraft.state.BlockStateValues;
 import java.util.ArrayList;
 import java.util.Comparator;
@@ -12,12 +13,14 @@ import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.EnumMap;
+import java.util.Iterator;
+import java.util.concurrent.CancellationException;
 import net.minecraft.core.BlockPos;
 import net.minecraft.resources.ResourceLocation;
-import net.minecraft.world.level.block.Block;
 import net.minecraft.world.level.block.Rotation;
 import net.minecraft.world.level.block.state.BlockState;
 import net.minecraft.world.level.block.state.properties.Property;
+import net.neoforged.neoforge.registries.DeferredBlock;
 
 /**
  * Server-compiled display/build candidates share the exact definition
@@ -67,15 +70,34 @@ public record AssemblyPattern(
    * Main-thread candidate callbacks are resumable; supplied rules are immutable.
    */
   public static final class Preparation {
+    private record CapturedPart(
+        BlockPos position,
+        MachineDefinition.Rule source,
+        List<BlockState> states,
+        List<MachineDefinition.Alternative> alternatives) {
+      Part freeze() {
+        return new Part(
+            position,
+            source.port() == null ? new MachineDefinition.Rule(null, alternatives) : source,
+            states);
+      }
+    }
+
     private final MachineDefinition definition;
     private final long epoch;
     private final BlockPos origin;
     private final MachineOrientation orientation;
     private final List<MachineDefinition.Rule> rules;
-    private final ArrayList<Part> parts = new ArrayList<>();
+    private final ArrayList<CapturedPart> parts = new ArrayList<>();
     private final Map<PortKind, List<BlockState>> ports = new EnumMap<>(PortKind.class);
     private final Rotation rotation;
     private int cursor;
+    private int alternativeCursor;
+    private MachineDefinition.Rule activeRule;
+    private List<BlockState> activeStates;
+    private List<MachineDefinition.Alternative> activeAlternatives;
+    private Iterator<DeferredBlock<MachinePortBlock>> portScan;
+    private ArrayList<BlockState> portStates;
     private boolean finished;
 
     public Preparation(MachineDefinition definition, long epoch, BlockPos origin, MachineOrientation orientation, List<MachineDefinition.Rule> rules) {
@@ -108,37 +130,63 @@ public record AssemblyPattern(
       }
       int used = 0;
       while (!complete() && used < budget) {
-        int index = cursor++;
-        used++;
-        var rule = rules.get(index);
-        var states = new ArrayList<BlockState>();
-        var alternatives = new ArrayList<MachineDefinition.Alternative>();
-        if (rule.port() != null) {
-          var port = rule.port();
-          states.addAll(
-              ports.computeIfAbsent(
-                  port,
-                  kind -> MachineRegistries.PORTS.values().stream().map(holder -> holder.get())
-                      .filter(block -> block.kind() == kind).map(Block::defaultBlockState).toList()));
-        } else {
-          for (var alternative : rule.alternatives()) {
-            var state = BlockStateValues.apply(alternative.block().defaultBlockState(), alternative.properties());
-            var properties = alternative.properties();
-            if (definition.parts().get(index).propertiesSpace() == PropertySpace.LEGACY) {
-              state = state.rotate(rotation);
-              var transformed = new HashMap<Property<?>, Comparable<?>>();
-              for (var key : properties.keySet()) {
-                transformed.put(key, state.getValue(key));
-              }
-              properties = transformed;
-            }
-            states.add(state);
-            alternatives.add(new MachineDefinition.Alternative(alternative.snapshot(), properties));
+        if (activeRule == null) {
+          activeRule = rules.get(cursor);
+          alternativeCursor = 0;
+          if (activeRule.port() == null) {
+            activeStates = new ArrayList<>();
+            activeAlternatives = new ArrayList<>();
+          } else if (!ports.containsKey(activeRule.port())) {
+            portScan = MachineRegistries.PORTS.values().iterator();
+            portStates = new ArrayList<>();
           }
-          rule = new MachineDefinition.Rule(null, alternatives);
+          used++;
+          continue;
         }
+        if (portScan != null) {
+          if (portScan.hasNext()) {
+            var block = portScan.next().get();
+            if (block.kind() == activeRule.port()) {
+              portStates.add(block.defaultBlockState());
+            }
+          } else {
+            // Freeze once per port kind so repeated hatches share the same candidate list.
+            ports.put(activeRule.port(), List.copyOf(portStates));
+            portStates = null;
+            portScan = null;
+          }
+          used++;
+          continue;
+        }
+        if (activeRule.port() == null && alternativeCursor < activeRule.alternatives().size()) {
+          var alternative = activeRule.alternatives().get(alternativeCursor++);
+          var state = BlockStateValues.apply(alternative.block().defaultBlockState(), alternative.properties());
+          var properties = alternative.properties();
+          if (definition.parts().get(cursor).propertiesSpace() == PropertySpace.LEGACY) {
+            state = state.rotate(rotation);
+            var transformed = new HashMap<Property<?>, Comparable<?>>();
+            for (var key : properties.keySet()) {
+              transformed.put(key, state.getValue(key));
+            }
+            properties = transformed;
+          }
+          activeStates.add(state);
+          activeAlternatives.add(new MachineDefinition.Alternative(alternative.snapshot(), properties));
+          used++;
+          continue;
+        }
+        var states = activeRule.port() == null ? activeStates : ports.get(activeRule.port());
         parts.add(
-            new Part(origin.offset(orientation.toWorldOffset(definition.parts().get(index).offset())), rule, states));
+            new CapturedPart(
+                origin.offset(orientation.toWorldOffset(definition.parts().get(cursor).offset())),
+                activeRule,
+                states,
+                activeAlternatives));
+        activeRule = null;
+        activeStates = null;
+        activeAlternatives = null;
+        cursor++;
+        used++;
       }
       return used;
     }
@@ -149,7 +197,14 @@ public record AssemblyPattern(
         throw new IllegalStateException("Incomplete or transferred candidates");
       }
       finished = true;
-      parts.sort(
+      var frozen = new ArrayList<Part>(parts.size());
+      for (var part : parts) {
+        if (Thread.currentThread().isInterrupted()) {
+          throw new CancellationException();
+        }
+        frozen.add(part.freeze());
+      }
+      frozen.sort(
           Comparator.comparingInt((Part part) -> part.position().getY())
               .thenComparingInt(part -> part.position().getX()).thenComparingInt(part -> part.position().getZ()));
       return new AssemblyPattern(
@@ -159,14 +214,20 @@ public record AssemblyPattern(
           orientation,
           definition.sourceDefinition(),
           definition.dynamicLengths(),
-          parts);
+          frozen);
     }
   }
 
   /** Pure translation of an already sorted origin template. */
   public AssemblyPattern relocate(BlockPos target) {
+    if (target.equals(origin)) {
+      return this;
+    }
     var relocated = new ArrayList<Part>(parts.size());
     for (var part : parts) {
+      if (Thread.currentThread().isInterrupted()) {
+        throw new CancellationException();
+      }
       var offset = part.position().subtract(origin);
       relocated.add(
           new Part(

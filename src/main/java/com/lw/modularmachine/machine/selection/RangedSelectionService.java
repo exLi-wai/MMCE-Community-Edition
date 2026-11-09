@@ -12,6 +12,8 @@ import com.lw.modularmachine.machine.selection.RangedSelectionData.Request;
 import com.lw.modularmachine.machine.selection.RangedSelectionData.Segment;
 import com.lw.modularmachine.machine.selection.RangedSelectionData.Settings;
 import com.lw.modularmachine.machine.selection.RangedSelectionData.Snapshot;
+import com.lw.modularmachine.machine.selection.RangedSelectionData.PartEdit;
+import com.lw.modularmachine.machine.selection.RangedSelectionData.PartEditor;
 import com.lw.modularmachine.machine.structure.AsyncStructureWork;
 import com.lw.modularmachine.machine.structure.StructureService;
 import com.lw.modularmachine.network.ProjectionPayloads;
@@ -23,9 +25,11 @@ import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Locale;
 import java.util.Map;
+import java.util.Objects;
 import java.util.UUID;
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.CompletionException;
+import java.util.stream.Collectors;
 import net.minecraft.core.BlockPos;
 import net.minecraft.core.Direction;
 import net.minecraft.core.registries.BuiltInRegistries;
@@ -63,6 +67,10 @@ public final class RangedSelectionService {
     int selected;
     PickTarget picking = PickTarget.NONE;
     BlockPos first;
+    final Map<BlockPos, PartEdit> partEdits = new LinkedHashMap<>();
+    final Map<BlockPos, BlockState> editedStates = new LinkedHashMap<>();
+    PartEditor partEditor;
+    BlockState partState;
     boolean append;
     boolean deduplicate = true;
     boolean includeAir;
@@ -114,7 +122,9 @@ public final class RangedSelectionService {
           catalog == null ? List.of() : catalog.page(filter, filePage),
           filePage,
           catalog == null ? 1 : catalog.pages(filter),
-          result != null && saved != null);
+          result != null && saved != null,
+          partEditor,
+          partEdits.size());
     }
 
     void cancelWork() {
@@ -143,6 +153,13 @@ public final class RangedSelectionService {
       saved = null;
       cancelPreview();
       status = message("updated");
+    }
+
+    void clearPartEdits() {
+      partEdits.clear();
+      editedStates.clear();
+      partEditor = null;
+      partState = null;
     }
   }
 
@@ -230,6 +247,16 @@ public final class RangedSelectionService {
       send(player, session, false, false);
       return InteractionResult.SUCCESS;
     }
+    if (session.picking == PickTarget.PART) {
+      try {
+        openPart(player, session, position);
+      } catch (RuntimeException invalid) {
+        session.status = message("invalid", detail(invalid));
+        player.displayClientMessage(session.status, true);
+        send(player, session, false, false);
+      }
+      return InteractionResult.SUCCESS;
+    }
     if (session.picking != PickTarget.NONE) {
       if (session.first == null) {
         session.first = position.immutable();
@@ -239,7 +266,7 @@ public final class RangedSelectionService {
         try {
           var box = new Box(session.first, position);
           if (box.volume() > RangedSelectionData.MAX_CAPTURE) {
-            throw new IllegalArgumentException("Selection exceeds 262144 positions");
+            throw RangedSelectionMessages.invalid("capture_limit", RangedSelectionData.MAX_CAPTURE);
           }
           boolean changed = !box.equals(box(session, session.picking));
           setBox(session, session.picking, box);
@@ -247,6 +274,7 @@ public final class RangedSelectionService {
           session.first = null;
           session.revision++;
           if (changed) {
+            session.clearPartEdits();
             session.changed();
           }
           session.status = message("ready");
@@ -293,7 +321,14 @@ public final class RangedSelectionService {
           requireTarget(session, request);
           session.picking = request.target();
           session.first = null;
-          session.status = message("picking");
+          if (request.target() == PickTarget.PART) {
+            session.partEditor = null;
+            session.partState = null;
+          }
+          session.status = message(request.target() == PickTarget.PART ? "picking_part" : "picking");
+          if (request.target() == PickTarget.PART) {
+            player.displayClientMessage(session.status, true);
+          }
           session.revision++;
           close = true;
         }
@@ -305,9 +340,13 @@ public final class RangedSelectionService {
         }
         case CLEAR_BOX -> {
           requireTarget(session, request);
+          if (request.target() == PickTarget.PART) {
+            throw RangedSelectionMessages.invalid("part_not_boundary");
+          }
           boolean changed = box(session, request.target()) != null;
           setBox(session, request.target(), null);
           if (changed) {
+            session.clearPartEdits();
             session.changed();
           }
           session.revision++;
@@ -315,11 +354,12 @@ public final class RangedSelectionService {
         }
         case SET_MODE -> {
           if (request.index() != 0 && request.index() != 1) {
-            throw new IllegalArgumentException("Invalid export mode");
+            throw RangedSelectionMessages.invalid("invalid_mode");
           }
           boolean append = request.index() == 1;
           if (session.append != append) {
             session.append = append;
+            session.clearPartEdits();
             session.changed();
           }
           session.revision++;
@@ -336,7 +376,7 @@ public final class RangedSelectionService {
               }
             });
             if (session.catalogFuture == null) {
-              throw new IllegalStateException("The editor worker queue is busy; retry");
+              throw RangedSelectionMessages.invalid("worker_busy");
             }
           } else {
             session.filePage = Math.min(session.filePage, session.catalog.pages(session.filter) - 1);
@@ -344,11 +384,12 @@ public final class RangedSelectionService {
         }
         case SELECT_FILE -> {
           if (session.catalog == null) {
-            throw new IllegalArgumentException("Open the file list first");
+            throw RangedSelectionMessages.invalid("file_list_required");
           }
           var entry = session.catalog.entries().stream().filter(value -> value.token().equals(request.value()))
               .findFirst().orElseThrow(() -> new IllegalArgumentException("The selected file token has expired"));
           if (!session.fileToken.equals(entry.token()) || !session.append) {
+            session.clearPartEdits();
             session.changed();
           }
           session.fileToken = entry.token();
@@ -358,7 +399,7 @@ public final class RangedSelectionService {
         }
         case ADD_SEGMENT -> {
           if (session.segments.size() >= RangedSelectionData.MAX_SEGMENTS) {
-            throw new IllegalArgumentException("At most 64 dynamic segments");
+            throw RangedSelectionMessages.invalid("segment_limit", RangedSelectionData.MAX_SEGMENTS);
           }
           session.segments.add(new Segment(Settings.defaults(), null, null, null));
           session.selected = session.segments.size() - 1;
@@ -377,13 +418,14 @@ public final class RangedSelectionService {
             session.segments.add(new Segment(Settings.defaults(), null, null, null));
           }
           session.selected = Math.min(session.selected, session.segments.size() - 1);
+          session.clearPartEdits();
           session.changed();
           session.revision++;
         }
         case UPDATE -> {
           requireSegment(session, request.index());
           if (request.index() != session.selected) {
-            throw new IllegalArgumentException("The selected segment changed");
+            throw RangedSelectionMessages.invalid("segment_changed");
           }
           var before = session.segments.get(session.selected);
           if (!before.settings().equals(request.settings())
@@ -406,6 +448,7 @@ public final class RangedSelectionService {
           session.selected = 0;
           session.picking = PickTarget.NONE;
           session.first = null;
+          session.clearPartEdits();
           session.changed();
           session.revision++;
           syncMain(player, session);
@@ -413,7 +456,7 @@ public final class RangedSelectionService {
         }
         case PREVIEW -> {
           if (session.result == null || session.saved == null) {
-            throw new IllegalArgumentException("Export a machine before opening its result preview");
+            throw RangedSelectionMessages.invalid("export_before_preview");
           }
           session.cancelPreview();
           session.previewRequest++;
@@ -422,6 +465,49 @@ public final class RangedSelectionService {
               session.selected,
               request.index(),
               StructureService.definitionEpoch());
+        }
+        case UPDATE_PART -> {
+          var editor = requirePart(player, session);
+          var edit = Objects.requireNonNull(request.partEdit(), "Missing part edit");
+          PartOverrides.apply(new JsonObject(), edit);
+          if (!edit.empty()
+              && !session.partEdits.containsKey(editor.position())
+              && session.partEdits.size() >= RangedSelectionData.MAX_PART_EDITS) {
+            throw RangedSelectionMessages.invalid("part_edit_limit", RangedSelectionData.MAX_PART_EDITS);
+          }
+          if (edit.empty()) {
+            session.partEdits.remove(editor.position());
+            session.editedStates.remove(editor.position());
+          } else {
+            session.partEdits.put(editor.position(), edit);
+            session.editedStates.put(editor.position(), session.partState);
+          }
+          session.partEditor = new PartEditor(
+              editor.position(),
+              editor.observedBlock(),
+              editor.observedProperties(),
+              edit);
+          session.changed();
+          session.revision++;
+          session.status = message("part_saved", session.partEdits.size());
+        }
+        case RESET_PART -> {
+          var editor = requirePart(player, session);
+          session.partEdits.remove(editor.position());
+          session.editedStates.remove(editor.position());
+          session.partEditor = new PartEditor(
+              editor.position(),
+              editor.observedBlock(),
+              editor.observedProperties(),
+              PartEdit.inherit());
+          session.changed();
+          session.revision++;
+          session.status = message("part_reset");
+        }
+        case CLOSE_PART -> {
+          session.partEditor = null;
+          session.partState = null;
+          session.revision++;
         }
         case OPEN -> {
         }
@@ -461,7 +547,9 @@ public final class RangedSelectionService {
           player,
           controller,
           session.snapshot(false, false),
-          session.append ? session.catalog : null);
+          session.append ? session.catalog : null,
+          session.partEdits,
+          session.editedStates);
       session.status = message("busy");
       send(player, session, false, false);
     } catch (RuntimeException failure) {
@@ -603,7 +691,7 @@ public final class RangedSelectionService {
         });
       }
     } else {
-      session.status = message("failed", task.status());
+      session.status = task.status();
       player.displayClientMessage(session.status, false);
     }
     send(player, session, false, false);
@@ -634,26 +722,81 @@ public final class RangedSelectionService {
 
   private static void requireTarget(Session session, Request request) {
     if (request.target() == PickTarget.NONE || session.append && request.target() == PickTarget.MAIN) {
-      throw new IllegalArgumentException("This selection target is unavailable");
+      throw RangedSelectionMessages.invalid("target_unavailable");
     }
     requireSegment(session, request.index());
     if (request.index() != session.selected) {
-      throw new IllegalArgumentException("The selected segment changed");
+      throw RangedSelectionMessages.invalid("segment_changed");
     }
   }
 
+  private static void openPart(ServerPlayer player, Session session, BlockPos position) {
+    if (!selectedPosition(session, position)) {
+      throw RangedSelectionMessages.invalid("select_part_in_area");
+    }
+    var level = player.serverLevel();
+    if (level.getBlockEntity(position) instanceof StructureService.StructureSubject) {
+      throw RangedSelectionMessages.invalid("controller_not_part");
+    }
+    var state = level.getBlockState(position);
+    if (state.isAir() && !session.includeAir) {
+      throw RangedSelectionMessages.invalid("enable_air_editing");
+    }
+    String properties = "";
+    if (!(state.getBlock() instanceof MachinePortBlock) && !(state.getBlock() instanceof LiquidBlock)) {
+      var values = stateProperties(state, MachineOrientation.IDENTITY, false);
+      properties = values.entrySet().stream().map(entry -> entry.getKey() + "=" + entry.getValue().getAsString())
+          .collect(Collectors.joining(";"));
+    }
+    session.partState = state;
+    session.partEditor = new PartEditor(
+        position,
+        BuiltInRegistries.BLOCK.getKey(state.getBlock()).toString(),
+        properties,
+        session.partEdits.getOrDefault(position, PartEdit.inherit()));
+    session.picking = PickTarget.NONE;
+    session.first = null;
+    session.revision++;
+    session.status = message("part_ready");
+    send(player, session, true, false);
+  }
+
+  private static PartEditor requirePart(ServerPlayer player, Session session) {
+    var editor = session.partEditor;
+    var level = player.serverLevel();
+    if (editor == null
+        || !selectedPosition(session, editor.position())
+        || !level.hasChunkAt(editor.position())
+        || !player.canInteractWithBlock(editor.position(), 0)
+        || !level.mayInteract(player, editor.position())
+        || !level.getBlockState(editor.position()).equals(session.partState)) {
+      throw RangedSelectionMessages.invalid("part_selection_changed");
+    }
+    return editor;
+  }
+
+  private static boolean selectedPosition(Session session, BlockPos position) {
+    if (!session.append && contains(session.main, position)) {
+      return true;
+    }
+    return session.segments.stream().anyMatch(
+        segment -> contains(segment.body(), position)
+            || contains(segment.start(), position)
+            || contains(segment.end(), position));
+  }
+
+  private static boolean contains(Box box, BlockPos position) {
+    return box != null
+        && position.getX() >= Math.min(box.first().getX(), box.second().getX())
+        && position.getX() <= Math.max(box.first().getX(), box.second().getX())
+        && position.getY() >= Math.min(box.first().getY(), box.second().getY())
+        && position.getY() <= Math.max(box.first().getY(), box.second().getY())
+        && position.getZ() >= Math.min(box.first().getZ(), box.second().getZ())
+        && position.getZ() <= Math.max(box.first().getZ(), box.second().getZ());
+  }
+
   private static Component savedMessage(Session session) {
-    var message = message(
-        "saved_detail",
-        session.saved.file().toString(),
-        session.result.mainParts(),
-        session.result.dynamicParts(),
-        session.result.deduplicated());
-    message.getSiblings().add(
-        Component.literal(
-            "\n源 SHA-256: " + session.saved.sourceHash() + "\n目标 SHA-256: " + session.saved
-                .targetHash() + (session.saved.backup() == null ? "" : "\n备份: " + session.saved.backup())));
-    return message;
+    return RangedSelectionMessages.saved(session.saved, session.result);
   }
 
   private static Box box(Session session, PickTarget target) {
@@ -663,13 +806,13 @@ public final class RangedSelectionService {
       case BODY -> segment.body();
       case START -> segment.start();
       case END -> segment.end();
-      case NONE -> null;
+      case NONE, PART -> null;
     };
   }
 
   private static void requireSegment(Session session, int index) {
     if (index < 0 || index >= session.segments.size()) {
-      throw new IllegalArgumentException("Invalid segment index");
+      throw RangedSelectionMessages.invalid("invalid_segment_index");
     }
   }
 
@@ -730,18 +873,11 @@ public final class RangedSelectionService {
   }
 
   private static Component message(String key, Object... args) {
-    return Component.translatable("message.mmcece.selection." + key, args);
+    return RangedSelectionMessages.text(key, args);
   }
 
-  private static String detail(Throwable failure) {
-    while (failure.getCause() != null && failure instanceof CompletionException) {
-      failure = failure.getCause();
-    }
-    String text = failure.getMessage();
-    if (text == null || text.isBlank()) {
-      text = failure.getClass().getSimpleName();
-    }
-    return text.length() > 1024 ? text.substring(0, 1024) : text;
+  private static Component detail(Throwable failure) {
+    return RangedSelectionMessages.detail(failure);
   }
 
   @SubscribeEvent

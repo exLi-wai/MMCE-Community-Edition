@@ -6,6 +6,7 @@ import com.lw.modularmachine.item.RangedConstructToolItem;
 import com.lw.modularmachine.machine.orientation.StateOrientationAdapters;
 import com.lw.modularmachine.machine.selection.RangedSelectionData.Box;
 import com.lw.modularmachine.machine.selection.RangedSelectionData.Snapshot;
+import com.lw.modularmachine.machine.selection.RangedSelectionData.PartEdit;
 import com.lw.modularmachine.machine.structure.AsyncStructureWork;
 import com.lw.modularmachine.machine.structure.StructureService;
 import java.io.IOException;
@@ -24,6 +25,7 @@ import java.util.concurrent.atomic.AtomicBoolean;
 import net.minecraft.resources.ResourceLocation;
 import java.util.function.Supplier;
 import net.minecraft.core.BlockPos;
+import net.minecraft.network.chat.Component;
 import net.minecraft.server.level.ServerLevel;
 import net.minecraft.server.level.ServerPlayer;
 import net.minecraft.world.item.ItemStack;
@@ -46,6 +48,8 @@ public final class RangedSelectionTask {
   private final MachineOrientation orientation;
   private final ItemStack tool;
   private final Snapshot draft;
+  private final Map<BlockPos, PartEdit> edits;
+  private final Map<BlockPos, BlockState> editedStates;
   private final long epoch;
   private final List<Box> boxes = new ArrayList<>();
   private final Map<BlockPos, DynamicDefinitionEditor.Captured> captured = new LinkedHashMap<>();
@@ -66,9 +70,9 @@ public final class RangedSelectionTask {
   private int boxIndex;
   private Iterator<BlockPos> positions;
   private boolean done;
-  private String status = "正在捕获选区…";
+  private Component status = RangedSelectionMessages.text("capturing");
 
-  public RangedSelectionTask(ServerPlayer player, StructureService.StructureSubject controller, Snapshot draft, MachineDefinitionFileStore.Catalog catalog) {
+  public RangedSelectionTask(ServerPlayer player, StructureService.StructureSubject controller, Snapshot draft, MachineDefinitionFileStore.Catalog catalog, Map<BlockPos, PartEdit> edits, Map<BlockPos, BlockState> editedStates) {
     this.player = player;
     level = player.serverLevel();
     this.controller = controller;
@@ -77,23 +81,25 @@ public final class RangedSelectionTask {
     orientation = controller.structureOrientation(level);
     tool = player.getMainHandItem();
     this.draft = draft;
+    this.edits = Map.copyOf(edits);
+    this.editedStates = Map.copyOf(editedStates);
     epoch = StructureService.definitionEpoch();
     if (!draft.dimension().equals(level.dimension().location())) {
-      throw new IllegalArgumentException("选区维度已改变，请重新选择");
+      throw RangedSelectionMessages.invalid("dimension_changed");
     }
     if (draft.append() && (catalog == null || draft.fileToken().isEmpty())) {
-      throw new IllegalArgumentException("请先选择已有机器文件");
+      throw RangedSelectionMessages.invalid("missing_file");
     }
     if (!draft.append()) {
       if (draft.main() == null) {
-        throw new IllegalArgumentException("新建机器需要主体选区");
+        throw RangedSelectionMessages.invalid("missing_main");
       }
       boxes.add(draft.main());
     }
     for (var segment : draft.segments()) {
       if (segment.body() == null) {
         if (segment.start() != null || segment.end() != null) {
-          throw new IllegalArgumentException("首部/尾部需要对应的动态重复体");
+          throw RangedSelectionMessages.invalid("end_piece_requires_body");
         }
         continue;
       }
@@ -106,18 +112,18 @@ public final class RangedSelectionTask {
       }
     }
     if (boxes.isEmpty()) {
-      throw new IllegalArgumentException("请先选择动态结构");
+      throw RangedSelectionMessages.invalid("missing_body");
     }
     long volume = 0;
     for (var box : boxes) {
       volume = Math.addExact(volume, box.volume());
       if (volume > RangedSelectionData.MAX_CAPTURE) {
-        throw new IllegalArgumentException("会话总捕获体积不能超过262144个位置");
+        throw RangedSelectionMessages.invalid("capture_limit", RangedSelectionData.MAX_CAPTURE);
       }
     }
     permit = AsyncStructureWork.acquireSnapshot();
     if (permit == null) {
-      throw new IllegalStateException("结构快照预算暂满，请稍后重试");
+      throw RangedSelectionMessages.invalid("snapshot_busy");
     }
     String name = draft.fileName();
     String playerName = player.getGameProfile().getName();
@@ -130,7 +136,7 @@ public final class RangedSelectionTask {
         var loaded = append ? MachineDefinitionFileStore.read(disk, token) : MachineDefinitionFileStore
             .create(disk, name, playerName);
         if (append && !machine.equals(loaded.machine())) {
-          throw new IllegalArgumentException("控制器与所选机器文件不对应");
+          throw RangedSelectionMessages.invalid("controller_file_mismatch");
         }
         return loaded;
       } catch (IOException failure) {
@@ -150,12 +156,7 @@ public final class RangedSelectionTask {
       // afterward.
       if (saveTask != null && saveTask.isDone()) {
         saved = saveTask.join();
-        finish(
-            "已保存 " + saved.file() + "；主体 " + result.mainParts() + "，动态 " + result.dynamicParts() + "，去重 " + result
-                .deduplicated() + "，排除控制器 " + result.excludedController() + (draft
-                    .append() ? "。使用 /mmcece reload 生效。" : "。新增机器需完整重启双端。") + "\n源SHA-256: " + saved
-                        .sourceHash() + "\n目标SHA-256: " + saved
-                            .targetHash() + (saved.backup() == null ? "" : "\n备份: " + saved.backup()));
+        finish(RangedSelectionMessages.saved(saved, result));
         return true;
       }
       if (!valid()) {
@@ -181,13 +182,16 @@ public final class RangedSelectionTask {
         var pos = positions.next().immutable();
         work++;
         if (!level.hasChunkAt(pos) || !level.isInWorldBounds(pos)) {
-          throw new IllegalArgumentException("选区含未加载区块或越界位置：" + pos.toShortString());
+          throw RangedSelectionMessages.invalid("position_unavailable", pos.toShortString());
         }
         if (!level.mayInteract(player, pos)) {
-          throw new IllegalArgumentException("无权读取所选位置：" + pos.toShortString());
+          throw RangedSelectionMessages.invalid("position_denied", pos.toShortString());
         }
         if (!captured.containsKey(pos)) {
           var state = level.getBlockState(pos);
+          if (editedStates.containsKey(pos) && !state.equals(editedStates.get(pos))) {
+            throw RangedSelectionMessages.invalid("edited_block_changed", pos.toShortString());
+          }
           var local = orientation.toLocalOffset(
               new BlockPos(
                   Math.subtractExact(pos.getX(), origin.getX()),
@@ -203,7 +207,7 @@ public final class RangedSelectionTask {
         }
       }
       if (boxIndex < boxes.size() || sourceTask == null || !sourceTask.isDone()) {
-        status = "正在捕获选区：" + captured.size() + " 个位置";
+        status = RangedSelectionMessages.text("capturing_count", captured.size());
         return false;
       }
       if (source == null) {
@@ -218,7 +222,8 @@ public final class RangedSelectionTask {
             draft.segments(),
             draft.deduplicate(),
             draft.includeAir(),
-            List.copyOf(captured.values()));
+            List.copyOf(captured.values()),
+            edits);
       }
       if (referencesTask == null) {
         var frozen = input;
@@ -230,7 +235,7 @@ public final class RangedSelectionTask {
       if (references == null) {
         references = referencesTask.join();
       }
-      status = "正在校验候选与全部动态长度…";
+      status = RangedSelectionMessages.text("validating");
       int groups = 0;
       while (registryCursor < references.size() && groups++ < 128 && System.nanoTime() < deadline) {
         var reference = references.get(registryCursor++);
@@ -267,15 +272,11 @@ public final class RangedSelectionTask {
             throw new UncheckedIOException(failure);
           }
         });
-        status = "正在备份并原子写入文件…";
+        status = RangedSelectionMessages.text("saving");
       }
     } catch (RuntimeException failure) {
-      Throwable cause = failure;
-      while (cause.getCause() != null) {
-        cause = cause.getCause();
-      }
       active.set(false);
-      finish("导出失败：" + (cause.getMessage() == null ? cause.getClass().getSimpleName() : cause.getMessage()));
+      finish(RangedSelectionMessages.text("failed", RangedSelectionMessages.detail(failure)));
     }
     return done;
   }
@@ -317,10 +318,10 @@ public final class RangedSelectionTask {
   public void cancel() {
     active.set(false);
     if (saveTask != null && !saveTask.isDone()) {
-      status = "正在结束文件写入，请稍候…";
+      status = RangedSelectionMessages.text("finishing_write");
       return;
     }
-    finish("导出已取消：选区、控制器、工具或定义已改变，请重试");
+    finish(RangedSelectionMessages.text("export_cancelled"));
   }
 
   /**
@@ -333,7 +334,7 @@ public final class RangedSelectionTask {
     permit.close();
   }
 
-  private void finish(String message) {
+  private void finish(Component message) {
     status = message;
     done = true;
     ACTIVE.remove(this);
@@ -343,8 +344,8 @@ public final class RangedSelectionTask {
   public boolean done() {
     return done;
   }
-  public String status() {
-    return status;
+  public Component status() {
+    return status.copy();
   }
   public MachineDefinitionFileStore.SaveResult saved() {
     return saved;

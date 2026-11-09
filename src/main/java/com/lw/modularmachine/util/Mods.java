@@ -1,0 +1,17 @@
+package com.lw.modularmachine.util;
+
+import net.neoforged.fml.ModList;
+
+public enum Mods {
+  AE2("ae2");
+
+  public final String modid;
+
+  Mods(String modid) {
+    this.modid = modid;
+  }
+
+  public boolean isLoaded() {
+    return ModList.get().isLoaded(this.modid);
+  }
+}

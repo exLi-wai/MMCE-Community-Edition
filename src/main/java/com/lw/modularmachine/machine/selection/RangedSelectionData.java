@@ -14,6 +14,7 @@ import org.jetbrains.annotations.ApiStatus;
 public final class RangedSelectionData {
   public static final int MAX_SEGMENTS = 64;
   public static final int MAX_CAPTURE = 262_144;
+  public static final int MAX_PART_EDITS = 4096;
   public static final UUID NO_SESSION = new UUID(0, 0);
 
   private RangedSelectionData() {
@@ -24,7 +25,8 @@ public final class RangedSelectionData {
     MAIN,
     BODY,
     START,
-    END
+    END,
+    PART
   }
 
   public enum Action {
@@ -40,7 +42,10 @@ public final class RangedSelectionData {
     REMOVE_SEGMENT,
     UPDATE,
     CLEAR,
-    PREVIEW
+    PREVIEW,
+    UPDATE_PART,
+    RESET_PART,
+    CLOSE_PART
   }
 
   public record Box(BlockPos first, BlockPos second) {
@@ -110,6 +115,53 @@ public final class RangedSelectionData {
     }
   }
 
+  /**
+   * Empty block/property text inherits the source; '-' explicitly clears
+   * properties.
+   */
+  public record PartEdit(
+      String blocks,
+      String properties,
+      String propertiesSpace,
+      boolean changeSelector,
+      String selector,
+      boolean changeInterface,
+      String interfaceType) {
+    public PartEdit {
+      blocks = Objects.requireNonNull(blocks).strip();
+      properties = Objects.requireNonNull(properties).strip();
+      selector = Objects.requireNonNull(selector).strip();
+      interfaceType = Objects.requireNonNull(interfaceType).strip();
+      if (blocks.length() > 4096
+          || properties.length() > 4096
+          || selector.length() > 64
+          || interfaceType.length() > 64
+          || !("local".equals(propertiesSpace) || "world".equals(propertiesSpace))) {
+        throw new IllegalArgumentException("Invalid part edit");
+      }
+    }
+
+    public static PartEdit inherit() {
+      return new PartEdit("", "", "world", false, "", false, "");
+    }
+
+    public boolean empty() {
+      return blocks.isEmpty() && properties.isEmpty() && !changeSelector && !changeInterface;
+    }
+  }
+
+  public record PartEditor(BlockPos position, String observedBlock, String observedProperties, PartEdit edit) {
+    public PartEditor {
+      position = Objects.requireNonNull(position).immutable();
+      Objects.requireNonNull(observedBlock);
+      Objects.requireNonNull(observedProperties);
+      Objects.requireNonNull(edit);
+      if (observedBlock.length() > 512 || observedProperties.length() > 4096) {
+        throw new IllegalArgumentException("Oversized part description");
+      }
+    }
+  }
+
   /** index selects a segment/page, value is a file token, filter, or filename. */
   public record Request(
       UUID session,
@@ -120,7 +172,11 @@ public final class RangedSelectionData {
       String value,
       Settings settings,
       boolean deduplicate,
-      boolean includeAir) {
+      boolean includeAir,
+      PartEdit partEdit) {
+    public Request(UUID session, long revision, Action action, PickTarget target, int index, String value, Settings settings, boolean deduplicate, boolean includeAir) {
+      this(session, revision, action, target, index, value, settings, deduplicate, includeAir, null);
+    }
     public Request {
       Objects.requireNonNull(session);
       Objects.requireNonNull(action);
@@ -155,7 +211,9 @@ public final class RangedSelectionData {
       List<FileOption> files,
       int filePage,
       int filePages,
-      boolean hasResult) {
+      boolean hasResult,
+      PartEditor partEditor,
+      int partEdits) {
     public Snapshot {
       Objects.requireNonNull(session);
       Objects.requireNonNull(dimension);
@@ -172,6 +230,8 @@ public final class RangedSelectionData {
           || files.size() > 32
           || filePage < 0
           || filePages < 1
+          || partEdits < 0
+          || partEdits > MAX_PART_EDITS
           || selected < 0
           || selected >= Math.max(1, segments.size())) {
         throw new IllegalArgumentException("Invalid ranged selection snapshot");

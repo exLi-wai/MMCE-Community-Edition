@@ -7,6 +7,7 @@ import com.lw.modularmachine.api.client.preview.PreviewViewport;
 import com.lw.modularmachine.item.RangedConstructToolItem;
 import com.lw.modularmachine.machine.selection.RangedSelectionData.Action;
 import com.lw.modularmachine.machine.selection.RangedSelectionData.Box;
+import com.lw.modularmachine.machine.selection.RangedSelectionData.PartEdit;
 import com.lw.modularmachine.machine.selection.RangedSelectionData.PickTarget;
 import com.lw.modularmachine.machine.selection.RangedSelectionData.Request;
 import com.lw.modularmachine.machine.selection.RangedSelectionData.Segment;
@@ -41,6 +42,7 @@ public final class RangedConstructToolScreen extends Screen {
     FILES,
     ADVANCED,
     DETAILS,
+    PART,
     RESULT
   }
 
@@ -63,6 +65,7 @@ public final class RangedConstructToolScreen extends Screen {
   private Page page = Page.MAIN;
   private Direction direction;
   private boolean customStep, customOrigin, deduplicate, includeAir;
+  private boolean partLocal, customPartSelector, customPartInterface;
   private int left, top, previewLength, picked = -1;
   private String filter = "";
   private Component localError;
@@ -79,6 +82,10 @@ public final class RangedConstructToolScreen extends Screen {
     super(Component.translatable("item.mmcece.ranged_construct_tool"));
     this.state = state;
     loadValues();
+    if (state.partEditor() != null) {
+      loadPartValues();
+      page = Page.PART;
+    }
   }
 
   private static Component tr(String key, Object... args) {
@@ -114,6 +121,21 @@ public final class RangedConstructToolScreen extends Screen {
     previewLength = Math.max(settings.minimum(), Math.min(settings.maximum(), previewLength));
   }
 
+  private void loadPartValues() {
+    var editor = state.partEditor();
+    if (editor == null) {
+      return;
+    }
+    var edit = editor.edit();
+    values.put("part_blocks", edit.blocks());
+    values.put("part_properties", edit.properties());
+    values.put("part_selector", edit.selector());
+    values.put("part_interface", edit.interfaceType());
+    partLocal = edit.propertiesSpace().equals("local");
+    customPartSelector = edit.changeSelector();
+    customPartInterface = edit.changeInterface();
+  }
+
   @Override
   protected void init() {
     rememberEdits();
@@ -137,14 +159,18 @@ public final class RangedConstructToolScreen extends Screen {
     edits.clear();
     labels.clear();
     hovers.clear();
+    if (page == Page.PART && state.partEditor() == null) {
+      page = Page.MAIN;
+    }
     switch (page) {
       case MAIN -> mainPage();
       case FILES -> filesPage();
       case ADVANCED -> advancedPage();
       case DETAILS -> detailsPage();
+      case PART -> partPage();
       case RESULT -> resultPage();
     }
-    if (page != Page.MAIN) {
+    if (page != Page.MAIN && page != Page.PART) {
       button(8, 185, 70, tr("back"), () -> saveThen(() -> show(Page.MAIN)));
     }
     if (pending != null || state.busy()) {
@@ -163,6 +189,7 @@ public final class RangedConstructToolScreen extends Screen {
   }
 
   private void mainPage() {
+    label(tr("part_edits", state.partEdits()), 180, 9, 92);
     var targetLabel = state.append() && !state.fileLabel().isEmpty() ? tr("target_file", state.fileLabel()) : tr(
         state.append() ? "target_existing" : "target_new");
     var target = button(
@@ -195,7 +222,14 @@ public final class RangedConstructToolScreen extends Screen {
       direction = DIRECTIONS[(index + 1) % DIRECTIONS.length];
       rebuild();
     });
-    button(148, 154, 124, tr("advanced"), () -> saveThen(() -> show(Page.ADVANCED)));
+    button(
+        148,
+        154,
+        60,
+        tr("edit_part"),
+        () -> saveThen(() -> send(Action.BEGIN_PICK, PickTarget.PART, state.selected(), "", null)))
+        .setTooltip(Tooltip.create(tr("pick_part_help")));
+    button(212, 154, 60, tr("advanced"), () -> saveThen(() -> show(Page.ADVANCED)));
     button(8, 185, 84, tr("close"), () -> saveThen(this::closeNow));
     button(98, 185, 84, tr("clear_draft"), () -> send(Action.CLEAR, PickTarget.NONE, 0, "", null));
     button(188, 185, 84, tr("result"), () -> saveThen(() -> {
@@ -356,6 +390,94 @@ public final class RangedConstructToolScreen extends Screen {
     button(144, 185, 128, tr("advanced"), () -> saveThen(() -> show(Page.ADVANCED)));
   }
 
+  private void partPage() {
+    var editor = state.partEditor();
+    label(tr("part_position", editor.position().toShortString()), 8, 25, 264);
+    label(tr("part_observed", editor.observedBlock()), 8, 35, 264);
+    hovers.add(
+        new Hover(
+            Component.literal(editor.position().toShortString()).append("\n").append(editor.observedBlock())
+                .append("\n").append(editor.observedProperties()),
+            8,
+            24,
+            264,
+            20));
+    label(tr("part_blocks"), 8, 47, 264);
+    edit("part_blocks", 8, 57, 264, 18, 4096).setTooltip(Tooltip.create(tr("part_blocks_help")));
+    label(tr("part_properties"), 8, 78, 264);
+    edit("part_properties", 8, 88, 264, 18, 4096).setTooltip(Tooltip.create(tr("part_properties_help")));
+    partButton(8, 110, 112, tr("part_read_properties"), () -> {
+      rememberEdits();
+      values.put("part_properties", editor.observedProperties().isBlank() ? "-" : editor.observedProperties());
+      partLocal = false;
+      rebuild();
+    }).setTooltip(Tooltip.create(tr("part_read_properties_help")));
+    partButton(124, 110, 84, tr(partLocal ? "part_space_local" : "part_space_world"), () -> {
+      rememberEdits();
+      partLocal = !partLocal;
+      rebuild();
+    }).setTooltip(Tooltip.create(tr("part_space_help")));
+    partButton(212, 110, 60, tr("part_clear_properties"), () -> {
+      rememberEdits();
+      values.put("part_properties", "-");
+      rebuild();
+    });
+    partButton(8, 132, 96, tr(customPartSelector ? "part_selector_custom" : "part_selector_inherit"), () -> {
+      rememberEdits();
+      customPartSelector = !customPartSelector;
+      rebuild();
+    }).setTooltip(Tooltip.create(tr("part_marker_help")));
+    edit("part_selector", 110, 132, 162, 18, 64).active = customPartSelector;
+    partButton(8, 154, 96, tr(customPartInterface ? "part_interface_custom" : "part_interface_inherit"), () -> {
+      rememberEdits();
+      customPartInterface = !customPartInterface;
+      rebuild();
+    }).setTooltip(Tooltip.create(tr("part_marker_help")));
+    edit("part_interface", 110, 154, 162, 18, 64).active = customPartInterface;
+    button(
+        8,
+        185,
+        84,
+        tr("back"),
+        () -> savePartThen(() -> send(Action.CLOSE_PART, PickTarget.PART, state.selected(), "", null)));
+    button(98, 185, 84, tr("part_reset"), () -> send(Action.RESET_PART, PickTarget.PART, state.selected(), "", null))
+        .setTooltip(Tooltip.create(tr("part_reset_help")));
+    button(188, 185, 84, tr("part_save"), () -> send(Action.UPDATE_PART, PickTarget.PART, state.selected(), "", null))
+        .setTooltip(Tooltip.create(tr("part_save_help")));
+  }
+
+  private Button partButton(int x, int y, int width, Component text, Runnable action) {
+    return addRenderableWidget(
+        Button.builder(text, ignored -> action.run()).bounds(left + x, top + y, width, 18).build());
+  }
+
+  private PartEdit partEdit() {
+    return new PartEdit(
+        values.getOrDefault("part_blocks", ""),
+        values.getOrDefault("part_properties", ""),
+        partLocal ? "local" : "world",
+        customPartSelector,
+        customPartSelector ? values.getOrDefault("part_selector", "") : "",
+        customPartInterface,
+        customPartInterface ? values.getOrDefault("part_interface", "") : "");
+  }
+
+  private void savePartThen(Runnable next) {
+    if (pending != null || state.busy() || state.partEditor() == null) {
+      return;
+    }
+    rememberEdits();
+    try {
+      if (partEdit().equals(state.partEditor().edit())) {
+        next.run();
+      } else {
+        send(Action.UPDATE_PART, PickTarget.PART, state.selected(), "", next);
+      }
+    } catch (IllegalArgumentException invalid) {
+      localError = tr("invalid_parameters");
+    }
+  }
+
   private void resultPage() {
     label(tr("preview_length"), 172, 32, 100);
     button(172, 48, 28, Component.literal("-"), () -> changeLength(-1)).active = !previewWaiting
@@ -480,7 +602,8 @@ public final class RangedConstructToolScreen extends Screen {
               value,
               parameters,
               deduplicate,
-              includeAir));
+              includeAir,
+              action == Action.UPDATE_PART ? partEdit() : null));
       rebuild();
     } catch (IllegalArgumentException invalid) {
       pending = null;
@@ -513,6 +636,21 @@ public final class RangedConstructToolScreen extends Screen {
         clearPreview();
       }
     }
+    var previousEditor = previous.partEditor();
+    var nextEditor = value.partEditor();
+    boolean openedPart = nextEditor != null
+        && (!previous.session().equals(value.session())
+            || previousEditor == null
+            || !previousEditor.position().equals(nextEditor.position()));
+    boolean savedPart = acknowledged
+        && value.revision() > sentRevision
+        && (completedAction == Action.UPDATE_PART || completedAction == Action.RESET_PART);
+    if (nextEditor != null && (openedPart || savedPart)) {
+      loadPartValues();
+      page = Page.PART;
+    } else if (nextEditor == null && page == Page.PART) {
+      page = Page.MAIN;
+    }
     if (acknowledged && completedAction == Action.PREVIEW && previewHeader == null) {
       // The server can acknowledge before it begins streaming; keep the old complete
       // scene.
@@ -521,10 +659,17 @@ public final class RangedConstructToolScreen extends Screen {
     rebuild();
     if (acknowledged
         && followUp != null
-        && (completedAction != Action.UPDATE && completedAction != Action.SELECT_FILE
-            || value.revision() > sentRevision)) {
+        && (!requiresRevisionAdvance(completedAction) || value.revision() > sentRevision)) {
       followUp.run();
     }
+  }
+
+  private static boolean requiresRevisionAdvance(Action action) {
+    return action == Action.UPDATE
+        || action == Action.SELECT_FILE
+        || action == Action.UPDATE_PART
+        || action == Action.RESET_PART
+        || action == Action.CLOSE_PART;
   }
 
   public void acceptPreview(RangedSelectionPayloads.Preview value) {
@@ -628,6 +773,10 @@ public final class RangedConstructToolScreen extends Screen {
 
   @Override
   public void onClose() {
+    if (page == Page.PART) {
+      savePartThen(() -> send(Action.CLOSE_PART, PickTarget.PART, state.selected(), "", this::closeNow));
+      return;
+    }
     closeNow();
   }
 
@@ -663,7 +812,7 @@ public final class RangedConstructToolScreen extends Screen {
     }
     var status = localError != null ? localError : state.status();
     if (status.getString().isEmpty()) {
-      status = tr("export_hint");
+      status = tr(page == Page.PART ? "part_export_hint" : "export_hint");
     }
     drawClipped(graphics, status, 8, 175, 264, localError == null ? 0xFF6B5200 : 0xFFAA0000);
     // Screen.render would blur the panel again; render only its widgets here.

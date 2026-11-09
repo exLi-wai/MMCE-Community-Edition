@@ -75,6 +75,7 @@ import net.minecraft.world.inventory.AbstractContainerMenu;
 import net.minecraft.world.level.Level;
 import net.minecraft.world.level.block.entity.BlockEntity;
 import net.minecraft.world.level.block.state.BlockState;
+import org.jetbrains.annotations.ApiStatus;
 
 public final class FactoryControllerBlockEntity extends BlockEntity implements MenuProvider, UpgradeBusOwner {
   private static final int FACTORY_SCHEMA = 7;
@@ -367,11 +368,110 @@ public final class FactoryControllerBlockEntity extends BlockEntity implements M
     return configurationRevision;
   }
 
+  /**
+   * Internal whitelist snapshot; paid runs and installed upgrades are not copied.
+   */
+  @ApiStatus.Internal
+  public Optional<FactoryThreadPreset> copyThreadConfiguration() {
+    requireUpgradeThread();
+    if (!persistentStateValid
+        || !threadsInitialized
+        || isRemoved()
+        || !level.hasChunkAt(worldPosition)
+        || level.getBlockEntity(worldPosition) != this
+        || StructureService.definition(machineId) == null) {
+      return Optional.empty();
+    }
+    return Optional.of(
+        new FactoryThreadPreset(
+            scheduler.channels().stream()
+                .map(
+                    thread -> new FactoryThreadPreset.Thread(
+                        thread.threadId(),
+                        thread.lockedRecipe(),
+                        thread.enabled(),
+                        thread.priority(),
+                        thread.parallelLimit()))
+                .toList()));
+  }
+
+  /**
+   * Internal atomic configuration paste. Compatibility metadata is checked, never
+   * installed as identity.
+   */
+  @ApiStatus.Internal
+  public ConfigurationResult pasteThreadConfiguration(ResourceLocation expectedMachine, long expectedRevision, FactoryThreadPreset preset) {
+    if (!configurationAllowed()
+        || UpgradeLifecyclePublisher.isDispatchingAny()
+        || RecipeLifecyclePublisher.isDispatching()
+        || SmartInterfaceEventPublisher.isDispatching()) {
+      return ConfigurationResult.UNAVAILABLE;
+    }
+    if (!machineId.equals(expectedMachine) || configurationRevision != expectedRevision || preset == null) {
+      return ConfigurationResult.INVALID;
+    }
+    if (!runSets.isEmpty() || !startingThreads.isEmpty()) {
+      return ConfigurationResult.BUSY;
+    }
+    var definition = StructureService.definition(machineId);
+    if (definition == null) {
+      return ConfigurationResult.UNKNOWN_DEFINITION;
+    }
+    var server = (ServerLevel) level;
+    long epoch = StructureService.definitionEpoch();
+    long revision = configurationRevision;
+    for (var current : scheduler.channels()) {
+      revision = Math.max(revision, current.revision());
+    }
+    if (revision >= Long.MAX_VALUE - 1) {
+      return ConfigurationResult.UNAVAILABLE;
+    }
+    var copied = new ArrayList<FactoryThreadState>();
+    for (var thread : preset.threads()) {
+      if (thread.lockedRecipe() != null
+          && !MachineRecipeService.recipeBelongsTo(server.getServer(), machineId, thread.lockedRecipe())
+              .orElse(false)) {
+        return ConfigurationResult.INVALID;
+      }
+      var initial = thread.instantiate(machineId);
+      copied.add(
+          new FactoryThreadState(
+              initial.threadId(),
+              machineId,
+              initial.lockedRecipe(),
+              initial.enabled(),
+              initial.priority(),
+              initial.parallelLimit(),
+              initial.upgradeRevision(),
+              initial.state(),
+              initial.reason(),
+              revision + 1,
+              initial.upgradeSnapshot()));
+    }
+    if (configurationRevision != expectedRevision
+        || !configurationAllowed()
+        || !runSets.isEmpty()
+        || !startingThreads.isEmpty()
+        || StructureService.definitionEpoch() != epoch
+        || StructureService.definition(machineId) != definition
+        || !machineId.equals(expectedMachine)) {
+      return ConfigurationResult.UNAVAILABLE;
+    }
+    var current = copyThreadConfiguration();
+    if (current.isPresent() && current.get().equals(preset)) {
+      return ConfigurationResult.NO_CHANGE;
+    }
+    installConfiguration(new FactoryScheduler(copied));
+
+    return ConfigurationResult.SUCCESS;
+  }
+
   private boolean configurationAllowed() {
     requireUpgradeThread();
 
     return persistentStateValid
         && configurationRevision < Long.MAX_VALUE
+        && scheduler.channels().stream().noneMatch(thread -> thread.revision() == Long.MAX_VALUE)
         && !UpgradeLifecyclePublisher.isDispatching(this)
         && !isRemoved()
         && level.hasChunkAt(worldPosition)
@@ -379,9 +479,19 @@ public final class FactoryControllerBlockEntity extends BlockEntity implements M
   }
 
   private void installConfiguration(FactoryScheduler replacement) {
+    // Retired channels must not lose their revision watermark before a later paste
+    // reuses an ID.
+    long highestRevision = configurationRevision;
+    for (var thread : scheduler.channels()) {
+      highestRevision = Math.max(highestRevision, thread.revision());
+    }
+    for (var thread : replacement.channels()) {
+      highestRevision = Math.max(highestRevision, thread.revision());
+    }
+    long nextRevision = Math.incrementExact(highestRevision);
     scheduler = replacement;
     threadsInitialized = true;
-    configurationRevision++;
+    configurationRevision = nextRevision;
     clearSearchState();
     outputEngine.invalidate();
     appliedUpgradeSourceView = null;
@@ -520,6 +630,9 @@ public final class FactoryControllerBlockEntity extends BlockEntity implements M
     }
     var current = scheduler.channel(threadId);
     if (current == null || current.revision() != expectedRevision) {
+      return false;
+    }
+    if (changeLock && (!runSet(threadId).runs().isEmpty() || startingThreads.contains(threadId))) {
       return false;
     }
     if (changeLock
@@ -1480,7 +1593,8 @@ public final class FactoryControllerBlockEntity extends BlockEntity implements M
         continue;
       }
       var belongs = MachineRecipeService.recipeBelongsTo(server.getServer(), thread.machineId(), thread.lockedRecipe());
-      if (belongs.isEmpty()) {
+      // A valid lock only clears this gate's own error, not resource/run status.
+      if (belongs.isEmpty() || belongs.get() && thread.reason() != FactoryThreadState.Reason.LOCKED_RECIPE_MISSING) {
         continue;
       }
       var desired = belongs.get() ? thread

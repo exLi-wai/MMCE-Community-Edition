@@ -20,6 +20,7 @@ import com.lw.modularmachine.item.MachineBlueprintItem;
 import com.lw.modularmachine.item.MachineConstructionTool;
 import com.lw.modularmachine.item.MachineControllerItem;
 import com.lw.modularmachine.item.MachineWrenchItem;
+import com.lw.modularmachine.item.ConfigurationCardItem;
 import com.lw.modularmachine.item.RangedConstructToolItem;
 import com.lw.modularmachine.machine.HatchTier;
 import com.lw.modularmachine.machine.ParallelControllerTier;
@@ -80,6 +81,8 @@ public final class MachineRegistries {
       .register("factory_controller", () -> new FactoryControllerBlock(properties().strength(5F, 10F)));
   public static final DeferredItem<MachineWrenchItem> WRENCH = ITEMS
       .register("machine_wrench", () -> new MachineWrenchItem(new Item.Properties().stacksTo(1)));
+  public static final DeferredItem<ConfigurationCardItem> CONFIGURATION_CARD = ITEMS
+      .register("configuration_card", () -> new ConfigurationCardItem(new Item.Properties().stacksTo(1)));
   public static final DeferredItem<MachineConstructionTool> PROJECTOR = ITEMS
       .register("machine_projector", () -> new MachineConstructionTool(new Item.Properties().stacksTo(1)));
   /** Ranged structure selection that exports a schema 2 machine definition. */
@@ -223,6 +226,7 @@ public final class MachineRegistries {
             PARALLEL_CONTROLLERS.values().forEach(block -> output.accept(block.get()));
             UPGRADE_BUSES.values().forEach(block -> output.accept(block.get()));
             output.accept(WRENCH.get());
+            output.accept(CONFIGURATION_CARD.get());
             BLUEPRINTS.values().forEach(blueprint -> output.accept(blueprint.get()));
             output.accept(PROJECTOR.get());
             output.accept(RANGED_CONSTRUCT_TOOL.get());
