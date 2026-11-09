@@ -28,6 +28,9 @@ public final class MachineConfig {
   public static final ModConfigSpec.IntValue FACTORY_SEARCH_WORK;
   public static final ModConfigSpec.IntValue FACTORY_OUTPUT_WORK;
   public static final ModConfigSpec.ConfigValue<String> ASSEMBLY_ITEM;
+  public static final ModConfigSpec.IntValue ASSEMBLY_TIME_BUDGET_MILLIS;
+  public static final ModConfigSpec.IntValue ASSEMBLY_WORK_PER_TICK;
+  public static final ModConfigSpec.IntValue ASSEMBLY_SLICE_WORK;
   public static final Map<ParallelControllerTier, ModConfigSpec.IntValue> PARALLEL_CONTROLLER_MAXIMA;
   public static final Map<String, ModConfigSpec.IntValue> FLUID_HATCH_CAPACITY;
   public static final Map<String, ModConfigSpec.LongValue> ENERGY_HATCH_CAPACITY;
@@ -117,6 +120,18 @@ public final class MachineConfig {
             "itemName",
             "minecraft:stick",
             value -> value instanceof String name && ResourceLocation.tryParse(name) != null);
+    ASSEMBLY_TIME_BUDGET_MILLIS = builder.translation("mmcece.config.auto_assembly.timeBudgetMillis").comment(
+        "Shared server-thread time budget for survival material planning and construction each tick, in milliseconds.",
+        "Individual capability and placement callbacks finish atomically and cannot be preempted.")
+        .defineInRange("timeBudgetMillis", 2, 1, 20);
+    ASSEMBLY_WORK_PER_TICK = builder.translation("mmcece.config.auto_assembly.workPerTick")
+        .comment("Maximum shared material capture and construction work each tick; the time budget also applies.")
+        .defineInRange("workPerTick", 4096, 1, 262144);
+    ASSEMBLY_SLICE_WORK = builder.translation("mmcece.config.auto_assembly.sliceWork")
+        .comment(
+            "Maximum work for one player's construction slice before rotating to the next player.",
+            "A player may receive more slices in the same tick while shared budget remains.")
+        .defineInRange("sliceWork", 64, 1, 4096);
     builder.pop();
 
     FLUID_HATCH_CAPACITY = hatchValues(builder, "fluid_hatch", HatchTier.FLUIDS, false, Integer.MAX_VALUE);
@@ -168,6 +183,20 @@ public final class MachineConfig {
 
   public static int defaultFactoryMaxThreads() {
     return SPEC.isLoaded() ? DEFAULT_FACTORY_MAX_THREADS.get() : 10;
+  }
+
+  public static long assemblyTimeBudgetNanos() {
+    long milliseconds = SPEC.isLoaded() ? ASSEMBLY_TIME_BUDGET_MILLIS.get() : 2;
+
+    return milliseconds * 1_000_000L;
+  }
+
+  public static int assemblyWorkPerTick() {
+    return SPEC.isLoaded() ? ASSEMBLY_WORK_PER_TICK.get() : 4096;
+  }
+
+  public static int assemblySliceWork() {
+    return SPEC.isLoaded() ? ASSEMBLY_SLICE_WORK.get() : 64;
   }
   public static long fluidHatchCapacity(HatchTier tier) {
     return hatchValue(FLUID_HATCH_CAPACITY, tier.name(), tier.capacity());

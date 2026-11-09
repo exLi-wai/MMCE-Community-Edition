@@ -3,6 +3,7 @@ package com.lw.modularmachine.machine.assembly;
 import com.lw.modularmachine.machine.factory.UpgradeLifecyclePublisher;
 
 import com.lw.modularmachine.ModularMachine;
+import com.lw.modularmachine.config.MachineConfig;
 import com.lw.modularmachine.block.FactoryControllerBlock;
 import com.lw.modularmachine.block.MachineControllerBlock;
 import com.lw.modularmachine.blockentity.FactoryControllerBlockEntity;
@@ -36,6 +37,7 @@ import net.minecraft.network.chat.Component;
 import net.minecraft.resources.ResourceLocation;
 import net.minecraft.server.level.ServerLevel;
 import net.minecraft.server.level.ServerPlayer;
+import net.minecraft.server.MinecraftServer;
 import net.minecraft.world.InteractionHand;
 import net.minecraft.world.item.BlockItem;
 import net.minecraft.world.item.ItemStack;
@@ -53,11 +55,11 @@ import net.neoforged.neoforge.event.server.ServerStoppedEvent;
 import net.neoforged.neoforge.event.tick.ServerTickEvent.Post;
 
 /**
- * One server task per player, 16 inspections/2 placements per tick; no
- * persistent prepaid work.
+ * One server task per player, shared time/work slicing and no persistent
+ * prepaid work.
  */
 public final class AssemblyService {
-  private static final Map<UUID, Job> JOBS = new HashMap<>();
+  private static final Map<UUID, Job> JOBS = new LinkedHashMap<>();
   private static final Map<UUID, Job> PROJECTIONS = new HashMap<>();
   private static final Map<UUID, PendingProjection> PENDING_PROJECTIONS = new HashMap<>();
   private static final Map<UUID, PendingConstruction> PENDING_CONSTRUCTIONS = new HashMap<>();
@@ -67,8 +69,8 @@ public final class AssemblyService {
   private static long request;
   private static boolean placing;
   private static int playerCursor;
-  private static long budgetTick = -1;
-  private static int budget;
+  private static int assemblyCursor;
+  private static final long BUILD_SLICE_NANOS = 250_000L;
 
   private record LengthSelection(MachineDefinition definition, long epoch, int size) {
   }
@@ -117,6 +119,7 @@ public final class AssemblyService {
     MaterialAttempt materialAttempt;
     int cursor, matched, placed, passPlaced;
     long nextPass;
+    long lastReportTick = -1, waitedTick = -1;
     long projectionRequest = -1;
     List<ProjectionPayloads.Entry> projectionEntries = List.of();
     int sent;
@@ -708,11 +711,42 @@ public final class AssemblyService {
                 projection.sent);
           }
         }
-        advance(player);
         packets += advanceBlueprint(player, projectionDeadline, Math.min(32, 64 - packets));
       }
     }
     playerCursor = (start + 1) % players.size();
+    advanceConstructions(event.getServer());
+  }
+
+  private static void advanceConstructions(MinecraftServer server) {
+    var players = new ArrayList<>(JOBS.keySet());
+    if (players.isEmpty()) {
+      return;
+    }
+    int start = Math.floorMod(assemblyCursor, players.size());
+    int visits = 0, idle = 0;
+    int remaining = MachineConfig.assemblyWorkPerTick();
+    long deadline = System.nanoTime() + MachineConfig.assemblyTimeBudgetNanos();
+    while (remaining > 0 && System.nanoTime() < deadline) {
+      var id = players.get((start + visits++) % players.size());
+      var player = server.getPlayerList().getPlayer(id);
+      int used;
+      if (!JOBS.containsKey(id)) {
+        used = 0;
+      } else if (player == null) {
+        removeJob(id);
+        used = 1;
+      } else {
+        long sliceDeadline = Math.min(deadline, System.nanoTime() + BUILD_SLICE_NANOS);
+        used = advance(player, Math.min(remaining, MachineConfig.assemblySliceWork()), sliceDeadline);
+      }
+      remaining -= used;
+      idle = used == 0 ? idle + 1 : 0;
+      if (idle >= players.size()) {
+        break;
+      }
+    }
+    assemblyCursor = (start + visits) % players.size();
   }
 
   private static void prepareConstruction(ServerPlayer player, long deadline) {
@@ -835,42 +869,46 @@ public final class AssemblyService {
         && pending.orientation == pending.owner.structureOrientation(pending.level);
   }
 
-  private static void advance(ServerPlayer player) {
+  private static int advance(ServerPlayer player, int workBudget, long deadline) {
     var job = JOBS.get(player.getUUID());
-    if (job == null) {
-      return;
+    if (job == null || workBudget <= 0 || System.nanoTime() >= deadline) {
+      return 0;
     }
+    long serverTick = player.server.getTickCount();
     if (job.report.finishing()) {
-      if (job.report.send(player, 4)) {
+      if (job.lastReportTick == serverTick) {
+        return 0;
+      }
+      job.lastReportTick = serverTick;
+      var sent = job.report.send(player, 4, deadline, workBudget);
+      if (sent.done()) {
         removeJob(player.getUUID(), job);
       }
-      return;
+      return sent.done() ? Math.max(1, sent.work()) : sent.work();
     }
     if (!current(player, job)) {
       cancelConstruction(player);
-      return;
+      return 1;
     }
-    if (job.level.getGameTime() < job.nextPass) {
-      return;
+    if (job.level.getGameTime() < job.nextPass || job.waitedTick == serverTick) {
+      return 0;
     }
-    long serverTick = player.server.getTickCount();
-    if (serverTick != budgetTick) {
-      budgetTick = serverTick;
-      budget = 128;
-    }
-    if (budget <= 0) {
-      return;
-    }
+    int used = 0;
     if (job.materials == null) {
-      prepareMaterials(player, job);
-      return;
+      used += prepareMaterials(player, job, workBudget, deadline);
+      if (job.materials == null || JOBS.get(player.getUUID()) != job) {
+        if (used == 0) {
+          job.waitedTick = serverTick;
+        }
+        return used;
+      }
     }
-    int writes = 0;
-    for (int work = 0; work < 16 && writes < 2 && budget-- > 0; work++) {
+    while (used < workBudget && System.nanoTime() < deadline) {
       if (!current(player, job)) {
         cancelConstruction(player);
-        return;
+        return Math.max(1, used);
       }
+      used++;
       var part = job.pattern.parts().get(job.cursor);
       var pos = part.position();
       if (job.level.isOutsideBuildHeight(pos) || !job.level.getWorldBorder().isWithinBounds(pos)) {
@@ -892,11 +930,12 @@ public final class AssemblyService {
           try {
             var result = place(player, job, part);
             if (JOBS.get(player.getUUID()) != job) {
-              return;
+              return used;
             }
             if (result == null) {
               // A detached reassignment is pending; retain this exact position.
-              return;
+              job.waitedTick = serverTick;
+              return used;
             }
             // Observe only after the placement's rollback/refund scope has resolved.
             if (!job.level.hasChunkAt(pos)) {
@@ -908,7 +947,6 @@ public final class AssemblyService {
                 job.passPlaced++;
                 if (result == PlacementOutcome.PLACED) {
                   job.placed++;
-                  writes++;
                 }
               } else if (!PlacementMaterials.canReplace(part.states(), after)) {
                 job.report.occupied(pos, after);
@@ -927,7 +965,7 @@ public final class AssemblyService {
         }
       }
       if (JOBS.get(player.getUUID()) != job) {
-        return;
+        return used;
       }
       if (job.materialAttempt != null) {
         job.materialAttempt.cancel();
@@ -937,10 +975,7 @@ public final class AssemblyService {
         boolean complete = job.matched == job.pattern.parts().size();
         if (complete || job.passPlaced == 0) {
           job.report.finish(player, job.matched, job.pattern.parts().size(), job.placed);
-          if (job.report.send(player, 4)) {
-            removeJob(player.getUUID(), job);
-          }
-          return;
+          return used;
         }
         job.cursor = 0;
         job.matched = 0;
@@ -951,18 +986,22 @@ public final class AssemblyService {
         job.materialCursor = 0;
         job.materialDemand.clear();
         job.nextPass = job.level.getGameTime() + 20;
-        return;
+        return used;
       }
     }
+
+    return used;
   }
 
-  private static void prepareMaterials(ServerPlayer player, Job job) {
+  private static int prepareMaterials(ServerPlayer player, Job job, int workBudget, long deadline) {
+    int used = 0;
     if (job.materialCursor < job.pattern.parts().size()) {
-      long deadline = System.nanoTime() + 1_000_000L;
-      for (int work = 0; work < 16
-          && budget-- > 0
-          && System.nanoTime() < deadline
-          && job.materialCursor < job.pattern.parts().size(); work++) {
+      while (used < workBudget && System.nanoTime() < deadline && job.materialCursor < job.pattern.parts().size()) {
+        if (!current(player, job)) {
+          cancelConstruction(player);
+          return Math.max(1, used);
+        }
+        used++;
         var part = job.pattern.parts().get(job.materialCursor++);
         var pos = part.position();
         if (!job.level.isOutsideBuildHeight(pos)
@@ -980,21 +1019,39 @@ public final class AssemblyService {
           }
         }
       }
-      return;
+      if (job.materialCursor < job.pattern.parts().size()) {
+        return used;
+      }
+    }
+    if (used >= workBudget || System.nanoTime() >= deadline) {
+      return used;
     }
     if (job.materialPlanning == null || !job.materialPlanning.inventoryMatches(player)) {
       if (job.materialPlanning != null) {
         job.materialPlanning.cancel();
       }
       job.materialPlanning = new AssemblyMaterialPlan(job.materialDemand, player);
+      used++;
     }
     try {
-      job.materials = job.materialPlanning.advance();
+      if (used < workBudget && System.nanoTime() < deadline) {
+        var advanced = job.materialPlanning.advance(deadline, workBudget - used);
+        used += advanced.work();
+        if (advanced.result() != null) {
+          job.materials = advanced.result();
+          used = Math.min(workBudget, Math.max(1, used));
+        } else if (job.materialPlanning.waitingForAllocation()) {
+          job.waitedTick = player.server.getTickCount();
+        }
+      }
     } catch (RuntimeException failure) {
       cancelConstruction(player);
       ModularMachine.LOGGER.warn("Assembly material planning failed", failure);
       player.sendSystemMessage(Component.translatable("message.mmcece.assembly.material_planning_failed"));
+      used = Math.max(1, used);
     }
+
+    return used;
   }
 
   private static PlacementOutcome place(ServerPlayer player, Job job, AssemblyPattern.Part part) {
@@ -1206,8 +1263,7 @@ public final class AssemblyService {
     LENGTH_SELECTIONS.clear();
     ProjectionPreparation.clearCache();
     placing = false;
-    budgetTick = -1;
-    budget = 0;
+    assemblyCursor = 0;
     playerCursor = 0;
   }
 }

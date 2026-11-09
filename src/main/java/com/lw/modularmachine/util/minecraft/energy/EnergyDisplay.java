@@ -80,7 +80,7 @@ public final class EnergyDisplay {
     if (MachineClientConfig.DISPLAY_FE_TOOLTIP.get()) {
       units.add(unit() == Unit.RF ? Unit.RF : Unit.FE);
     }
-    if ((Mods.GTCEU.isLoaded() || Mods.GREGTECH.isLoaded()) && MachineClientConfig.DISPLAY_GT_EU_TOOLTIP.get()) {
+    if (Mods.GTM.isLoaded() && MachineClientConfig.DISPLAY_GT_EU_TOOLTIP.get()) {
       units.add(Unit.GT_EU);
     }
 

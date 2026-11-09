@@ -39,7 +39,7 @@ class MachinePayloadsTest {
     assertThrows(
         IllegalArgumentException.class,
         () -> new MachinePayloads.ControllerStatusPayload(
-            3,
+            MachinePayloads.PROTOCOL_VERSION + 1,
             valid.position(),
             valid.machineId(),
             valid.definitionEpoch(),
@@ -127,7 +127,10 @@ class MachinePayloadsTest {
     assertEquals(InteractionHand.MAIN_HAND, action.hand());
     assertThrows(
         IllegalArgumentException.class,
-        () -> new MachinePayloads.ResourcePortActionPayload(3, action.position(), action.hand()));
+        () -> new MachinePayloads.ResourcePortActionPayload(
+            MachinePayloads.PROTOCOL_VERSION + 1,
+            action.position(),
+            action.hand()));
   }
 
 }

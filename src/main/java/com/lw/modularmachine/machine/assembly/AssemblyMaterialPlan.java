@@ -4,7 +4,10 @@ import com.lw.modularmachine.machine.structure.AsyncStructureWork;
 import com.lw.modularmachine.util.minecraft.placement.PlacementMaterials;
 import com.lw.modularmachine.util.minecraft.placement.PlacementMaterials.Choices;
 import java.util.ArrayList;
+import java.util.Collections;
 import java.util.HashMap;
+import java.util.HashSet;
+import java.util.Iterator;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
@@ -13,6 +16,7 @@ import java.util.concurrent.CompletableFuture;
 import net.minecraft.server.level.ServerPlayer;
 import net.minecraft.world.item.Item;
 import net.minecraft.world.item.ItemStack;
+import net.minecraft.world.level.material.Fluid;
 import net.neoforged.neoforge.capabilities.Capabilities;
 import net.neoforged.neoforge.fluids.FluidStack;
 import net.neoforged.neoforge.fluids.FluidType;
@@ -39,6 +43,9 @@ final class AssemblyMaterialPlan {
   }
 
   record Replacement(Map<Choices, LinkedHashMap<Resource, Long>> assignments, Resource resource) {
+  }
+
+  record Advance(Result result, int work) {
   }
 
   static final class Result {
@@ -119,19 +126,29 @@ final class AssemblyMaterialPlan {
   }
 
   private final Map<Choices, Integer> requested;
+  private final Iterator<Choices> requestedChoices;
+  private final Set<Item> requestedItems = new HashSet<>();
+  private final Set<Fluid> requestedFluids = new HashSet<>();
   private final List<ItemStack> inventory;
   private final List<Supply> supplies = new ArrayList<>();
   private final List<Supply> slotSupplies = new ArrayList<>();
   private final long maximumFluid;
   private int slot, identity;
+  private Choices indexingChoices;
+  private int itemCandidate, fluidCandidate;
+  private boolean choicesReady;
   private IFluidHandlerItem handler;
   private List<FluidStack> identities = List.of();
+  private final List<FluidStack> tankIdentities = new ArrayList<>();
+  private int tank, tankCount;
+  private boolean enumeratingTanks;
   private boolean incomplete;
   private long extracted;
   private CompletableFuture<Result> future;
 
   AssemblyMaterialPlan(Map<Choices, Integer> requested, ServerPlayer player) {
-    this.requested = new LinkedHashMap<>(requested);
+    this.requested = Collections.unmodifiableMap(new LinkedHashMap<>(requested));
+    requestedChoices = this.requested.keySet().iterator();
     inventory = player.getInventory().items.stream().map(ItemStack::copy).toList();
     maximumFluid = requested.values().stream().mapToLong(Integer::longValue).sum() * FluidType.BUCKET_VOLUME;
   }
@@ -150,11 +167,27 @@ final class AssemblyMaterialPlan {
   }
 
   Result advance() {
+    return advance(System.nanoTime() + 1_000_000L, 64).result();
+  }
+
+  boolean waitingForAllocation() {
+    return choicesReady && slot >= inventory.size() && (future == null || !future.isDone());
+  }
+
+  /**
+   * Capture shares its caller's deadline and operation quota; worker polling
+   * costs no capture work.
+   */
+  Advance advance(long deadline, int workBudget) {
     if (requested.isEmpty()) {
-      return new Result(Map.of(), List.of(), false);
+      return new Advance(new Result(Map.of(), List.of(), false), 0);
     }
-    long deadline = System.nanoTime() + 1_000_000L;
-    for (int work = 0; slot < inventory.size() && work < 64 && System.nanoTime() < deadline; work++) {
+    int work = 0;
+    while (!choicesReady && work < workBudget && System.nanoTime() < deadline) {
+      captureRequested();
+      work++;
+    }
+    while (choicesReady && slot < inventory.size() && work < workBudget && System.nanoTime() < deadline) {
       try {
         capture();
       } catch (RuntimeException failure) {
@@ -163,17 +196,39 @@ final class AssemblyMaterialPlan {
         slotSupplies.clear();
         nextSlot();
       }
+      work++;
     }
-    if (slot < inventory.size()) {
-      return null;
+    if (!choicesReady || slot < inventory.size()) {
+      return new Advance(null, work);
     }
-    if (future == null) {
-      var demands = new LinkedHashMap<>(requested);
+    if (future == null && work < workBudget && System.nanoTime() < deadline) {
+      var demands = requested;
       var captured = List.copyOf(supplies);
       boolean limited = incomplete;
       future = AsyncStructureWork.submit(() -> solve(demands, captured, limited));
+      work++;
     }
-    return future != null && future.isDone() ? future.join() : null;
+
+    return new Advance(future != null && future.isDone() ? future.join() : null, work);
+  }
+
+  private void captureRequested() {
+    if (indexingChoices == null) {
+      if (!requestedChoices.hasNext()) {
+        choicesReady = true;
+        return;
+      }
+      indexingChoices = requestedChoices.next();
+      itemCandidate = 0;
+      fluidCandidate = 0;
+    }
+    if (itemCandidate < indexingChoices.items().size()) {
+      requestedItems.add(indexingChoices.items().get(itemCandidate++));
+    } else if (fluidCandidate < indexingChoices.fluids().size()) {
+      requestedFluids.add(indexingChoices.fluids().get(fluidCandidate++));
+    } else {
+      indexingChoices = null;
+    }
   }
 
   void cancel() {
@@ -191,6 +246,10 @@ final class AssemblyMaterialPlan {
     slot++;
     handler = null;
     identities = List.of();
+    tankIdentities.clear();
+    tank = 0;
+    tankCount = 0;
+    enumeratingTanks = false;
     identity = 0;
     extracted = 0;
   }
@@ -206,7 +265,7 @@ final class AssemblyMaterialPlan {
       // blocks when requested, never counted again through their fluid capability.
       if (stack.getComponentsPatch().isEmpty()
           && PlacementMaterials.automaticItem(stack.getItem())
-          && requested.keySet().stream().anyMatch(choices -> choices.items().contains(stack.getItem()))) {
+          && requestedItems.contains(stack.getItem())) {
         add(new Resource(stack.getItem(), FluidStack.EMPTY), stack.getCount());
         nextSlot();
         return;
@@ -216,22 +275,30 @@ final class AssemblyMaterialPlan {
         nextSlot();
         return;
       }
-      int tanks = handler.getTanks();
-      if (tanks < 0 || tanks > 64) {
+      tankCount = handler.getTanks();
+      if (tankCount < 0 || tankCount > 64) {
         incomplete = true;
         nextSlot();
         return;
       }
-      var found = new ArrayList<FluidStack>();
-      for (int tank = 0; tank < tanks; tank++) {
-        var fluid = handler.getFluidInTank(tank).copy();
+      tank = 0;
+      enumeratingTanks = true;
+      return;
+    }
+    if (enumeratingTanks) {
+      if (tank < tankCount) {
+        var fluid = handler.getFluidInTank(tank++).copy();
         if (!fluid.isEmpty()
-            && requested.keySet().stream().anyMatch(choices -> choices.fluids().contains(fluid.getFluid()))
-            && found.stream().noneMatch(other -> FluidStack.isSameFluidSameComponents(other, fluid))) {
-          found.add(fluid.copyWithAmount(1));
+            && requestedFluids.contains(fluid.getFluid())
+            && tankIdentities.stream().noneMatch(other -> FluidStack.isSameFluidSameComponents(other, fluid))) {
+          tankIdentities.add(fluid.copyWithAmount(1));
         }
+        return;
       }
-      identities = List.copyOf(found);
+      identities = List.copyOf(tankIdentities);
+      tankIdentities.clear();
+      enumeratingTanks = false;
+      return;
     }
     if (identity == identities.size()) {
       nextSlot();

@@ -13,6 +13,7 @@ import java.util.Locale;
 import java.util.Map;
 import net.minecraft.core.BlockPos;
 import net.minecraft.network.chat.Component;
+import net.minecraft.network.chat.MutableComponent;
 import net.minecraft.server.level.ServerPlayer;
 import net.minecraft.world.level.block.state.BlockState;
 import net.neoforged.neoforge.fluids.FluidStack;
@@ -24,6 +25,12 @@ import org.jetbrains.annotations.ApiStatus;
  */
 @ApiStatus.Internal
 final class AssemblyReport {
+  record Send(boolean done, int work) {
+  }
+
+  private record Message(Component value, int work, boolean done) {
+  }
+
   private final Map<MachineDefinition.Rule, Choices> candidates = new HashMap<>();
   private final Map<Choices, Integer> missing = new LinkedHashMap<>();
   private final List<Component> problems = new ArrayList<>();
@@ -31,6 +38,9 @@ final class AssemblyReport {
   private Delivery delivery;
   private AssemblyMaterialPlan planning;
   private AssemblyMaterialPlan.Result plan;
+  private Iterator<Map.Entry<Choices, Integer>> fallback;
+  private final List<AssemblyMaterialPlan.Shortage> fallbackShortages = new ArrayList<>();
+  private Component pendingMessage;
 
   Choices choices(AssemblyPattern.Part part) {
     return candidates.computeIfAbsent(part.rule(), ignored -> PlacementMaterials.choices(part.states()));
@@ -88,34 +98,65 @@ final class AssemblyReport {
   }
 
   boolean send(ServerPlayer player, int limit) {
+    return send(player, limit, System.nanoTime() + 1_000_000L, 64).done();
+  }
+
+  Send send(ServerPlayer player, int limit, long deadline, int workBudget) {
+    int work = 0;
     if (plan == null) {
-      try {
-        plan = planning.advance();
-      } catch (RuntimeException failure) {
-        com.lw.modularmachine.ModularMachine.LOGGER.warn("Assembly material report planning failed", failure);
-        var shortage = missing.entrySet().stream()
-            .map(
-                entry -> new AssemblyMaterialPlan.Shortage(
-                    entry.getKey(),
-                    entry.getValue(),
-                    FluidStack.EMPTY,
-                    (long) entry.getValue() * FluidType.BUCKET_VOLUME))
-            .toList();
-        plan = new AssemblyMaterialPlan.Result(Map.of(), shortage, true);
+      if (fallback == null) {
+        try {
+          var advanced = planning.advance(deadline, workBudget);
+          plan = advanced.result();
+          work += advanced.work();
+        } catch (RuntimeException failure) {
+          com.lw.modularmachine.ModularMachine.LOGGER.warn("Assembly material report planning failed", failure);
+          fallback = missing.entrySet().iterator();
+        }
+      }
+      if (fallback != null) {
+        while (fallback.hasNext() && work < workBudget && System.nanoTime() < deadline) {
+          var entry = fallback.next();
+          fallbackShortages.add(
+              new AssemblyMaterialPlan.Shortage(
+                  entry.getKey(),
+                  entry.getValue(),
+                  FluidStack.EMPTY,
+                  (long) entry.getValue() * FluidType.BUCKET_VOLUME));
+          work++;
+        }
+        if (!fallback.hasNext()) {
+          plan = new AssemblyMaterialPlan.Result(Map.of(), fallbackShortages, true);
+        }
       }
       if (plan == null) {
-        return false;
+        return new Send(false, work);
       }
       delivery.materials = plan.shortages.iterator();
     }
-    for (int sent = 0; sent < limit; sent++) {
-      var message = delivery.next();
-      if (message == null) {
-        return true;
+    int sent = 0;
+    while (sent < limit && work < workBudget && System.nanoTime() < deadline) {
+      if (pendingMessage == null) {
+        var message = delivery.next(deadline, workBudget - work);
+        work += message.work();
+        if (message.done()) {
+          return new Send(true, work);
+        }
+        pendingMessage = message.value();
+        if (pendingMessage == null) {
+          break;
+        }
       }
-      player.sendSystemMessage(message);
+      if (work >= workBudget || System.nanoTime() >= deadline) {
+        break;
+      }
+      player.sendSystemMessage(pendingMessage);
+      pendingMessage = null;
+      sent++;
+      work++;
     }
-    return false;
+
+    return new Send(false, work);
   }
 
   void cancel() {
@@ -128,6 +169,9 @@ final class AssemblyReport {
     final int matched, total, placed;
     Iterator<AssemblyMaterialPlan.Shortage> materials;
     final Iterator<Component> issues = problems.iterator();
+    AssemblyMaterialPlan.Shortage material;
+    MutableComponent materialNames;
+    int itemName, fluidName;
     int phase;
 
     Delivery(int matched, int total, int placed) {
@@ -136,12 +180,14 @@ final class AssemblyReport {
       this.placed = placed;
     }
 
-    Component next() {
-      while (true) {
+    Message next(long deadline, int workBudget) {
+      int work = 0;
+      while (work < workBudget && System.nanoTime() < deadline) {
+        work++;
         switch (phase) {
           case 0 -> {
             phase++;
-            return matched == total ? Component
+            var message = matched == total ? Component
                 .translatable("message.mmcece.assembly.complete", matched, total, placed) : Component.translatable(
                     "message.mmcece.assembly.finished_partial",
                     matched,
@@ -149,84 +195,106 @@ final class AssemblyReport {
                     placed,
                     missingPositions,
                     problems.size());
+            return new Message(message, work, false);
           }
           case 1 -> {
             phase++;
             if (plan.incomplete) {
-              return Component.translatable("message.mmcece.assembly.material_snapshot_incomplete");
+              return new Message(
+                  Component.translatable("message.mmcece.assembly.material_snapshot_incomplete"),
+                  work,
+                  false);
             }
           }
           case 2 -> {
             phase++;
             if (!plan.shortages.isEmpty()) {
-              return Component.translatable("message.mmcece.assembly.net_missing_header");
+              return new Message(Component.translatable("message.mmcece.assembly.net_missing_header"), work, false);
             }
           }
           case 3 -> {
-            if (materials.hasNext()) {
-              var entry = materials.next();
-              var names = Component.empty();
-              var choices = entry.choices();
-              if (!entry.fluid().isEmpty()) {
-                return Component.translatable(
+            if (material == null) {
+              if (!materials.hasNext()) {
+                phase++;
+                continue;
+              }
+              material = materials.next();
+              materialNames = Component.empty();
+              itemName = 0;
+              fluidName = 0;
+              if (!material.fluid().isEmpty()) {
+                var message = Component.translatable(
                     "message.mmcece.assembly.net_missing_fluid",
-                    entry.fluid().getHoverName(),
-                    entry.millibuckets());
+                    material.fluid().getHoverName(),
+                    material.millibuckets());
+                material = null;
+                return new Message(message, work, false);
               }
-              for (var item : choices.items()) {
-                if (!names.getSiblings().isEmpty()) {
-                  names.append(" / ");
-                }
-                names.append(Component.translatable(item.getDescriptionId()));
+              continue;
+            }
+            var choices = material.choices();
+            if (itemName < choices.items().size()) {
+              appendName(Component.translatable(choices.items().get(itemName++).getDescriptionId()));
+              continue;
+            }
+            if (fluidName < choices.fluids().size()) {
+              appendName(new FluidStack(choices.fluids().get(fluidName++), FluidType.BUCKET_VOLUME).getHoverName());
+              if (!choices.items().isEmpty()) {
+                materialNames.append(" (" + FluidType.BUCKET_VOLUME + " mB)");
               }
-              for (var fluid : choices.fluids()) {
-                if (!names.getSiblings().isEmpty()) {
-                  names.append(" / ");
-                }
-                names.append(new FluidStack(fluid, FluidType.BUCKET_VOLUME).getHoverName());
-                if (!choices.items().isEmpty()) {
-                  names.append(" (" + FluidType.BUCKET_VOLUME + " mB)");
-                }
-              }
-              if (!choices.fluids().isEmpty()) {
-                return choices.items().isEmpty() ? Component.translatable(
-                    "message.mmcece.assembly.net_missing_fluid_choices",
-                    names,
-                    entry.positions(),
-                    entry.millibuckets()) : Component
-                        .translatable("message.mmcece.assembly.missing_mixed", names, entry.positions());
-              }
-              return Component.translatable(
+              continue;
+            }
+            Component message;
+            if (!choices.fluids().isEmpty()) {
+              message = choices.items().isEmpty() ? Component.translatable(
+                  "message.mmcece.assembly.net_missing_fluid_choices",
+                  materialNames,
+                  material.positions(),
+                  material.millibuckets()) : Component
+                      .translatable("message.mmcece.assembly.missing_mixed", materialNames, material.positions());
+            } else {
+              message = Component.translatable(
                   choices.items()
                       .size() == 1 ? "message.mmcece.assembly.missing_item" : "message.mmcece.assembly.missing_choices",
-                  names,
-                  entry.positions());
+                  materialNames,
+                  material.positions());
             }
-            phase++;
+            material = null;
+            materialNames = null;
+            return new Message(message, work, false);
           }
           case 4 -> {
             phase++;
             if (!problems.isEmpty()) {
-              return Component.translatable("message.mmcece.assembly.problems_header");
+              return new Message(Component.translatable("message.mmcece.assembly.problems_header"), work, false);
             }
           }
           case 5 -> {
             if (issues.hasNext()) {
-              return issues.next();
+              return new Message(issues.next(), work, false);
             }
             phase++;
           }
           case 6 -> {
             phase++;
             if (matched < total) {
-              return Component.translatable("message.mmcece.assembly.retry");
+              return new Message(Component.translatable("message.mmcece.assembly.retry"), work, false);
             }
           }
           default -> {
-            return null;
+            return new Message(null, work, true);
           }
         }
       }
+
+      return new Message(null, work, false);
+    }
+
+    private void appendName(Component name) {
+      if (!materialNames.getSiblings().isEmpty()) {
+        materialNames.append(" / ");
+      }
+      materialNames.append(name);
     }
   }
 }

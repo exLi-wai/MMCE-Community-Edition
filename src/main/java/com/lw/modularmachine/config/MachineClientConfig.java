@@ -24,7 +24,7 @@ public final class MachineClientConfig {
         .comment("Show the FE/RF capacity and transfer limits in energy hatch item tooltips.")
         .define("FE_RF_Tooltip", true);
     DISPLAY_GT_EU_TOOLTIP = builder.translation("mmcece.config.energy_display.gtTooltip").comment(
-        "Show additional GT EU equivalents when GregTech is present. Display conversion does not add an energy bridge.")
+        "Show additional GTM EU equivalents when GTM (mod id gtceu) is present. Display conversion does not add an energy bridge.")
         .define("GT_EU_Tooltip", true);
     ENERGY_DISPLAY_TYPE = builder.translation("mmcece.config.energy_display.type").comment(
         "Energy display unit for GUI and recipe text: FE, RF or GT_EU. Four FE are displayed as one EU; actual storage and transfer remain FE.")
