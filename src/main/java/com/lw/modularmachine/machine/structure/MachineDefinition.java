@@ -10,7 +10,11 @@ import com.lw.modularmachine.block.ParallelControllerBlock;
 import com.lw.modularmachine.block.SmartInterfaceBlock;
 import com.lw.modularmachine.blockentity.MachinePortBlockEntity;
 import com.lw.modularmachine.machine.PortKind;
+import com.lw.modularmachine.machine.appearance.MachineComponentType;
+import com.lw.modularmachine.machine.controller.MachineControllerRegistrationFlags;
 import com.lw.modularmachine.machine.factory.FactoryThreadPreset;
+import com.lw.modularmachine.machine.factory.FactoryThreadStateCodec;
+import com.lw.modularmachine.config.MachineConfig;
 import com.lw.modularmachine.api.orientation.MachineOrientation;
 import com.lw.modularmachine.machine.orientation.OrientationCompilation;
 import com.lw.modularmachine.machine.orientation.OrientationPolicy;
@@ -24,6 +28,7 @@ import com.lw.modularmachine.machine.smart.SmartInterfaceType;
 import java.nio.charset.StandardCharsets;
 import java.util.ArrayList;
 import java.util.HashSet;
+import java.util.EnumSet;
 import java.util.LinkedHashMap;
 import java.util.LinkedHashSet;
 import java.util.Iterator;
@@ -42,7 +47,11 @@ import net.minecraft.world.level.block.Block;
 import net.minecraft.world.level.block.state.BlockState;
 import net.minecraft.world.level.block.state.properties.Property;
 
-/** Immutable machine declarations and resolved dynamic layouts. */
+/**
+ * Immutable machine declarations and resolved dynamic layouts. The declared
+ * hasFactory flag affects startup registrations; reload does not revoke
+ * registered identities or paid recipe runs.
+ */
 public record MachineDefinition(
     ResourceLocation id,
     String translationKey,
@@ -63,7 +72,11 @@ public record MachineDefinition(
     AABB controllerBoundingBox,
     List<DynamicPatternDefinition> dynamicPatterns,
     Map<String, Integer> dynamicLengths,
-    MachineDefinition source) {
+    MachineDefinition source,
+    Set<MachineComponentType> hiddenComponentTypes,
+    boolean hasFactory,
+    boolean parallelizable,
+    int maximumFactoryThreads) {
 
   /**
    * In Laozi's world, Laozi builds it however he wants.
@@ -71,6 +84,32 @@ public record MachineDefinition(
   private static final Logger LOGGER = LogUtils.getLogger();
   public static final int MAX_PARTS = Integer.MAX_VALUE;
   static final long ALTERNATIVE_RESOURCE_BUDGET = 4_194_304L;
+
+  public MachineDefinition(ResourceLocation id, String translationKey, List<Part> parts, long energyPerTick, OrientationPolicy orientationPolicy, OrientationCompilation orientationCompilation, FactoryThreadPreset factoryPreset, List<RecipeModifier> recipeModifiers, List<StructureModifierDefinition> structureModifiers, Map<String, SmartInterfaceType> interfaceTypes, int internalParallelism, int maxParallelism, boolean requiresBlueprint, boolean factoryOnly, int color, boolean hideComponentsWhenFormed, AABB controllerBoundingBox, List<DynamicPatternDefinition> dynamicPatterns, Map<String, Integer> dynamicLengths, MachineDefinition source, Set<MachineComponentType> hiddenComponentTypes, boolean hasFactory) {
+    this(id, translationKey, parts, energyPerTick, orientationPolicy, orientationCompilation, factoryPreset,
+        recipeModifiers, structureModifiers, interfaceTypes, internalParallelism, maxParallelism, requiresBlueprint,
+        factoryOnly, color, hideComponentsWhenFormed, controllerBoundingBox, dynamicPatterns, dynamicLengths, source,
+        hiddenComponentTypes, hasFactory, MachineConfig.machineParallelDefault(),
+        MachineConfig.defaultFactoryMaxThreads());
+  }
+
+  public MachineDefinition(ResourceLocation id, String translationKey, List<Part> parts, long energyPerTick, OrientationPolicy orientationPolicy, OrientationCompilation orientationCompilation, FactoryThreadPreset factoryPreset, List<RecipeModifier> recipeModifiers, List<StructureModifierDefinition> structureModifiers, Map<String, SmartInterfaceType> interfaceTypes, int internalParallelism, int maxParallelism, boolean requiresBlueprint, boolean factoryOnly, int color, boolean hideComponentsWhenFormed, AABB controllerBoundingBox, List<DynamicPatternDefinition> dynamicPatterns, Map<String, Integer> dynamicLengths, MachineDefinition source, Set<MachineComponentType> hiddenComponentTypes) {
+    this(id, translationKey, parts, energyPerTick, orientationPolicy, orientationCompilation, factoryPreset,
+        recipeModifiers, structureModifiers, interfaceTypes, internalParallelism, maxParallelism, requiresBlueprint,
+        factoryOnly, color, hideComponentsWhenFormed, controllerBoundingBox, dynamicPatterns, dynamicLengths, source,
+        hiddenComponentTypes, false);
+  }
+
+  public MachineDefinition(ResourceLocation id, String translationKey, List<Part> parts, long energyPerTick, OrientationPolicy orientationPolicy, OrientationCompilation orientationCompilation, FactoryThreadPreset factoryPreset, List<RecipeModifier> recipeModifiers, List<StructureModifierDefinition> structureModifiers, Map<String, SmartInterfaceType> interfaceTypes, int internalParallelism, int maxParallelism, boolean requiresBlueprint, boolean factoryOnly, int color, boolean hideComponentsWhenFormed, AABB controllerBoundingBox, List<DynamicPatternDefinition> dynamicPatterns, Map<String, Integer> dynamicLengths, MachineDefinition source) {
+    this(id, translationKey, parts, energyPerTick, orientationPolicy, orientationCompilation, factoryPreset,
+        recipeModifiers, structureModifiers, interfaceTypes, internalParallelism, maxParallelism, requiresBlueprint,
+        factoryOnly, color, hideComponentsWhenFormed, controllerBoundingBox, dynamicPatterns, dynamicLengths, source,
+        EnumSet.allOf(MachineComponentType.class));
+  }
+
+  public boolean hidesComponent(MachineComponentType type) {
+    return hideComponentsWhenFormed && type != null && hiddenComponentTypes.contains(type);
+  }
 
   public MachineDefinition(ResourceLocation id, String translationKey, List<Part> parts, long energyPerTick, OrientationPolicy orientationPolicy, OrientationCompilation orientationCompilation, FactoryThreadPreset factoryPreset, List<RecipeModifier> recipeModifiers, List<StructureModifierDefinition> structureModifiers, Map<String, SmartInterfaceType> interfaceTypes, int internalParallelism, int maxParallelism, boolean requiresBlueprint, boolean factoryOnly, int color, boolean hideComponentsWhenFormed, AABB controllerBoundingBox) {
     this(id, translationKey, parts, energyPerTick, orientationPolicy, orientationCompilation, factoryPreset,
@@ -81,12 +120,12 @@ public record MachineDefinition(
   public MachineDefinition(ResourceLocation id, String translationKey, List<Part> parts, long energyPerTick, OrientationPolicy orientationPolicy, OrientationCompilation orientationCompilation, FactoryThreadPreset factoryPreset, List<RecipeModifier> recipeModifiers, List<StructureModifierDefinition> structureModifiers, Map<String, SmartInterfaceType> interfaceTypes, int internalParallelism, int maxParallelism) {
     this(id, translationKey, parts, energyPerTick, orientationPolicy, orientationCompilation, factoryPreset,
         recipeModifiers, structureModifiers, interfaceTypes, internalParallelism, maxParallelism, false, false,
-        0xFFFFFF, false, new AABB(0, 0, 0, 1, 1, 1));
+        MachineConfig.defaultCasingColor(), false, new AABB(0, 0, 0, 1, 1, 1));
   }
 
   public MachineDefinition(ResourceLocation id, String translationKey, List<Part> parts, long energyPerTick, OrientationPolicy orientationPolicy, OrientationCompilation orientationCompilation, FactoryThreadPreset factoryPreset, List<RecipeModifier> recipeModifiers, List<StructureModifierDefinition> structureModifiers, Map<String, SmartInterfaceType> interfaceTypes) {
     this(id, translationKey, parts, energyPerTick, orientationPolicy, orientationCompilation, factoryPreset,
-        recipeModifiers, structureModifiers, interfaceTypes, 0, Integer.MAX_VALUE);
+        recipeModifiers, structureModifiers, interfaceTypes, 0, MachineConfig.defaultMaxMachineParallelism());
   }
 
   public MachineDefinition(ResourceLocation id, String translationKey, List<Part> parts, long energyPerTick, OrientationPolicy orientationPolicy, OrientationCompilation orientationCompilation, FactoryThreadPreset factoryPreset, List<RecipeModifier> recipeModifiers, List<StructureModifierDefinition> structureModifiers) {
@@ -109,6 +148,7 @@ public record MachineDefinition(
   }
 
   public MachineDefinition {
+    hiddenComponentTypes = Set.copyOf(hiddenComponentTypes);
     if ((color & ~0xFFFFFF) != 0) {
       throw new IllegalArgumentException("Machine color must be an RGB value");
     }
@@ -124,6 +164,11 @@ public record MachineDefinition(
     Objects.requireNonNull(orientationPolicy, "orientationPolicy");
     Objects.requireNonNull(orientationCompilation, "orientationCompilation");
     Objects.requireNonNull(factoryPreset, "factoryPreset");
+    if (maximumFactoryThreads < 1
+        || maximumFactoryThreads > FactoryThreadStateCodec.MAX_THREADS
+        || factoryPreset.threads().size() > maximumFactoryThreads) {
+      throw new IllegalArgumentException("Factory thread preset exceeds the machine business thread limit");
+    }
     recipeModifiers = List.copyOf(recipeModifiers);
     structureModifiers = List.copyOf(structureModifiers);
     dynamicPatterns = List.copyOf(dynamicPatterns);
@@ -236,6 +281,11 @@ public record MachineDefinition(
    * parser calls.
    */
   public static MachineDefinition parse(ResourceLocation id, JsonObject root, StateOrientationAdapters.RegistrySnapshot snapshot) {
+    return parse(id, root, snapshot, MachineDefinitionDefaults.capture());
+  }
+
+  public static MachineDefinition parse(ResourceLocation id, JsonObject root, StateOrientationAdapters.RegistrySnapshot snapshot, MachineDefinitionDefaults defaults) {
+    Objects.requireNonNull(defaults, "defaults");
     String path = id + ": $";
     header(root, path);
     checkAlternativeBudget(Map.of(id, root));
@@ -285,18 +335,30 @@ public record MachineDefinition(
     String translation = root.has("translation_key") ? string(
         root.get("translation_key"),
         path + ".translation_key") : "machine." + id.getNamespace() + "." + id.getPath();
+    int maximumFactoryThreads = maximumFactoryThreads(root, path, defaults.maximumFactoryThreads());
     var factory = root.has("factory") ? FactoryThreadPreset
-        .parse(root.get("factory"), path + ".factory") : FactoryThreadPreset.defaults();
+        .parse(root.get("factory"), path + ".factory", maximumFactoryThreads) : FactoryThreadPreset.defaults();
 
     var modifiers = root.has("recipe_modifiers") ? RecipeModifiers
         .parse(root.get("recipe_modifiers"), path + ".recipe_modifiers") : List.<RecipeModifier>of();
     int internalParallelism = 0;
-    int maxParallelism = Integer.MAX_VALUE;
+    int maxParallelism = defaults.maximumParallelism();
     if (root.has("parallel")) {
       var parallel = object(root.get("parallel"), path + ".parallel");
       fields(parallel, path + ".parallel", "internal", "maximum");
       internalParallelism = Math.toIntExact(optionalInteger(parallel, "internal", 0, path + ".parallel"));
-      maxParallelism = Math.toIntExact(optionalInteger(parallel, "maximum", Integer.MAX_VALUE, path + ".parallel"));
+      maxParallelism = Math.toIntExact(optionalInteger(parallel, "maximum", maxParallelism, path + ".parallel"));
+      if (root.has("max-parallelism") && parallel.has("maximum")) {
+        throw error(path, "Use only one of parallel.maximum or max-parallelism");
+      }
+    }
+    if (root.has("max-parallelism")) {
+      maxParallelism = Math.toIntExact(integer(root.get("max-parallelism"), path + ".max-parallelism"));
+    }
+    if (internalParallelism > maxParallelism
+        && !root.has("max-parallelism")
+        && (!root.has("parallel") || !root.getAsJsonObject("parallel").has("maximum"))) {
+      maxParallelism = internalParallelism;
     }
     var interfaceTypes = root.has("interfaces") ? SmartInterfaceType
         .parse(root.get("interfaces"), path + ".interfaces") : Map.<String, SmartInterfaceType>of();
@@ -307,6 +369,7 @@ public record MachineDefinition(
         false,
         path);
     AABB controllerBoundingBox = boundingBoxAlias(root, "controller_bounding_box", "controller-bounding-box", path);
+    var registrationFlags = MachineControllerRegistrationFlags.parse(root, path);
 
     return new MachineDefinition(
         id,
@@ -322,13 +385,18 @@ public record MachineDefinition(
         internalParallelism,
         maxParallelism,
         root.has("requires_blueprint") && bool(root.get("requires_blueprint"), path + ".requires_blueprint"),
-        root.has("factory_only") && bool(root.get("factory_only"), path + ".factory_only"),
-        machineColor(root, path),
+        registrationFlags.factoryOnly(),
+        machineColor(root, path, defaults.casingColor()),
         hideComponentsWhenFormed,
         controllerBoundingBox,
         dynamicPatterns,
         Map.of(),
-        null);
+        null,
+        hiddenComponentTypes(root, path),
+        registrationFlags.hasFactory(),
+        root.has("parallelizable") ? bool(root.get("parallelizable"), path + ".parallelizable") : defaults
+            .parallelizable(),
+        maximumFactoryThreads);
   }
 
   /**
@@ -490,7 +558,11 @@ public record MachineDefinition(
         controllerBoundingBox,
         List.of(),
         lengths,
-        this);
+        this,
+        hiddenComponentTypes,
+        hasFactory,
+        parallelizable,
+        maximumFactoryThreads);
   }
 
   private static void appendDynamic(List<Part> target, Set<BlockPos> positions, Set<String> ids, DynamicPatternDefinition pattern, List<Part> template, String group, int repetition) {
@@ -645,15 +717,64 @@ public record MachineDefinition(
         "dynamic-patterns",
         "interfaces",
         "parallel",
+        "parallelizable",
+        "max-parallelism",
+        "max-threads",
         "requires_blueprint",
         "factory_only",
+        "factory-only",
+        "has_factory",
+        "has-factory",
         "hide_components_when_formed",
         "hide-components-when-formed",
+        "hide_component_types",
         "controller_bounding_box",
         "controller-bounding-box",
         "color",
         "machine_color");
     return 2;
+  }
+
+  private static int maximumFactoryThreads(JsonObject root, String path, int fallback) {
+    JsonObject factory = root.has("factory") ? object(root.get("factory"), path + ".factory") : null;
+    if (root.has("max-threads") && factory != null && factory.has("maximum_threads")) {
+      throw error(path, "Use only one of factory.maximum_threads or max-threads");
+    }
+    long maximum = fallback;
+    if (root.has("max-threads")) {
+      maximum = integer(root.get("max-threads"), path + ".max-threads");
+    } else if (factory != null && factory.has("maximum_threads")) {
+      maximum = integer(factory.get("maximum_threads"), path + ".factory.maximum_threads");
+    }
+    if (maximum < 1 || maximum > FactoryThreadStateCodec.MAX_THREADS) {
+      throw error(path + ".factory.maximum_threads", "Factory thread limit is outside the supported bounded range");
+    }
+
+    return (int) maximum;
+  }
+
+  private static Set<MachineComponentType> hiddenComponentTypes(JsonObject root, String path) {
+    if (!root.has("hide_component_types")) {
+      return EnumSet.allOf(MachineComponentType.class);
+    }
+    var types = EnumSet.noneOf(MachineComponentType.class);
+    var values = array(root.get("hide_component_types"), path + ".hide_component_types");
+    for (int index = 0; index < values.size(); index++) {
+      String value = string(values.get(index), path + ".hide_component_types[" + index + "]");
+      MachineComponentType selected = null;
+      for (var type : MachineComponentType.values()) {
+        if (type.getSerializedName().equals(value)) {
+          selected = type;
+          break;
+        }
+      }
+      if (selected == null) {
+        throw error(path + ".hide_component_types[" + index + "]", "Unknown component type " + value);
+      }
+      types.add(selected);
+    }
+
+    return types;
   }
 
   private static JsonArray parts(JsonObject root, String path) {
@@ -744,12 +865,12 @@ public record MachineDefinition(
     return Integer.parseInt(value, 16);
   }
 
-  private static int machineColor(JsonObject root, String path) {
+  private static int machineColor(JsonObject root, String path, int fallback) {
     if (root.has("color") && root.has("machine_color")) {
       throw error(path, "Use only one of color or machine_color");
     }
     String key = root.has("machine_color") ? "machine_color" : "color";
-    return root.has(key) ? color(root.get(key), path + "." + key) : 0xFFFFFF;
+    return root.has(key) ? color(root.get(key), path + "." + key) : fallback;
   }
 
   private static void partFields(JsonObject part, String path) {

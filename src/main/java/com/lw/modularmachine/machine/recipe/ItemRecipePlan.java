@@ -4,6 +4,7 @@ import com.lw.modularmachine.machine.factory.UpgradeRecipeChecks;
 
 import com.lw.modularmachine.blockentity.MachineControllerBlockEntity;
 import com.lw.modularmachine.machine.PortKind;
+import com.lw.modularmachine.machine.controller.MachineControllerScriptDataService;
 import com.lw.modularmachine.machine.factory.FactoryUpgradeStartCosts;
 import com.lw.modularmachine.machine.factory.UpgradeBusOwner;
 import java.util.ArrayList;
@@ -128,16 +129,21 @@ public final class ItemRecipePlan {
     var structural = registration.activeRecipeModifiers(source.level());
     var upgrades = thread.upgradeSnapshot().recipeModifiers();
     var actual = catalog.contextRules();
+    var expected = new ArrayList<>(structural);
+    expected.addAll(upgrades);
+    expected.addAll(MachineControllerScriptDataService.modifiers(factory));
 
-    return actual.size() == structural.size() + upgrades.size()
-        && actual.subList(0, structural.size()).equals(structural)
-        && actual.subList(structural.size(), actual.size()).equals(upgrades);
+    return actual.equals(expected);
   }
 
   public FactoryUpgradeStartCosts.Preparation prepareFactoryStartup(UpgradeBusOwner factory, String threadId, int instances) {
     source.requireServerThread();
     if (source.owner() != factory) {
       throw new IllegalArgumentException("Startup plan belongs to a different controller");
+    }
+    var definition = MachineRecipeService.definitionForStart(factory, this).orElse(null);
+    if (definition == null || instances < 1 || instances > 1 && !definition.parallelized()) {
+      throw new IllegalArgumentException("Recipe does not allow the requested parallel instances");
     }
     if (factoryStartup == null || startupInstances != instances) {
       factoryStartup = FactoryUpgradeStartCosts
@@ -243,6 +249,7 @@ public final class ItemRecipePlan {
   }
 
   public int prepareParallel(MachineRecipe definition, int limit, int budget) {
+    limit = definition.parallelized() ? limit : Math.min(limit, 1);
     if (parallelAdmission == null || parallelRequest != limit) {
       parallelAdmission = new ParallelRecipeAdmission(
           this,

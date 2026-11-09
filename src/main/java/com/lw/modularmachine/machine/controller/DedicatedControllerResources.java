@@ -5,6 +5,7 @@ import com.google.gson.JsonArray;
 import com.google.gson.JsonObject;
 import com.google.gson.JsonParser;
 import com.lw.modularmachine.api.orientation.MachineOrientation;
+import com.lw.modularmachine.machine.appearance.ControllerAppearanceState;
 import java.io.IOException;
 import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
@@ -20,15 +21,15 @@ import net.neoforged.fml.loading.FMLPaths;
 import net.neoforged.neoforge.event.AddPackFindersEvent;
 
 /**
- * Generates only registered-controller resources; user resource packs can
- * override these defaults.
+ * Internal generator for registered-controller resources; user resource packs
+ * can override these defaults.
  */
 public final class DedicatedControllerResources {
   private static Path generated;
   private DedicatedControllerResources() {
   }
   public static synchronized void register(AddPackFindersEvent event) {
-    if (DedicatedControllerCatalog.entries().isEmpty()) {
+    if (DedicatedControllerCatalog.entries().isEmpty() && DedicatedControllerCatalog.machines().isEmpty()) {
       return;
     }
     if (generated == null) {
@@ -82,32 +83,29 @@ public final class DedicatedControllerResources {
         String id = "mmcece:" + path;
         var variants = new JsonObject();
         for (var pose : MachineOrientation.all()) {
-          var variant = new JsonObject();
-          variant.addProperty("model", "mmcece:block/dedicated/" + entry.id() + "/" + pose.key());
           String key = "facing=" + pose.front().getSerializedName() + ",roll=" + pose.roll();
-          variants.add(key + ",formed=false", variant.deepCopy());
-          variants.add(key + ",formed=true", variant);
-          var template = read("models/block/" + (entry.factory() ? "factory/" : "controller/") + pose.key() + ".json");
-          if (entry.model() == null) {
-            var textures = new JsonObject();
-            textures.addProperty("casing", entry.casing().toString());
-            textures.addProperty("overlay", entry.overlay().toString());
-            template.add("textures", textures);
-            tintCasingFaces(template);
-          } else {
-            // Custom models must supply all 24 keys: <model prefix>/<front>_<roll>.
-            template = new JsonObject();
-            template.addProperty("parent", entry.model() + "/" + pose.key());
-          }
           write(
               root.resolve("assets/mmcece/models/block/dedicated/" + entry.id() + "/" + pose.key() + ".json"),
-              template);
+              model(entry, entry.baseAppearance(), pose.key()));
+          for (var appearance : ControllerAppearanceState.values()) {
+            String modelPath = modelPath(entry, appearance, pose.key());
+            var variant = new JsonObject();
+            variant.addProperty("model", "mmcece:block/" + modelPath);
+            // Real formation and visibility remain independent of the model choice.
+            variants.add(key + ",appearance=" + appearance.getSerializedName(), variant);
+            var resources = entry.appearance(appearance);
+            if (!resources.equals(entry.baseAppearance())) {
+              write(
+                  root.resolve("assets/mmcece/models/block/" + modelPath + ".json"),
+                  model(entry, resources, pose.key()));
+            }
+          }
         }
         var state = new JsonObject();
         state.add("variants", variants);
         write(root.resolve("assets/mmcece/blockstates/" + path + ".json"), state);
         var item = new JsonObject();
-        item.addProperty("parent", "mmcece:block/dedicated/" + entry.id() + "/north_0");
+        item.addProperty("parent", "mmcece:block/" + modelPath(entry, ControllerAppearanceState.UNFORMED, "north_0"));
         write(root.resolve("assets/mmcece/models/item/" + path + ".json"), item);
         var loot = read("/data/mmcece/loot_table/blocks/machine_controller.json");
         loot.getAsJsonArray("pools").get(0).getAsJsonObject().getAsJsonArray("entries").get(0).getAsJsonObject()
@@ -129,6 +127,34 @@ public final class DedicatedControllerResources {
       throw new IllegalStateException("Cannot generate dedicated controller pack", failure);
     }
   }
+
+  private static String modelPath(DedicatedControllerCatalog.Entry entry, ControllerAppearanceState state, String pose) {
+    if (entry.appearance(state).equals(entry.baseAppearance())) {
+      return "dedicated/" + entry.id() + "/" + pose;
+    }
+
+    return "dedicated_appearance/" + state.getSerializedName() + "/" + entry.id() + "/" + pose;
+  }
+
+  private static JsonObject model(DedicatedControllerCatalog.Entry entry, DedicatedControllerCatalog.Appearance appearance, String pose)
+      throws IOException {
+    if (appearance.model() != null) {
+      // Custom models must supply all 24 keys: <model prefix>/<front>_<roll>.
+      var model = new JsonObject();
+      model.addProperty("parent", appearance.model() + "/" + pose);
+
+      return model;
+    }
+    var model = read("models/block/" + (entry.factory() ? "factory/" : "controller/") + pose + ".json");
+    var textures = new JsonObject();
+    textures.addProperty("casing", appearance.casing().toString());
+    textures.addProperty("overlay", appearance.overlay().toString());
+    model.add("textures", textures);
+    tintCasingFaces(model);
+
+    return model;
+  }
+
   private static JsonObject read(String relative) throws IOException {
     String path = relative.startsWith("/") ? relative : "/assets/mmcece/" + relative;
     try (var input = DedicatedControllerResources.class.getResourceAsStream(path)) {

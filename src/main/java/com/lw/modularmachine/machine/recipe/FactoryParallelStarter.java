@@ -299,6 +299,13 @@ public final class FactoryParallelStarter {
     if (first == null) {
       return new Admission(Result.STALE, null);
     }
+    var definition = MachineRecipeService.definitionForStart(factory, first).orElse(null);
+    if (definition == null) {
+      return new Admission(Result.STALE, null);
+    }
+    if (plans.size() > 1 && !definition.parallelized()) {
+      return new Admission(Result.LIMIT_REACHED, null);
+    }
     var recipeId = first.recipe().id();
     for (var plan : plans.stream().distinct().toList()) {
       if (plan == null || !recipeId.equals(plan.recipe().id())) {
@@ -313,7 +320,7 @@ public final class FactoryParallelStarter {
           Result.ADMITTED,
           FactoryParallelBatch.plan(
               Objects.requireNonNull(ResourceLocation.tryParse(recipeId)),
-              factory.effectiveParallelLimit(threadId),
+              definition.parallelized() ? factory.effectiveParallelLimit(threadId) : 1,
               inputCapacity,
               outputCapacity,
               startBudget,

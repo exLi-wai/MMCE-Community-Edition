@@ -9,6 +9,7 @@ import java.util.ArrayList;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.function.BooleanSupplier;
 import net.minecraft.core.HolderLookup;
 import net.minecraft.resources.ResourceLocation;
 import net.neoforged.neoforge.fluids.FluidStack;
@@ -23,6 +24,9 @@ final class ModifiedRecipeCatalogCompiler {
   private final MachineDefinition machine;
   private final Map<ResourceLocation, RecipeModifierTemplate> templates;
   private final List<RecipeModifier> rules;
+  private final boolean durationMultiplier;
+  private final MachineRecipeJson.Defaults defaults;
+  private final BooleanSupplier authority;
   private final List<String> ids;
   private final List<RecipeCandidate<ItemResourceKey>> candidates = new ArrayList<>();
   private final Map<String, MachineRecipe> definitions = new HashMap<>();
@@ -32,15 +36,30 @@ final class ModifiedRecipeCatalogCompiler {
   private ItemRecipeCatalog result;
 
   ModifiedRecipeCatalogCompiler(ItemRecipeCatalog base, MachineDefinition machine, Map<ResourceLocation, RecipeModifierTemplate> templates, List<RecipeModifier> rules) {
+    this(base, machine, templates, rules, false);
+  }
+
+  ModifiedRecipeCatalogCompiler(ItemRecipeCatalog base, MachineDefinition machine, Map<ResourceLocation, RecipeModifierTemplate> templates, List<RecipeModifier> rules, boolean durationMultiplier) {
+    this(base, machine, templates, rules, durationMultiplier, base::isCurrent);
+  }
+
+  ModifiedRecipeCatalogCompiler(ItemRecipeCatalog base, MachineDefinition machine, Map<ResourceLocation, RecipeModifierTemplate> templates, List<RecipeModifier> rules, boolean durationMultiplier, BooleanSupplier authority) {
+    this(base, machine, templates, rules, durationMultiplier, authority, MachineRecipeJson.currentDefaults());
+  }
+
+  ModifiedRecipeCatalogCompiler(ItemRecipeCatalog base, MachineDefinition machine, Map<ResourceLocation, RecipeModifierTemplate> templates, List<RecipeModifier> rules, boolean durationMultiplier, BooleanSupplier authority, MachineRecipeJson.Defaults defaults) {
     this.base = base;
     this.machine = machine;
     this.templates = templates;
     this.rules = List.copyOf(rules);
+    this.durationMultiplier = durationMultiplier;
+    this.defaults = defaults;
+    this.authority = authority;
     ids = base.recipes().candidates().stream().map(RecipeCandidate::id).toList();
   }
 
   void advance(long tick, HolderLookup.Provider registries) {
-    if (failed || result != null || lastTick == tick || !base.isCurrent()) {
+    if (failed || result != null || lastTick == tick || !authority.getAsBoolean()) {
       return;
     }
     lastTick = tick;
@@ -52,7 +71,7 @@ final class ModifiedRecipeCatalogCompiler {
         if (template == null) {
           throw new IllegalArgumentException("Missing original modifier template: " + id);
         }
-        var recipe = template.resolve(rules, registries);
+        var recipe = template.resolve(rules, registries, durationMultiplier, defaults);
         MachineRecipeService.validatePorts(id, recipe, machine);
         candidates.add(recipe.compile(id, registries));
         definitions.put(id.toString(), recipe);
@@ -73,7 +92,7 @@ final class ModifiedRecipeCatalogCompiler {
             new CompiledRecipeSet<>(candidates),
             inputs,
             outputs,
-            base::isCurrent,
+            authority,
             base,
             definitions,
             rules,

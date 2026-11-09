@@ -8,6 +8,8 @@ import com.lw.modularmachine.api.recipe.RecipeSelectors;
 import com.google.gson.JsonElement;
 import com.lw.modularmachine.blockentity.FactoryControllerBlockEntity;
 import com.lw.modularmachine.blockentity.MachineControllerBlockEntity;
+import com.lw.modularmachine.config.MachineConfig;
+import com.lw.modularmachine.machine.controller.MachineControllerScriptDataService;
 import com.lw.modularmachine.integration.kubejs.MachineItemRecipeKubeJSSources;
 import com.lw.modularmachine.machine.PortKind;
 import com.lw.modularmachine.machine.structure.MachineDefinition;
@@ -35,6 +37,7 @@ import net.neoforged.neoforge.event.server.ServerStartedEvent;
 import net.neoforged.neoforge.event.server.ServerStoppedEvent;
 import net.neoforged.neoforge.fluids.FluidStack;
 import net.neoforged.neoforge.server.ServerLifecycleHooks;
+import org.jetbrains.annotations.ApiStatus;
 
 /**
  * Validated candidates are staged by prospective RecipeManager; only current
@@ -49,13 +52,15 @@ public final class MachineRecipeService {
       Collection<RecipeHolder<?>> recipeView,
       Map<ResourceLocation, CompiledRecipeSet<ItemResourceKey>> candidates,
       Map<ResourceLocation, MachineRecipe> definitions,
-      Map<ResourceLocation, RecipeModifierTemplate> templates) {
+      Map<ResourceLocation, RecipeModifierTemplate> templates,
+      MachineRecipeJson.Defaults defaults) {
   }
 
   private MachineRecipeService() {
   }
 
   static void stage(RecipeManager manager, Map<ResourceLocation, MachineRecipe> expected, Map<ResourceLocation, JsonElement> sources, HolderLookup.Provider registries) {
+    var defaults = MachineRecipeJson.currentDefaults();
     var server = ServerLifecycleHooks.getCurrentServer();
     if (server != null) {
       ServerThreadGuard.require(server, "Machine recipe catalog accessed");
@@ -96,9 +101,11 @@ public final class MachineRecipeService {
       }
       var template = new RecipeModifierTemplate(source.getAsJsonObject(), machine.recipeModifiers());
       templates.put(entry.getKey(), template);
-      if (!machine.recipeModifiers().isEmpty()) {
+      if (!machine.recipeModifiers().isEmpty()
+          || !source.getAsJsonObject().has("parallelized")
+          || !source.getAsJsonObject().has("failure_action")) {
         try {
-          var resolved = template.resolve(List.of(), registries);
+          var resolved = template.resolve(List.of(), registries, false, defaults);
           if (!resolved.sameDefinition(original)) {
             recipe = resolved;
           }
@@ -131,7 +138,8 @@ public final class MachineRecipeService {
         manager.getRecipes(),
         Map.copyOf(frozen),
         Map.copyOf(effective),
-        Map.copyOf(templates));
+        Map.copyOf(templates),
+        defaults);
     PREPARED.entrySet().removeIf(
         entry -> entry.getKey() != manager
             && ACTIVE.values().stream().noneMatch(active -> active.manager == entry.getKey()));
@@ -159,7 +167,10 @@ public final class MachineRecipeService {
       }
       return contextCatalog(published, owner, base, upgrades.recipeModifiers(), true);
     }
-    if (StructureService.definition(owner.structureMachineId()).structureModifiers().isEmpty()) {
+    if (!published.durationMultiplier
+        && published.defaults.equals(published.prepared.defaults())
+        && MachineControllerScriptDataService.revision(owner) == 0
+        && StructureService.definition(owner.structureMachineId()).structureModifiers().isEmpty()) {
       return Optional.of(base);
     }
 
@@ -233,10 +244,17 @@ public final class MachineRecipeService {
     }
     var rules = new ArrayList<>(registration.activeRecipeModifiers(level));
     rules.addAll(extraRules);
-    if (rules.isEmpty()) {
+    long scriptRevision = MachineControllerScriptDataService.revision(owner);
+    rules.addAll(MachineControllerScriptDataService.modifiers(owner));
+    if (rules.isEmpty()
+        && !published.durationMultiplier
+        && scriptRevision == 0
+        && published.defaults.equals(published.prepared.defaults())) {
       return Optional.of(base);
     }
-    var key = new ModifierCatalogKey(owner.structureMachineId(), rules);
+    // Untouched controller data keeps the existing shared rule-signature cache.
+    var scriptOwner = scriptRevision == 0 ? null : owner;
+    var key = new ModifierCatalogKey(owner.structureMachineId(), rules, scriptOwner, scriptRevision);
     var compiler = published.modifiedCatalogs.get(key);
     if (compiler == null) {
       if (published.modifiedCatalogs.size() >= Published.MAX_MODIFIED_CATALOGS) {
@@ -248,7 +266,11 @@ public final class MachineRecipeService {
           base,
           StructureService.definition(owner.structureMachineId()),
           published.prepared.templates(),
-          rules);
+          rules,
+          published.durationMultiplier,
+          () -> base.isCurrent()
+              && (scriptOwner == null || MachineControllerScriptDataService.revision(scriptOwner) == scriptRevision),
+          published.defaults);
       published.modifiedCatalogs.put(key, compiler);
     }
     compiler.advance(level.getGameTime(), level.registryAccess());
@@ -262,9 +284,28 @@ public final class MachineRecipeService {
     return Optional.ofNullable(compiler.result());
   }
 
-  private record ModifierCatalogKey(ResourceLocation machine, List<RecipeModifier> rules) {
+  private record ModifierCatalogKey(
+      ResourceLocation machine,
+      List<RecipeModifier> rules,
+      StructureService.StructureSubject scriptOwner,
+      long scriptRevision) {
     private ModifierCatalogKey {
       rules = List.copyOf(rules);
+    }
+  }
+
+  /**
+   * Internal controller-local revocation; paid runs retain their frozen recipe.
+   */
+  @ApiStatus.Internal
+  public static void invalidateControllerScriptData(StructureService.StructureSubject owner) {
+    if (!(owner.structureLevel() instanceof ServerLevel level)) {
+      return;
+    }
+    ServerThreadGuard.require(level, "Controller recipe context invalidated");
+    var published = ACTIVE.get(level.getServer());
+    if (published != null) {
+      published.modifiedCatalogs.keySet().removeIf(key -> key.scriptOwner() == owner);
     }
   }
 
@@ -314,11 +355,16 @@ public final class MachineRecipeService {
       var upgrades = ordinary.upgradeSnapshot();
       var expected = new ArrayList<>(structuralRules);
       expected.addAll(upgrades.recipeModifiers());
+      expected.addAll(MachineControllerScriptDataService.modifiers(owner));
       if (!ordinary.upgradeSnapshotCurrent(upgrades) || !context.equals(expected)) {
         return Optional.empty();
       }
-    } else if (!context.equals(structuralRules)) {
-      return Optional.empty();
+    } else {
+      var expected = new ArrayList<>(structuralRules);
+      expected.addAll(MachineControllerScriptDataService.modifiers(owner));
+      if (!context.equals(expected)) {
+        return Optional.empty();
+      }
     }
     var definition = plan.catalog().definition(id.toString());
     if (definition == null && plan.catalog().root() == plan.catalog()) {
@@ -338,10 +384,16 @@ public final class MachineRecipeService {
       return null;
     }
     var published = ACTIVE.get(server);
-    if (published != null && published.manager == manager && published.prepared == prepared) {
+    boolean durationMultiplier = MachineConfig.durationMultiplierEnabled();
+    var defaults = MachineRecipeJson.currentDefaults();
+    if (published != null
+        && published.manager == manager
+        && published.prepared == prepared
+        && published.durationMultiplier == durationMultiplier
+        && published.defaults.equals(defaults)) {
       return published;
     }
-    var next = new Published(server, manager, prepared);
+    var next = new Published(server, manager, prepared, durationMultiplier, defaults);
     ACTIVE.put(server, next);
     return next;
   }
@@ -351,16 +403,20 @@ public final class MachineRecipeService {
     final MinecraftServer server;
     final RecipeManager manager;
     final Prepared prepared;
+    final boolean durationMultiplier;
+    final MachineRecipeJson.Defaults defaults;
     final Map<ResourceLocation, ItemRecipeCatalog> catalogs;
     final LinkedHashMap<ModifierCatalogKey, ModifiedRecipeCatalogCompiler> modifiedCatalogs = new LinkedHashMap<>(
         16,
         0.75F,
         true);
 
-    Published(MinecraftServer server, RecipeManager manager, Prepared prepared) {
+    Published(MinecraftServer server, RecipeManager manager, Prepared prepared, boolean durationMultiplier, MachineRecipeJson.Defaults defaults) {
       this.server = server;
       this.manager = manager;
       this.prepared = prepared;
+      this.durationMultiplier = durationMultiplier;
+      this.defaults = defaults;
       var values = new HashMap<ResourceLocation, ItemRecipeCatalog>();
       prepared.candidates().forEach((machine, recipes) -> {
         var fluids = new HashMap<String, List<FluidStack>>();
@@ -397,6 +453,8 @@ public final class MachineRecipeService {
           && PREPARED.get(manager) == prepared
           && server.getRecipeManager() == manager
           && manager.getRecipes() == prepared.recipeView()
+          && MachineConfig.durationMultiplierEnabled() == durationMultiplier
+          && MachineRecipeJson.currentDefaults().equals(defaults)
           && StructureService.definitionEpoch() == prepared.structureEpoch();
     }
   }

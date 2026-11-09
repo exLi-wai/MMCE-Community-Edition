@@ -5,6 +5,8 @@ import com.google.gson.JsonObject;
 import com.google.gson.JsonParseException;
 import com.google.gson.JsonParser;
 import com.lw.modularmachine.ModularMachine;
+import com.lw.modularmachine.config.MachineStartupConfig;
+import com.lw.modularmachine.machine.appearance.ControllerAppearanceState;
 import com.lw.modularmachine.machine.structure.MachineDefinitionConfig;
 import java.io.IOException;
 import java.nio.charset.StandardCharsets;
@@ -15,10 +17,13 @@ import java.nio.file.StandardOpenOption;
 import java.security.MessageDigest;
 import java.security.NoSuchAlgorithmException;
 import java.util.ArrayList;
+import java.util.Collections;
 import java.util.Comparator;
+import java.util.EnumMap;
 import java.util.HashSet;
 import java.util.HexFormat;
 import java.util.List;
+import java.util.Map;
 import java.util.Set;
 import java.util.TreeMap;
 import net.minecraft.network.chat.Component;
@@ -26,12 +31,19 @@ import net.minecraft.network.chat.MutableComponent;
 import net.minecraft.resources.ResourceLocation;
 import net.neoforged.fml.loading.FMLPaths;
 
-/** Registration-only manifest, frozen before deferred block registration. */
+/**
+ * Internal registration-only manifest, frozen before deferred block
+ * registration.
+ */
 public final class DedicatedControllerCatalog {
 
   private static final long MAX_FILE_BYTES = 67_108_864L;
   private static final long MAX_TOTAL_BYTES = 1_073_741_824L;
   private static final int MAX_MACHINE_FILES = 1024;
+
+  /** Internal immutable resources for one controller appearance. */
+  public record Appearance(ResourceLocation casing, ResourceLocation overlay, ResourceLocation model) {
+  }
 
   public record Entry(
       String id,
@@ -40,14 +52,42 @@ public final class DedicatedControllerCatalog {
       String name,
       ResourceLocation casing,
       ResourceLocation overlay,
-      ResourceLocation model) {
+      ResourceLocation model,
+      Map<ControllerAppearanceState, Appearance> appearances) {
+    public Entry {
+      var copied = new EnumMap<ControllerAppearanceState, Appearance>(ControllerAppearanceState.class);
+      copied.putAll(appearances);
+      appearances = Collections.unmodifiableMap(copied);
+    }
+
+    public Entry(String id, ResourceLocation machine, boolean factory, String name, ResourceLocation casing, ResourceLocation overlay, ResourceLocation model) {
+      this(id, machine, factory, name, casing, overlay, model, Map.of());
+    }
+
+    public Appearance baseAppearance() {
+      return new Appearance(casing, overlay, model);
+    }
+
+    public Appearance appearance(ControllerAppearanceState state) {
+      return appearances.getOrDefault(state, baseAppearance());
+    }
+
     public String registryPath() {
       return id.contains("/") ? (factory ? "factory_controller/" : "controller/") + machine
           .getNamespace() + "/" + machine.getPath() : (factory ? "factory_controller_" : "controller_") + id;
     }
   }
-  public record Machine(ResourceLocation id, String translationKey, int color) {
+  public record Machine(
+      ResourceLocation id,
+      String translationKey,
+      int color,
+      boolean hasFactory,
+      boolean factoryOnly) {
+    public Machine(ResourceLocation id, String translationKey, int color) {
+      this(id, translationKey, color, false, false);
+    }
   }
+  private static final boolean FACTORIES_BY_DEFAULT = MachineStartupConfig.enabledAtStartup();
   private static final List<Machine> MACHINES = scanMachines();
   private static final List<Entry> ENTRIES = load();
   private DedicatedControllerCatalog() {
@@ -68,7 +108,8 @@ public final class DedicatedControllerCatalog {
    */
   public static String resourceFingerprint() {
     try {
-      byte[] bytes = ("registered-machines-v7\n" + MACHINES + ENTRIES).getBytes(StandardCharsets.UTF_8);
+      byte[] bytes = ("registered-machines-v10\n" + FACTORIES_BY_DEFAULT + "\n" + MACHINES + ENTRIES)
+          .getBytes(StandardCharsets.UTF_8);
       return HexFormat.of().formatHex(MessageDigest.getInstance("SHA-256").digest(bytes));
     } catch (NoSuchAlgorithmException impossible) {
       throw new IllegalStateException(impossible);
@@ -77,7 +118,7 @@ public final class DedicatedControllerCatalog {
 
   public static boolean restartRequired() {
     try {
-      return !MACHINES.equals(scanMachines()) || !ENTRIES.equals(read());
+      return MachineStartupConfig.restartRequired() || !MACHINES.equals(scanMachines()) || !ENTRIES.equals(read());
     } catch (IOException | RuntimeException invalid) {
       return true;
     }
@@ -131,7 +172,9 @@ public final class DedicatedControllerCatalog {
         var root = JsonParser.parseString(Files.readString(file, StandardCharsets.UTF_8)).getAsJsonObject();
         String translation = text(root, "translation_key", "machine." + id.getNamespace() + "." + id.getPath());
         int color = color(root);
-        if (machines.putIfAbsent(id, new Machine(id, translation, color)) != null) {
+        var flags = MachineControllerRegistrationFlags.parse(root, relative.toString());
+        if (machines
+            .putIfAbsent(id, new Machine(id, translation, color, flags.hasFactory(), flags.factoryOnly())) != null) {
           skipped.add(relative + ": duplicate machine id " + id);
           ModularMachine.LOGGER.error("Skipping duplicate machine definition {} (id {})", relative, id);
         }
@@ -200,7 +243,8 @@ public final class DedicatedControllerCatalog {
     for (JsonElement value : values) {
       try {
         var source = value.getAsJsonObject();
-        if (!Set.of("id", "machine", "type", "name", "casing", "overlay", "model").containsAll(source.keySet())) {
+        if (!Set.of("id", "machine", "type", "name", "casing", "overlay", "model", "appearances")
+            .containsAll(source.keySet())) {
           throw new IllegalArgumentException("Unknown controller field");
         }
         String id = text(source, "id", null);
@@ -213,6 +257,10 @@ public final class DedicatedControllerCatalog {
           throw new IllegalArgumentException("Invalid dedicated controller entry: " + id);
         }
         var machine = registeredMachine(text(source, "machine", null));
+        if (!controllerEnabled(machine, type.equals("factory"))) {
+          throw new IllegalArgumentException(
+              "Controller role is disabled by the startup machine settings: " + machine + " / " + type);
+        }
         var casing = location(text(source, "casing", "mmcece:block/blockcasing_plain"));
         var overlay = location(
             text(
@@ -221,7 +269,16 @@ public final class DedicatedControllerCatalog {
                 type.equals(
                     "factory") ? "mmcece:block/overlay_factory_controller" : "mmcece:block/overlay_controller"));
         var model = source.has("model") ? location(text(source, "model", null)) : null;
-        result.add(new Entry(id, machine, type.equals("factory"), name, casing, overlay, model));
+        result.add(
+            new Entry(
+                id,
+                machine,
+                type.equals("factory"),
+                name,
+                casing,
+                overlay,
+                model,
+                appearances(source, new Appearance(casing, overlay, model))));
       } catch (RuntimeException invalid) {
         // 单条控制器条目失败 -> 跳过并继续
         skipped.add(invalid.getMessage());
@@ -255,7 +312,7 @@ public final class DedicatedControllerCatalog {
 
     for (var machine : MACHINES) {
       for (boolean factory : new boolean[]{false, true}) {
-        if (roles.add(factory + ":" + machine.id())) {
+        if (controllerEnabled(machine, factory) && roles.add(factory + ":" + machine.id())) {
           String id = (factory ? "factory/" : "ordinary/") + machine.id().getNamespace() + "/" + machine.id().getPath();
           result.add(
               new Entry(
@@ -278,6 +335,53 @@ public final class DedicatedControllerCatalog {
       }
     }
     return List.copyOf(result);
+  }
+
+  private static boolean controllerEnabled(ResourceLocation machine, boolean factory) {
+    return MACHINES.stream().filter(entry -> entry.id().equals(machine))
+        .anyMatch(entry -> controllerEnabled(entry, factory));
+  }
+
+  private static boolean controllerEnabled(Machine machine, boolean factory) {
+    return factory ? machine.hasFactory() || FACTORIES_BY_DEFAULT : !machine.factoryOnly();
+  }
+
+  private static Map<ControllerAppearanceState, Appearance> appearances(JsonObject source, Appearance base) {
+    if (!source.has("appearances")) {
+      return Map.of();
+    }
+    if (!source.get("appearances").isJsonObject()) {
+      throw new IllegalArgumentException("Expected object controller field: appearances");
+    }
+    var result = new EnumMap<ControllerAppearanceState, Appearance>(ControllerAppearanceState.class);
+    for (var entry : source.getAsJsonObject("appearances").entrySet()) {
+      ControllerAppearanceState state = null;
+      for (var candidate : ControllerAppearanceState.values()) {
+        if (candidate.getSerializedName().equals(entry.getKey())) {
+          state = candidate;
+          break;
+        }
+      }
+      if (state == null) {
+        throw new IllegalArgumentException("Unknown controller appearance: " + entry.getKey());
+      }
+      if (!entry.getValue().isJsonObject()) {
+        throw new IllegalArgumentException("Expected object controller appearance: " + entry.getKey());
+      }
+      var value = entry.getValue().getAsJsonObject();
+      if (!Set.of("casing", "overlay", "model").containsAll(value.keySet())) {
+        throw new IllegalArgumentException("Unknown controller appearance field: " + entry.getKey());
+      }
+      var casing = value.has("casing") ? location(text(value, "casing", null)) : base.casing();
+      var overlay = value.has("overlay") ? location(text(value, "overlay", null)) : base.overlay();
+      var model = base.model();
+      if (value.has("model")) {
+        model = value.get("model").isJsonNull() ? null : location(text(value, "model", null));
+      }
+      result.put(state, new Appearance(casing, overlay, model));
+    }
+
+    return result;
   }
 
   private static String text(JsonObject object, String key, String fallback) {
@@ -305,7 +409,7 @@ public final class DedicatedControllerCatalog {
 
   public static int color(ResourceLocation id) {
     return MACHINES.stream().filter(machine -> machine.id().equals(id)).findFirst().map(Machine::color)
-        .orElse(0xFFFFFF);
+        .orElse(MachineStartupConfig.defaultCasingColorAtStartup());
   }
 
   /**
@@ -335,7 +439,7 @@ public final class DedicatedControllerCatalog {
     }
     var value = root.has("machine_color") ? root.get("machine_color") : root.get("color");
     if (value == null) {
-      return 0xFFFFFF;
+      return MachineStartupConfig.defaultCasingColorAtStartup();
     }
     if (!value.isJsonPrimitive() || !value.getAsJsonPrimitive().isString()) {
       throw new IllegalArgumentException("Machine color must be a six-digit hexadecimal string");

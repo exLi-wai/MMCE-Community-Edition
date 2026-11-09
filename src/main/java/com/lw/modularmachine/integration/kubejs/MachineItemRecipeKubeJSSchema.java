@@ -52,7 +52,9 @@ public final class MachineItemRecipeKubeJSSchema {
   private static final RecipeKey<Long> ENERGY = NumberComponent.NON_NEGATIVE_LONG.instance().otherKey("energy_per_tick")
       .optional(0L);
   private static final RecipeKey<String> FAILURE = StringComponent.STRING.instance().otherKey("failure_action")
-      .optional("still");
+      .defaultOptional();
+  private static final RecipeKey<Boolean> PARALLELIZED = BooleanComponent.BOOLEAN.instance().otherKey("parallelized")
+      .defaultOptional();
   private static final RecipeKey<Long> SEED = NumberComponent.NON_NEGATIVE_LONG.instance().otherKey("random_seed")
       .optional(0L);
   private static final RecipeKey<List<List<CustomObjectRecipeComponent.Value>>> INPUTS = ITEM_ROW.asList()
@@ -87,6 +89,7 @@ public final class MachineItemRecipeKubeJSSchema {
       FLUID_INPUTS,
       FLUID_OUTPUTS,
       FAILURE,
+      PARALLELIZED,
       SEED,
       INTERFACE_INPUTS,
       SELECTOR_VALUE,

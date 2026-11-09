@@ -1,8 +1,10 @@
 package com.lw.modularmachine.block;
 
 import com.lw.modularmachine.blockentity.MachinePortBlockEntity;
+import com.lw.modularmachine.config.MachineConfig;
 import com.lw.modularmachine.machine.HatchTier;
 import com.lw.modularmachine.machine.PortKind;
+import com.lw.modularmachine.util.minecraft.energy.EnergyDisplay;
 import com.mojang.serialization.MapCodec;
 import java.util.List;
 import net.minecraft.core.BlockPos;
@@ -80,13 +82,22 @@ public final class MachinePortBlock extends BaseEntityBlock {
         }
       }
       case ENERGY -> {
-        tooltip.add(
-            Component.translatable("tooltip.mmcece.energy_hatch.capacity", tier.capacity())
-                .withStyle(ChatFormatting.GRAY));
-        tooltip.add(
-            Component.translatable(
-                kind.isInput() ? "tooltip.mmcece.energy_hatch.input" : "tooltip.mmcece.energy_hatch.output",
-                tier.transferLimit()).withStyle(ChatFormatting.GRAY));
+        long capacity = MachineConfig.energyHatchCapacity(tier);
+        long transfer = MachineConfig.energyHatchTransfer(tier);
+        for (var unit : EnergyDisplay.hatchTooltipUnits()) {
+          String suffix = unit.converted() ? "_converted" : "_unit";
+          tooltip.add(
+              Component.translatable(
+                  "tooltip.mmcece.energy_hatch.capacity" + suffix,
+                  EnergyDisplay.format(capacity, unit),
+                  unit.component()).withStyle(ChatFormatting.GRAY));
+          tooltip.add(
+              Component.translatable(
+                  (kind
+                      .isInput() ? "tooltip.mmcece.energy_hatch.input" : "tooltip.mmcece.energy_hatch.output") + suffix,
+                  EnergyDisplay.format(transfer, unit),
+                  unit.component()).withStyle(ChatFormatting.GRAY));
+        }
       }
     }
   }

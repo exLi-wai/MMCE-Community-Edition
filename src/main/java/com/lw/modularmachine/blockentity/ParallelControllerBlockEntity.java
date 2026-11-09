@@ -1,6 +1,7 @@
 package com.lw.modularmachine.blockentity;
 
 import com.lw.modularmachine.api.component.MachineColorable;
+import com.lw.modularmachine.config.MachineConfig;
 
 import com.lw.modularmachine.block.ParallelControllerBlock;
 import com.lw.modularmachine.machine.ParallelControllerTier;
@@ -31,7 +32,7 @@ import net.minecraft.world.level.block.state.BlockState;
  */
 public final class ParallelControllerBlockEntity extends BlockEntity implements MenuProvider, MachineColorable {
   private final ParallelControllerTier tier;
-  private int machineColor = 0xFFFFFF;
+  private int machineColor = MachineConfig.defaultCasingColor();
   private boolean machineColorAssigned;
   private UUID instance = UUID.randomUUID();
   private Integer configured;
@@ -80,8 +81,9 @@ public final class ParallelControllerBlockEntity extends BlockEntity implements 
   @Override
   public void setMachineColor(int color) {
     color &= 0xFFFFFF;
+    boolean wasAssigned = machineColorAssigned;
     machineColorAssigned = true;
-    if (machineColor != color) {
+    if (!wasAssigned || machineColor != color) {
       machineColor = color;
       MachineColorable.update(this);
     }

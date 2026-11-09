@@ -27,6 +27,8 @@ class FrozenItemRunTest {
     definition.putString("type", MachineRecipeJson.TYPE);
     definition.putString("machine", "mmcece:test");
     definition.putInt("duration", 20);
+    definition.putString("failure_action", "still");
+    definition.putBoolean("parallelized", true);
     var inputs = new ListTag();
     inputs.add(requirement("minecraft:dirt"));
     definition.put("inputs", inputs);
@@ -78,6 +80,25 @@ class FrozenItemRunTest {
     var restored = FrozenItemRun.read(run.save());
     assertEquals(128, restored.energyPerTick());
     assertEquals(run.runId(), restored.runId());
+  }
+
+  @Test
+  void preservesResolvedParallelAndFailureDefaultsAcrossNbtRecovery() {
+    var source = valid();
+    source.putInt("progress", 5);
+    source.putLong("last_progress_tick", 10);
+    var definition = source.getCompound("definition");
+    definition.putBoolean("parallelized", false);
+    definition.putString("failure_action", "reset");
+
+    var saved = FrozenItemRun.read(source).save();
+    var restored = FrozenItemRun.read(saved);
+
+    assertFalse(restored.definition().getBoolean("parallelized"));
+    assertEquals(0, restored.afterResourceFailure(11).progress());
+    assertEquals(saved, restored.save());
+    saved.getCompound("definition").putByte("parallelized", (byte) 2);
+    assertThrows(IllegalArgumentException.class, () -> FrozenItemRun.read(saved));
   }
 
   @Test

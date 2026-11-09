@@ -1,6 +1,8 @@
 package com.lw.modularmachine.block;
 
 import com.lw.modularmachine.blockentity.FactoryControllerBlockEntity;
+import com.lw.modularmachine.machine.appearance.ControllerAppearance;
+import com.lw.modularmachine.machine.appearance.ControllerAppearanceState;
 import com.lw.modularmachine.machine.controller.DedicatedControllerCatalog.Entry;
 import com.lw.modularmachine.machine.controller.DedicatedControllerCatalog;
 import com.lw.modularmachine.machine.orientation.ControllerOrientationActions;
@@ -33,6 +35,7 @@ import net.minecraft.world.level.block.state.StateDefinition;
 import net.minecraft.world.level.block.state.properties.BlockStateProperties;
 import net.minecraft.world.level.block.state.properties.DirectionProperty;
 import net.minecraft.world.level.block.state.properties.BooleanProperty;
+import net.minecraft.world.level.block.state.properties.EnumProperty;
 import net.minecraft.world.level.block.state.properties.IntegerProperty;
 import net.minecraft.world.level.storage.loot.LootParams.Builder;
 import net.minecraft.world.level.storage.loot.parameters.LootContextParams;
@@ -45,7 +48,9 @@ public final class FactoryControllerBlock extends BaseEntityBlock {
   public static final MapCodec<FactoryControllerBlock> CODEC = simpleCodec(FactoryControllerBlock::new);
   public static final DirectionProperty FACING = BlockStateProperties.FACING;
   public static final IntegerProperty ROLL = IntegerProperty.create("roll", 0, 3);
-  public static final BooleanProperty FORMED = BooleanProperty.create("formed");
+  public static final BooleanProperty FORMED = ControllerAppearance.FORMED;
+  public static final BooleanProperty HIDDEN = ControllerAppearance.HIDDEN;
+  public static final EnumProperty<ControllerAppearanceState> APPEARANCE = ControllerAppearance.APPEARANCE;
 
   private final Entry dedicated;
   public FactoryControllerBlock(Properties properties) {
@@ -55,7 +60,8 @@ public final class FactoryControllerBlock extends BaseEntityBlock {
     super(properties);
     this.dedicated = dedicated;
     registerDefaultState(
-        stateDefinition.any().setValue(FACING, Direction.NORTH).setValue(ROLL, 0).setValue(FORMED, false));
+        stateDefinition.any().setValue(FACING, Direction.NORTH).setValue(ROLL, 0).setValue(FORMED, false)
+            .setValue(HIDDEN, false).setValue(APPEARANCE, ControllerAppearanceState.UNFORMED));
   }
 
   public Entry dedicated() {
@@ -73,12 +79,12 @@ public final class FactoryControllerBlock extends BaseEntityBlock {
 
   @Override
   protected RenderShape getRenderShape(BlockState state) {
-    return state.getValue(FORMED) ? RenderShape.INVISIBLE : RenderShape.MODEL;
+    return state.getValue(HIDDEN) ? RenderShape.INVISIBLE : RenderShape.MODEL;
   }
 
   @Override
   protected void createBlockStateDefinition(StateDefinition.Builder<Block, BlockState> builder) {
-    builder.add(FACING, ROLL, FORMED);
+    builder.add(FACING, ROLL, FORMED, HIDDEN, APPEARANCE);
   }
 
   @Override

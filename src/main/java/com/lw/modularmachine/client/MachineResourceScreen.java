@@ -3,6 +3,7 @@ package com.lw.modularmachine.client;
 import com.lw.modularmachine.machine.PortKind;
 import com.lw.modularmachine.menu.MachineResourceMenu;
 import com.lw.modularmachine.network.MachinePayloads;
+import com.lw.modularmachine.util.minecraft.energy.EnergyDisplay;
 import java.util.List;
 import net.minecraft.client.Minecraft;
 import net.minecraft.client.gui.GuiGraphics;
@@ -127,10 +128,11 @@ public final class MachineResourceScreen extends AbstractContainerScreen<Machine
           font,
           List.of(
               Component.translatable(
-                  "message.mmcece.energy_port",
-                  status.amount(),
-                  status.capacity(),
-                  status.transferLimit())),
+                  "message.mmcece.energy_port_unit",
+                  EnergyDisplay.format(status.amount()),
+                  EnergyDisplay.format(status.capacity()),
+                  EnergyDisplay.format(status.transferLimit()),
+                  EnergyDisplay.unitComponent())),
           mouseX,
           mouseY);
     } else {

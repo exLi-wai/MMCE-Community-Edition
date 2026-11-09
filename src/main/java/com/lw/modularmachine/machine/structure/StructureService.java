@@ -5,6 +5,10 @@ import com.lw.modularmachine.block.MachineControllerBlock;
 import com.lw.modularmachine.block.ParallelControllerBlock;
 import com.lw.modularmachine.api.component.MachineColorable;
 import com.lw.modularmachine.blockentity.MachineControllerBlockEntity;
+import com.lw.modularmachine.blockentity.FactoryControllerBlockEntity;
+import com.lw.modularmachine.machine.appearance.MachineComponentType;
+import com.lw.modularmachine.machine.appearance.MachineComponentVisibility;
+import com.lw.modularmachine.machine.controller.MachineControllerScriptDataService;
 import com.lw.modularmachine.blockentity.SmartInterfaceBlockEntity;
 import com.lw.modularmachine.config.MachineConfig;
 import com.lw.modularmachine.api.orientation.MachineOrientation;
@@ -20,6 +24,7 @@ import java.util.HashMap;
 import java.util.HashSet;
 import java.util.IdentityHashMap;
 import java.util.LinkedHashSet;
+import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.Set;
@@ -149,6 +154,7 @@ public final class StructureService {
     if (!changed && !force) {
       return;
     }
+    state.scriptCleanup.remove(controller);
     if (anchor.definition != definition || anchor.orientation != orientation) {
       clearDynamicWatches(state, anchor);
     }
@@ -325,7 +331,7 @@ public final class StructureService {
       return;
     }
     for (Registration registration : watched) {
-      if (!registration.valid || !registration.pattern.contains(pos)) {
+      if (!registration.valid || !observesComponentChange(registration.pattern, pos)) {
         continue;
       }
       int group = registration.pattern.groupFor(pos);
@@ -355,8 +361,21 @@ public final class StructureService {
     }
   }
 
+  /**
+   * The owner origin has its own identity/orientation gate and is never a part.
+   */
+  static boolean observesComponentChange(CompiledStructure pattern, BlockPos position) {
+    return observesDynamicChange(pattern.origin, position) && pattern.contains(position);
+  }
+
+  static boolean observesDynamicChange(BlockPos origin, BlockPos position) {
+    return !position.equals(origin);
+  }
+
   private static void markDirty(LevelState state, Registration registration, int group, boolean all, boolean resetColors, long now) {
     Anchor anchor = registration.owner;
+    state.scriptCleanup.remove(anchor.controller);
+    registration.suspendVisibility();
     if (resetColors) {
       registration.resetColors();
     }
@@ -375,6 +394,7 @@ public final class StructureService {
       }
       registration.verifier.markDirty(group, now);
     }
+    refreshAppearance(anchor.controller);
     state.enqueue(anchor);
   }
 
@@ -426,9 +446,12 @@ public final class StructureService {
       if (loaded) {
         markDirty(state, registration, -1, true, true, now);
       } else {
+        state.scriptCleanup.remove(registration.controller);
+        registration.suspendVisibility();
         registration.modifiers.markAllDirty(now);
         registration.verifier.unavailable(now);
         registration.discardCapture();
+        refreshAppearance(registration.controller);
       }
     }
   }
@@ -447,9 +470,9 @@ public final class StructureService {
       return 0;
     }
     state.drainReady();
-    int used = 0;
-    int idle = 0;
     long deadline = System.nanoTime() + timeBudgetNanos;
+    int used = advanceScriptCleanup(state, level, Math.min(budget, 32), deadline);
+    int idle = 0;
     while (used < budget && System.nanoTime() < deadline && !state.queue.isEmpty()) {
       var iterator = state.queue.iterator();
       Work work = iterator.next();
@@ -526,7 +549,11 @@ public final class StructureService {
       anchor.dynamicWatches.add(segment, position, contents);
     });
     if (anchor.dynamicMatcher.complete() && !anchor.dynamicMatcher.matched()) {
-      fail(state, anchor, anchor.dynamicMatcher.failure().reason(), level.getGameTime());
+      var reason = anchor.dynamicMatcher.failure().reason();
+      fail(state, anchor, reason, level.getGameTime());
+      if (reason == VerificationFailure.MISMATCH) {
+        definiteStructureMismatch(anchor.controller);
+      }
     }
     return used;
   }
@@ -537,7 +564,9 @@ public final class StructureService {
       return;
     }
     for (var anchor : List.copyOf(watched)) {
-      restartDynamic(state, level, anchor, anchor.dynamicWatches.affected(position, contents));
+      if (observesDynamicChange(anchor.controller.structurePosition(), position)) {
+        restartDynamic(state, level, anchor, anchor.dynamicWatches.affected(position, contents));
+      }
     }
   }
 
@@ -545,6 +574,7 @@ public final class StructureService {
     if (!anchor.alive || affected == 0) {
       return;
     }
+    state.scriptCleanup.remove(anchor.controller);
     if (anchor.dynamicMatcher == null || !matchesActual(level, anchor)) {
       request(anchor.controller, true, false);
       return;
@@ -561,11 +591,13 @@ public final class StructureService {
     anchor.preparing = true;
     anchor.failure = VerificationFailure.UNVERIFIED;
     if (anchor.registration != null) {
+      anchor.registration.suspendVisibility();
       anchor.registration.verifier.invalidateDependency(now);
       anchor.registration.discardCapture();
     } else {
       anchor.controller.attach(null);
     }
+    refreshAppearance(anchor.controller);
     state.enqueue(anchor);
   }
 
@@ -714,6 +746,13 @@ public final class StructureService {
         && !registration.colorsComplete) {
       used += registration.advanceColors(level, budget - used);
     }
+    if (registration != null && used < budget && registration.canCommit(level) && !registration.visibilityComplete) {
+      used += registration.advanceVisibility(level, budget - used);
+    }
+    if (registration != null && registration.visibility != null) {
+      registration.visibility.active(registration.canCommit(level));
+    }
+    refreshAppearance(anchor.controller);
     return used;
   }
 
@@ -732,6 +771,7 @@ public final class StructureService {
       return;
     }
     registration.valid = false;
+    registration.resetVisibility();
     registration.discardCapture();
     registration.verifier.rejectProof(VerificationFailure.STALE_BINDING, -1, registration.owner.roundStarted);
     Anchor owner = registration.owner;
@@ -789,6 +829,7 @@ public final class StructureService {
   }
 
   private static void removeAnchor(LevelState state, Anchor anchor) {
+    state.scriptCleanup.remove(anchor.controller);
     state.anchors.remove(anchor.controller.structurePosition().asLong(), anchor);
     anchor.alive = false;
     state.queue.remove(anchor);
@@ -807,6 +848,79 @@ public final class StructureService {
         && level.hasChunkAt(controller.structurePosition())
         && level.getBlockEntity(controller.structurePosition()) == controller
         && controller.matchesStructureBlock(level.getBlockState(controller.structurePosition()));
+  }
+
+  private static void refreshAppearance(StructureSubject controller) {
+    if (controller instanceof MachineControllerBlockEntity ordinary) {
+      ordinary.refreshAppearanceState();
+    } else if (controller instanceof FactoryControllerBlockEntity factory) {
+      factory.refreshAppearanceState();
+    }
+  }
+
+  private static void definiteStructureMismatch(StructureSubject controller) {
+    if (!MachineConfig.cleanCustomDataOnStructureFailure()
+        || !(controller.structureLevel() instanceof ServerLevel level)
+        || !liveController(level, controller)) {
+      return;
+    }
+    var state = LEVELS.get(level);
+    if (state != null && !clearScriptState(controller)) {
+      var anchor = state.anchors.get(controller.structurePosition().asLong());
+      if (anchor != null) {
+        var registration = anchor.registration;
+        state.scriptCleanup.put(
+            controller,
+            new ScriptCleanup(
+                MachineControllerScriptDataService.revision(controller),
+                anchor,
+                anchor.generation,
+                registration,
+                registration == null ? -1 : registration.verifier.revision()));
+      }
+    }
+  }
+
+  private static boolean clearScriptState(StructureSubject controller) {
+    if (controller instanceof MachineControllerBlockEntity ordinary) {
+      return ordinary.clearControllerScriptState() || ordinary.scriptState().isEmpty();
+    }
+    if (controller instanceof FactoryControllerBlockEntity factory) {
+      return factory.clearControllerScriptState() || factory.scriptState().isEmpty();
+    }
+
+    return true;
+  }
+
+  private static int advanceScriptCleanup(LevelState state, ServerLevel level, int budget, long deadline) {
+    int used = 0;
+    int visits = Math.min(budget, state.scriptCleanup.size());
+    while (used < visits && System.nanoTime() < deadline) {
+      var iterator = state.scriptCleanup.entrySet().iterator();
+      var pending = iterator.next();
+      var controller = pending.getKey();
+      var cleanup = pending.getValue();
+      iterator.remove();
+      used++;
+      var anchor = state.anchors.get(controller.structurePosition().asLong());
+      if (!MachineConfig.cleanCustomDataOnStructureFailure()
+          || !liveController(level, controller)
+          || MachineControllerScriptDataService.revision(controller) != cleanup.scriptRevision()
+          || anchor != cleanup.anchor()
+          || anchor.generation != cleanup.generation()
+          || anchor.registration != cleanup.registration()
+          || anchor.registration != null
+              && (anchor.registration.verifier.revision() != cleanup.structureRevision()
+                  || anchor.registration.verifier.failure() != VerificationFailure.MISMATCH)
+          || anchor.registration == null && anchor.failure != VerificationFailure.MISMATCH) {
+        continue;
+      }
+      if (!clearScriptState(controller)) {
+        state.scriptCleanup.put(controller, cleanup);
+      }
+    }
+
+    return used;
   }
 
   private static boolean matchesActual(ServerLevel level, Anchor anchor) {
@@ -966,7 +1080,7 @@ public final class StructureService {
                           && registration.verifier.canCommit()
                           && registration.modifiers.canCommit()
                           && registration.interfacesReady
-                          && !registration.colorsComplete));
+                          && (!registration.colorsComplete || !registration.visibilityComplete)));
     }
   }
 
@@ -1018,6 +1132,9 @@ public final class StructureService {
     private int subscribed, cleaned;
     private int colorCursor;
     private boolean colorsComplete;
+    private int visibilityCursor;
+    private boolean visibilityComplete;
+    private MachineComponentVisibility.Session visibility;
     private long conservativeModifierRevision = Long.MIN_VALUE;
     private boolean conservativeModifiersValidated;
     private StructureSnapshot.Capture capture;
@@ -1053,6 +1170,48 @@ public final class StructureService {
     private void resetColors() {
       colorCursor = 0;
       colorsComplete = false;
+      resetVisibility();
+    }
+
+    private void suspendVisibility() {
+      if (visibility != null) {
+        visibility.active(false);
+      }
+    }
+
+    private void resetVisibility() {
+      if (visibility != null) {
+        visibility.close();
+        visibility = null;
+      }
+      visibilityCursor = 0;
+      visibilityComplete = false;
+    }
+
+    private int advanceVisibility(ServerLevel level, int budget) {
+      var definition = pattern.definition;
+      if (!definition.hideComponentsWhenFormed()
+          || definition.hiddenComponentTypes().stream().noneMatch(type -> type != MachineComponentType.CONTROLLER)) {
+        visibilityComplete = true;
+        return 1;
+      }
+      if (visibility == null) {
+        visibility = MachineComponentVisibility.create(level, controller.structurePosition());
+      }
+      visibility.active(true);
+      int used = 0;
+      while (used < budget && visibilityCursor < definition.parts().size()) {
+        var position = pattern.position(visibilityCursor++);
+        var type = MachineComponentType.forBlock(level.getBlockState(position).getBlock());
+        if (type != MachineComponentType.CONTROLLER && definition.hidesComponent(type)) {
+          visibility.add(position);
+        }
+        used++;
+      }
+      visibility.flush();
+      visibilityComplete = visibilityCursor == definition.parts().size();
+
+      return used;
     }
 
     private void discardCapture() {
@@ -1080,7 +1239,10 @@ public final class StructureService {
           if (result.matched()) {
             modifiers.acceptSnapshot(result.modifiers());
           }
-          verifier.applySnapshot(captureRevision, result.failure(), result.failedIndex(), now);
+          boolean accepted = verifier.applySnapshot(captureRevision, result.failure(), result.failedIndex(), now);
+          if (accepted && result.failure() == VerificationFailure.MISMATCH) {
+            definiteStructureMismatch(controller);
+          }
         } catch (RuntimeException failure) {
           LOGGER.warn("Async structure matching failed at {}", controller.structurePosition(), failure);
           verifier.rejectProof(VerificationFailure.CHECK_ERROR, -1, now);
@@ -1112,7 +1274,10 @@ public final class StructureService {
             if (result.matched()) {
               modifiers.acceptSnapshot(result.modifiers());
             }
-            verifier.applySnapshot(captureRevision, result.failure(), result.failedIndex(), now);
+            boolean accepted = verifier.applySnapshot(captureRevision, result.failure(), result.failedIndex(), now);
+            if (accepted && result.failure() == VerificationFailure.MISMATCH) {
+              definiteStructureMismatch(controller);
+            }
           } catch (RuntimeException failure) {
             LOGGER.warn("Structure matching failed at {}", controller.structurePosition(), failure);
             verifier.rejectProof(VerificationFailure.CHECK_ERROR, -1, now);
@@ -1252,7 +1417,7 @@ public final class StructureService {
       var full = pattern.fullScan(level, reference);
       if (full.state() != VerificationState.CONFIRMED) {
         modifiers.markAllDirty(level.getGameTime());
-        verifier.rejectProof(full.failure(), full.failedIndex(), level.getGameTime());
+        rejectProof(full.failure(), full.failedIndex(), level.getGameTime());
         conservativeModifierRevision = verifier.revision();
         conservativeModifiersValidated = false;
         return false;
@@ -1261,6 +1426,21 @@ public final class StructureService {
       conservativeModifierRevision = verifier.revision();
       conservativeModifiersValidated = validReference;
       return validReference;
+    }
+
+    /**
+     * Internal proof revocation also immediately restores the visual components.
+     */
+    public void rejectProof(VerificationFailure failure, int failedIndex, long now) {
+      if (controller.structureLevel() instanceof ServerLevel level) {
+        ServerThreadGuard.require(level, "Structure proof rejected");
+      }
+      suspendVisibility();
+      verifier.rejectProof(failure, failedIndex, now);
+      if (failure == VerificationFailure.MISMATCH && failedIndex >= 0) {
+        definiteStructureMismatch(controller);
+      }
+      refreshAppearance(controller);
     }
 
     public boolean canCommit(ServerLevel level) {
@@ -1296,6 +1476,7 @@ public final class StructureService {
     final Map<Long, Set<Anchor>> dynamicSections = new HashMap<>();
     final Map<Long, Set<Anchor>> dynamicChunks = new HashMap<>();
     final LinkedHashSet<Work> queue = new LinkedHashSet<>();
+    final Map<StructureSubject, ScriptCleanup> scriptCleanup = new LinkedHashMap<>();
     final ConcurrentLinkedQueue<Anchor> ready = new ConcurrentLinkedQueue<>();
     long nextGeneration, revision;
 
@@ -1313,6 +1494,7 @@ public final class StructureService {
     }
 
     void clear() {
+      scriptCleanup.clear();
       for (Anchor anchor : anchors.values()) {
         anchor.alive = false;
         if (anchor.registration != null) {
@@ -1340,5 +1522,13 @@ public final class StructureService {
       queue.clear();
       ready.clear();
     }
+  }
+
+  private record ScriptCleanup(
+      long scriptRevision,
+      Anchor anchor,
+      long generation,
+      Registration registration,
+      long structureRevision) {
   }
 }

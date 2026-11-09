@@ -1,6 +1,7 @@
 package com.lw.modularmachine.client.recipe;
 
 import com.lw.modularmachine.machine.recipe.MachineRecipe;
+import com.lw.modularmachine.util.minecraft.energy.EnergyDisplay;
 import java.math.BigInteger;
 import java.text.NumberFormat;
 import java.util.ArrayList;
@@ -55,15 +56,16 @@ public final class MachineRecipeDisplay {
     if (recipe.energyPerTick() > 0) {
       result.add(
           Component.literal(
-              I18n.get("tooltip.machinery.energy.in") + I18n
-                  .get("tooltip.machinery.energy.tick", String.format("%,d", recipe.energyPerTick()), "FE")));
+              I18n.get("tooltip.machinery.energy.in") + I18n.get(
+                  "tooltip.machinery.energy.tick",
+                  EnergyDisplay.format(recipe.energyPerTick()),
+                  EnergyDisplay.unitComponent().getString())));
       result.add(
           Component.translatable(
               "tooltip.machinery.energy.total",
-              String.format(
-                  "%,d",
-                  BigInteger.valueOf(recipe.energyPerTick()).multiply(BigInteger.valueOf(recipe.duration()))),
-              "FE"));
+              EnergyDisplay
+                  .format(BigInteger.valueOf(recipe.energyPerTick()).multiply(BigInteger.valueOf(recipe.duration()))),
+              EnergyDisplay.unitComponent()));
     }
     for (var requirement : recipe.interfaceInputs()) {
       result.add(

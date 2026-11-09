@@ -2,9 +2,11 @@ package com.lw.modularmachine;
 
 import com.lw.modularmachine.command.MachineCommands;
 import com.lw.modularmachine.config.MachineConfig;
+import com.lw.modularmachine.config.MachineStartupConfig;
 import com.lw.modularmachine.item.WrenchInteractions;
 import com.lw.modularmachine.machine.assembly.AssemblyInteractions;
 import com.lw.modularmachine.machine.assembly.AssemblyService;
+import com.lw.modularmachine.machine.appearance.MachineComponentVisibility;
 import com.lw.modularmachine.machine.controller.DedicatedControllerResources;
 import com.lw.modularmachine.machine.factory.FactoryUpgradeService;
 import com.lw.modularmachine.machine.recipe.MachineRecipeRegistries;
@@ -18,6 +20,7 @@ import com.lw.modularmachine.network.RangedSelectionPayloads;
 import com.lw.modularmachine.machine.selection.RangedSelectionService;
 import com.lw.modularmachine.network.MachineJeiPayloads;
 import com.lw.modularmachine.network.MachineColorPayloads;
+import com.lw.modularmachine.network.MachineVisibilityPayloads;
 import com.lw.modularmachine.network.MachinePayloads;
 import com.lw.modularmachine.network.ParallelControllerPayloads;
 import com.lw.modularmachine.network.ProjectionPayloads;
@@ -51,6 +54,8 @@ public class ModularMachine {
       .create(Registries.CREATIVE_MODE_TAB, MODID);
 
   public ModularMachine(IEventBus modEventBus, ModContainer modContainer) {
+    modContainer.registerConfig(ModConfig.Type.STARTUP, MachineStartupConfig.SPEC, MachineStartupConfig.FILE_NAME);
+    MachineStartupConfig.enabledAtStartup();
     modEventBus.addListener(this::commonSetup);
     modEventBus.addListener(DedicatedControllerResources::register);
     modEventBus.addListener(ProjectionPayloads::register);
@@ -61,6 +66,7 @@ public class ModularMachine {
     modEventBus.addListener(SmartInterfacePayloads::register);
     modEventBus.addListener(MachineJeiPayloads::register);
     modEventBus.addListener(MachineColorPayloads::register);
+    modEventBus.addListener(MachineVisibilityPayloads::register);
     modEventBus.addListener(ParallelControllerPayloads::register);
     modEventBus.addListener(GroupInputPayloads::register);
     BLOCKS.register(modEventBus);
@@ -74,6 +80,7 @@ public class ModularMachine {
     NeoForge.EVENT_BUS.register(AssemblyService.class);
     NeoForge.EVENT_BUS.register(RangedSelectionService.class);
     NeoForge.EVENT_BUS.register(StructureService.class);
+    NeoForge.EVENT_BUS.register(MachineComponentVisibility.class);
     NeoForge.EVENT_BUS.register(MachineRecipeService.class);
     NeoForge.EVENT_BUS.register(MachineJeiPayloads.class);
     NeoForge.EVENT_BUS.register(FactoryUpgradeService.class);

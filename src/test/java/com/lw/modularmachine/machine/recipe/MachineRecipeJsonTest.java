@@ -109,6 +109,17 @@ class MachineRecipeJsonTest {
   }
 
   @Test
+  void requiresAJsonBooleanForTheParallelOverride() {
+    var root = valid();
+    root.addProperty("parallelized", false);
+    assertFalse(MachineRecipeJson.validate(root).parallelized());
+    root.addProperty("parallelized", true);
+    assertTrue(MachineRecipeJson.validate(root).parallelized());
+    root.addProperty("parallelized", 1);
+    reject(root, "$.parallelized");
+  }
+
+  @Test
   void validatesStableRandomSeed() {
     var root = valid();
     root.addProperty("random_seed", Long.MAX_VALUE);

@@ -52,7 +52,7 @@ public final class MachinePortBlockEntity extends BlockEntity implements MenuPro
   private long groupRevision;
   private int preferredInputGroup = 1;
   private CompoundTag unsupportedData;
-  private int machineColor = 0xFFFFFF;
+  private int machineColor = MachineConfig.defaultCasingColor();
   private boolean machineColorAssigned;
 
   public MachinePortBlockEntity(BlockPos pos, BlockState state) {
@@ -538,8 +538,9 @@ public final class MachinePortBlockEntity extends BlockEntity implements MenuPro
   @Override
   public void setMachineColor(int color) {
     color &= 0xFFFFFF;
+    boolean wasAssigned = machineColorAssigned;
     machineColorAssigned = true;
-    if (machineColor != color) {
+    if (!wasAssigned || machineColor != color) {
       machineColor = color;
       MachineColorable.update(this);
     }

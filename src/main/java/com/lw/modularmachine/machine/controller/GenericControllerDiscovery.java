@@ -12,6 +12,7 @@ import java.util.Comparator;
 import java.util.List;
 import java.util.Objects;
 import java.util.concurrent.CompletableFuture;
+import java.util.function.Supplier;
 import java.util.stream.IntStream;
 import net.minecraft.core.BlockPos;
 import net.minecraft.resources.ResourceLocation;
@@ -54,25 +55,16 @@ public final class GenericControllerDiscovery {
           && definition.allows(pose)
           && (!definition.requiresBlueprint() || fixed.equals(target)) ? fixed : null;
     }
-    long currentRevision = StructureService.worldRevision(level);
-    if (epoch != StructureService.definitionEpoch()
-        || revision != currentRevision
-        || orientation != pose
-        || !Objects.equals(blueprint, target)
-        || !Objects.equals(dedicated, fixed)
-        || factory != factoryController) {
-      clear();
-      epoch = StructureService.definitionEpoch();
-      revision = currentRevision;
-      orientation = pose;
-      blueprint = target;
-      dedicated = fixed;
-      factory = factoryController;
-      candidates = StructureService.definitionsSnapshot().values().stream()
-          .filter(definition -> !definition.requiresBlueprint() && (factory || !definition.factoryOnly()))
-          .sorted(Comparator.comparing(MachineDefinition::id)).toList();
-    }
-    if (candidateIndex >= candidates.size()) {
+    if (!refresh(
+        StructureService.definitionEpoch(),
+        StructureService.worldRevision(level),
+        pose,
+        target,
+        fixed,
+        factoryController,
+        () -> StructureService.definitionsSnapshot().values().stream()
+            .filter(definition -> !definition.requiresBlueprint() && (factoryController || !definition.factoryOnly()))
+            .sorted(Comparator.comparing(MachineDefinition::id)).toList())) {
       return null;
     }
     if (budgetServer != level.getServer() || tick != level.getServer().getTickCount()) {
@@ -96,14 +88,9 @@ public final class GenericControllerDiscovery {
         return null;
       }
       if (definition.hasDynamicPatterns()) {
-        if (dynamicMatcher == null) {
-          if (dynamicPreparation == null) {
-            dynamicPreparation = AsyncStructureWork.submit(() -> new DynamicStructureMatcher(definition, origin, pose));
-          }
-          if (dynamicPreparation == null || !dynamicPreparation.isDone()) {
-            return null;
-          }
-          dynamicMatcher = dynamicPreparation.join();
+        if (!prepareDynamic(
+            () -> AsyncStructureWork.submit(() -> new DynamicStructureMatcher(definition, origin, pose)))) {
+          return null;
         }
         while (!dynamicMatcher.complete() && System.nanoTime() < deadline) {
           dynamicMatcher.advance(level, 128, (position, contents) -> {
@@ -159,7 +146,49 @@ public final class GenericControllerDiscovery {
     return null;
   }
 
-  private void next() {
+  /**
+   * Detached selection state; unrelated world changes wait for the current pass.
+   */
+  boolean refresh(long currentEpoch, long currentRevision, MachineOrientation pose, ResourceLocation target, ResourceLocation fixed, boolean factoryController, Supplier<List<MachineDefinition>> definitions) {
+    if (epoch != currentEpoch
+        || orientation != pose
+        || !Objects.equals(blueprint, target)
+        || !Objects.equals(dedicated, fixed)
+        || factory != factoryController) {
+      clear();
+      epoch = currentEpoch;
+      revision = currentRevision;
+      orientation = pose;
+      blueprint = target;
+      dedicated = fixed;
+      factory = factoryController;
+      candidates = List.copyOf(definitions.get());
+    } else if (candidateIndex >= candidates.size() && revision != currentRevision) {
+      // Coalesce world changes until this pass has completed. Detached preparation
+      // and partial captures must not restart every changing server tick.
+      candidateIndex = 0;
+      revision = currentRevision;
+    }
+
+    return candidateIndex < candidates.size();
+  }
+
+  boolean prepareDynamic(Supplier<CompletableFuture<DynamicStructureMatcher>> prepare) {
+    if (dynamicMatcher != null) {
+      return true;
+    }
+    if (dynamicPreparation == null) {
+      dynamicPreparation = prepare.get();
+    }
+    if (dynamicPreparation == null || !dynamicPreparation.isDone()) {
+      return false;
+    }
+    dynamicMatcher = dynamicPreparation.join();
+
+    return true;
+  }
+
+  void next() {
     candidateIndex++;
     if (permit != null) {
       permit.close();

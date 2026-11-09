@@ -6,6 +6,7 @@ import com.lw.modularmachine.blockentity.MachinePortBlockEntity;
 import com.lw.modularmachine.api.smart.SmartInterfaceBinding;
 import com.lw.modularmachine.blockentity.SmartInterfaceBlockEntity;
 import com.lw.modularmachine.machine.PortKind;
+import com.lw.modularmachine.machine.controller.MachineControllerScriptDataService;
 import com.lw.modularmachine.api.upgrade.FactoryUpgradeSnapshot;
 import com.lw.modularmachine.machine.parallel.ParallelCapacity.Snapshot;
 import com.lw.modularmachine.machine.parallel.ParallelCapacity;
@@ -34,6 +35,7 @@ public final class RecipeExecutionTicket {
   private final ServerLevel level;
   private final StructureService.Registration registration;
   private final long structureRevision;
+  private final long scriptRevision;
   private final long capturedTick;
   private final List<PortSnapshot> ports;
   private final CaptureMode mode;
@@ -49,6 +51,7 @@ public final class RecipeExecutionTicket {
     this.level = level;
     this.registration = registration;
     structureRevision = registration.verifier.revision();
+    scriptRevision = mode == CaptureMode.ALL ? MachineControllerScriptDataService.revision(owner) : -1;
     capturedTick = level.getGameTime();
     this.ports = List.copyOf(ports);
     this.mode = mode;
@@ -66,6 +69,7 @@ public final class RecipeExecutionTicket {
     level = source.level;
     registration = source.registration;
     structureRevision = source.structureRevision;
+    scriptRevision = source.scriptRevision;
     capturedTick = source.capturedTick;
     ports = source.ports;
     mode = source.mode;
@@ -327,6 +331,9 @@ public final class RecipeExecutionTicket {
   }
 
   private boolean matchesDependencies() {
+    if (scriptRevision >= 0 && MachineControllerScriptDataService.revision(owner) != scriptRevision) {
+      return false;
+    }
     if (ordinaryUpgrades != null && !controller.upgradeSnapshotCurrent(ordinaryUpgrades)) {
       return false;
     }
@@ -386,7 +393,8 @@ public final class RecipeExecutionTicket {
       }
     }
 
-    return (ordinaryUpgrades == null || controller.upgradeSnapshotCurrent(ordinaryUpgrades))
+    return (scriptRevision < 0 || MachineControllerScriptDataService.revision(owner) == scriptRevision)
+        && (ordinaryUpgrades == null || controller.upgradeSnapshotCurrent(ordinaryUpgrades))
         && (parallel == null || parallel.current())
         && (mode != CaptureMode.ALL
             || !(owner instanceof FactoryControllerBlockEntity factory)

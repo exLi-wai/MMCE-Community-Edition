@@ -4,7 +4,11 @@ import com.lw.modularmachine.machine.factory.UpgradeRecipeChecks;
 import com.lw.modularmachine.machine.factory.UpgradeLifecyclePublisher;
 import com.lw.modularmachine.block.FactoryControllerBlock;
 import com.lw.modularmachine.config.MachineConfig;
+import com.lw.modularmachine.machine.appearance.ControllerAppearance;
+import com.lw.modularmachine.machine.appearance.MachineComponentType;
 import com.lw.modularmachine.machine.controller.GenericControllerDiscovery;
+import com.lw.modularmachine.machine.controller.ControllerScriptState;
+import com.lw.modularmachine.machine.controller.ControllerScriptStateOwner;
 import com.lw.modularmachine.machine.factory.FactoryRunSet;
 import com.lw.modularmachine.machine.factory.FactoryRunSetCodec;
 import com.lw.modularmachine.machine.factory.FactoryScheduler;
@@ -77,7 +81,7 @@ import net.minecraft.world.level.block.entity.BlockEntity;
 import net.minecraft.world.level.block.state.BlockState;
 import org.jetbrains.annotations.ApiStatus;
 
-public final class FactoryControllerBlockEntity extends BlockEntity implements MenuProvider, UpgradeBusOwner {
+public final class FactoryControllerBlockEntity extends BlockEntity implements MenuProvider, UpgradeBusOwner, ControllerScriptStateOwner {
   private static final int FACTORY_SCHEMA = 7;
   private static final int SEARCH_RETRY_INITIAL = 5;
   private static final int SEARCH_RETRY_MAX = 80;
@@ -86,6 +90,8 @@ public final class FactoryControllerBlockEntity extends BlockEntity implements M
   private long configurationRevision;
   private boolean persistentStateValid = true;
   private CompoundTag opaqueFactoryState;
+  private ControllerScriptState controllerScriptState = ControllerScriptState.empty();
+  private Tag unsupportedScriptData;
   private final GenericControllerDiscovery genericDiscovery = new GenericControllerDiscovery();
   private ResourceLocation machineId = ControllerPlacementData.UNBOUND_MACHINE;
   private final ControllerBlueprintInventory blueprintInventory = new ControllerBlueprintInventory(
@@ -164,6 +170,7 @@ public final class FactoryControllerBlockEntity extends BlockEntity implements M
       configureMachine(blueprintInventory.machine());
     }
     StructureService.register(this);
+    refreshAppearanceState();
   }
 
   @Override
@@ -208,8 +215,113 @@ public final class FactoryControllerBlockEntity extends BlockEntity implements M
     return scheduler.channels().size();
   }
 
+  @ApiStatus.Internal
+  public int maximumBusinessThreads() {
+    requireUpgradeThread();
+    var definition = StructureService.definition(machineId);
+
+    return definition == null ? MachineConfig.defaultFactoryMaxThreads() : definition.maximumFactoryThreads();
+  }
+
+  private boolean threadStartAllowed(String threadId) {
+    int limit = maximumBusinessThreads();
+    int index = 0;
+    boolean available = false;
+    for (var thread : scheduler.channels()) {
+      if (thread.threadId().equals(threadId)) {
+        available = index < limit;
+        break;
+      }
+      index++;
+    }
+    if (!available) {
+      return false;
+    }
+    int occupied = 0;
+    for (var entry : runSets.entrySet()) {
+      if (!entry.getKey().equals(threadId) && !entry.getValue().runs().isEmpty()) {
+        occupied++;
+      }
+    }
+    for (String starting : startingThreads) {
+      if (!starting.equals(threadId) && runSet(starting).runs().isEmpty()) {
+        occupied++;
+      }
+    }
+
+    return occupied < limit;
+  }
+
   public boolean persistentStateValid() {
-    return persistentStateValid && blueprintInventory.valid();
+    return persistentStateValid && unsupportedScriptData == null && blueprintInventory.valid();
+  }
+
+  @Override
+  @ApiStatus.Internal
+  public ControllerScriptState scriptState() {
+    if (level instanceof ServerLevel server) {
+      ServerThreadGuard.require(server, "Factory controller script state read");
+    }
+
+    return controllerScriptState;
+  }
+
+  @Override
+  @ApiStatus.Internal
+  public boolean scriptStateAvailable() {
+    return persistentStateValid();
+  }
+
+  @Override
+  @ApiStatus.Internal
+  public boolean scriptStateEditingAllowed() {
+    if (!(level instanceof ServerLevel server)) {
+      return false;
+    }
+    ServerThreadGuard.require(server, "Factory controller script state edited");
+
+    return persistentStateValid()
+        && !isRemoved()
+        && server.hasChunkAt(worldPosition)
+        && server.getBlockEntity(worldPosition) == this
+        && matchesStructureBlock(server.getBlockState(worldPosition))
+        && startingThreads.isEmpty()
+        && !UpgradeLifecyclePublisher.isDispatchingAny()
+        && !RecipeLifecyclePublisher.isDispatching()
+        && !SmartInterfaceEventPublisher.isDispatching();
+  }
+
+  @Override
+  @ApiStatus.Internal
+  public boolean replaceControllerScriptState(ControllerScriptState expected, ControllerScriptState replacement) {
+    Objects.requireNonNull(expected, "expected");
+    Objects.requireNonNull(replacement, "replacement");
+    if (!scriptStateEditingAllowed()
+        || controllerScriptState != expected
+        || expected.revision() == Long.MAX_VALUE
+        || replacement.revision() != expected.revision() + 1) {
+      return false;
+    }
+    controllerScriptState = replacement;
+    clearSearchState();
+    MachineRecipeService.invalidateControllerScriptData(this);
+    setChanged();
+
+    return true;
+  }
+
+  @Override
+  @ApiStatus.Internal
+  public boolean clearControllerScriptState() {
+    if (!scriptStateEditingAllowed()) {
+      return false;
+    }
+    var previous = controllerScriptState;
+    if (previous.isEmpty()) {
+      return true;
+    }
+
+    return replaceControllerScriptState(previous, previous.cleared());
   }
 
   public ControllerBlueprintInventory blueprintInventory() {
@@ -306,7 +418,7 @@ public final class FactoryControllerBlockEntity extends BlockEntity implements M
     this.registration = registration;
     detachedState = VerificationState.PENDING;
     detachedFailure = VerificationFailure.UNVERIFIED;
-    syncFormedState();
+    refreshAppearanceState();
   }
 
   @Override
@@ -316,21 +428,24 @@ public final class FactoryControllerBlockEntity extends BlockEntity implements M
     registration = null;
     detachedState = VerificationState.INVALID;
     detachedFailure = failure;
-    syncFormedState();
+    refreshAppearanceState();
   }
 
-  private void syncFormedState() {
-    if (level == null || !(getBlockState().getBlock() instanceof FactoryControllerBlock)) {
+  @ApiStatus.Internal
+  public void refreshAppearanceState() {
+    if (!(level instanceof ServerLevel server) || !(getBlockState().getBlock() instanceof FactoryControllerBlock)) {
       return;
     }
-    var state = getBlockState();
-    var definition = StructureService.definition(machineId);
-    boolean formed = verificationState() == VerificationState.CONFIRMED
-        && definition != null
-        && definition.hideComponentsWhenFormed();
-    if (state.hasProperty(FactoryControllerBlock.FORMED) && state.getValue(FactoryControllerBlock.FORMED) != formed) {
-      level.setBlock(worldPosition, state.setValue(FactoryControllerBlock.FORMED, formed), 3);
+    ServerThreadGuard.require(server, "Factory appearance refreshed");
+    if (isRemoved() || !server.hasChunkAt(worldPosition) || server.getBlockEntity(worldPosition) != this) {
+      return;
     }
+    var definition = StructureService.definition(machineId);
+    var verification = verificationState();
+    boolean formed = verification == VerificationState.CONFIRMED && definition != null;
+    boolean hidden = formed && definition.hidesComponent(MachineComponentType.CONTROLLER);
+    var appearance = ControllerAppearance.factory(verification, scheduler.channels(), runSets, upgradeSourcesValid);
+    ControllerAppearance.sync(this, formed, hidden, appearance);
   }
 
   @Override
@@ -417,6 +532,9 @@ public final class FactoryControllerBlockEntity extends BlockEntity implements M
     if (definition == null) {
       return ConfigurationResult.UNKNOWN_DEFINITION;
     }
+    if (preset.threads().size() > definition.maximumFactoryThreads()) {
+      return ConfigurationResult.LIMIT_REACHED;
+    }
     var server = (ServerLevel) level;
     long epoch = StructureService.definitionEpoch();
     long revision = configurationRevision;
@@ -479,6 +597,14 @@ public final class FactoryControllerBlockEntity extends BlockEntity implements M
   }
 
   private void installConfiguration(FactoryScheduler replacement) {
+    if (replacement.channels().size() > maximumBusinessThreads()) {
+      var existing = scheduler.channels().stream().map(FactoryThreadState::threadId)
+          .collect(java.util.stream.Collectors.toSet());
+      if (replacement.channels().size() >= scheduler.channels().size()
+          || replacement.channels().stream().anyMatch(thread -> !existing.contains(thread.threadId()))) {
+        throw new IllegalArgumentException("Factory configuration exceeds its machine business thread limit");
+      }
+    }
     // Retired channels must not lose their revision watermark before a later paste
     // reuses an ID.
     long highestRevision = configurationRevision;
@@ -561,7 +687,7 @@ public final class FactoryControllerBlockEntity extends BlockEntity implements M
     if (!startingThreads.isEmpty()) {
       return ConfigurationResult.BUSY;
     }
-    if (scheduler.channels().size() >= FactoryThreadStateCodec.MAX_THREADS) {
+    if (scheduler.channels().size() >= maximumBusinessThreads()) {
       return ConfigurationResult.LIMIT_REACHED;
     }
     if (scheduler.channel(id) != null) {
@@ -774,6 +900,7 @@ public final class FactoryControllerBlockEntity extends BlockEntity implements M
     if (!persistentStateValid
         || !upgradeSourcesValid
         || thread == null
+        || !threadStartAllowed(threadId)
         || pendingUpgradeSnapshot != null && !thread.upgradeSnapshot().equals(pendingUpgradeSnapshot)
         || !runSet(threadId).runs().isEmpty()
         || !startingThreads.add(threadId)) {
@@ -792,6 +919,10 @@ public final class FactoryControllerBlockEntity extends BlockEntity implements M
   public int effectiveParallelLimit(String threadId) {
     var thread = scheduler.channel(threadId);
     if (thread == null) {
+      return 1;
+    }
+    var definition = StructureService.definition(machineId);
+    if (definition != null && !definition.parallelizable()) {
       return 1;
     }
     if (!(level instanceof ServerLevel server) || registration == null || !registration.canCommit(server)) {
@@ -819,7 +950,7 @@ public final class FactoryControllerBlockEntity extends BlockEntity implements M
   }
 
   public void installRuns(String threadId, List<FrozenItemRun> runs) {
-    if (!startingThreads.contains(threadId) || runs == null || runs.isEmpty()) {
+    if (!startingThreads.contains(threadId) || !threadStartAllowed(threadId) || runs == null || runs.isEmpty()) {
       throw new IllegalStateException("Invalid factory run installation");
     }
     var thread = scheduler.channels().stream().filter(candidate -> candidate.threadId().equals(threadId)).findFirst()
@@ -916,6 +1047,7 @@ public final class FactoryControllerBlockEntity extends BlockEntity implements M
     try {
       tickController(server);
     } finally {
+      refreshAppearanceState();
       RecipeLifecyclePublisher.machineTick(this);
     }
   }
@@ -938,7 +1070,6 @@ public final class FactoryControllerBlockEntity extends BlockEntity implements M
       }
     }
     StructureService.register(this);
-    syncFormedState();
     initializeThreadsIfNeeded();
     refreshAutomaticUpgradeBindings(server);
     refreshThreadGates();
@@ -1380,6 +1511,11 @@ public final class FactoryControllerBlockEntity extends BlockEntity implements M
           || thread.state() == FactoryThreadState.State.INVALID) {
         continue;
       }
+      if (!threadStartAllowed(thread.threadId())) {
+        removeSearchState(thread.threadId(), now);
+        updateThreadState(thread, FactoryThreadState.State.WAITING, FactoryThreadState.Reason.THREAD_LIMIT);
+        continue;
+      }
       var search = searches.get(thread.threadId());
       if (search != null && !search.dependenciesCurrent()) {
         removeSearchState(thread.threadId(), now);
@@ -1676,6 +1812,9 @@ public final class FactoryControllerBlockEntity extends BlockEntity implements M
   protected void saveAdditional(CompoundTag tag, HolderLookup.Provider registries) {
     super.saveAdditional(tag, registries);
     tag.put("controller_blueprint", blueprintInventory.save(registries));
+    tag.put(
+        ControllerScriptState.NBT_KEY,
+        unsupportedScriptData == null ? controllerScriptState.save() : unsupportedScriptData.copy());
     if (!persistentStateValid && opaqueFactoryState != null) {
       tag.merge(opaqueFactoryState);
       return;
@@ -1715,6 +1854,13 @@ public final class FactoryControllerBlockEntity extends BlockEntity implements M
     }
     runtimeUpgrades.clear();
     super.loadAdditional(tag, registries);
+    controllerScriptState = ControllerScriptState.empty();
+    unsupportedScriptData = null;
+    try {
+      controllerScriptState = ControllerScriptState.load(tag.get(ControllerScriptState.NBT_KEY));
+    } catch (RuntimeException invalidScriptData) {
+      unsupportedScriptData = tag.get(ControllerScriptState.NBT_KEY).copy();
+    }
     genericDiscovery.clear();
     blueprintInventory.load(registries, tag.get("controller_blueprint"));
     clearUpgradeDiscovery();

@@ -81,14 +81,23 @@ public final class RecipeModifiers {
   }
 
   public long amount(RecipeModifier.Target target, RecipeModifier.Io io, long base, long minimum, long maximum) {
+    return amount(target, io, base, minimum, maximum, 1, 1);
+  }
+
+  /** Exact contextual ratio is applied before the single amount rounding step. */
+  long amount(RecipeModifier.Target target, RecipeModifier.Io io, long base, long minimum, long maximum, int numerator, int denominator) {
     if (base < 0 || minimum < 0 || maximum < minimum) {
       throw new IllegalArgumentException("Invalid modifier amount bounds");
+    }
+    if (numerator <= 0 || denominator <= 0) {
+      throw new IllegalArgumentException("Invalid modifier amount ratio");
     }
     var result = apply(new Key(target, io, false), BigDecimal.valueOf(base));
     if (result.signum() < 0) {
       throw new IllegalArgumentException("Modifier produced a negative " + target.serialized() + " amount");
     }
-    long rounded = result.setScale(0, RoundingMode.HALF_UP).longValueExact();
+    long rounded = result.multiply(BigDecimal.valueOf(numerator))
+        .divide(BigDecimal.valueOf(denominator), 0, RoundingMode.HALF_UP).longValueExact();
     if (rounded < minimum || rounded > maximum) {
       throw new IllegalArgumentException("Modifier result is outside supported " + target.serialized() + " range");
     }

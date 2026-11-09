@@ -5,6 +5,7 @@ import net.minecraft.nbt.CompoundTag;
 import net.minecraft.world.level.Level;
 import net.minecraft.world.level.block.entity.BlockEntity;
 import com.lw.modularmachine.network.MachineColorPayloads;
+import com.lw.modularmachine.config.MachineConfig;
 import net.minecraft.server.level.ServerLevel;
 
 /** Persisted casing tint shared by machine structure components. */
@@ -27,7 +28,7 @@ public interface MachineColorable {
   }
 
   static int load(CompoundTag tag) {
-    int color = tag.contains(COLOR_TAG) ? tag.getInt(COLOR_TAG) : 0xFFFFFF;
+    int color = tag.contains(COLOR_TAG) ? tag.getInt(COLOR_TAG) : MachineConfig.defaultCasingColor();
     return color & 0xFFFFFF;
   }
 

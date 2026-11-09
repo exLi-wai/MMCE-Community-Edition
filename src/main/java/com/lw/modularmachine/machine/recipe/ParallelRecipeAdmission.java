@@ -20,7 +20,9 @@ final class ParallelRecipeAdmission {
   ParallelRecipeAdmission(ItemRecipePlan plan, MachineRecipe definition, int limit, boolean aggregateDefinition) {
     this.plan = plan;
     this.definition = definition;
-    high = Math.min(limit, Math.min(plan.maxRepeatableInputs(), plan.maxRepeatableOutputs()));
+    high = Math.min(
+        definition.parallelized() ? limit : Math.min(limit, 1),
+        Math.min(plan.maxRepeatableInputs(), plan.maxRepeatableOutputs()));
     var requiredFluids = new HashMap<FluidResourceKey, Long>();
     for (var fluid : definition.fluidInputs()) {
       requiredFluids.merge(

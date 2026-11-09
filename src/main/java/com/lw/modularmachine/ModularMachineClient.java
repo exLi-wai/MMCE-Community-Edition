@@ -8,6 +8,7 @@ import net.minecraft.resources.ResourceLocation;
 import net.minecraft.core.component.DataComponents;
 import net.minecraft.core.BlockPos;
 import com.lw.modularmachine.client.*;
+import com.lw.modularmachine.client.appearance.MachineVisibilityClient;
 import com.lw.modularmachine.client.preview.CachedPreviewRenderer;
 import com.lw.modularmachine.client.preview.BlueprintPreviewScreen;
 import com.lw.modularmachine.client.preview.PreviewBlockView;
@@ -24,6 +25,7 @@ import com.lw.modularmachine.blockentity.FactoryControllerBlockEntity;
 import com.lw.modularmachine.api.component.MachineColorable;
 import com.lw.modularmachine.blockentity.MachineControllerBlockEntity;
 import com.lw.modularmachine.config.MachineClientConfig;
+import com.lw.modularmachine.config.MachineConfig;
 import com.lw.modularmachine.integration.jei.ClientMachineJeiCatalog;
 import com.lw.modularmachine.machine.blueprint.BlueprintPreviewActions;
 import com.lw.modularmachine.menu.GroupInputMenu;
@@ -50,6 +52,7 @@ import net.neoforged.fml.event.lifecycle.FMLClientSetupEvent;
 import net.neoforged.neoforge.client.event.RegisterClientReloadListenersEvent;
 import net.neoforged.neoforge.client.event.RegisterMenuScreensEvent;
 import net.neoforged.neoforge.client.event.RegisterColorHandlersEvent;
+import net.neoforged.neoforge.client.event.ModelEvent;
 import net.neoforged.neoforge.client.gui.ConfigurationScreen;
 import net.neoforged.neoforge.client.gui.IConfigScreenFactory;
 
@@ -64,6 +67,7 @@ public class ModularMachineClient {
     MachineJeiPayloads.setReceiver(ClientMachineJeiCatalog::receive);
     ProjectionPayloads.setReceiver(WorldProjection::receive);
     MachineColorPayloads.setClientReceiver(ModularMachineClient::receiveMachineColor);
+    MachineVisibilityPayloads.setClientReceiver(MachineVisibilityClient::receive);
     MachinePayloads.setClientReceiver(MachineControllerStatusClient::receive);
     MachinePayloads.setResourceClientReceiver(MachineControllerStatusClient::receiveResource);
     MachinePayloads.setFactoryClientReceiver(MachineControllerStatusClient::receiveFactory);
@@ -77,10 +81,17 @@ public class ModularMachineClient {
     event.registerReloadListener((ResourceManagerReloadListener) resources -> {
       CachedPreviewRenderer.invalidateAll();
       WorldProjection.invalidateMeshes();
+      MachineVisibilityClient.invalidateMeshes();
     });
   }
   @SubscribeEvent
   static void onClientSetup(FMLClientSetupEvent event) {
+    event.enqueueWork(MachineVisibilityClient::initializeModels);
+  }
+
+  @SubscribeEvent
+  static void wrapComponentModels(ModelEvent.ModifyBakingResult event) {
+    MachineVisibilityClient.wrapModels(event);
   }
 
   @SubscribeEvent
@@ -146,7 +157,7 @@ public class ModularMachineClient {
       }
     }
     BlockEntity entity = pos == null ? null : level.getBlockEntity(pos);
-    return entity instanceof MachineColorable colorable ? colorable.machineColor() : -1;
+    return entity instanceof MachineColorable colorable ? colorable.machineColor() : MachineConfig.defaultCasingColor();
   }
 
   private static boolean isMachineColorBlock(Block block) {
@@ -177,7 +188,7 @@ public class ModularMachineClient {
         return machineColor(machine);
       }
     }
-    return data.contains(MachineColorable.COLOR_TAG) ? MachineColorable.load(data) : 0xFFFFFF;
+    return data.contains(MachineColorable.COLOR_TAG) ? MachineColorable.load(data) : MachineConfig.defaultCasingColor();
   }
 
   private static int machineColor(ResourceLocation machine) {

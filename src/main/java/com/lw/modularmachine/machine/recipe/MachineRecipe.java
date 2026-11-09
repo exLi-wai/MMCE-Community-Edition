@@ -20,6 +20,7 @@ import java.util.List;
 import java.util.Objects;
 import java.util.stream.Stream;
 import net.minecraft.core.HolderLookup;
+import net.minecraft.nbt.ByteTag;
 import net.minecraft.network.RegistryFriendlyByteBuf;
 import net.minecraft.network.codec.StreamCodec;
 import net.minecraft.resources.ResourceLocation;
@@ -99,8 +100,8 @@ public final class MachineRecipe implements Recipe<RecipeInput> {
           FluidStack.CODEC.optionalFieldOf("fluid_per_tick", FluidStack.EMPTY).forGetter(MachineRecipe::fluidPerTick),
           FluidStack.CODEC.listOf().optionalFieldOf("fluid_inputs", List.of()).forGetter(MachineRecipe::fluidInputs),
           FluidStack.CODEC.listOf().optionalFieldOf("fluid_outputs", List.of()).forGetter(MachineRecipe::fluidOutputs),
-          Codec.STRING.optionalFieldOf("failure_action", "still")
-              .forGetter(value -> value.failureAction().serialized()),
+          Codec.STRING.fieldOf("failure_action").forGetter(value -> value.failureAction().serialized()),
+          Codec.BOOL.fieldOf("parallelized").forGetter(MachineRecipe::parallelized),
           Codec.LONG.optionalFieldOf("random_seed", 0L).forGetter(MachineRecipe::randomSeed),
           ItemAmount.CODEC.listOf().fieldOf("inputs").forGetter(MachineRecipe::inputs),
           ItemAmount.CODEC.listOf().fieldOf("outputs").forGetter(MachineRecipe::outputs),
@@ -118,6 +119,11 @@ public final class MachineRecipe implements Recipe<RecipeInput> {
     public <T> DataResult<MachineRecipe> decode(DynamicOps<T> ops, MapLike<T> input) {
       try {
         var source = ops.convertTo(JsonOps.INSTANCE, ops.createMap(input.entries()));
+        if (input.get("parallelized") instanceof ByteTag flag && flag.getAsByte() >= 0 && flag.getAsByte() <= 1) {
+          var resolved = source.getAsJsonObject().deepCopy();
+          resolved.addProperty("parallelized", flag.getAsByte() == 1);
+          source = resolved;
+        }
         if (source.isJsonObject() && source.getAsJsonObject().has(MachineRecipeJson.KUBEJS_CHANGED_MARKER)) {
           var cleaned = source.getAsJsonObject().deepCopy();
           cleaned.remove(MachineRecipeJson.KUBEJS_CHANGED_MARKER);
@@ -148,12 +154,13 @@ public final class MachineRecipe implements Recipe<RecipeInput> {
   private final List<FluidStack> fluidInputs;
   private final List<FluidStack> fluidOutputs;
   private final RecipeFailureAction failureAction;
+  private final boolean parallelized;
   private final long randomSeed;
   private final List<ItemAmount> inputs, outputs;
   private final List<SmartNumberRequirement> interfaceInputs;
   private final RecipeSelectors selectors;
 
-  private MachineRecipe(ResourceLocation machineId, int priority, int duration, long energyPerTick, FluidStack fluidPerTick, List<FluidStack> fluidInputs, List<FluidStack> fluidOutputs, String failureAction, long randomSeed, List<ItemAmount> inputs, List<ItemAmount> outputs, List<SmartNumberRequirement> interfaceInputs, RecipeSelectors selectors) {
+  private MachineRecipe(ResourceLocation machineId, int priority, int duration, long energyPerTick, FluidStack fluidPerTick, List<FluidStack> fluidInputs, List<FluidStack> fluidOutputs, String failureAction, boolean parallelized, long randomSeed, List<ItemAmount> inputs, List<ItemAmount> outputs, List<SmartNumberRequirement> interfaceInputs, RecipeSelectors selectors) {
     if (duration <= 0 || energyPerTick < 0) {
       throw new IllegalArgumentException("Nonpositive duration");
     }
@@ -165,6 +172,7 @@ public final class MachineRecipe implements Recipe<RecipeInput> {
     this.fluidInputs = fluidInputs.stream().map(FluidStack::copy).toList();
     this.fluidOutputs = fluidOutputs.stream().map(FluidStack::copy).toList();
     this.failureAction = RecipeFailureAction.parse(failureAction);
+    this.parallelized = parallelized;
     if (randomSeed < 0) {
       throw new IllegalArgumentException("Invalid random seed");
     }
@@ -237,6 +245,10 @@ public final class MachineRecipe implements Recipe<RecipeInput> {
     return failureAction;
   }
 
+  public boolean parallelized() {
+    return parallelized;
+  }
+
   public long randomSeed() {
     return randomSeed;
   }
@@ -286,6 +298,7 @@ public final class MachineRecipe implements Recipe<RecipeInput> {
         && sameFluids(fluidInputs, other.fluidInputs)
         && sameFluids(fluidOutputs, other.fluidOutputs)
         && failureAction == other.failureAction
+        && parallelized == other.parallelized
         && randomSeed == other.randomSeed
         && interfaceInputs.equals(other.interfaceInputs)
         && selectors.equals(other.selectors)
@@ -321,7 +334,7 @@ public final class MachineRecipe implements Recipe<RecipeInput> {
   }
 
   private static void write(RegistryFriendlyByteBuf buffer, MachineRecipe value) {
-    buffer.writeVarInt(10);
+    buffer.writeVarInt(11);
     buffer.writeResourceLocation(value.machineId);
     buffer.writeVarInt(value.priority);
     buffer.writeVarInt(value.duration);
@@ -336,6 +349,7 @@ public final class MachineRecipe implements Recipe<RecipeInput> {
       FluidStack.OPTIONAL_STREAM_CODEC.encode(buffer, fluid);
     }
     buffer.writeVarInt(value.failureAction.ordinal());
+    buffer.writeBoolean(value.parallelized);
     buffer.writeVarLong(value.randomSeed);
     writeAmounts(buffer, value.inputs);
     writeAmounts(buffer, value.outputs);
@@ -364,7 +378,7 @@ public final class MachineRecipe implements Recipe<RecipeInput> {
   private static MachineRecipe read(RegistryFriendlyByteBuf buffer) {
     try {
       int schema = buffer.readVarInt();
-      if (schema != 10) {
+      if (schema != 11) {
         throw new DecoderException("Unsupported machine recipe wire schema");
       }
       var machine = buffer.readResourceLocation();
@@ -374,6 +388,7 @@ public final class MachineRecipe implements Recipe<RecipeInput> {
       var fluidInputs = readFluids(buffer);
       var fluidOutputs = readFluids(buffer);
       var failureAction = readFailureAction(buffer);
+      boolean parallelized = buffer.readBoolean();
       long randomSeed = buffer.readVarLong();
       var inputs = readAmounts(buffer);
       var outputs = readAmounts(buffer);
@@ -403,6 +418,7 @@ public final class MachineRecipe implements Recipe<RecipeInput> {
           fluidInputs,
           fluidOutputs,
           failureAction,
+          parallelized,
           randomSeed,
           inputs,
           outputs,

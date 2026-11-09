@@ -183,10 +183,18 @@ public final class FrozenItemRun {
       throw new IllegalArgumentException("Frozen input group has no mapped input");
     }
     var definition = source.getCompound("definition");
+    if (!definition.contains("failure_action", Tag.TAG_STRING)
+        || !definition.contains("parallelized", Tag.TAG_BYTE)
+        || definition.getByte("parallelized") < 0
+        || definition.getByte("parallelized") > 1) {
+      throw new IllegalArgumentException("Frozen recipe is missing resolved defaults");
+    }
     if (definition.contains("modifiers")) {
       throw new IllegalArgumentException("Frozen recipe contains unresolved modifiers");
     }
-    var header = MachineRecipeJson.validate(NbtOps.INSTANCE.convertTo(JsonOps.INSTANCE, definition));
+    var declaration = NbtOps.INSTANCE.convertTo(JsonOps.INSTANCE, definition).getAsJsonObject();
+    declaration.addProperty("parallelized", definition.getBoolean("parallelized"));
+    var header = MachineRecipeJson.validate(declaration);
     selectors = header.selectors();
     if (!definition.getString("type").equals(MachineRecipeJson.TYPE)
         || !header.machine().equals(machineId.toString())

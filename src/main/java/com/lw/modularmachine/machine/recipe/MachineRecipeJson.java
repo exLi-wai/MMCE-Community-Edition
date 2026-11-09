@@ -3,6 +3,7 @@ package com.lw.modularmachine.machine.recipe;
 import com.lw.modularmachine.api.recipe.RecipeModifier;
 import com.lw.modularmachine.api.recipe.RecipeSelectors;
 import com.lw.modularmachine.api.recipe.RecipeFailureAction;
+import com.lw.modularmachine.config.MachineConfig;
 
 import com.google.gson.JsonElement;
 import com.google.gson.JsonObject;
@@ -34,6 +35,7 @@ public final class MachineRecipeJson {
       "fluid_inputs",
       "fluid_outputs",
       "failure_action",
+      "parallelized",
       "random_seed",
       "modifiers",
       "interface_inputs",
@@ -54,6 +56,7 @@ public final class MachineRecipeJson {
       boolean hasFluidInputs,
       boolean hasFluidOutputs,
       String failureAction,
+      boolean parallelized,
       long randomSeed,
       RecipeSelectors selectors) {
   }
@@ -120,6 +123,14 @@ public final class MachineRecipeJson {
     } catch (IllegalArgumentException invalid) {
       throw error("$.failure_action", invalid.getMessage());
     }
+    boolean parallelized = true;
+    if (object.has("parallelized")) {
+      var value = object.get("parallelized");
+      if (!value.isJsonPrimitive() || !value.getAsJsonPrimitive().isBoolean()) {
+        throw error("$.parallelized", "Expected boolean");
+      }
+      parallelized = value.getAsBoolean();
+    }
     long randomSeed = object.has("random_seed") ? integer(object.get("random_seed"), "$.random_seed") : 0;
     if (randomSeed < 0) {
       throw error("$.random_seed", "Random seeds require a non-negative schema 2 long");
@@ -146,6 +157,7 @@ public final class MachineRecipeJson {
         object.has("fluid_inputs"),
         object.has("fluid_outputs"),
         failureAction,
+        parallelized,
         randomSeed,
         selectors);
   }
@@ -163,8 +175,37 @@ public final class MachineRecipeJson {
    * normalized value back in.
    */
   public static JsonObject normalize(JsonElement root, List<RecipeModifier> inheritedRules) {
+    return normalize(root, inheritedRules, false);
+  }
+
+  /**
+   * Internal contextual energy policy; frozen effective declarations never apply
+   * it again.
+   */
+  static JsonObject normalize(JsonElement root, List<RecipeModifier> inheritedRules, boolean durationMultiplier) {
+    return normalize(root, inheritedRules, durationMultiplier, currentDefaults());
+  }
+
+  /** Internal immutable defaults captured for one candidate compilation. */
+  record Defaults(boolean parallelized, RecipeFailureAction failureAction) {
+  }
+
+  static Defaults currentDefaults() {
+    return new Defaults(MachineConfig.recipeParallelDefault(), MachineConfig.defaultFailureAction());
+  }
+
+  static JsonObject normalize(JsonElement root, List<RecipeModifier> inheritedRules, boolean durationMultiplier, Defaults defaults) {
     validate(root);
     var source = root.getAsJsonObject();
+    if (!source.has("parallelized") || !source.has("failure_action")) {
+      source = source.deepCopy();
+      if (!source.has("parallelized")) {
+        source.addProperty("parallelized", defaults.parallelized());
+      }
+      if (!source.has("failure_action")) {
+        source.addProperty("failure_action", defaults.failureAction().serialized());
+      }
+    }
     if (!source.has("modifiers") && inheritedRules.isEmpty()) {
       return source;
     }
@@ -182,10 +223,18 @@ public final class MachineRecipeJson {
     var result = source.deepCopy();
     result.remove("modifiers");
     try {
-      result.addProperty("duration", modifiers.duration((int) integer(source.get("duration"), "$.duration")));
+      int originalDuration = (int) integer(source.get("duration"), "$.duration");
+      int duration = modifiers.duration(originalDuration);
+      result.addProperty("duration", duration);
       long baseEnergy = source.has("energy_per_tick") ? integer(source.get("energy_per_tick"), "$.energy_per_tick") : 0;
-      long energy = modifiers
-          .amount(RecipeModifier.Target.ENERGY, RecipeModifier.Io.INPUT, baseEnergy, 0, Long.MAX_VALUE);
+      long energy = modifiers.amount(
+          RecipeModifier.Target.ENERGY,
+          RecipeModifier.Io.INPUT,
+          baseEnergy,
+          0,
+          Long.MAX_VALUE,
+          durationMultiplier ? originalDuration : 1,
+          durationMultiplier ? duration : 1);
       if (energy > 0 || source.has("energy_per_tick")) {
         result.addProperty("energy_per_tick", energy);
       }

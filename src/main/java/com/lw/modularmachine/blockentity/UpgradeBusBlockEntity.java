@@ -67,7 +67,7 @@ public final class UpgradeBusBlockEntity extends BlockEntity implements MenuProv
   public static final int DATA_SCHEMA = 2;
   private final UpgradeBusTier tier;
   private final int slots;
-  private int machineColor = 0xFFFFFF;
+  private int machineColor = MachineConfig.defaultCasingColor();
   private boolean machineColorAssigned;
   private final TransactionalItemStackHandler inventory;
   private final Map<BlockPos, UpgradeBusBinding> bindings = new LinkedHashMap<>();
@@ -120,8 +120,9 @@ public final class UpgradeBusBlockEntity extends BlockEntity implements MenuProv
   @Override
   public void setMachineColor(int color) {
     color &= 0xFFFFFF;
+    boolean wasAssigned = machineColorAssigned;
     machineColorAssigned = true;
-    if (machineColor != color) {
+    if (!wasAssigned || machineColor != color) {
       machineColor = color;
       MachineColorable.update(this);
     }

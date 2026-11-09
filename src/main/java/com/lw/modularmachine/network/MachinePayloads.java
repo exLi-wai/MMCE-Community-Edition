@@ -30,7 +30,7 @@ import net.neoforged.neoforge.network.handling.IPayloadContext;
 
 /** Versioned, bounded controller state payloads for menus and observers. */
 public final class MachinePayloads {
-  public static final int PROTOCOL_VERSION = 2;
+  public static final int PROTOCOL_VERSION = 3;
   public static final int MAX_SHORTAGES = 8;
   public static final int MAX_TEXT_LENGTH = 512;
   public static final ResourceLocation STATUS_ID = ResourceLocation

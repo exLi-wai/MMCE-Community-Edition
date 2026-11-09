@@ -38,7 +38,11 @@ public final class MachineDefinitionReloadListener extends ContextAwareReloadLis
 
   private record Captured(
       Map<ResourceLocation, JsonElement> roots,
-      StateOrientationAdapters.RegistrySnapshot registry) {
+      StateOrientationAdapters.RegistrySnapshot registry,
+      MachineDefinitionDefaults defaults) {
+  }
+
+  private record Candidate(Map<ResourceLocation, MachineDefinition> definitions, MachineDefinitionDefaults defaults) {
   }
 
   @Override
@@ -47,10 +51,23 @@ public final class MachineDefinitionReloadListener extends ContextAwareReloadLis
         .thenApplyAsync(roots -> new Input(roots, MachineDefinition.blockReferences(roots)), backgroundExecutor)
         .thenCompose(
             input -> CompletableFuture.supplyAsync(
-                () -> new Captured(input.roots(), StateOrientationAdapters.capture(input.references())),
+                () -> new Captured(
+                    input.roots(),
+                    StateOrientationAdapters.capture(input.references()),
+                    MachineDefinitionDefaults.capture()),
                 gameExecutor))
-        .thenApplyAsync(captured -> compileCandidate(captured.roots(), captured.registry()), backgroundExecutor)
-        .thenCompose(barrier::wait).thenAcceptAsync(StructureService::replaceDefinitions, gameExecutor);
+        .thenApplyAsync(
+            captured -> new Candidate(
+                compileCandidate(captured.roots(), captured.registry(), captured.defaults()),
+                captured.defaults()),
+            backgroundExecutor)
+        .thenCompose(barrier::wait).thenAcceptAsync(candidate -> {
+          if (!candidate.defaults().equals(MachineDefinitionDefaults.capture())) {
+            throw new IllegalStateException(
+                "Machine defaults changed during reload; reload again to publish a consistent generation");
+          }
+          StructureService.replaceDefinitions(candidate.definitions());
+        }, gameExecutor);
   }
 
   /**
@@ -58,13 +75,17 @@ public final class MachineDefinitionReloadListener extends ContextAwareReloadLis
    * exception.
    */
   public static Map<ResourceLocation, MachineDefinition> compileCandidate(Map<ResourceLocation, JsonElement> data, StateOrientationAdapters.RegistrySnapshot snapshot) {
+    return compileCandidate(data, snapshot, MachineDefinitionDefaults.capture());
+  }
+
+  private static Map<ResourceLocation, MachineDefinition> compileCandidate(Map<ResourceLocation, JsonElement> data, StateOrientationAdapters.RegistrySnapshot snapshot, MachineDefinitionDefaults defaults) {
     Map<ResourceLocation, MachineDefinition> candidate = new LinkedHashMap<>();
     data.entrySet().stream().sorted(Map.Entry.comparingByKey()).forEach(entry -> {
       if (!entry.getValue().isJsonObject()) {
         throw new JsonParseException(entry.getKey() + ": $: Expected object");
       }
       MachineDefinition definition = MachineDefinition
-          .parse(entry.getKey(), entry.getValue().getAsJsonObject(), snapshot);
+          .parse(entry.getKey(), entry.getValue().getAsJsonObject(), snapshot, defaults);
       candidate.put(entry.getKey(), definition);
       var compilation = definition.orientationCompilation();
       if (!compilation.diagnostics().isEmpty()) {

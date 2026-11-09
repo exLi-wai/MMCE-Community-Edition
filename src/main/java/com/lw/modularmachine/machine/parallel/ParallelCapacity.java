@@ -62,6 +62,9 @@ public final class ParallelCapacity {
 
   public static Snapshot capture(StructureService.Registration registration, ServerLevel level) {
     ServerThreadGuard.require(level, "Parallel capacity capture");
+    if (!registration.pattern.definition.parallelizable()) {
+      return new Snapshot(level, List.of(), 1);
+    }
     long total = registration.pattern.definition.internalParallelism();
     int maximum = registration.pattern.definition.maxParallelism();
     var sources = new ArrayList<Source>();

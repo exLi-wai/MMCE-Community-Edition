@@ -6,7 +6,12 @@ import com.lw.modularmachine.ModularMachine;
 import com.lw.modularmachine.api.controller.MachineControllerApi;
 import com.lw.modularmachine.block.MachineControllerBlock;
 import com.lw.modularmachine.config.MachineConfig;
+import com.lw.modularmachine.machine.appearance.ControllerAppearance;
+import com.lw.modularmachine.machine.appearance.ControllerAppearanceState;
+import com.lw.modularmachine.machine.appearance.MachineComponentType;
 import com.lw.modularmachine.machine.controller.GenericControllerDiscovery;
+import com.lw.modularmachine.machine.controller.ControllerScriptState;
+import com.lw.modularmachine.machine.controller.ControllerScriptStateOwner;
 import com.lw.modularmachine.machine.factory.ControllerUpgrades;
 import com.lw.modularmachine.machine.factory.FactoryUpgradeRestrictions;
 import com.lw.modularmachine.machine.factory.FactoryUpgradeRuntimeWork;
@@ -22,6 +27,7 @@ import com.lw.modularmachine.machine.recipe.FrozenItemRun;
 import com.lw.modularmachine.machine.recipe.ItemRecipePlan;
 import com.lw.modularmachine.machine.recipe.ItemRecipeSearch;
 import com.lw.modularmachine.machine.recipe.ItemRunEngine;
+import com.lw.modularmachine.machine.recipe.MachineRecipeService;
 import com.lw.modularmachine.machine.recipe.RecipeLifecyclePublisher;
 import com.lw.modularmachine.machine.recipe.RecipePlanner.Status;
 import com.lw.modularmachine.machine.smart.SmartInterfaceEventPublisher;
@@ -58,8 +64,9 @@ import net.minecraft.world.level.Level;
 import net.minecraft.world.level.block.entity.BlockEntity;
 import net.minecraft.world.level.block.state.BlockState;
 import net.neoforged.neoforge.network.PacketDistributor;
+import org.jetbrains.annotations.ApiStatus;
 
-public final class MachineControllerBlockEntity extends BlockEntity implements MenuProvider, UpgradeBusOwner {
+public final class MachineControllerBlockEntity extends BlockEntity implements MenuProvider, UpgradeBusOwner, ControllerScriptStateOwner {
   private static final int RECIPE_RETRY_INITIAL = 5;
   private static final int RECIPE_RETRY_MAX = 80;
   private final GenericControllerDiscovery genericDiscovery = new GenericControllerDiscovery();
@@ -68,6 +75,8 @@ public final class MachineControllerBlockEntity extends BlockEntity implements M
   private MachinePortBlockEntity input;
   private MachinePortBlockEntity output;
   private long successfulTransfers;
+  private boolean transferredThisTick;
+  private ControllerAppearanceState idleAppearance = ControllerAppearanceState.FORMED;
   private long bindingRebuilds;
   private long conservativeChecks;
   private StructureService.Registration conservativeRegistration;
@@ -76,6 +85,8 @@ public final class MachineControllerBlockEntity extends BlockEntity implements M
   private MachinePayloads.ControllerStatusPayload lastObserverStatus;
   private final Set<UUID> observerRecipients = new HashSet<>();
   private Tag unsupportedData;
+  private ControllerScriptState controllerScriptState = ControllerScriptState.empty();
+  private Tag unsupportedScriptData;
   private FrozenItemRun runningRecipe;
   private RunStartLease recipeStart;
   private RunUpdateLease recipeUpdate;
@@ -111,6 +122,7 @@ public final class MachineControllerBlockEntity extends BlockEntity implements M
       machineId = blueprintMachineId();
     }
     StructureService.register(this);
+    refreshAppearanceState();
   }
 
   @Override
@@ -143,6 +155,7 @@ public final class MachineControllerBlockEntity extends BlockEntity implements M
     recipeEngine.invalidate();
     recipeSearch = null;
     preparedRecipe = null;
+    idleAppearance = ControllerAppearanceState.FORMED;
     resetRecipeRetry(0L);
     this.registration = registration;
     conservativeRegistration = null;
@@ -152,28 +165,37 @@ public final class MachineControllerBlockEntity extends BlockEntity implements M
     output = null;
     detachedState = VerificationState.PENDING;
     detachedFailure = VerificationFailure.UNVERIFIED;
-    syncFormedState();
+    refreshAppearanceState();
   }
 
   public void failPreparation(VerificationFailure failure) {
     attach(null);
     detachedState = VerificationState.INVALID;
     detachedFailure = failure;
-    syncFormedState();
+    refreshAppearanceState();
   }
 
-  private void syncFormedState() {
-    if (level == null || !(getBlockState().getBlock() instanceof MachineControllerBlock)) {
+  @ApiStatus.Internal
+  public void refreshAppearanceState() {
+    if (!(level instanceof ServerLevel server) || !(getBlockState().getBlock() instanceof MachineControllerBlock)) {
       return;
     }
-    var state = getBlockState();
-    var definition = StructureService.definition(machineId);
-    boolean formed = verificationState() == VerificationState.CONFIRMED
-        && definition != null
-        && definition.hideComponentsWhenFormed();
-    if (state.hasProperty(MachineControllerBlock.FORMED) && state.getValue(MachineControllerBlock.FORMED) != formed) {
-      level.setBlock(worldPosition, state.setValue(MachineControllerBlock.FORMED, formed), 3);
+    ServerThreadGuard.require(server, "Controller appearance refreshed");
+    if (isRemoved() || !server.hasChunkAt(worldPosition) || server.getBlockEntity(worldPosition) != this) {
+      return;
     }
+    var definition = StructureService.definition(machineId);
+    var verification = verificationState();
+    boolean formed = verification == VerificationState.CONFIRMED && definition != null;
+    boolean hidden = formed && definition.hidesComponent(MachineComponentType.CONTROLLER);
+    var appearance = ControllerAppearance.ordinary(
+        verification,
+        runningRecipe != null,
+        recipeRunStatus(),
+        server.getDirectSignalTo(worldPosition) != 0,
+        transferredThisTick,
+        idleAppearance);
+    ControllerAppearance.sync(this, formed, hidden, appearance);
   }
 
   public ResourceLocation machineId() {
@@ -258,7 +280,79 @@ public final class MachineControllerBlockEntity extends BlockEntity implements M
   }
 
   public boolean schemaSupported() {
-    return unsupportedData == null && blueprintInventory.valid();
+    return unsupportedData == null && unsupportedScriptData == null && blueprintInventory.valid();
+  }
+
+  @Override
+  @ApiStatus.Internal
+  public ControllerScriptState scriptState() {
+    if (level instanceof ServerLevel server) {
+      ServerThreadGuard.require(server, "Controller script state read");
+    }
+
+    return controllerScriptState;
+  }
+
+  @Override
+  @ApiStatus.Internal
+  public boolean scriptStateAvailable() {
+    return schemaSupported();
+  }
+
+  @Override
+  @ApiStatus.Internal
+  public boolean scriptStateEditingAllowed() {
+    if (!(level instanceof ServerLevel server)) {
+      return false;
+    }
+    ServerThreadGuard.require(server, "Controller script state edited");
+
+    return schemaSupported()
+        && !isRemoved()
+        && server.hasChunkAt(worldPosition)
+        && server.getBlockEntity(worldPosition) == this
+        && matchesStructureBlock(server.getBlockState(worldPosition))
+        && !recipeStartInProgress()
+        && !RecipeLifecyclePublisher.isDispatching()
+        && !SmartInterfaceEventPublisher.isDispatching();
+  }
+
+  @Override
+  @ApiStatus.Internal
+  public boolean replaceControllerScriptState(ControllerScriptState expected, ControllerScriptState replacement) {
+    Objects.requireNonNull(expected, "expected");
+    Objects.requireNonNull(replacement, "replacement");
+    if (!scriptStateEditingAllowed()
+        || controllerScriptState != expected
+        || expected.revision() == Long.MAX_VALUE
+        || replacement.revision() != expected.revision() + 1) {
+      return false;
+    }
+    controllerScriptState = replacement;
+    recipeSearch = null;
+    preparedRecipe = null;
+    resetRecipeRetry(level.getGameTime());
+    if (runningRecipe == null) {
+      recipeEngine.invalidate();
+    }
+    MachineRecipeService.invalidateControllerScriptData(this);
+    setChanged();
+
+    return true;
+  }
+
+  @Override
+  @ApiStatus.Internal
+  public boolean clearControllerScriptState() {
+    if (!scriptStateEditingAllowed()) {
+      return false;
+    }
+    var previous = controllerScriptState;
+    if (previous.isEmpty()) {
+      return true;
+    }
+
+    return replaceControllerScriptState(previous, previous.cleared());
   }
 
   public VerificationState verificationState() {
@@ -637,8 +731,10 @@ public final class MachineControllerBlockEntity extends BlockEntity implements M
       return;
     }
     try {
+      transferredThisTick = false;
       tickController(server);
     } finally {
+      refreshAppearanceState();
       RecipeLifecyclePublisher.machineTick(this);
     }
   }
@@ -663,7 +759,6 @@ public final class MachineControllerBlockEntity extends BlockEntity implements M
     // O(1) metadata refresh also catches an untracked change to the controller
     // state itself.
     StructureService.register(this);
-    syncFormedState();
     refreshUpgradeSources();
     if (runningRecipe != null) {
       long tickStarted = System.nanoTime();
@@ -687,6 +782,7 @@ public final class MachineControllerBlockEntity extends BlockEntity implements M
         } catch (RuntimeException failure) {
           recipeSearch = null;
           preparedRecipe = null;
+          idleAppearance = ControllerAppearanceState.ERROR;
           backoffRecipeRetry(server.getGameTime());
           if (!failure.toString().equals(lastRecipeFailure)) {
             lastRecipeFailure = failure.toString();
@@ -696,6 +792,7 @@ public final class MachineControllerBlockEntity extends BlockEntity implements M
       }
       return;
     }
+    idleAppearance = ControllerAppearanceState.PAUSED;
     if (!(server.getBlockEntity(ticket.pattern.energyInputPosition()) instanceof MachinePortBlockEntity foundInput)
         || !(server.getBlockEntity(ticket.pattern.energyOutputPosition()) instanceof MachinePortBlockEntity foundOutput)
         || !foundInput.schemaSupported()
@@ -725,6 +822,7 @@ public final class MachineControllerBlockEntity extends BlockEntity implements M
       return;
     }
     if (source.energy().transferExactTo(target.energy(), amount)) {
+      transferredThisTick = true;
       successfulTransfers = addTelemetry(successfulTransfers, 1);
       setChanged();
     }
@@ -766,10 +864,25 @@ public final class MachineControllerBlockEntity extends BlockEntity implements M
       resetRecipeRetry(server.getGameTime());
     }
     if (recipeSearch == null) {
-      recipeSearch = ItemRecipeSearch.begin(this).orElse(null);
-      if (recipeSearch == null) {
+      var catalog = MachineRecipeService.catalogFor(this).orElse(null);
+      if (catalog == null) {
+        idleAppearance = ControllerAppearanceState.PAUSED;
         backoffRecipeRetry(server.getGameTime());
         return;
+      }
+      if (catalog.recipes().candidates().isEmpty()) {
+        idleAppearance = ControllerAppearanceState.FORMED;
+        backoffRecipeRetry(server.getGameTime());
+        return;
+      }
+      recipeSearch = ItemRecipeSearch.begin(this, catalog).orElse(null);
+      if (recipeSearch == null) {
+        idleAppearance = ControllerAppearanceState.PAUSED;
+        backoffRecipeRetry(server.getGameTime());
+        return;
+      }
+      if (idleAppearance == ControllerAppearanceState.ERROR) {
+        idleAppearance = ControllerAppearanceState.PAUSED;
       }
     }
     if (preparedRecipe == null) {
@@ -780,6 +893,7 @@ public final class MachineControllerBlockEntity extends BlockEntity implements M
           return;
         }
         if (result.status() == Status.NO_MATCH) {
+          idleAppearance = ControllerAppearanceState.PAUSED;
           recipeSearch = null;
           backoffRecipeRetry(server.getGameTime());
           return;
@@ -790,6 +904,7 @@ public final class MachineControllerBlockEntity extends BlockEntity implements M
       }
     }
     var result = preparedRecipe.start();
+    idleAppearance = result == Result.FAILED ? ControllerAppearanceState.ERROR : ControllerAppearanceState.PAUSED;
     if (result == Result.STARTED) {
       recipeEngine.started();
       resetRecipeRetry(server.getGameTime());
@@ -838,7 +953,7 @@ public final class MachineControllerBlockEntity extends BlockEntity implements M
       var full = ticket.pattern.fullScan(server, reference);
       conservativeChecks = addTelemetry(conservativeChecks, full.checks());
       if (full.state() != VerificationState.CONFIRMED) {
-        ticket.verifier.rejectProof(full.failure(), full.failedIndex(), server.getGameTime());
+        ticket.rejectProof(full.failure(), full.failedIndex(), server.getGameTime());
         conservativeRegistration = ticket;
         conservativeRevision = ticket.verifier.revision();
         conservativeValidated = false;
@@ -900,6 +1015,9 @@ public final class MachineControllerBlockEntity extends BlockEntity implements M
     }
     super.saveAdditional(tag, registries);
     tag.put("controller_blueprint", blueprintInventory.save(registries));
+    tag.put(
+        ControllerScriptState.NBT_KEY,
+        unsupportedScriptData == null ? controllerScriptState.save() : unsupportedScriptData.copy());
     if (unsupportedData != null) {
       tag.put("mmcece", unsupportedData.copy());
       return;
@@ -926,6 +1044,13 @@ public final class MachineControllerBlockEntity extends BlockEntity implements M
     upgrades.invalidate();
     recipeEngine.invalidate();
     super.loadAdditional(tag, registries);
+    controllerScriptState = ControllerScriptState.empty();
+    unsupportedScriptData = null;
+    try {
+      controllerScriptState = ControllerScriptState.load(tag.get(ControllerScriptState.NBT_KEY));
+    } catch (RuntimeException invalidScriptData) {
+      unsupportedScriptData = tag.get(ControllerScriptState.NBT_KEY).copy();
+    }
     genericDiscovery.clear();
     blueprintInventory.load(registries, tag.get("controller_blueprint"));
     recipeSearch = null;
@@ -959,6 +1084,9 @@ public final class MachineControllerBlockEntity extends BlockEntity implements M
   public CompoundTag portableData(HolderLookup.Provider registries) {
     CompoundTag root = new CompoundTag();
     root.put("controller_blueprint", blueprintInventory.save(registries));
+    root.put(
+        ControllerScriptState.NBT_KEY,
+        unsupportedScriptData == null ? controllerScriptState.save() : unsupportedScriptData.copy());
     if (unsupportedData != null) {
       root.put("mmcece", unsupportedData.copy());
     } else {

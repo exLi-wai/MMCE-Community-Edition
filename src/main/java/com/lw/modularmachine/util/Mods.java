@@ -3,7 +3,9 @@ package com.lw.modularmachine.util;
 import net.neoforged.fml.ModList;
 
 public enum Mods {
-  AE2("ae2");
+  AE2("ae2"),
+  GTCEU("gtceu"),
+  GREGTECH("gregtech");
 
   public final String modid;
 
@@ -12,6 +14,8 @@ public enum Mods {
   }
 
   public boolean isLoaded() {
-    return ModList.get().isLoaded(this.modid);
+    var mods = ModList.get();
+
+    return mods != null && mods.isLoaded(modid);
   }
 }

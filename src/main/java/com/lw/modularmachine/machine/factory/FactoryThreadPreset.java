@@ -1,6 +1,7 @@
 package com.lw.modularmachine.machine.factory;
 
 import com.lw.modularmachine.api.upgrade.FactoryUpgradeSnapshot;
+import com.lw.modularmachine.config.MachineConfig;
 
 import com.google.gson.JsonElement;
 import com.google.gson.JsonObject;
@@ -69,15 +70,27 @@ public record FactoryThreadPreset(List<Thread> threads) {
   }
 
   public static FactoryThreadPreset parse(JsonElement source, String path) {
+    return parse(source, path, MachineConfig.defaultFactoryMaxThreads());
+  }
+
+  public static FactoryThreadPreset parse(JsonElement source, String path, int defaultMaximumThreads) {
     try {
       if (source == null || !source.isJsonObject()) {
         throw new IllegalArgumentException("Expected factory object");
       }
       var root = source.getAsJsonObject();
-      if (!root.keySet().equals(Set.of("threads")) || !root.get("threads").isJsonArray()) {
-        throw new IllegalArgumentException("factory requires only a threads array");
+      if (!Set.of("threads", "maximum_threads").containsAll(root.keySet())
+          || root.has("threads") && !root.get("threads").isJsonArray()) {
+        throw new IllegalArgumentException("factory accepts a threads array and maximum_threads");
       }
-      if (root.getAsJsonArray("threads").size() > FactoryThreadStateCodec.MAX_THREADS) {
+      int maximumThreads = integer(root, "maximum_threads", defaultMaximumThreads);
+      if (maximumThreads < 1 || maximumThreads > FactoryThreadStateCodec.MAX_THREADS) {
+        throw new IllegalArgumentException("Factory business thread limit is outside the supported range");
+      }
+      if (!root.has("threads")) {
+        return defaults();
+      }
+      if (root.getAsJsonArray("threads").size() > maximumThreads) {
         throw new IllegalArgumentException("Too many factory thread presets");
       }
       var result = new ArrayList<Thread>();

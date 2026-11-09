@@ -22,9 +22,17 @@ final class RecipeModifierTemplate {
   }
 
   MachineRecipe resolve(List<RecipeModifier> upgradeRules, HolderLookup.Provider registries) {
+    return resolve(upgradeRules, registries, false);
+  }
+
+  MachineRecipe resolve(List<RecipeModifier> upgradeRules, HolderLookup.Provider registries, boolean durationMultiplier) {
+    return resolve(upgradeRules, registries, durationMultiplier, MachineRecipeJson.currentDefaults());
+  }
+
+  MachineRecipe resolve(List<RecipeModifier> upgradeRules, HolderLookup.Provider registries, boolean durationMultiplier, MachineRecipeJson.Defaults defaults) {
     var inherited = new ArrayList<>(machineRules);
     inherited.addAll(upgradeRules);
-    var effective = MachineRecipeJson.normalize(source, inherited);
+    var effective = MachineRecipeJson.normalize(source, inherited, durationMultiplier, defaults);
 
     return MachineRecipe.CODEC.codec().parse(registries.createSerializationContext(JsonOps.INSTANCE), effective)
         .getOrThrow();

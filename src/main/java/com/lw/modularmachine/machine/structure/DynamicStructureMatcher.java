@@ -137,8 +137,15 @@ public final class DynamicStructureMatcher {
           Math.addExact(origin.getY(), offset.getY()),
           Math.addExact(origin.getZ(), offset.getZ()));
       // Subscribe before reading, including the first nonmatching boundary.
-      watch.accept(segmentIndex, position, probe.part().field() != null);
-      var result = check.check(position, probe.part(), probe.rule(), probe.inverse());
+      CheckResult result;
+      if (position.equals(origin)) {
+        // The owning controller cannot be a repeated component. Its identity
+        // and orientation use the owner's gate, not visual-state subscriptions.
+        result = CheckResult.MISMATCH;
+      } else {
+        watch.accept(segmentIndex, position, probe.part().field() != null);
+        result = check.check(position, probe.part(), probe.rule(), probe.inverse());
+      }
       used++;
       if (result == CheckResult.MATCH) {
         cursor++;

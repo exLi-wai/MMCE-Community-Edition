@@ -1,6 +1,7 @@
 package com.lw.modularmachine.blockentity;
 
 import com.lw.modularmachine.api.component.MachineColorable;
+import com.lw.modularmachine.config.MachineConfig;
 import com.lw.modularmachine.api.smart.SmartInterfaceBinding;
 
 import com.lw.modularmachine.machine.recipe.RecipeLifecyclePublisher;
@@ -73,7 +74,7 @@ public final class SmartInterfaceBlockEntity extends BlockEntity implements Menu
   private long revision;
   private boolean valid = true;
   private CompoundTag opaque;
-  private int machineColor = 0xFFFFFF;
+  private int machineColor = MachineConfig.defaultCasingColor();
   private boolean machineColorAssigned;
 
   public SmartInterfaceBlockEntity(BlockPos pos, BlockState state) {
@@ -105,8 +106,9 @@ public final class SmartInterfaceBlockEntity extends BlockEntity implements Menu
   @Override
   public void setMachineColor(int color) {
     color &= 0xFFFFFF;
+    boolean wasAssigned = machineColorAssigned;
     machineColorAssigned = true;
-    if (machineColor != color) {
+    if (!wasAssigned || machineColor != color) {
       machineColor = color;
       MachineColorable.update(this);
     }

@@ -32,7 +32,8 @@ public final class MachineRecipeBuilder {
   private final List<SmartNumberRequirement> interfaceInputs = new ArrayList<>();
   private final List<RecipeModifier> modifiers = new ArrayList<>();
   private RecipeSelectors selectors = RecipeSelectors.NONE;
-  private RecipeFailureAction failureAction = RecipeFailureAction.STILL;
+  private RecipeFailureAction failureAction;
+  private Boolean parallelized;
   private int priority;
   private long energyPerTick, randomSeed;
   private FluidStack fluidPerTick = FluidStack.EMPTY;
@@ -123,6 +124,11 @@ public final class MachineRecipeBuilder {
     return this;
   }
 
+  public MachineRecipeBuilder parallelized(boolean enabled) {
+    parallelized = enabled;
+    return this;
+  }
+
   public MachineRecipeBuilder randomSeed(long randomSeed) {
     if (randomSeed < 0) {
       throw new IllegalArgumentException("Random seed cannot be negative");
@@ -151,8 +157,11 @@ public final class MachineRecipeBuilder {
     }
     addFluids(json, "fluid_inputs", fluidInputs, registries);
     addFluids(json, "fluid_outputs", fluidOutputs, registries);
-    if (failureAction != RecipeFailureAction.STILL) {
+    if (failureAction != null) {
       json.addProperty("failure_action", failureAction.serialized());
+    }
+    if (parallelized != null) {
+      json.addProperty("parallelized", parallelized);
     }
     if (randomSeed > 0) {
       json.addProperty("random_seed", randomSeed);
