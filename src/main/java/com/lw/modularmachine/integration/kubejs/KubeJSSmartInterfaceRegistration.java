@@ -17,7 +17,7 @@ public final class KubeJSSmartInterfaceRegistration implements KubeEvent {
   private final Set<ResourceLocation> identifiers = new LinkedHashSet<>();
   private boolean valid = true;
 
-  public void onUpdate(String text, SmartInterfaceEvents.Listener listener) {
+  public void onSmartInterfaceUpdate(String text, SmartInterfaceEvents.Listener listener) {
     ResourceLocation id = KubeJSRegistrationIds.parse(text);
     if (id == null
         || listener == null

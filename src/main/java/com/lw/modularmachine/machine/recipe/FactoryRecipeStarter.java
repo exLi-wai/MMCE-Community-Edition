@@ -72,6 +72,9 @@ public final class FactoryRecipeStarter {
         return Result.STALE;
       }
       var ticket = checked.orElseThrow();
+      if (RecipeResourceRequirements.missing(ticket, nativeRecipe.orElseThrow()).isPresent()) {
+        return Result.STALE;
+      }
       var ports = new HashMap<String, RecipeExecutionTicket.PortSnapshot>();
       for (var port : ticket.ports()) {
         ports.put(port.partId(), port);

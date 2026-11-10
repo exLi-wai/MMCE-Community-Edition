@@ -36,7 +36,9 @@ public final class FactoryParallelResourceCommitter {
     WAITING_UPGRADE,
     UPGRADE_ERROR,
     STALE,
-    UPGRADE_PENDING
+    UPGRADE_PENDING,
+    MISSING_ENERGY_INPUT,
+    MISSING_FLUID_INPUT
   }
 
   private record EnergyDebit(RecipeExecutionTicket.PortSnapshot port, long amount) {
@@ -115,6 +117,9 @@ public final class FactoryParallelResourceCommitter {
     }
     var energyDebits = new ArrayList<EnergyDebit>();
     for (var requirement : energyRequirements.entrySet()) {
+      if (!RecipeResourceRequirements.has(energyTicket, PortKind.ENERGY_INPUT, requirement.getKey())) {
+        return Result.MISSING_ENERGY_INPUT;
+      }
       var planned = planEnergy(energyTicket, requirement.getValue(), requirement.getKey());
       if (planned == null) {
         return applyFailure(factory, threadId, set, activeRuns, level.getGameTime(), Result.WAITING_ENERGY);
@@ -124,6 +129,12 @@ public final class FactoryParallelResourceCommitter {
     var fluidDebits = new ArrayList<FluidDebit>();
     var reservedFluids = new HashMap<String, Integer>();
     for (var requirement : fluidRequirements.entrySet()) {
+      if (!RecipeResourceRequirements.has(
+          fluidTicket.withInputGroup(requirement.getKey().group()),
+          PortKind.FLUID_INPUT,
+          requirement.getKey().selector())) {
+        return Result.MISSING_FLUID_INPUT;
+      }
       var planned = planFluids(
           fluidTicket,
           requirement.getValue(),

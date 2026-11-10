@@ -138,8 +138,8 @@ public final class MachineRecipeJson {
     if (object.has("modifiers")) {
       RecipeModifiers.parse(object.get("modifiers"), "$.modifiers");
     }
-    demands(object.get("inputs"), "$.inputs");
-    demands(object.get("outputs"), "$.outputs");
+    demands(object.get("inputs"), "$.inputs", true);
+    demands(object.get("outputs"), "$.outputs", false);
     if (object.has("interface_inputs")) {
       SmartNumberRequirement.parse(object.get("interface_inputs"), "$.interface_inputs");
     }
@@ -328,7 +328,7 @@ public final class MachineRecipeJson {
     }
   }
 
-  private static void demands(JsonElement element, String path) {
+  private static void demands(JsonElement element, String path, boolean input) {
     if (element == null || !element.isJsonArray()) {
       throw error(path, "Expected array");
     }
@@ -339,7 +339,14 @@ public final class MachineRecipeJson {
     for (int i = 0; i < array.size(); i++) {
       String at = path + "[" + i + "]";
       var demand = object(array.get(i), at);
-      fields(demand, Set.of("stack", "amount", "chance", "selector"), at);
+      fields(demand, Set.of("stack", "amount", "chance", "selector", "match"), at);
+      String match = demand.has("match") ? string(demand.get("match"), at + ".match") : "exact";
+      if (!match.equals("exact") && !match.equals("item")) {
+        throw error(at + ".match", "Expected exact or item");
+      }
+      if (match.equals("item") && (!input || array.size() != 1)) {
+        throw error(at + ".match", "Item-only matching requires a single item input row");
+      }
       if (demand.has("selector")) {
         ResourceSelector.require(string(demand.get("selector"), at + ".selector"));
       }

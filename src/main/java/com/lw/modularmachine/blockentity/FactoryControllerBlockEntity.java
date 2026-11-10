@@ -14,6 +14,7 @@ import com.lw.modularmachine.machine.factory.FactoryRunSetCodec;
 import com.lw.modularmachine.machine.factory.FactoryScheduler;
 import com.lw.modularmachine.machine.factory.FactoryThreadPreset;
 import com.lw.modularmachine.machine.factory.FactoryThreadState;
+import com.lw.modularmachine.machine.recipe.RecipeResourceRequirements;
 import com.lw.modularmachine.machine.factory.FactoryThreadStateCodec;
 import com.lw.modularmachine.machine.factory.FactoryUpgradeCatalog;
 import com.lw.modularmachine.api.upgrade.FactoryUpgradeEntry;
@@ -1346,6 +1347,10 @@ public final class FactoryControllerBlockEntity extends BlockEntity implements M
             updateThreadState(thread, FactoryThreadState.State.WAITING, FactoryThreadState.Reason.WAITING_ENERGY);
           case WAITING_FLUID ->
             updateThreadState(thread, FactoryThreadState.State.WAITING, FactoryThreadState.Reason.WAITING_FLUID);
+          case MISSING_ENERGY_INPUT ->
+            updateThreadState(thread, FactoryThreadState.State.WAITING, FactoryThreadState.Reason.MISSING_ENERGY_INPUT);
+          case MISSING_FLUID_INPUT ->
+            updateThreadState(thread, FactoryThreadState.State.WAITING, FactoryThreadState.Reason.MISSING_FLUID_INPUT);
           case WAITING_UPGRADE ->
             updateThreadState(thread, FactoryThreadState.State.WAITING, FactoryThreadState.Reason.WAITING_UPGRADE_COST);
           case UPGRADE_ERROR ->
@@ -1373,6 +1378,12 @@ public final class FactoryControllerBlockEntity extends BlockEntity implements M
           if (result == FactoryRunResourceCommitter.Result.WAITING_ENERGY) {
             threadState = FactoryThreadState.State.WAITING;
             threadReason = FactoryThreadState.Reason.WAITING_ENERGY;
+          } else if (result == FactoryRunResourceCommitter.Result.MISSING_ENERGY_INPUT) {
+            threadState = FactoryThreadState.State.WAITING;
+            threadReason = FactoryThreadState.Reason.MISSING_ENERGY_INPUT;
+          } else if (result == FactoryRunResourceCommitter.Result.MISSING_FLUID_INPUT) {
+            threadState = FactoryThreadState.State.WAITING;
+            threadReason = FactoryThreadState.Reason.MISSING_FLUID_INPUT;
           } else if (result == FactoryRunResourceCommitter.Result.WAITING_FLUID) {
             threadState = FactoryThreadState.State.WAITING;
             threadReason = FactoryThreadState.Reason.WAITING_FLUID;
@@ -1604,11 +1615,16 @@ public final class FactoryControllerBlockEntity extends BlockEntity implements M
           case BUDGET_EXHAUSTED ->
             updateThreadState(thread, FactoryThreadState.State.WAITING, FactoryThreadState.Reason.SEARCH_BUDGET);
           case NO_MATCH -> {
-            updateThreadState(
-                thread,
-                FactoryThreadState.State.WAITING,
-                thread
-                    .lockedRecipe() == null ? FactoryThreadState.Reason.NO_RECIPE : FactoryThreadState.Reason.INPUT_MISSING);
+            var missing = search.missingResource();
+            FactoryThreadState.Reason reason;
+            if (missing.isPresent()) {
+              reason = RecipeResourceRequirements.factoryReason(missing.orElseThrow());
+            } else if (thread.lockedRecipe() == null) {
+              reason = FactoryThreadState.Reason.NO_RECIPE;
+            } else {
+              reason = FactoryThreadState.Reason.INPUT_MISSING;
+            }
+            updateThreadState(thread, FactoryThreadState.State.WAITING, reason);
             removeSearchState(thread.threadId(), now);
             backoffSearch(thread.threadId(), now);
           }

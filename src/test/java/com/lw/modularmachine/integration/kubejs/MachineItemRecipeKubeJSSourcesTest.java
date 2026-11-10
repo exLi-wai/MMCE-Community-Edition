@@ -47,15 +47,24 @@ class MachineItemRecipeKubeJSSourcesTest {
   }
 
   @Test
-  void ignoresForeignNamespacesTypesAndReadsTheLiveMapOnly() {
+  void acceptsAnyNamespaceButExcludesUnchangedOriginalsAndOtherTypes() {
     Map<ResourceLocation, JsonElement> live = new LinkedHashMap<>();
+    var original = ResourceLocation.fromNamespaceAndPath("mmcece", "mmcece/original");
+    live.put(original, JsonParser.parseString(RECIPE));
     MachineItemRecipeKubeJSSources.capture(live);
-    live.put(ResourceLocation.fromNamespaceAndPath("other", "ae/gold_ingot"), JsonParser.parseString(RECIPE));
+    var added = ResourceLocation.fromNamespaceAndPath("other", "gold_ingot");
+    live.put(added, JsonParser.parseString(RECIPE));
     live.put(
         ResourceLocation.fromNamespaceAndPath("kubejs", "not_machine"),
         JsonParser.parseString("{\"type\":\"minecraft:crafting_shapeless\"}"));
 
-    assertTrue(MachineItemRecipeKubeJSSources.snapshot().isEmpty());
+    var snapshot = MachineItemRecipeKubeJSSources.snapshot();
+    assertEquals(1, snapshot.size());
+    assertTrue(snapshot.containsKey(added));
+    assertFalse(snapshot.containsKey(original));
+    assertTrue(
+        live.get(original).getAsJsonObject().getAsJsonArray("inputs").get(0).getAsJsonObject().getAsJsonObject("stack")
+            .has("count"));
   }
 
   @Test

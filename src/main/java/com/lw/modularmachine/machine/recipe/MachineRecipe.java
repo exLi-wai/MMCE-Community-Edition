@@ -44,26 +44,38 @@ public final class MachineRecipe implements Recipe<RecipeInput> {
                 ItemStack.SINGLE_ITEM_CODEC.fieldOf("stack").forGetter((ItemAmount value) -> value.prototype),
                 Codec.LONG.fieldOf("amount").forGetter(ItemAmount::amount),
                 Codec.DOUBLE.optionalFieldOf("chance", 1.0D).forGetter(ItemAmount::chance),
-                Codec.STRING.optionalFieldOf("selector", "").forGetter(ItemAmount::selector))
+                Codec.STRING.optionalFieldOf("selector", "").forGetter(ItemAmount::selector),
+                Codec.STRING.optionalFieldOf("match", "exact").forGetter(ItemAmount::match))
             .apply(instance, ItemAmount::new));
     private final ItemStack prototype;
     private final long amount;
     private final double chance;
     private final String selector;
+    private final String match;
 
-    private ItemAmount(ItemStack prototype, long amount, double chance, String selector) {
+    private ItemAmount(ItemStack prototype, long amount, double chance, String selector, String match) {
       if (prototype.isEmpty()
           || prototype.getCount() != 1
           || amount <= 0
           || !Double.isFinite(chance)
           || chance < 0
-          || chance > 1) {
+          || chance > 1
+          || !("exact".equals(match) || "item".equals(match))) {
         throw new IllegalArgumentException("Expected one prototype and positive long amount");
       }
       this.prototype = prototype;
       this.amount = amount;
       this.chance = chance;
       this.selector = ResourceSelector.require(selector);
+      this.match = match;
+    }
+
+    public String match() {
+      return match;
+    }
+
+    public boolean ignoresComponents() {
+      return match.equals("item");
     }
 
     public String selector() {
@@ -186,6 +198,10 @@ public final class MachineRecipe implements Recipe<RecipeInput> {
     }
     validateAmounts(this.inputs);
     validateAmounts(this.outputs);
+    if (this.inputs.size() != 1 && this.inputs.stream().anyMatch(ItemAmount::ignoresComponents)
+        || this.outputs.stream().anyMatch(ItemAmount::ignoresComponents)) {
+      throw new IllegalArgumentException("Item-only matching requires one item input and exact outputs");
+    }
   }
 
   private static void validateAmounts(List<ItemAmount> values) {
@@ -274,11 +290,7 @@ public final class MachineRecipe implements Recipe<RecipeInput> {
         id.toString(),
         priority,
         inputs.stream()
-            .map(
-                value -> new RecipeCandidate.Input<>(
-                    ItemResourceKey.of(value.prototype, registries).withSelector(value.selector),
-                    value.amount,
-                    value.chance))
+            .map(value -> new RecipeCandidate.Input<>(inputKey(value, registries), value.amount, value.chance))
             .toList(),
         outputs.stream().filter(value -> value.chance == 1.0D)
             .map(
@@ -287,6 +299,12 @@ public final class MachineRecipe implements Recipe<RecipeInput> {
                     value.amount))
             .toList(),
         interfaceInputs);
+  }
+
+  private static ItemResourceKey inputKey(ItemAmount value, HolderLookup.Provider registries) {
+    var key = ItemResourceKey.of(value.prototype, registries).withSelector(value.selector);
+
+    return value.ignoresComponents() ? key.ignoringComponents() : key;
   }
 
   boolean sameDefinition(MachineRecipe other) {
@@ -314,6 +332,7 @@ public final class MachineRecipe implements Recipe<RecipeInput> {
       if (a.get(i).amount != b.get(i).amount
           || a.get(i).chance != b.get(i).chance
           || !a.get(i).selector.equals(b.get(i).selector)
+          || !a.get(i).match.equals(b.get(i).match)
           || !ItemStack.matches(a.get(i).prototype, b.get(i).prototype)) {
         return false;
       }
@@ -334,7 +353,7 @@ public final class MachineRecipe implements Recipe<RecipeInput> {
   }
 
   private static void write(RegistryFriendlyByteBuf buffer, MachineRecipe value) {
-    buffer.writeVarInt(11);
+    buffer.writeVarInt(12);
     buffer.writeResourceLocation(value.machineId);
     buffer.writeVarInt(value.priority);
     buffer.writeVarInt(value.duration);
@@ -372,13 +391,14 @@ public final class MachineRecipe implements Recipe<RecipeInput> {
       buffer.writeVarLong(value.amount);
       buffer.writeDouble(value.chance);
       buffer.writeUtf(value.selector, ResourceSelector.MAX_LENGTH);
+      buffer.writeBoolean(value.ignoresComponents());
     }
   }
 
   private static MachineRecipe read(RegistryFriendlyByteBuf buffer) {
     try {
       int schema = buffer.readVarInt();
-      if (schema != 11) {
+      if (schema != 12) {
         throw new DecoderException("Unsupported machine recipe wire schema");
       }
       var machine = buffer.readResourceLocation();
@@ -465,7 +485,8 @@ public final class MachineRecipe implements Recipe<RecipeInput> {
               ItemStack.STREAM_CODEC.decode(buffer),
               buffer.readVarLong(),
               buffer.readDouble(),
-              buffer.readUtf(ResourceSelector.MAX_LENGTH)));
+              buffer.readUtf(ResourceSelector.MAX_LENGTH),
+              buffer.readBoolean() ? "item" : "exact"));
     }
     return List.copyOf(values);
   }

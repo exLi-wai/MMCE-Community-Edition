@@ -21,6 +21,8 @@ import com.lw.modularmachine.machine.orientation.OrientationPolicy;
 import com.lw.modularmachine.machine.orientation.PropertySpace;
 import com.lw.modularmachine.machine.orientation.StateOrientationAdapters;
 import com.lw.modularmachine.api.recipe.RecipeModifier;
+import com.lw.modularmachine.api.recipe.adapter.RecipeAdapterImport;
+import com.lw.modularmachine.machine.recipe.adapter.RecipeAdapterDefinitions;
 import com.lw.modularmachine.machine.recipe.RecipeModifiers;
 import com.lw.modularmachine.machine.recipe.ResourceSelector;
 import com.lw.modularmachine.machine.smart.SmartInterfaceAssignment;
@@ -76,7 +78,8 @@ public record MachineDefinition(
     Set<MachineComponentType> hiddenComponentTypes,
     boolean hasFactory,
     boolean parallelizable,
-    int maximumFactoryThreads) {
+    int maximumFactoryThreads,
+    List<RecipeAdapterImport> recipeAdapters) {
 
   /**
    * In Laozi's world, Laozi builds it however he wants.
@@ -84,6 +87,13 @@ public record MachineDefinition(
   private static final Logger LOGGER = LogUtils.getLogger();
   public static final int MAX_PARTS = Integer.MAX_VALUE;
   static final long ALTERNATIVE_RESOURCE_BUDGET = 4_194_304L;
+
+  public MachineDefinition(ResourceLocation id, String translationKey, List<Part> parts, long energyPerTick, OrientationPolicy orientationPolicy, OrientationCompilation orientationCompilation, FactoryThreadPreset factoryPreset, List<RecipeModifier> recipeModifiers, List<StructureModifierDefinition> structureModifiers, Map<String, SmartInterfaceType> interfaceTypes, int internalParallelism, int maxParallelism, boolean requiresBlueprint, boolean factoryOnly, int color, boolean hideComponentsWhenFormed, AABB controllerBoundingBox, List<DynamicPatternDefinition> dynamicPatterns, Map<String, Integer> dynamicLengths, MachineDefinition source, Set<MachineComponentType> hiddenComponentTypes, boolean hasFactory, boolean parallelizable, int maximumFactoryThreads) {
+    this(id, translationKey, parts, energyPerTick, orientationPolicy, orientationCompilation, factoryPreset,
+        recipeModifiers, structureModifiers, interfaceTypes, internalParallelism, maxParallelism, requiresBlueprint,
+        factoryOnly, color, hideComponentsWhenFormed, controllerBoundingBox, dynamicPatterns, dynamicLengths, source,
+        hiddenComponentTypes, hasFactory, parallelizable, maximumFactoryThreads, List.of());
+  }
 
   public MachineDefinition(ResourceLocation id, String translationKey, List<Part> parts, long energyPerTick, OrientationPolicy orientationPolicy, OrientationCompilation orientationCompilation, FactoryThreadPreset factoryPreset, List<RecipeModifier> recipeModifiers, List<StructureModifierDefinition> structureModifiers, Map<String, SmartInterfaceType> interfaceTypes, int internalParallelism, int maxParallelism, boolean requiresBlueprint, boolean factoryOnly, int color, boolean hideComponentsWhenFormed, AABB controllerBoundingBox, List<DynamicPatternDefinition> dynamicPatterns, Map<String, Integer> dynamicLengths, MachineDefinition source, Set<MachineComponentType> hiddenComponentTypes, boolean hasFactory) {
     this(id, translationKey, parts, energyPerTick, orientationPolicy, orientationCompilation, factoryPreset,
@@ -148,6 +158,8 @@ public record MachineDefinition(
   }
 
   public MachineDefinition {
+    recipeAdapters = List.copyOf(recipeAdapters);
+    RecipeAdapterDefinitions.validate(recipeAdapters);
     hiddenComponentTypes = Set.copyOf(hiddenComponentTypes);
     if ((color & ~0xFFFFFF) != 0) {
       throw new IllegalArgumentException("Machine color must be an RGB value");
@@ -396,7 +408,8 @@ public record MachineDefinition(
         registrationFlags.hasFactory(),
         root.has("parallelizable") ? bool(root.get("parallelizable"), path + ".parallelizable") : defaults
             .parallelizable(),
-        maximumFactoryThreads);
+        maximumFactoryThreads,
+        RecipeAdapterDefinitions.parse(root, path));
   }
 
   /**
@@ -562,7 +575,8 @@ public record MachineDefinition(
         hiddenComponentTypes,
         hasFactory,
         parallelizable,
-        maximumFactoryThreads);
+        maximumFactoryThreads,
+        recipeAdapters);
   }
 
   private static void appendDynamic(List<Part> target, Set<BlockPos> positions, Set<String> ids, DynamicPatternDefinition pattern, List<Part> template, String group, int repetition) {
@@ -712,6 +726,7 @@ public record MachineDefinition(
         "orientation",
         "factory",
         "recipe_modifiers",
+        "recipe_adapters",
         "structure_modifiers",
         "dynamic_patterns",
         "dynamic-patterns",

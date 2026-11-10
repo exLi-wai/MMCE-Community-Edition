@@ -27,7 +27,9 @@ public final class FactoryRunResourceCommitter {
     WAITING_UPGRADE,
     UPGRADE_ERROR,
     STALE,
-    UPGRADE_PENDING
+    UPGRADE_PENDING,
+    MISSING_ENERGY_INPUT,
+    MISSING_FLUID_INPUT
   }
 
   private FactoryRunResourceCommitter() {
@@ -65,6 +67,9 @@ public final class FactoryRunResourceCommitter {
       if (energyTicket == null) {
         return Result.WAITING_ENERGY;
       }
+      if (!RecipeResourceRequirements.has(energyTicket, PortKind.ENERGY_INPUT, run.selectors().energyInput())) {
+        return Result.MISSING_ENERGY_INPUT;
+      }
       energyDebits = planEnergyDebits(energyTicket, run.energyPerTick(), run.selectors().energyInput());
       if (energyDebits == null) {
         return applyResourceFailure(factory, threadId, run, level.getGameTime(), Result.WAITING_ENERGY);
@@ -80,6 +85,9 @@ public final class FactoryRunResourceCommitter {
         return Result.STALE;
       }
       fluidTicket = fluidTicket.withInputGroup(run.inputGroup());
+      if (!RecipeResourceRequirements.has(fluidTicket, PortKind.FLUID_INPUT, run.selectors().fluidPerTick())) {
+        return Result.MISSING_FLUID_INPUT;
+      }
       fluidDebits = planFluidDebits(fluidTicket, fluidFee, run.selectors().fluidPerTick());
       if (fluidDebits == null) {
         return applyResourceFailure(factory, threadId, run, level.getGameTime(), Result.WAITING_FLUID);

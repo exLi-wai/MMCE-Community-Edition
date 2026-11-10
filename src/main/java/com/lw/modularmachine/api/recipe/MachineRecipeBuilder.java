@@ -19,7 +19,7 @@ import net.neoforged.neoforge.fluids.FluidStack;
 
 /** Builds a validated machine-recipe data-pack resource. */
 public final class MachineRecipeBuilder {
-  private record ItemRow(ItemStack stack, long amount, double chance, String selector) {
+  private record ItemRow(ItemStack stack, long amount, double chance, String selector, String match) {
   }
 
   private final ResourceLocation id;
@@ -91,7 +91,21 @@ public final class MachineRecipeBuilder {
   }
 
   public MachineRecipeBuilder itemInput(ItemStack stack, long amount, double chance, String selector) {
+    if (!inputs.isEmpty() && inputs.getFirst().match().equals("item")) {
+      throw new IllegalArgumentException("Item-only matching requires a single item input row");
+    }
     inputs.add(itemRow(stack, amount, chance, selector));
+    return this;
+  }
+
+  /** One item input, matching its item identity while allowing any components. */
+  public MachineRecipeBuilder itemInputIgnoringComponents(ItemStack stack, long amount) {
+    if (!inputs.isEmpty()) {
+      throw new IllegalArgumentException("Item-only matching requires a single item input row");
+    }
+    var row = itemRow(stack, amount, 1, "");
+    inputs.add(new ItemRow(row.stack(), row.amount(), row.chance(), row.selector(), "item"));
+
     return this;
   }
 
@@ -192,7 +206,7 @@ public final class MachineRecipeBuilder {
     if (amount <= 0 || !Double.isFinite(chance) || chance < 0 || chance > 1) {
       throw new IllegalArgumentException("Invalid item amount or chance");
     }
-    return new ItemRow(stack.copy(), amount, chance, ResourceSelector.require(selector));
+    return new ItemRow(stack.copy(), amount, chance, ResourceSelector.require(selector), "exact");
   }
 
   private static FluidStack requireFluid(FluidStack fluid) {
@@ -214,6 +228,9 @@ public final class MachineRecipeBuilder {
       }
       if (!row.selector().isEmpty()) {
         entry.addProperty("selector", row.selector());
+      }
+      if (!row.match().equals("exact")) {
+        entry.addProperty("match", row.match());
       }
       entries.add(entry);
     }

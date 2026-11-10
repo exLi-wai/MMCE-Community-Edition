@@ -82,6 +82,9 @@ public final class FactoryParallelStarter {
       if (ticket == null || !RecipeCommitGuard.validate(ticket)) {
         return Result.STALE;
       }
+      if (RecipeResourceRequirements.missing(ticket, nativeRecipe.orElseThrow()).isPresent()) {
+        return Result.STALE;
+      }
       var ports = new HashMap<String, RecipeExecutionTicket.PortSnapshot>();
       for (var port : ticket.ports()) {
         ports.put(port.partId(), port);
@@ -312,6 +315,9 @@ public final class FactoryParallelStarter {
         return new Admission(Result.MIXED_RECIPES, null);
       }
       if (!plan.validateForStart()) {
+        return new Admission(Result.STALE, null);
+      }
+      if (RecipeResourceRequirements.missing(plan.source(), definition).isPresent()) {
         return new Admission(Result.STALE, null);
       }
     }

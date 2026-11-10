@@ -27,6 +27,7 @@ import com.lw.modularmachine.machine.recipe.FrozenItemRun;
 import com.lw.modularmachine.machine.recipe.ItemRecipePlan;
 import com.lw.modularmachine.machine.recipe.ItemRecipeSearch;
 import com.lw.modularmachine.machine.recipe.ItemRunEngine;
+import com.lw.modularmachine.machine.recipe.RecipeResourceRequirements;
 import com.lw.modularmachine.machine.recipe.MachineRecipeService;
 import com.lw.modularmachine.machine.recipe.RecipeLifecyclePublisher;
 import com.lw.modularmachine.machine.recipe.RecipePlanner.Status;
@@ -105,6 +106,7 @@ public final class MachineControllerBlockEntity extends BlockEntity implements M
   private long recipeRetryAfter;
   private int recipeRetryInterval = RECIPE_RETRY_INITIAL;
   private String lastRecipeFailure;
+  private ItemRunEngine.Result idleRecipeStatus = ItemRunEngine.Result.IDLE;
   private VerificationState detachedState = VerificationState.PENDING;
   private VerificationFailure detachedFailure = VerificationFailure.UNVERIFIED;
 
@@ -156,6 +158,7 @@ public final class MachineControllerBlockEntity extends BlockEntity implements M
     recipeSearch = null;
     preparedRecipe = null;
     idleAppearance = ControllerAppearanceState.FORMED;
+    idleRecipeStatus = ItemRunEngine.Result.IDLE;
     resetRecipeRetry(0L);
     this.registration = registration;
     conservativeRegistration = null;
@@ -513,6 +516,9 @@ public final class MachineControllerBlockEntity extends BlockEntity implements M
       return upgrades.restrictions()
           .valid() ? ItemRunEngine.Result.UPGRADE_ERROR : ItemRunEngine.Result.UPGRADE_CONFLICT;
     }
+    if (runningRecipe == null && idleRecipeStatus != ItemRunEngine.Result.IDLE) {
+      return idleRecipeStatus;
+    }
     return recipeEngine.status();
   }
 
@@ -864,6 +870,7 @@ public final class MachineControllerBlockEntity extends BlockEntity implements M
       resetRecipeRetry(server.getGameTime());
     }
     if (recipeSearch == null) {
+      idleRecipeStatus = ItemRunEngine.Result.IDLE;
       var catalog = MachineRecipeService.catalogFor(this).orElse(null);
       if (catalog == null) {
         idleAppearance = ControllerAppearanceState.PAUSED;
@@ -894,6 +901,8 @@ public final class MachineControllerBlockEntity extends BlockEntity implements M
         }
         if (result.status() == Status.NO_MATCH) {
           idleAppearance = ControllerAppearanceState.PAUSED;
+          idleRecipeStatus = recipeSearch.missingResource().map(RecipeResourceRequirements::ordinaryResult)
+              .orElse(ItemRunEngine.Result.IDLE);
           recipeSearch = null;
           backoffRecipeRetry(server.getGameTime());
           return;
@@ -904,6 +913,7 @@ public final class MachineControllerBlockEntity extends BlockEntity implements M
       }
     }
     var result = preparedRecipe.start();
+    idleRecipeStatus = ItemRunEngine.Result.IDLE;
     idleAppearance = result == Result.FAILED ? ControllerAppearanceState.ERROR : ControllerAppearanceState.PAUSED;
     if (result == Result.STARTED) {
       recipeEngine.started();

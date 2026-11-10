@@ -57,6 +57,9 @@ public final class AtomicRecipeStarter {
     if (!plan.validateForStart()) {
       return Result.STALE;
     }
+    if (RecipeResourceRequirements.missing(plan.source(), nativeRecipe.orElseThrow()).isPresent()) {
+      return Result.STALE;
+    }
     int budget = MachineConfig.RECIPE_OUTPUT_WORK.get();
     var checks = plan.advanceFactoryChecks(controller, "main", budget);
     if (checks.status() == UpgradeRecipeChecks.Status.PENDING) {
@@ -101,6 +104,11 @@ public final class AtomicRecipeStarter {
     var owner = controller.acquireRecipeStart();
     FrozenItemRun startedRun = null;
     try {
+      var checked = effectivePlan.checkedTicket();
+      if (checked.isEmpty()
+          || RecipeResourceRequirements.missing(checked.orElseThrow(), nativeRecipe.orElseThrow()).isPresent()) {
+        return Result.STALE;
+      }
       // Payload codecs/allocations, predicates and potentially reentrant work precede
       // inventory
       // leases.
@@ -140,10 +148,6 @@ public final class AtomicRecipeStarter {
           return Result.STALE;
         }
         contents.set(ref.slot(), before.copyWithCount(before.getCount() - deduction.count()));
-      }
-      var checked = effectivePlan.checkedTicket();
-      if (checked.isEmpty()) {
-        return Result.STALE;
       }
       var fluidDebits = planFluidDebits(
           checked.orElseThrow(),

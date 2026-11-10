@@ -1,0 +1,7 @@
+{
+  "orientation": { "policy": "all_24" },
+  "parts": [
+    { "part_id": "item_in", "offset": [-1, 0, 1], "block": "item_input" },
+    { "part_id": "item_out", "offset": [1, 0, 1], "block": "item_output" }
+  ]
+}

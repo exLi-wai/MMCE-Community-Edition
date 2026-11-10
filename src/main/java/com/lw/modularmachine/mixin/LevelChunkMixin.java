@@ -17,7 +17,7 @@ import org.spongepowered.asm.mixin.injection.callback.CallbackInfoReturnable;
 @Mixin(LevelChunk.class)
 public abstract class LevelChunkMixin {
   @Inject(method = "setBlockState", at = @At("RETURN"))
-  private void mmcece$blockChanged(BlockPos pos, BlockState state, boolean moving, CallbackInfoReturnable<BlockState> callback) {
+  private void MMCECE$blockChanged(BlockPos pos, BlockState state, boolean moving, CallbackInfoReturnable<BlockState> callback) {
     if (callback.getReturnValue() != null
         && ((LevelChunk) (Object) this).getLevel() instanceof ServerLevel level
         && level.getServer().isSameThread()) {

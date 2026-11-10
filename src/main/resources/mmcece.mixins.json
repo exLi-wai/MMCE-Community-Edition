@@ -4,6 +4,7 @@
   "package": "com.lw.modularmachine.mixin",
   "compatibilityLevel": "JAVA_21",
   "mixins": [
+    "KubeJSRecipesEventMixin",
     "LevelChunkMixin"
   ],
   "client": [

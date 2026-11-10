@@ -15,6 +15,8 @@ import com.lw.modularmachine.api.upgrade.FactoryUpgradeRecipeChecks;
 import com.lw.modularmachine.api.upgrade.FactoryUpgradeRuntimeData;
 import com.lw.modularmachine.api.upgrade.FactoryUpgradeStartCost;
 import com.lw.modularmachine.machine.recipe.FrozenItemRun.State;
+import com.lw.modularmachine.machine.recipe.MachineRecipeRegistries;
+import com.lw.modularmachine.machine.recipe.adapter.RecipeAdapterScriptSources;
 import com.lw.modularmachine.api.recipe.RecipeLifecycleEvents;
 import com.lw.modularmachine.api.smart.SmartInterfaceEvents;
 import dev.latvian.mods.kubejs.core.RecipeManagerKJS;
@@ -23,11 +25,15 @@ import dev.latvian.mods.kubejs.event.EventGroupRegistry;
 import dev.latvian.mods.kubejs.event.EventHandler;
 import dev.latvian.mods.kubejs.plugin.ClassFilter;
 import dev.latvian.mods.kubejs.plugin.KubeJSPlugin;
+import dev.latvian.mods.kubejs.recipe.NamespaceFunction;
+import dev.latvian.mods.kubejs.recipe.RecipeTypeFunction;
 import dev.latvian.mods.kubejs.recipe.RecipesKubeEvent;
-import dev.latvian.mods.kubejs.recipe.schema.RecipeMappingRegistry;
-import dev.latvian.mods.kubejs.recipe.schema.RecipeSchemaRegistry;
+import dev.latvian.mods.kubejs.recipe.schema.RecipeNamespace;
 import dev.latvian.mods.kubejs.script.ScriptManager;
+import dev.latvian.mods.kubejs.script.BindingRegistry;
+import dev.latvian.mods.kubejs.script.ScriptType;
 import java.util.List;
+import java.util.LinkedHashMap;
 import java.util.Map;
 import java.util.concurrent.atomic.AtomicLong;
 import net.minecraft.resources.ResourceLocation;
@@ -41,27 +47,49 @@ public final class MMCECEKubeJSPlugin implements KubeJSPlugin {
   public static final EventGroup EVENTS = EventGroup.of("MMCECEUpgradeEvents");
   public static final EventGroup SMART_INTERFACE_EVENTS = EventGroup.of("MMCECESmartInterfaceEvents");
   public static final EventGroup RECIPE_LIFECYCLE_EVENTS = EventGroup.of("MMCECERecipeEvents");
+  public static final EventGroup RECIPE_ADAPTER_EVENTS = EventGroup.of("MMCECERecipeAdapterEvents");
   private static final EventHandler REGISTER_HANDLERS = EVENTS
-      .server("registerHandlers", () -> KubeJSUpgradeHandlerRegistration.class);
+      .server("register", () -> KubeJSUpgradeHandlerRegistration.class);
   private static final EventHandler REGISTER_SMART_INTERFACE_HANDLERS = SMART_INTERFACE_EVENTS
-      .server("registerHandlers", () -> KubeJSSmartInterfaceRegistration.class);
+      .server("register", () -> KubeJSSmartInterfaceRegistration.class);
   private static final EventHandler REGISTER_RECIPE_LIFECYCLE_HANDLERS = RECIPE_LIFECYCLE_EVENTS
-      .server("registerHandlers", () -> KubeJSRecipeLifecycleRegistration.class);
+      .server("register", () -> KubeJSRecipeLifecycleRegistration.class);
+  private static final EventHandler REGISTER_RECIPE_ADAPTERS = RECIPE_ADAPTER_EVENTS
+      .server("register", () -> KubeJSRecipeAdapterRegistration.class);
   private static final AtomicLong SCRIPT_GENERATION = new AtomicLong();
 
   @Override
-  public void registerRecipeSchemas(RecipeSchemaRegistry registry) {
-    MachineItemRecipeKubeJSSchema.register(registry);
-  }
-
-  @Override
-  public void registerRecipeMappings(RecipeMappingRegistry registry) {
-    MachineItemRecipeKubeJSSchema.registerMappings(registry);
+  public void registerBindings(BindingRegistry registry) {
+    if (registry.type() == ScriptType.SERVER) {
+      registry.add("RecipeBuilder", KubeJSRecipeBuilder.class);
+    }
   }
 
   @Override
   public void beforeRecipeLoading(RecipesKubeEvent event, RecipeManagerKJS manager, Map<ResourceLocation, JsonElement> recipes) {
+    hideMachineRecipeFunction(event);
     MachineItemRecipeKubeJSSources.capture(recipes);
+  }
+
+  private static void hideMachineRecipeFunction(RecipesKubeEvent event) {
+    var id = MachineRecipeRegistries.ITEM_SERIALIZER.getId();
+    var namespace = event.recipeSchemaStorage.namespaces.get(id.getNamespace());
+    if (namespace == null) {
+      return;
+    }
+    // KubeJSRecipesEventMixin filters the script-facing flat map. Omit the
+    // namespace function too, while preserving the schema namespace and internal
+    // type lookup for native JSON parsing and RecipeBuilder.build().
+    var visibleNamespace = new RecipeNamespace(namespace.storage, namespace.name);
+    var functions = new LinkedHashMap<String, RecipeTypeFunction>();
+    for (var entry : namespace.entrySet()) {
+      if (entry.getValue().serializerKey.location().equals(id)) {
+        continue;
+      }
+      visibleNamespace.put(entry.getKey(), entry.getValue());
+      functions.put(entry.getValue().id.getPath(), event.getRecipeFunction(entry.getValue().id.toString()));
+    }
+    event.getRecipes().put(namespace.name, new NamespaceFunction(visibleNamespace, functions));
   }
 
   @Override
@@ -69,6 +97,7 @@ public final class MMCECEKubeJSPlugin implements KubeJSPlugin {
     registry.register(EVENTS);
     registry.register(SMART_INTERFACE_EVENTS);
     registry.register(RECIPE_LIFECYCLE_EVENTS);
+    registry.register(RECIPE_ADAPTER_EVENTS);
   }
 
   @Override
@@ -77,6 +106,10 @@ public final class MMCECEKubeJSPlugin implements KubeJSPlugin {
     filter.allow(FactoryUpgradeKubeJSHandlers.FixedUpgradeBuilder.class);
     filter.allow(KubeJSSmartInterfaceRegistration.class);
     filter.allow(KubeJSRecipeLifecycleRegistration.class);
+    filter.allow(KubeJSRecipeAdapterRegistration.class);
+    filter.allow(KubeJSRecipeBuilder.class);
+    filter.allow(KubeJSRecipeBuilder.RecipeBuilder.class);
+    filter.allow(KubeJSRecipeAdapterRegistration.RecipeAdapterBuilder.class);
     filter.allow(SmartInterfaceApi.class);
     filter.allow(SmartInterfaceApi.Snapshot.class);
     filter.allow(SmartInterfaceApi.Value.class);
@@ -141,6 +174,12 @@ public final class MMCECEKubeJSPlugin implements KubeJSPlugin {
         .snapshot() : List.<KubeJSRecipeLifecycleRegistration.Handler>of();
     var failurePolicies = recipeRegistrations.valid() && recipeResult.pass() ? recipeRegistrations
         .failurePolicies() : List.<KubeJSRecipeLifecycleRegistration.FailurePolicy>of();
+    var adapterRegistrations = new KubeJSRecipeAdapterRegistration();
+    var adapterResult = REGISTER_RECIPE_ADAPTERS.post(manager.scriptType, adapterRegistrations);
+    adapterRegistrations.seal();
+    boolean adaptersValid = adapterRegistrations.valid() && adapterResult.pass();
+    RecipeAdapterScriptSources
+        .install(generation, adaptersValid ? adapterRegistrations.snapshot() : Map.of(), adaptersValid);
     var server = ServerLifecycleHooks.getCurrentServer();
     if (server == null) {
       ModularMachine.LOGGER.warn("KubeJS server handlers were not installed without a running server");

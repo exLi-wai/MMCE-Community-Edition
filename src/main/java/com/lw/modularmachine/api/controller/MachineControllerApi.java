@@ -7,6 +7,7 @@ import com.lw.modularmachine.machine.PortKind;
 import com.lw.modularmachine.api.orientation.MachineOrientation;
 import com.lw.modularmachine.machine.recipe.FrozenItemRun;
 import com.lw.modularmachine.machine.recipe.ItemResourceKey;
+import com.lw.modularmachine.machine.recipe.ItemRecipePlan;
 import com.lw.modularmachine.machine.recipe.ItemRunEngine;
 import com.lw.modularmachine.machine.recipe.MachineRecipeService;
 import com.lw.modularmachine.machine.recipe.RecipeExecutionTicket;
@@ -62,9 +63,14 @@ public final class MachineControllerApi {
     }
   }
 
-  public record InputShortage(String key, long required, long available, long missing) {
+  public record InputShortage(String key, long required, long available, long missing, String descriptionId) {
+    public InputShortage(String key, long required, long available, long missing) {
+      this(key, required, available, missing, "");
+    }
+
     public InputShortage {
       Objects.requireNonNull(key, "key");
+      Objects.requireNonNull(descriptionId, "descriptionId");
       if (required <= 0 || available < 0 || missing <= 0 || missing != required - Math.min(required, available)) {
         throw new IllegalArgumentException("Invalid input shortage");
       }
@@ -183,7 +189,7 @@ public final class MachineControllerApi {
           for (var stack : port.items()) {
             if (!stack.isEmpty()) {
               available.merge(
-                  ItemResourceKey.of(stack).withSelector(port.selector()),
+                  ItemRecipePlan.inputKey(candidate, ItemResourceKey.of(stack).withSelector(port.selector())),
                   (long) stack.getCount(),
                   Math::addExact);
             }
@@ -197,7 +203,13 @@ public final class MachineControllerApi {
             long amount = entry.getValue() - have;
             missing = missing.add(BigInteger.valueOf(amount));
             if (shortages.size() < 8) {
-              shortages.add(new InputShortage(entry.getKey().debugName(), entry.getValue(), have, amount));
+              shortages.add(
+                  new InputShortage(
+                      entry.getKey().debugName(),
+                      entry.getValue(),
+                      have,
+                      amount,
+                      entry.getKey().descriptionId()));
             }
           }
         }

@@ -1,19 +1,19 @@
 package com.lw.modularmachine.machine.recipe;
 
 import com.lw.modularmachine.machine.factory.UpgradeRecipeChecks;
-
 import com.lw.modularmachine.api.recipe.RecipeModifier;
 import com.lw.modularmachine.api.recipe.RecipeSelectors;
-
+import com.lw.modularmachine.api.recipe.adapter.RecipeAdapterTags;
 import com.google.gson.JsonElement;
 import com.lw.modularmachine.blockentity.FactoryControllerBlockEntity;
 import com.lw.modularmachine.blockentity.MachineControllerBlockEntity;
 import com.lw.modularmachine.config.MachineConfig;
 import com.lw.modularmachine.machine.controller.MachineControllerScriptDataService;
 import com.lw.modularmachine.integration.kubejs.MachineItemRecipeKubeJSSources;
-import com.lw.modularmachine.machine.PortKind;
 import com.lw.modularmachine.machine.structure.MachineDefinition;
 import com.lw.modularmachine.machine.structure.StructureService;
+import com.lw.modularmachine.machine.recipe.adapter.RecipeAdapterImports;
+import com.lw.modularmachine.machine.recipe.adapter.RecipeAdapterScriptSources;
 import com.lw.modularmachine.util.thread.ServerThreadGuard;
 import java.util.ArrayList;
 import java.util.Collection;
@@ -53,13 +53,18 @@ public final class MachineRecipeService {
       Map<ResourceLocation, CompiledRecipeSet<ItemResourceKey>> candidates,
       Map<ResourceLocation, MachineRecipe> definitions,
       Map<ResourceLocation, RecipeModifierTemplate> templates,
-      MachineRecipeJson.Defaults defaults) {
+      MachineRecipeJson.Defaults defaults,
+      long recipeAdapterScriptRevision) {
   }
 
   private MachineRecipeService() {
   }
 
   static void stage(RecipeManager manager, Map<ResourceLocation, MachineRecipe> expected, Map<ResourceLocation, JsonElement> sources, HolderLookup.Provider registries) {
+    stage(manager, expected, sources, registries, RecipeAdapterTags.from(registries));
+  }
+
+  static void stage(RecipeManager manager, Map<ResourceLocation, MachineRecipe> expected, Map<ResourceLocation, JsonElement> sources, HolderLookup.Provider registries, RecipeAdapterTags tags) {
     var defaults = MachineRecipeJson.currentDefaults();
     var server = ServerLifecycleHooks.getCurrentServer();
     if (server != null) {
@@ -67,10 +72,9 @@ public final class MachineRecipeService {
     }
     var actual = new LinkedHashMap<ResourceLocation, MachineRecipe>();
     for (var holder : manager.getAllRecipesFor(MachineRecipeRegistries.ITEM_TYPE.get())) {
-      boolean nativeMachineRecipe = holder.id().getPath().startsWith("mmcece/");
-      boolean kubejsMachineRecipe = holder.id().getNamespace().equals("kubejs") && sources.containsKey(holder.id());
-      if (!nativeMachineRecipe && !kubejsMachineRecipe) {
-        throw new IllegalArgumentException(holder.id() + ": Machine recipes must use recipe/mmcece/*.json");
+      if (!sources.containsKey(holder.id())) {
+        throw new IllegalArgumentException(
+            holder.id() + ": Machine recipes require a validated native resource or script declaration");
       }
       actual.put(holder.id(), holder.value());
     }
@@ -82,10 +86,20 @@ public final class MachineRecipeService {
       throw new IllegalArgumentException(
           "Native machine recipe set is incomplete or contains an unvalidated recipe: missing " + missing + ", unvalidated " + unexpected);
     }
+    var imports = RecipeAdapterImports.generate(manager, StructureService.definitionsSnapshot(), registries, tags);
+    var declarations = new LinkedHashMap<>(expected);
+    var originalSources = new LinkedHashMap<>(sources);
+    for (var entry : imports.recipes().entrySet()) {
+      if (declarations.putIfAbsent(entry.getKey(), entry.getValue()) != null) {
+        throw new IllegalArgumentException(entry.getKey() + ": Imported recipe collides with a native declaration");
+      }
+      actual.put(entry.getKey(), entry.getValue());
+      originalSources.put(entry.getKey(), imports.sources().get(entry.getKey()));
+    }
     var candidates = new HashMap<ResourceLocation, List<RecipeCandidate<ItemResourceKey>>>();
     var effective = new LinkedHashMap<ResourceLocation, MachineRecipe>();
     var templates = new LinkedHashMap<ResourceLocation, RecipeModifierTemplate>();
-    for (var entry : expected.entrySet()) {
+    for (var entry : declarations.entrySet()) {
       var original = actual.get(entry.getKey());
       if (!entry.getValue().sameDefinition(original)) {
         throw new IllegalArgumentException(entry.getKey() + ": Native recipe differs from validated resource");
@@ -95,7 +109,7 @@ public final class MachineRecipeService {
         throw new IllegalArgumentException(entry.getKey() + ": Unknown machine " + original.machineId());
       }
       var recipe = original;
-      var source = sources.get(entry.getKey());
+      var source = originalSources.get(entry.getKey());
       if (source == null || !source.isJsonObject()) {
         throw new IllegalArgumentException(entry.getKey() + ": Missing original recipe declaration");
       }
@@ -122,12 +136,23 @@ public final class MachineRecipeService {
     candidates.forEach((machine, values) -> {
       frozen.put(machine, new CompiledRecipeSet<>(values)); // Compile every machine before any publication.
     });
-    boolean changed = effective.entrySet().stream().anyMatch(entry -> entry.getValue() != actual.get(entry.getKey()));
+    boolean changed = !imports.recipes().isEmpty()
+        || effective.entrySet().stream().anyMatch(entry -> entry.getValue() != actual.get(entry.getKey()));
+    if (!RecipeAdapterScriptSources.isCurrent(imports.scriptRevision())) {
+      throw new IllegalStateException("Recipe adapter scripts changed before recipe publication");
+    }
     if (changed) {
       var replacements = new ArrayList<RecipeHolder<?>>();
+      var installed = new LinkedHashSet<ResourceLocation>();
       for (var holder : manager.getRecipes()) {
         var replacement = effective.get(holder.id());
         replacements.add(replacement == null ? holder : new RecipeHolder<>(holder.id(), replacement));
+        installed.add(holder.id());
+      }
+      for (var entry : effective.entrySet()) {
+        if (installed.add(entry.getKey())) {
+          replacements.add(new RecipeHolder<>(entry.getKey(), entry.getValue()));
+        }
       }
       // This is the prospective reload manager. Preserve all other recipe types and
       // publish once after validation.
@@ -139,7 +164,8 @@ public final class MachineRecipeService {
         Map.copyOf(frozen),
         Map.copyOf(effective),
         Map.copyOf(templates),
-        defaults);
+        defaults,
+        imports.scriptRevision());
     PREPARED.entrySet().removeIf(
         entry -> entry.getKey() != manager
             && ACTIVE.values().stream().noneMatch(active -> active.manager == entry.getKey()));
@@ -185,36 +211,8 @@ public final class MachineRecipeService {
         throw new IllegalArgumentException(id + ": Missing declared smart interface type/part " + requirement.type());
       }
     }
-    for (var input : recipe.inputs()) {
-      requireSelectorPort(id, machine, PortKind.ITEM_INPUT, input.selector());
-    }
-    for (var output : recipe.outputs()) {
-      requireSelectorPort(id, machine, PortKind.ITEM_OUTPUT, output.selector());
-    }
-    if (!recipe.fluidInputs().isEmpty()) {
-      requireSelectorPort(id, machine, PortKind.FLUID_INPUT, recipe.selectors().fluidInput());
-    }
-    if (!recipe.fluidOutputs().isEmpty()) {
-      requireSelectorPort(id, machine, PortKind.FLUID_OUTPUT, recipe.selectors().fluidOutput());
-    }
-    if (recipe.energyPerTick() > 0) {
-      requireSelectorPort(id, machine, PortKind.ENERGY_INPUT, recipe.selectors().energyInput());
-    }
-    if (!recipe.fluidPerTick().isEmpty()) {
-      requireSelectorPort(id, machine, PortKind.FLUID_INPUT, recipe.selectors().fluidPerTick());
-    }
-    if (recipe.energyPerTick() > 0
-        && machine.declarationParts().stream().noneMatch(part -> part.rule().port() == PortKind.ENERGY_INPUT)) {
-      throw new IllegalArgumentException(id + ": FE/t recipes require an energy input port");
-    }
-    if ((!recipe.fluidPerTick().isEmpty() || !recipe.fluidInputs().isEmpty())
-        && machine.declarationParts().stream().noneMatch(part -> part.rule().port() == PortKind.FLUID_INPUT)) {
-      throw new IllegalArgumentException(id + ": Fluid input recipes require a fluid input port");
-    }
-    if (!recipe.fluidOutputs().isEmpty()
-        && machine.declarationParts().stream().noneMatch(part -> part.rule().port() == PortKind.FLUID_OUTPUT)) {
-      throw new IllegalArgumentException(id + ": Fluid output recipes require a fluid output port");
-    }
+    // Resource roles/selectors are runtime requirements. A valid recipe may be
+    // registered before its machine has the required physical resource parts.
   }
 
   public static Optional<ItemRecipeCatalog> catalogForFactory(FactoryControllerBlockEntity factory, String threadId, ItemRecipeCatalog base) {
@@ -227,13 +225,6 @@ public final class MachineRecipeService {
       return Optional.empty();
     }
     return contextCatalog(published, factory, base, thread.upgradeSnapshot().recipeModifiers(), true);
-  }
-
-  private static void requireSelectorPort(ResourceLocation recipe, MachineDefinition machine, PortKind kind, String selector) {
-    if (machine.declarationParts().stream()
-        .noneMatch(part -> part.rule().port() == kind && part.selector().equals(selector))) {
-      throw new IllegalArgumentException(recipe + ": No " + kind + " port in selector '" + selector + "'");
-    }
   }
 
   private static Optional<ItemRecipeCatalog> contextCatalog(Published published, StructureService.StructureSubject owner, ItemRecipeCatalog base, List<RecipeModifier> extraRules, boolean reportFailure) {
@@ -384,13 +375,15 @@ public final class MachineRecipeService {
       return null;
     }
     var published = ACTIVE.get(server);
+    boolean alreadyPublished = published != null && published.manager == manager && published.prepared == prepared;
+    // Declaration revisions guard new publication, not the authority of a catalog
+    // already installed before a later script generation failed validation.
+    if (!alreadyPublished && !RecipeAdapterScriptSources.isCurrent(prepared.recipeAdapterScriptRevision())) {
+      return null;
+    }
     boolean durationMultiplier = MachineConfig.durationMultiplierEnabled();
     var defaults = MachineRecipeJson.currentDefaults();
-    if (published != null
-        && published.manager == manager
-        && published.prepared == prepared
-        && published.durationMultiplier == durationMultiplier
-        && published.defaults.equals(defaults)) {
+    if (alreadyPublished && published.durationMultiplier == durationMultiplier && published.defaults.equals(defaults)) {
       return published;
     }
     var next = new Published(server, manager, prepared, durationMultiplier, defaults);
@@ -479,5 +472,6 @@ public final class MachineRecipeService {
     ACTIVE.remove(event.getServer());
     PREPARED.clear();
     MachineItemRecipeKubeJSSources.clear();
+    RecipeAdapterScriptSources.clear();
   }
 }

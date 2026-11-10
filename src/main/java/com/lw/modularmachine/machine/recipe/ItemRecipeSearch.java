@@ -43,6 +43,11 @@ public final class ItemRecipeSearch {
   private ItemRecipeSearch groupSearch;
   private ItemRecipePlan groupBest;
   private long completedGroupWork;
+  private final Map<String, MissingResource> missingResources = new HashMap<>();
+  private final Set<String> componentReady = new HashSet<>();
+
+  private record MissingResource(RecipeCandidate<ItemResourceKey> candidate, PortKind kind) {
+  }
 
   private ItemRecipeSearch(RecipeExecutionTicket ticket, ItemRecipeCatalog catalog, Set<String> allowedIds, String factoryThread, List<Integer> groups) {
     this.ticket = ticket;
@@ -67,6 +72,7 @@ public final class ItemRecipeSearch {
     var inputSlots = new ArrayList<InputSlot>();
     var outputSlots = new ArrayList<ItemSlotRef>();
     var counts = new LinkedHashMap<ItemResourceKey, Long>();
+    var itemAliases = new HashMap<ItemResourceKey, ItemResourceKey>();
     var spaces = new ArrayList<ItemResourceSnapshot.OutputSlot<ItemResourceKey>>();
     // All core item buses use the same validity rules; reuse one limit map for each
     // slot capacity.
@@ -96,12 +102,16 @@ public final class ItemRecipeSearch {
     }
     inputs = List.copyOf(inputSlots);
     outputs = List.copyOf(outputSlots);
-    // This label is not an aggregate resource revision or a commit proof. The
-    // original ticket owns
-    // all per-port stamps.
-    var snapshot = new ItemResourceSnapshot<>(ticket.structureRevision(), counts, spaces);
     var fluidCandidates = new HashSet<String>();
+    var requirements = RecipeResourceRequirements.capture(ticket);
     for (var candidate : catalog.recipes().candidatesFor(allowedIds)) {
+      var definition = catalog.definition(candidate.id());
+      var missing = definition == null ? Optional.<PortKind>empty() : requirements.missing(definition);
+      if (missing.isPresent()) {
+        missingResources.put(candidate.id(), new MissingResource(candidate, missing.orElseThrow()));
+        continue;
+      }
+      componentReady.add(candidate.id());
       if (ticket.interfacesMatch(candidate.interfaceInputs())
           && fluidInputsAvailable(
               catalog.fluidInputs(candidate.id()),
@@ -112,8 +122,26 @@ public final class ItemRecipeSearch {
               ticket,
               catalog.selectors(candidate.id()).fluidOutput())) {
         fluidCandidates.add(candidate.id());
+        if (!candidate.inputs().isEmpty() && candidate.inputs().getFirst().key().ignoresComponents()) {
+          if (candidate.inputs().size() != 1) {
+            throw new IllegalArgumentException("Item-only matching requires a single item input row");
+          }
+          var key = candidate.inputs().getFirst().key();
+          itemAliases.put(key, key);
+        }
       }
     }
+    if (!itemAliases.isEmpty()) {
+      for (var slot : inputs) {
+        var alias = itemAliases.get(slot.key().ignoringComponents());
+        if (alias != null) {
+          counts.merge(alias, (long) slot.count(), Math::addExact);
+        }
+      }
+    }
+    // Logical aliases are counted once per physical slot and are needed only by
+    // single-row item-only candidates. The ticket retains exact physical stamps.
+    var snapshot = new ItemResourceSnapshot<>(ticket.structureRevision(), counts, spaces);
     session = RecipePlanner.prepare(snapshot, catalog.recipes(), fluidCandidates);
     fluidLayout = new FluidOutputLayout(ticket, ticket.level().registryAccess());
   }
@@ -287,12 +315,13 @@ public final class ItemRecipeSearch {
         var needed = new HashMap<>(ItemRecipePlan.sampledInputs(generic.candidate(), inputChanceSeed, 1));
         var deductions = new ArrayList<ItemRecipePlan.Deduction>();
         for (var slot : inputs) {
-          long amount = Math.min(needed.getOrDefault(slot.key(), 0L), slot.count());
+          var expected = ItemRecipePlan.inputKey(generic.candidate(), slot.key());
+          long amount = Math.min(needed.getOrDefault(expected, 0L), slot.count());
           if (amount == 0) {
             continue;
           }
           deductions.add(new ItemRecipePlan.Deduction(slot.ref(), slot.key(), Math.toIntExact(amount)));
-          needed.put(slot.key(), needed.get(slot.key()) - amount);
+          needed.put(expected, needed.get(expected) - amount);
         }
         if (needed.values().stream().anyMatch(count -> count != 0)) {
           throw new IllegalStateException("Input slot accounting differs from exact-key plan");
@@ -392,6 +421,8 @@ public final class ItemRecipeSearch {
         }
       }
       completedGroupWork += groupSearch.totalWork();
+      missingResources.putAll(groupSearch.missingResources);
+      componentReady.addAll(groupSearch.componentReady);
       groupSearch = null;
       groupCursor++;
     }
@@ -410,6 +441,22 @@ public final class ItemRecipeSearch {
 
   public boolean dependenciesCurrent() {
     return ticket.dependenciesCurrent() && catalog.isCurrent() && (factoryScope == null || factoryScope.current());
+  }
+
+  /** Known absent roles after a complete search, never inventory shortages. */
+  public Optional<PortKind> missingResource() {
+    ticket.requireServerThread();
+    if (selected != null) {
+      return Optional.empty();
+    }
+    MissingResource first = null;
+    for (var missing : missingResources.values()) {
+      if (!componentReady.contains(missing.candidate().id())
+          && (first == null || precedes(missing.candidate(), first.candidate()))) {
+        first = missing;
+      }
+    }
+    return first == null ? Optional.empty() : Optional.of(first.kind());
   }
 
   private record InputSlot(ItemSlotRef ref, ItemResourceKey key, int count) {

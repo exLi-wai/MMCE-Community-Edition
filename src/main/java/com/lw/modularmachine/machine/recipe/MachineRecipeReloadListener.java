@@ -4,13 +4,17 @@ import com.google.gson.JsonElement;
 import com.google.gson.JsonParseException;
 import com.google.gson.JsonParser;
 import com.lw.modularmachine.integration.kubejs.MachineItemRecipeKubeJSSources;
+import com.lw.modularmachine.api.recipe.adapter.RecipeAdapterTags;
 import java.io.IOException;
 import java.util.LinkedHashMap;
 import java.util.Map;
+import java.util.List;
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.Executor;
 import net.minecraft.resources.FileToIdConverter;
 import net.minecraft.resources.ResourceLocation;
+import net.minecraft.core.registries.Registries;
+import net.minecraft.world.item.Item;
 import net.minecraft.server.packs.resources.PreparableReloadListener;
 import net.minecraft.server.packs.resources.ResourceManager;
 import net.minecraft.util.profiling.ProfilerFiller;
@@ -52,7 +56,10 @@ public final class MachineRecipeReloadListener extends ContextAwareReloadListene
                 decoded.put(entry.getKey(), machine);
               });
             }
-            MachineRecipeService.stage(target, decoded, sources, getRegistryLookup());
+            var itemTags = new LinkedHashMap<ResourceLocation, List<Item>>();
+            getContext().getAllTags(Registries.ITEM)
+                .forEach((id, holders) -> itemTags.put(id, holders.stream().map(holder -> holder.value()).toList()));
+            MachineRecipeService.stage(target, decoded, sources, getRegistryLookup(), new RecipeAdapterTags(itemTags));
           } finally {
             MachineItemRecipeKubeJSSources.clear();
           }

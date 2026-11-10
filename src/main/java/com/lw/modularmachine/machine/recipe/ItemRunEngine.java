@@ -47,7 +47,12 @@ public final class ItemRunEngine {
     UPGRADE_CONFLICT,
     UPGRADE_ERROR,
     WAITING_UPGRADE_COST,
-    UPGRADE_DATA_PENDING
+    UPGRADE_DATA_PENDING,
+    MISSING_ITEM_INPUT,
+    MISSING_ITEM_OUTPUT,
+    MISSING_ENERGY_INPUT,
+    MISSING_FLUID_INPUT,
+    MISSING_FLUID_OUTPUT
   }
 
   private long lastAttempt = Long.MIN_VALUE;
@@ -166,6 +171,9 @@ public final class ItemRunEngine {
             return status = Result.PAUSED;
           }
           energyTicket = captured.orElseThrow();
+          if (!RecipeResourceRequirements.has(energyTicket, PortKind.ENERGY_INPUT, run.selectors().energyInput())) {
+            return status = Result.MISSING_ENERGY_INPUT;
+          }
           debits = planEnergyDebits(energyTicket, run.energyPerTick(), run.selectors().energyInput());
           if (debits == null) {
             return status = applyResourceFailure(controller, run, now, Result.WAITING_ENERGY);
@@ -181,6 +189,9 @@ public final class ItemRunEngine {
             return status = Result.PAUSED;
           }
           fluidTicket = captured.orElseThrow().withInputGroup(run.inputGroup());
+          if (!RecipeResourceRequirements.has(fluidTicket, PortKind.FLUID_INPUT, run.selectors().fluidPerTick())) {
+            return status = Result.MISSING_FLUID_INPUT;
+          }
           fluidDebits = planFluidDebits(fluidTicket, fluidFee, run.selectors().fluidPerTick());
           if (fluidDebits == null) {
             return status = applyResourceFailure(controller, run, now, Result.WAITING_FLUID);

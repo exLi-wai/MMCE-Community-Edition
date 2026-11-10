@@ -11,7 +11,7 @@ import org.spongepowered.asm.mixin.injection.callback.CallbackInfo;
 @Mixin(LevelRenderer.class)
 public abstract class PreviewLevelRendererMixin {
   @Inject(method = "setSectionDirty(IIIZ)V", at = @At("HEAD"))
-  private void mmcece$projectionChanged(int x, int y, int z, boolean immediate, CallbackInfo callback) {
+  private void MMCECE$projectionChanged(int x, int y, int z, boolean immediate, CallbackInfo callback) {
     WorldProjection.sectionChanged(x, y, z);
   }
 }

@@ -1,0 +1,8 @@
+{
+  "type": "mmcece:machine",
+  "machine": "mmcece:test_missing_resource_ports",
+  "duration": 20,
+  "energy_per_tick": 32,
+  "inputs": [{ "stack": { "id": "minecraft:dirt" }, "amount": 1 }],
+  "outputs": [{ "stack": { "id": "minecraft:iron_ingot" }, "amount": 1 }]
+}

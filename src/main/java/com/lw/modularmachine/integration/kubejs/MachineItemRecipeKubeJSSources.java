@@ -22,38 +22,39 @@ import net.minecraft.resources.ResourceLocation;
 public final class MachineItemRecipeKubeJSSources {
   private static final int MAX_RECIPES = 16_384;
   private static Map<ResourceLocation, JsonElement> captured = Map.of();
+  private static Map<ResourceLocation, JsonElement> originalMachineRecipes = Map.of();
 
   private MachineItemRecipeKubeJSSources() {
   }
 
   public static synchronized void capture(Map<ResourceLocation, JsonElement> recipes) {
     captured = recipes;
+    var originals = new LinkedHashMap<ResourceLocation, JsonElement>();
+    for (var entry : recipes.entrySet()) {
+      if (isMachineRecipe(entry.getValue())) {
+        originals.put(entry.getKey(), normalizeKubeJsJson(entry.getValue().getAsJsonObject()));
+      }
+    }
+    originalMachineRecipes = Map.copyOf(originals);
   }
 
   /**
    * Deep-copies and validates the KubeJS machine rows currently in the captured
-   * map. The returned JSON is the normalized native shape, not the raw script
-   * output.
+   * map. Only new or changed declarations are script sources; unchanged originals
+   * retain their native directory validation. IDs have no namespace restriction.
+   * The returned JSON is the normalized native shape, not the raw script output.
    */
   public static synchronized Map<ResourceLocation, JsonElement> snapshot() {
     var result = new LinkedHashMap<ResourceLocation, JsonElement>();
     for (var entry : captured.entrySet()) {
-      if (!entry.getKey().getNamespace().equals("kubejs")) {
-        continue;
-      }
       var root = entry.getValue();
-      if (!root.isJsonObject()) {
+      if (!isMachineRecipe(root)) {
         continue;
       }
-      var object = root.getAsJsonObject();
-      var type = object.get("type");
-      if (type == null
-          || !type.isJsonPrimitive()
-          || !type.getAsJsonPrimitive().isString()
-          || !MachineRecipeJson.TYPE.equals(type.getAsString())) {
+      var normalized = normalizeKubeJsJson(root.getAsJsonObject());
+      if (normalized.equals(originalMachineRecipes.get(entry.getKey()))) {
         continue;
       }
-      var normalized = normalizeKubeJsJson(object);
       MachineRecipeJson.validate(normalized);
       result.put(entry.getKey(), normalized);
       if (result.size() > MAX_RECIPES) {
@@ -66,6 +67,19 @@ public final class MachineItemRecipeKubeJSSources {
 
   public static synchronized void clear() {
     captured = Map.of();
+    originalMachineRecipes = Map.of();
+  }
+
+  private static boolean isMachineRecipe(JsonElement root) {
+    if (!root.isJsonObject()) {
+      return false;
+    }
+    var type = root.getAsJsonObject().get("type");
+
+    return type != null
+        && type.isJsonPrimitive()
+        && type.getAsJsonPrimitive().isString()
+        && MachineRecipeJson.TYPE.equals(type.getAsString());
   }
 
   /**

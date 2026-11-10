@@ -14,6 +14,7 @@ import java.util.Map;
 import java.util.Optional;
 import net.minecraft.resources.ResourceLocation;
 import net.minecraft.util.RandomSource;
+import org.jetbrains.annotations.ApiStatus;
 
 /**
  * Read-only start admission: deductions are not applied and placements do not
@@ -186,10 +187,11 @@ public final class ItemRecipePlan {
           continue;
         }
         var key = ItemResourceKey.of(stack).withSelector(port.selector());
-        int take = (int) Math.min(stack.getCount(), needed.getOrDefault(key, 0L));
+        var expected = inputKey(recipe, key);
+        int take = (int) Math.min(stack.getCount(), needed.getOrDefault(expected, 0L));
         if (take > 0) {
           scaledDeductions.add(new Deduction(new ItemSlotRef(port.partId(), slot), key, take));
-          needed.put(key, needed.get(key) - take);
+          needed.put(expected, needed.get(expected) - take);
         }
       }
     }
@@ -227,10 +229,11 @@ public final class ItemRecipePlan {
           continue;
         }
         var key = ItemResourceKey.of(stack).withSelector(port.selector());
-        int amount = (int) Math.min(needed.getOrDefault(key, 0L), stack.getCount());
+        var expected = inputKey(first.recipe, key);
+        int amount = (int) Math.min(needed.getOrDefault(expected, 0L), stack.getCount());
         if (amount > 0) {
           combined.add(new Deduction(new ItemSlotRef(port.partId(), slot), key, amount));
-          needed.put(key, needed.get(key) - amount);
+          needed.put(expected, needed.get(expected) - amount);
         }
       }
     }
@@ -275,7 +278,7 @@ public final class ItemRecipePlan {
         for (var stack : port.items()) {
           if (!stack.isEmpty()) {
             available.merge(
-                ItemResourceKey.of(stack).withSelector(port.selector()),
+                inputKey(recipe, ItemResourceKey.of(stack).withSelector(port.selector())),
                 (long) stack.getCount(),
                 Math::addExact);
           }
@@ -288,6 +291,15 @@ public final class ItemRecipePlan {
     }
 
     return required.isEmpty() ? Integer.MAX_VALUE : (int) result;
+  }
+
+  /** Lookup identity only; deductions must keep the exact physical slot key. */
+  @ApiStatus.Internal
+  public static ItemResourceKey inputKey(RecipeCandidate<ItemResourceKey> candidate, ItemResourceKey physical) {
+    if (candidate.inputs().size() == 1 && candidate.inputs().getFirst().key().ignoresComponents()) {
+      return physical.ignoringComponents();
+    }
+    return physical;
   }
 
   public int maxRepeatableOutputs() {
@@ -353,7 +365,7 @@ public final class ItemRecipePlan {
 
   public record Deduction(ItemSlotRef slot, ItemResourceKey key, int count) {
     public Deduction {
-      if (slot == null || key == null || count <= 0) {
+      if (slot == null || key == null || key.ignoresComponents() || count <= 0) {
         throw new IllegalArgumentException("Invalid slot deduction");
       }
     }
@@ -361,7 +373,7 @@ public final class ItemRecipePlan {
 
   public record Placement(ItemSlotRef slot, ItemResourceKey key, int count) {
     public Placement {
-      if (slot == null || key == null || count <= 0 || count > key.maxStackSize()) {
+      if (slot == null || key == null || key.ignoresComponents() || count <= 0 || count > key.maxStackSize()) {
         throw new IllegalArgumentException("Invalid slot placement");
       }
     }

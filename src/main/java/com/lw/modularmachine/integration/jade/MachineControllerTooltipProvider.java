@@ -71,6 +71,7 @@ final class MachineControllerTooltipProvider implements IBlockComponentProvider,
         for (int i = 0; i < shortages.size(); i++) {
           var shortage = shortages.get(i);
           data.putString(INPUT_DIAGNOSTIC + "_key_" + i, shortage.key());
+          data.putString(INPUT_DIAGNOSTIC + "_description_" + i, shortage.descriptionId());
           data.putLong(INPUT_DIAGNOSTIC + "_missing_" + i, shortage.missing());
         }
       });
@@ -122,11 +123,16 @@ final class MachineControllerTooltipProvider implements IBlockComponentProvider,
       tooltip.add(Component.translatable("jade.mmcece.input.recipe", data.getString(INPUT_DIAGNOSTIC + "_recipe")));
       int count = Math.min(data.getInt(INPUT_DIAGNOSTIC + "_count"), 8);
       for (int i = 0; i < count; i++) {
+        String description = data.getString(INPUT_DIAGNOSTIC + "_description_" + i);
+        Component item;
+        if (description.isEmpty()) {
+          item = Component.literal(data.getString(INPUT_DIAGNOSTIC + "_key_" + i));
+        } else {
+          item = Component.translatable(description);
+        }
         tooltip.add(
-            Component.translatable(
-                "jade.mmcece.input.shortage",
-                data.getLong(INPUT_DIAGNOSTIC + "_missing_" + i),
-                data.getString(INPUT_DIAGNOSTIC + "_key_" + i)));
+            Component
+                .translatable("jade.mmcece.input.shortage", data.getLong(INPUT_DIAGNOSTIC + "_missing_" + i), item));
       }
     }
     if (data.getBoolean("mmcece:has_run")) {
@@ -138,6 +144,10 @@ final class MachineControllerTooltipProvider implements IBlockComponentProvider,
         int duration = data.getInt("mmcece:duration_value");
         int percent = duration <= 0 ? 0 : Math.min(100, progress * 100 / duration);
         tooltip.add(Component.translatable("jade.mmcece.progress", percent + "%"));
+      }
+      String status = data.getString(RUN_STATUS);
+      if (resourceWait(status)) {
+        tooltip.add(Component.translatable("jade.mmcece.run_status." + status.toLowerCase(Locale.ROOT)));
       }
     } else {
       tooltip
@@ -162,5 +172,14 @@ final class MachineControllerTooltipProvider implements IBlockComponentProvider,
     } catch (IllegalArgumentException invalid) {
       return null;
     }
+  }
+
+  private static boolean resourceWait(String status) {
+    return switch (status) {
+      case "WAITING_ENERGY", "WAITING_FLUID", "OUTPUT_BLOCKED", "OUTPUT_PLANNING", "MISSING_ITEM_INPUT",
+          "MISSING_ITEM_OUTPUT", "MISSING_ENERGY_INPUT", "MISSING_FLUID_INPUT", "MISSING_FLUID_OUTPUT" ->
+        true;
+      default -> false;
+    };
   }
 }

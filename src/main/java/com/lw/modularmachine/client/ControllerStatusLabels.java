@@ -43,6 +43,11 @@ final class ControllerStatusLabels {
       case "ADVANCED", "WAITING_TICK" -> tr(STATE + "crafting");
       case "WAITING_ENERGY" -> tr(STATE + "missing_energy");
       case "WAITING_FLUID" -> tr(STATE + "missing_fluid");
+      case "MISSING_ITEM_INPUT" -> tr(STATE + "missing_item_input");
+      case "MISSING_ITEM_OUTPUT" -> tr(STATE + "missing_item_output");
+      case "MISSING_ENERGY_INPUT" -> tr(STATE + "missing_energy_input");
+      case "MISSING_FLUID_INPUT" -> tr(STATE + "missing_fluid_input");
+      case "MISSING_FLUID_OUTPUT" -> tr(STATE + "missing_fluid_output");
       case "OUTPUT_PLANNING" -> tr(STATE + "output_planning");
       case "OUTPUT_BLOCKED" -> tr(STATE + "output_blocked");
       case "FINISHED" -> tr(STATE + "finished");
@@ -67,6 +72,11 @@ final class ControllerStatusLabels {
     }
     if (status.threads().stream().anyMatch(thread -> "RUNNING".equals(thread.state()))) {
       return tr(STATE + "crafting");
+    }
+    for (var thread : status.threads()) {
+      if (!"IDLE".equals(thread.state()) && !"NONE".equals(thread.reason())) {
+        return tr("menu.mmcece.factory.reason." + thread.reason().toLowerCase(Locale.ROOT));
+      }
     }
     if (status.threads().stream().anyMatch(thread -> !"IDLE".equals(thread.state()))) {
       return tr(STATE + "waiting");
