@@ -9,7 +9,6 @@ public enum PlacementOutcome {
   MISSING,
   UNLOADED,
   OUTSIDE_WORLD,
-  OUT_OF_REACH,
   NO_PERMISSION,
   MANUAL,
   INVALID_STATE,

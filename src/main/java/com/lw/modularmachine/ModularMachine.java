@@ -24,6 +24,7 @@ import com.lw.modularmachine.network.MachineVisibilityPayloads;
 import com.lw.modularmachine.network.MachinePayloads;
 import com.lw.modularmachine.network.ParallelControllerPayloads;
 import com.lw.modularmachine.network.ProjectionPayloads;
+import com.lw.modularmachine.network.ProjectionLengthPayloads;
 import com.lw.modularmachine.network.SmartInterfacePayloads;
 import com.lw.modularmachine.network.UpgradeBusPayloads;
 import com.lw.modularmachine.registry.MachineCapabilities;
@@ -59,6 +60,7 @@ public class ModularMachine {
     modEventBus.addListener(this::commonSetup);
     modEventBus.addListener(DedicatedControllerResources::register);
     modEventBus.addListener(ProjectionPayloads::register);
+    modEventBus.addListener(ProjectionLengthPayloads::register);
     modEventBus.addListener(BlueprintPreviewPayloads::register);
     modEventBus.addListener(RangedSelectionPayloads::register);
     modEventBus.addListener(MachinePayloads::register);

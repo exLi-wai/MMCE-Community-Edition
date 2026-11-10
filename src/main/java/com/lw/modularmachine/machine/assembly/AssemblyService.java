@@ -9,6 +9,7 @@ import com.lw.modularmachine.block.MachineControllerBlock;
 import com.lw.modularmachine.blockentity.FactoryControllerBlockEntity;
 import com.lw.modularmachine.blockentity.MachineControllerBlockEntity;
 import com.lw.modularmachine.item.MachineBlueprintItem;
+import com.lw.modularmachine.item.MachineConstructionTool;
 import com.lw.modularmachine.api.orientation.MachineOrientation;
 import com.lw.modularmachine.machine.recipe.RecipeLifecyclePublisher;
 import com.lw.modularmachine.machine.smart.SmartInterfaceEventPublisher;
@@ -177,13 +178,15 @@ public final class AssemblyService {
     final InteractionHand hand;
     final ProjectionPreparation preparation;
     final Map<String, Integer> lengths;
-    PendingProjection(StructureService.StructureSubject owner, ServerLevel level, MachineDefinition definition, MachineOrientation orientation, Map<String, Integer> lengths, long request, InteractionHand hand) {
+    final int layers;
+    PendingProjection(StructureService.StructureSubject owner, ServerLevel level, MachineDefinition definition, MachineOrientation orientation, Map<String, Integer> lengths, long request, InteractionHand hand, int layers) {
       this.owner = owner;
       this.level = level;
       this.definition = definition;
       this.orientation = orientation;
       this.request = request;
       this.hand = hand;
+      this.layers = layers;
       this.lengths = Map.copyOf(lengths);
       origin = owner.structurePosition().immutable();
       epoch = StructureService.definitionEpoch();
@@ -228,6 +231,7 @@ public final class AssemblyService {
         || !player.serverLevel().hasChunkAt(owner.structurePosition())
         || player.serverLevel().getBlockEntity(owner.structurePosition()) != owner
         || build && (hand != InteractionHand.MAIN_HAND || !AssemblyInteractions.matches(player.getMainHandItem()))
+        || !build && !(player.getItemInHand(hand).getItem() instanceof MachineConstructionTool)
         || !player.canInteractWithBlock(owner.structurePosition(), 0)) {
       return;
     }
@@ -241,14 +245,41 @@ public final class AssemblyService {
     if (!definition.allows(orientation)) {
       return;
     }
-    var lengths = selectedLengths(player, owner, definition);
+    Map<String, Integer> lengths;
+    int layers = -1;
+    if (build) {
+      lengths = selectedLengths(player, owner, definition);
+    } else {
+      layers = MachineConstructionTool.projectionLayers(player.getItemInHand(hand));
+      lengths = definition.defaultDynamicLengths(layers);
+    }
     if (!build) {
+      player.displayClientMessage(Component.translatable("message.mmcece.projection.length", layers), true);
       var id = player.getUUID();
+      var blueprint = PENDING_BLUEPRINTS.get(id);
+      if (blueprint != null && blueprint.definition == definition) {
+        removePendingBlueprint(id);
+      }
+      var building = PENDING_CONSTRUCTIONS.get(id);
+      if (building != null
+          && building.owner == owner
+          && building.definition == definition
+          && !building.lengths.equals(lengths)) {
+        removePendingConstruction(id);
+      }
+      var construction = JOBS.get(id);
+      if (construction != null
+          && construction.owner == owner
+          && construction.pattern.sourceDefinition() == definition
+          && !construction.pattern.dynamicLengths().equals(lengths)) {
+        removeJob(id);
+      }
       var pending = PENDING_PROJECTIONS.get(id);
       if (pending != null
           && pending.owner == owner
           && pending.definition == definition
           && pending.lengths.equals(lengths)
+          && pending.layers == layers
           && pending.orientation == orientation
           && pending.epoch == StructureService.definitionEpoch()) {
         return;
@@ -268,7 +299,15 @@ public final class AssemblyService {
       long selectedRequest = request = Math.incrementExact(request);
       PENDING_PROJECTIONS.put(
           id,
-          new PendingProjection(owner, player.serverLevel(), definition, orientation, lengths, selectedRequest, hand));
+          new PendingProjection(
+              owner,
+              player.serverLevel(),
+              definition,
+              orientation,
+              lengths,
+              selectedRequest,
+              hand,
+              layers));
       // Header lets the client cancel by distance even during preparation.
       ProjectionPayloads.begin(
           player,
@@ -328,6 +367,10 @@ public final class AssemblyService {
   }
 
   private static Map<String, Integer> selectedLengths(ServerPlayer player, StructureService.StructureSubject owner, MachineDefinition definition) {
+    var projected = projectedLengths(player, owner, definition);
+    if (projected != null) {
+      return projected;
+    }
     var selected = lengthSelection(player, definition);
     if (selected != null) {
       return definition.defaultDynamicLengths(selected.size());
@@ -339,6 +382,41 @@ public final class AssemblyService {
       return registration.dynamicLengths();
     }
     return definition.defaultDynamicLengths(-1);
+  }
+
+  /**
+   * Only the same current owner, definition and orientation may supply lengths.
+   */
+  private static Map<String, Integer> projectedLengths(ServerPlayer player, StructureService.StructureSubject owner, MachineDefinition definition) {
+    var pending = PENDING_PROJECTIONS.get(player.getUUID());
+    if (pending != null && pending.owner == owner && pending.definition == definition && current(player, pending)) {
+      return pending.lengths;
+    }
+    var projection = PROJECTIONS.get(player.getUUID());
+    if (projection != null
+        && projection.owner == owner
+        && projection.pattern.sourceDefinition() == definition
+        && current(player, projection)) {
+      return projection.pattern.dynamicLengths();
+    }
+    return null;
+  }
+
+  /** Only the held tool changes; world projection lengths are frozen on use. */
+  public static void adjustProjectionLength(ServerPlayer player, InteractionHand hand, int delta) {
+    ServerThreadGuard.require(player.serverLevel(), "Projection length adjustment");
+    var stack = player.getItemInHand(hand);
+    if ((delta != -1 && delta != 1) || !canEdit(player) || !(stack.getItem() instanceof MachineConstructionTool)) {
+      return;
+    }
+    int layers = (int) Math.clamp((long) MachineConstructionTool.projectionLayers(stack) + delta, 0, Integer.MAX_VALUE);
+    MachineConstructionTool.setProjectionLayers(stack, layers);
+    player.getInventory().setChanged();
+    player.inventoryMenu.broadcastChanges();
+    if (player.containerMenu != player.inventoryMenu) {
+      player.containerMenu.broadcastChanges();
+    }
+    player.displayClientMessage(Component.translatable("message.mmcece.projection.length", layers), true);
   }
 
   /**
@@ -385,8 +463,12 @@ public final class AssemblyService {
     }
     var definition = pending.definition;
     var selected = pending.ready.pattern().dynamicLengths();
+    commitLengthSelection(player, definition, pending.size, selected);
+  }
+
+  private static void commitLengthSelection(ServerPlayer player, MachineDefinition definition, int size, Map<String, Integer> selected) {
     var choices = LENGTH_SELECTIONS.computeIfAbsent(player.getUUID(), ignored -> new LinkedHashMap<>(16, .75F, true));
-    choices.put(definition.id(), new LengthSelection(definition, pending.epoch, pending.size));
+    choices.put(definition.id(), new LengthSelection(definition, StructureService.definitionEpoch(), size));
     while (choices.size() > 16) {
       choices.remove(choices.keySet().iterator().next());
     }
@@ -610,11 +692,20 @@ public final class AssemblyService {
   private record CreativeResult(int matched, int placed) {
   }
 
+  /** Internal failure retaining its translatable reason for the client. */
+  private static final class CreativeBuildFailure extends IllegalStateException {
+    private final Component reason;
+
+    private CreativeBuildFailure(String translationKey, BlockPos position) {
+      super(translationKey + ": " + position.toShortString());
+      reason = Component.translatable(translationKey, position.toShortString());
+    }
+  }
+
   /**
-   * GTM-style creative assembly: validate the whole structure, then commit it as
-   * one batch. Rebuilding over an existing structure is a no-op rather than a
-   * failure, and only the controller position needs interaction range (checked by
-   * the caller).
+   * validate the whole structure, then commit it as one batch. Rebuilding over an
+   * existing structure is a no-op rather than a failure, and only the controller
+   * position needs interaction range (checked by the caller).
    */
   private static CreativeResult creativeBuild(ServerPlayer player, AssemblyPattern pattern) {
     var level = player.serverLevel();
@@ -627,7 +718,7 @@ public final class AssemblyService {
           || !level.getWorldBorder().isWithinBounds(position)
           || !level.mayInteract(player, position)
           || part.states().isEmpty()) {
-        throw new IllegalStateException("位置不可用（区块未加载/超出边界/无权限）：" + position.toShortString());
+        throw new CreativeBuildFailure("message.mmcece.assembly.creative.position_unavailable", position);
       }
       var before = level.getBlockState(position);
       var after = part.states().get(0);
@@ -649,11 +740,11 @@ public final class AssemblyService {
         for (var placement : placements) {
           boolean written = level.setBlock(placement.position(), placement.after(), BULK_FLAGS);
           if (!written && !level.getBlockState(placement.position()).equals(placement.after())) {
-            throw new IllegalStateException("写入失败：" + placement.position().toShortString());
+            throw new CreativeBuildFailure("message.mmcece.assembly.creative.write_failed", placement.position());
           }
           placed++;
           if (!level.getBlockState(placement.position()).equals(placement.after())) {
-            throw new IllegalStateException("状态校验失败：" + placement.position().toShortString());
+            throw new CreativeBuildFailure("message.mmcece.assembly.creative.state_mismatch", placement.position());
           }
         }
       } catch (RuntimeException failure) {
@@ -680,8 +771,7 @@ public final class AssemblyService {
         || job.pattern.sourceDefinition() != StructureService.definition(job.pattern.machine())
         || !job.level.hasChunkAt(job.pattern.origin())
         || !job.level.mayInteract(player, job.pattern.origin())
-        || job.build && player.hasInfiniteMaterials()
-        || job.build && !player.canInteractWithBlock(job.pattern.origin(), 0)) {
+        || job.build && player.hasInfiniteMaterials()) {
       return false;
     }
     return !job.owner.structureRemoved()
@@ -836,7 +926,13 @@ public final class AssemblyService {
         removePendingConstruction(id);
       }
       ModularMachine.LOGGER.warn("Construction preparation failed at {}", pending.origin, failure);
-      player.sendSystemMessage(Component.translatable("message.mmcece.assembly.failed", failure.getMessage()));
+      Component reason;
+      if (failure instanceof CreativeBuildFailure creativeFailure) {
+        reason = creativeFailure.reason;
+      } else {
+        reason = Component.translatable("message.mmcece.assembly.reason.unexpected");
+      }
+      player.sendSystemMessage(Component.translatable("message.mmcece.assembly.failed", reason));
     }
   }
 
@@ -852,13 +948,15 @@ public final class AssemblyService {
         || !pending.level.hasChunkAt(pending.origin)
         || pending.level.getBlockEntity(pending.origin) != pending.owner
         || !pending.level.mayInteract(player, pending.origin)
-        || !player.canInteractWithBlock(pending.origin, 0)
         || !pending.definition.id().equals(selectedMachine(pending.owner, true))
         || pending.orientation != pending.owner.structureOrientation(pending.level)) {
       return false;
     }
-    var selection = lengthSelection(player, pending.definition);
-    return selection == null || pending.definition.defaultDynamicLengths(selection.size()).equals(pending.lengths);
+    var projected = projectedLengths(player, pending.owner, pending.definition);
+    if (projected != null) {
+      return projected.equals(pending.lengths);
+    }
+    return true;
   }
 
   private static void prepareProjection(ServerPlayer player, long deadline) {
@@ -886,9 +984,7 @@ public final class AssemblyService {
             .debug("Projection {} ready: {} entries at {}", pending.request, ready.entries().size(), pending.origin);
         PENDING_PROJECTIONS.remove(player.getUUID());
         PROJECTIONS.put(player.getUUID(), job);
-        player.displayClientMessage(
-            Component.translatable("message.mmcece.assembly.projected", pending.definition.id().toString()),
-            true);
+        player.displayClientMessage(Component.translatable("message.mmcece.projection.length", pending.layers), true);
       }
     } catch (RuntimeException failure) {
       ModularMachine.LOGGER.warn("Projection preparation failed at {}", pending.origin, failure);
@@ -956,8 +1052,6 @@ public final class AssemblyService {
           job.matched++;
         } else if (!PlacementMaterials.canReplace(part.states(), actual)) {
           job.report.occupied(pos, actual);
-        } else if (!player.canInteractWithBlock(pos, 0)) {
-          job.report.problem(pos, PlacementOutcome.OUT_OF_REACH);
         } else if (!job.level.mayInteract(player, pos)) {
           job.report.problem(pos, PlacementOutcome.NO_PERMISSION);
         } else {
@@ -1081,8 +1175,6 @@ public final class AssemblyService {
             continue;
           } else if (!PlacementMaterials.canReplace(part.states(), actual)) {
             job.report.occupied(pos, actual);
-          } else if (!player.canInteractWithBlock(pos, 0)) {
-            job.report.problem(pos, PlacementOutcome.OUT_OF_REACH);
           } else if (!job.level.mayInteract(player, pos)) {
             job.report.problem(pos, PlacementOutcome.NO_PERMISSION);
           } else {

@@ -2,9 +2,11 @@ package com.lw.modularmachine.registry;
 
 import com.lw.modularmachine.machine.blueprint.MachineBlueprint;
 import com.lw.modularmachine.machine.configuration.ConfigurationCardData;
+import com.mojang.serialization.Codec;
 import net.minecraft.core.BlockPos;
 import net.minecraft.core.component.DataComponentType;
 import net.minecraft.core.registries.Registries;
+import net.minecraft.network.codec.ByteBufCodecs;
 import net.neoforged.bus.api.IEventBus;
 import net.neoforged.neoforge.registries.DeferredHolder;
 import net.neoforged.neoforge.registries.DeferredRegister;
@@ -22,6 +24,15 @@ public final class MachineDataComponents {
           "blueprint_orientation",
           () -> DataComponentType.<MachineBlueprint>builder().persistent(MachineBlueprint.CODEC)
               .networkSynchronized(MachineBlueprint.STREAM_CODEC).build());
+  /** Projector layers only; the tool does not carry a machine identity. */
+  public static final DeferredHolder<DataComponentType<?>, DataComponentType<Integer>> PROJECTION_LAYERS = TYPES
+      .register(
+          "projection_layers",
+          () -> DataComponentType.<Integer>builder().persistent(Codec.intRange(0, Integer.MAX_VALUE))
+              .networkSynchronized(
+                  ByteBufCodecs.VAR_INT
+                      .map(MachineDataComponents::validProjectionLayers, MachineDataComponents::validProjectionLayers))
+              .build());
   /**
    * Ranged construct tool corners; the second one is absent until both are set.
    */
@@ -37,6 +48,15 @@ public final class MachineDataComponents {
               .networkSynchronized(BlockPos.STREAM_CODEC).build());
   private MachineDataComponents() {
   }
+
+  private static int validProjectionLayers(int layers) {
+    if (layers < 0) {
+      throw new IllegalArgumentException("Projection layers must be nonnegative");
+    }
+
+    return layers;
+  }
+
   public static void register(IEventBus bus) {
     TYPES.register(bus);
   }

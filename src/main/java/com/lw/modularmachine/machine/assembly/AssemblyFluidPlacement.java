@@ -189,7 +189,6 @@ final class AssemblyFluidPlacement {
     if (!current.getAsBoolean()
         || !level.hasChunkAt(pos)
         || !PlacementMaterials.canReplace(part.states(), level.getBlockState(pos))
-        || !player.canInteractWithBlock(pos, 0)
         || !level.mayInteract(player, pos)
         || level.captureBlockSnapshots
         || level.restoringBlockSnapshots

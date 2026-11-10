@@ -2,6 +2,7 @@ package com.lw.modularmachine.item;
 
 import com.lw.modularmachine.machine.assembly.AssemblyService;
 import com.lw.modularmachine.machine.structure.StructureService;
+import com.lw.modularmachine.registry.MachineDataComponents;
 import java.util.List;
 import net.minecraft.ChatFormatting;
 import net.minecraft.core.BlockPos;
@@ -17,6 +18,7 @@ import net.minecraft.world.item.TooltipFlag;
 import net.minecraft.world.item.context.UseOnContext;
 import net.minecraft.world.level.Level;
 import net.minecraft.world.level.LevelReader;
+import org.jetbrains.annotations.ApiStatus;
 
 /**
  * Dedicated projector. Construction is handled by the configurable right-click
@@ -26,6 +28,19 @@ public final class MachineConstructionTool extends Item {
 
   public MachineConstructionTool(Properties properties) {
     super(properties);
+  }
+
+  @ApiStatus.Internal
+  public static int projectionLayers(ItemStack stack) {
+    return Math.max(0, stack.getOrDefault(MachineDataComponents.PROJECTION_LAYERS.get(), 1));
+  }
+
+  @ApiStatus.Internal
+  public static void setProjectionLayers(ItemStack stack, int layers) {
+    if (layers < 0) {
+      throw new IllegalArgumentException("Projection layers must be nonnegative");
+    }
+    stack.set(MachineDataComponents.PROJECTION_LAYERS.get(), layers);
   }
 
   @Override
@@ -70,5 +85,8 @@ public final class MachineConstructionTool extends Item {
   @Override
   public void appendHoverText(ItemStack stack, TooltipContext context, List<Component> tooltip, TooltipFlag flag) {
     tooltip.add(Component.translatable("tooltip.mmcece.machine_projector").withStyle(ChatFormatting.WHITE));
+    tooltip.add(
+        Component.translatable("message.mmcece.projection.length", projectionLayers(stack))
+            .withStyle(ChatFormatting.GRAY));
   }
 }
