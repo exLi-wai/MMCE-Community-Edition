@@ -10,6 +10,11 @@ import com.lw.modularmachine.blockentity.FactoryControllerBlockEntity;
 import com.lw.modularmachine.blockentity.MachineControllerBlockEntity;
 import com.lw.modularmachine.item.MachineBlueprintItem;
 import com.lw.modularmachine.item.MachineConstructionTool;
+import com.lw.modularmachine.api.assembly.AssemblyPlan;
+import com.lw.modularmachine.api.assembly.AssemblyPage;
+import com.lw.modularmachine.api.assembly.AssemblyPart;
+import com.lw.modularmachine.api.assembly.AssemblyCandidate;
+import com.lw.modularmachine.api.assembly.MachineAssemblyApi;
 import com.lw.modularmachine.api.orientation.MachineOrientation;
 import com.lw.modularmachine.machine.recipe.RecipeLifecyclePublisher;
 import com.lw.modularmachine.machine.smart.SmartInterfaceEventPublisher;
@@ -29,6 +34,7 @@ import java.util.LinkedHashSet;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.Optional;
 import java.util.Set;
 import java.util.UUID;
 import java.util.concurrent.CompletableFuture;
@@ -55,6 +61,7 @@ import net.neoforged.neoforge.fluids.FluidStack;
 import net.neoforged.neoforge.event.entity.player.PlayerEvent;
 import net.neoforged.neoforge.event.server.ServerStoppedEvent;
 import net.neoforged.neoforge.event.tick.ServerTickEvent.Post;
+import org.jetbrains.annotations.ApiStatus;
 
 /**
  * One server task per player, shared time/work slicing and no persistent
@@ -114,6 +121,7 @@ public final class AssemblyService {
     final ServerLevel level;
     final InteractionHand hand;
     final boolean build;
+    final long projectionRevision;
     final AssemblyReport report = new AssemblyReport();
     final Map<PlacementMaterials.Choices, Integer> materialDemand = new LinkedHashMap<>();
     final BitSet demandPositions = new BitSet();
@@ -135,6 +143,7 @@ public final class AssemblyService {
       this.level = level;
       this.hand = hand;
       this.build = build;
+      projectionRevision = build ? -1 : StructureService.controllerProjectionRevision(owner);
     }
   }
 
@@ -174,7 +183,7 @@ public final class AssemblyService {
     final MachineDefinition definition;
     final MachineOrientation orientation;
     final BlockPos origin;
-    final long epoch, request;
+    final long epoch, request, controllerRevision;
     final InteractionHand hand;
     final ProjectionPreparation preparation;
     final Map<String, Integer> lengths;
@@ -190,6 +199,7 @@ public final class AssemblyService {
       this.lengths = Map.copyOf(lengths);
       origin = owner.structurePosition().immutable();
       epoch = StructureService.definitionEpoch();
+      controllerRevision = StructureService.controllerProjectionRevision(owner);
       preparation = new ProjectionPreparation(definition, epoch, origin, orientation, lengths);
     }
   }
@@ -400,6 +410,72 @@ public final class AssemblyService {
       return projection.pattern.dynamicLengths();
     }
     return null;
+  }
+
+  @ApiStatus.Internal
+  public static Optional<AssemblyPlan> inspectProjection(ServerPlayer player) {
+    ServerThreadGuard.require(player.serverLevel(), "Projection plan inspected");
+    var projection = PROJECTIONS.get(player.getUUID());
+    if (projection == null || !current(player, projection)) {
+      return Optional.empty();
+    }
+    var pattern = projection.pattern;
+    return Optional.of(
+        new AssemblyPlan(
+            projection.projectionRequest,
+            projection.level.dimension().location(),
+            pattern.origin(),
+            pattern.machine(),
+            pattern.epoch(),
+            pattern.orientation(),
+            pattern.dynamicLengths(),
+            pattern.selectedModifierGroups(),
+            pattern.parts().size()));
+  }
+
+  @ApiStatus.Internal
+  public static boolean isCurrentProjection(ServerPlayer player, long expectedRequest) {
+    ServerThreadGuard.require(player.serverLevel(), "Projection plan checked");
+    var projection = PROJECTIONS.get(player.getUUID());
+    return expectedRequest >= 0
+        && projection != null
+        && projection.projectionRequest == expectedRequest
+        && current(player, projection);
+  }
+
+  @ApiStatus.Internal
+  public static Optional<AssemblyPage> readProjectionPage(ServerPlayer player, long expectedRequest, int start, int limit) {
+    ServerThreadGuard.require(player.serverLevel(), "Projection plan page read");
+    if (expectedRequest < 0 || start < 0 || limit < 1 || limit > MachineAssemblyApi.MAX_PAGE_PARTS) {
+      throw new IllegalArgumentException("Invalid projection plan page request");
+    }
+    var projection = PROJECTIONS.get(player.getUUID());
+    if (projection == null
+        || projection.projectionRequest != expectedRequest
+        || !current(player, projection)
+        || start > projection.pattern.parts().size()) {
+      return Optional.empty();
+    }
+    int total = projection.pattern.parts().size();
+    int end = (int) Math.min((long) total, (long) start + limit);
+    var parts = new ArrayList<AssemblyPart>(end - start);
+    for (int index = start; index < end; index++) {
+      var source = projection.pattern.parts().get(index);
+      var alternatives = source.rule().alternatives();
+      var candidates = new ArrayList<AssemblyCandidate>(source.states().size());
+      for (int candidate = 0; candidate < source.states().size(); candidate++) {
+        List<String> properties;
+        if (alternatives.isEmpty()) {
+          properties = List.of();
+        } else {
+          properties = alternatives.get(candidate).properties().keySet().stream().map(property -> property.getName())
+              .sorted().toList();
+        }
+        candidates.add(new AssemblyCandidate(source.states().get(candidate), properties));
+      }
+      parts.add(new AssemblyPart(source.position(), candidates));
+    }
+    return Optional.of(new AssemblyPage(expectedRequest, start, total, parts));
   }
 
   /** Only the held tool changes; world projection lengths are frozen on use. */
@@ -771,7 +847,8 @@ public final class AssemblyService {
         || job.pattern.sourceDefinition() != StructureService.definition(job.pattern.machine())
         || !job.level.hasChunkAt(job.pattern.origin())
         || !job.level.mayInteract(player, job.pattern.origin())
-        || job.build && player.hasInfiniteMaterials()) {
+        || job.build && player.hasInfiniteMaterials()
+        || !job.build && job.projectionRevision != StructureService.controllerProjectionRevision(job.owner)) {
       return false;
     }
     return !job.owner.structureRemoved()
@@ -997,6 +1074,7 @@ public final class AssemblyService {
         && player.level() == pending.level
         && pending.epoch == StructureService.definitionEpoch()
         && pending.definition == StructureService.definition(pending.definition.id())
+        && pending.controllerRevision == StructureService.controllerProjectionRevision(pending.owner)
         && !pending.owner.structureRemoved()
         && pending.owner.structureSchemaSupported()
         && pending.level.hasChunkAt(pending.origin)

@@ -48,6 +48,7 @@ import net.neoforged.neoforge.event.server.ServerStoppedEvent;
 import net.neoforged.neoforge.event.tick.LevelTickEvent;
 import net.neoforged.neoforge.server.ServerLifecycleHooks;
 import org.slf4j.Logger;
+import org.jetbrains.annotations.ApiStatus;
 
 /**
  * Server-thread ownership, one coalesced request per controller, and budgeted
@@ -81,6 +82,20 @@ public final class StructureService {
 
   public static Map<ResourceLocation, MachineDefinition> definitionsSnapshot() {
     return catalog.definitions();
+  }
+
+  /**
+   * Read-only context token; querying it never registers or binds a controller.
+   */
+  @ApiStatus.Internal
+  public static long controllerProjectionRevision(StructureSubject controller) {
+    if (!(controller.structureLevel() instanceof ServerLevel level)) {
+      throw new IllegalArgumentException("Controller context requires a server level");
+    }
+    ServerThreadGuard.require(level, "Controller context read");
+    var state = LEVELS.get(level);
+    var anchor = state == null ? null : state.anchors.get(controller.structurePosition().asLong());
+    return anchor == null || anchor.controller != controller || !anchor.alive ? -1 : anchor.projectionRevision;
   }
 
   /** Coarse invalidation for unbound generic discovery, main-thread only. */
@@ -153,6 +168,13 @@ public final class StructureService {
         || anchor.schemaSupported != controller.structureSchemaSupported();
     if (!changed && !force) {
       return;
+    }
+    if (anchor.projectionRevision == 0
+        || resetEpisode
+        || anchor.epoch != snapshot.epoch()
+        || anchor.orientation != orientation
+        || anchor.schemaSupported != controller.structureSchemaSupported()) {
+      anchor.projectionRevision = state.nextProjectionRevision = Math.incrementExact(state.nextProjectionRevision);
     }
     state.scriptCleanup.remove(controller);
     if (anchor.definition != definition || anchor.orientation != orientation) {
@@ -1044,7 +1066,7 @@ public final class StructureService {
   private static final class Anchor implements Work {
     final StructureSubject controller;
     boolean alive = true, turning, schemaSupported, preparing;
-    long epoch = -1, generation, roundStarted;
+    long epoch = -1, generation, roundStarted, projectionRevision;
     long actualRevision = Long.MIN_VALUE;
     boolean actual;
     ResourceLocation machineId;
@@ -1478,7 +1500,7 @@ public final class StructureService {
     final LinkedHashSet<Work> queue = new LinkedHashSet<>();
     final Map<StructureSubject, ScriptCleanup> scriptCleanup = new LinkedHashMap<>();
     final ConcurrentLinkedQueue<Anchor> ready = new ConcurrentLinkedQueue<>();
-    long nextGeneration, revision;
+    long nextGeneration, nextProjectionRevision, revision;
 
     void enqueue(Anchor anchor) {
       if (anchor.alive && anchor.needsWork()) {

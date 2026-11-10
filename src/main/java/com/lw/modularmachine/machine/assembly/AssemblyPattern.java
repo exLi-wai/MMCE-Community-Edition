@@ -33,7 +33,12 @@ public record AssemblyPattern(
     MachineOrientation orientation,
     MachineDefinition sourceDefinition,
     Map<String, Integer> dynamicLengths,
+    List<String> selectedModifierGroups,
     List<Part> parts) {
+  public AssemblyPattern(ResourceLocation machine, long epoch, BlockPos origin, MachineOrientation orientation, MachineDefinition sourceDefinition, Map<String, Integer> dynamicLengths, List<Part> parts) {
+    this(machine, epoch, origin, orientation, sourceDefinition, dynamicLengths, List.of(), parts);
+  }
+
   public record Part(BlockPos position, MachineDefinition.Rule rule, List<BlockState> states) {
     public Part {
       position = position.immutable();
@@ -46,6 +51,7 @@ public record AssemblyPattern(
   public AssemblyPattern {
     origin = origin.immutable();
     dynamicLengths = Map.copyOf(dynamicLengths);
+    selectedModifierGroups = List.copyOf(selectedModifierGroups);
     parts = List.copyOf(parts);
   }
 
@@ -54,12 +60,17 @@ public record AssemblyPattern(
   }
 
   public static AssemblyPattern compile(MachineDefinition definition, long epoch, BlockPos origin, MachineOrientation orientation, Map<String, Integer> lengths) {
+    return compile(definition, epoch, origin, orientation, lengths, List.of());
+  }
+
+  public static AssemblyPattern compile(MachineDefinition definition, long epoch, BlockPos origin, MachineOrientation orientation, Map<String, Integer> lengths, List<String> selectedModifierGroups) {
     definition = definition.resolveDynamic(lengths);
     if (!definition.allows(orientation)) {
       throw new IllegalArgumentException("Unsupported assembly orientation");
     }
-    var rules = definition.rulesFor(orientation);
-    var preparation = new Preparation(definition, epoch, origin, orientation, rules);
+    var selected = ProjectionRules.normalizeSelection(definition, selectedModifierGroups);
+    var rules = ProjectionRules.compile(definition, orientation, selected);
+    var preparation = new Preparation(definition, epoch, origin, orientation, rules, selected);
     while (!preparation.complete()) {
       preparation.advance(512);
     }
@@ -88,6 +99,7 @@ public record AssemblyPattern(
     private final BlockPos origin;
     private final MachineOrientation orientation;
     private final List<MachineDefinition.Rule> rules;
+    private final List<String> selectedModifierGroups;
     private final ArrayList<CapturedPart> parts = new ArrayList<>();
     private final Map<PortKind, List<BlockState>> ports = new EnumMap<>(PortKind.class);
     private final Rotation rotation;
@@ -101,6 +113,10 @@ public record AssemblyPattern(
     private boolean finished;
 
     public Preparation(MachineDefinition definition, long epoch, BlockPos origin, MachineOrientation orientation, List<MachineDefinition.Rule> rules) {
+      this(definition, epoch, origin, orientation, rules, List.of());
+    }
+
+    public Preparation(MachineDefinition definition, long epoch, BlockPos origin, MachineOrientation orientation, List<MachineDefinition.Rule> rules, List<String> selectedModifierGroups) {
       if (!definition.allows(orientation) || rules.size() != definition.parts().size()) {
         throw new IllegalArgumentException("Invalid projection rule snapshot");
       }
@@ -109,6 +125,7 @@ public record AssemblyPattern(
       this.origin = origin.immutable();
       this.orientation = orientation;
       this.rules = rules;
+      this.selectedModifierGroups = List.copyOf(selectedModifierGroups);
       rotation = switch (orientation.front()) {
         case EAST -> Rotation.CLOCKWISE_90;
         case SOUTH -> Rotation.CLOCKWISE_180;
@@ -162,7 +179,8 @@ public record AssemblyPattern(
           var alternative = activeRule.alternatives().get(alternativeCursor++);
           var state = BlockStateValues.apply(alternative.block().defaultBlockState(), alternative.properties());
           var properties = alternative.properties();
-          if (definition.parts().get(cursor).propertiesSpace() == PropertySpace.LEGACY) {
+          if (selectedModifierGroups.isEmpty()
+              && definition.parts().get(cursor).propertiesSpace() == PropertySpace.LEGACY) {
             state = state.rotate(rotation);
             var transformed = new HashMap<Property<?>, Comparable<?>>();
             for (var key : properties.keySet()) {
@@ -214,6 +232,7 @@ public record AssemblyPattern(
           orientation,
           definition.sourceDefinition(),
           definition.dynamicLengths(),
+          selectedModifierGroups,
           frozen);
     }
   }
@@ -238,6 +257,14 @@ public record AssemblyPattern(
               part.rule(),
               part.states()));
     }
-    return new AssemblyPattern(machine, epoch, target, orientation, sourceDefinition, dynamicLengths, relocated);
+    return new AssemblyPattern(
+        machine,
+        epoch,
+        target,
+        orientation,
+        sourceDefinition,
+        dynamicLengths,
+        selectedModifierGroups,
+        relocated);
   }
 }

@@ -41,4 +41,5 @@ public final class ProjectionToolInput {
     event.setCanceled(true);
     ProjectionLengthPayloads.adjust(hand, event.getScrollDeltaY() > 0 ? 1 : -1);
   }
+
 }

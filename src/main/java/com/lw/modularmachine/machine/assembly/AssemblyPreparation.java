@@ -24,10 +24,18 @@ final class AssemblyPreparation {
   private static long cacheEpoch = -1;
   private static int cacheParts;
 
-  private record Key(MachineDefinition definition, MachineOrientation orientation, Map<String, Integer> lengths) {
+  private record Key(
+      MachineDefinition definition,
+      MachineOrientation orientation,
+      Map<String, Integer> lengths,
+      List<String> selectedModifierGroups) {
     @Override
     public int hashCode() {
-      return 31 * (31 * System.identityHashCode(definition) + orientation.hashCode()) + lengths.hashCode();
+      int result = System.identityHashCode(definition);
+      result = 31 * result + orientation.hashCode();
+      result = 31 * result + lengths.hashCode();
+
+      return 31 * result + selectedModifierGroups.hashCode();
     }
 
     @Override
@@ -35,7 +43,8 @@ final class AssemblyPreparation {
       return other instanceof Key key
           && key.definition == definition
           && key.orientation == orientation
-          && key.lengths.equals(lengths);
+          && key.lengths.equals(lengths)
+          && key.selectedModifierGroups.equals(selectedModifierGroups);
     }
   }
 
@@ -56,11 +65,19 @@ final class AssemblyPreparation {
   private boolean cancelled;
 
   AssemblyPreparation(MachineDefinition definition, long epoch, BlockPos origin, MachineOrientation orientation, Map<String, Integer> lengths) {
+    this(definition, epoch, origin, orientation, lengths, List.of());
+  }
+
+  AssemblyPreparation(MachineDefinition definition, long epoch, BlockPos origin, MachineOrientation orientation, Map<String, Integer> lengths, List<String> selectedModifierGroups) {
     this.definition = definition;
     this.epoch = epoch;
     this.origin = origin.immutable();
     this.orientation = orientation;
-    key = new Key(definition, orientation, Map.copyOf(lengths));
+    key = new Key(
+        definition,
+        orientation,
+        Map.copyOf(lengths),
+        ProjectionRules.normalizeSelection(definition, selectedModifierGroups));
     if (cacheEpoch != epoch) {
       clearCache();
       cacheEpoch = epoch;
@@ -82,9 +99,10 @@ final class AssemblyPreparation {
           var capturedDefinition = definition;
           var capturedOrientation = orientation;
           var capturedLengths = key.lengths();
+          var capturedGroups = key.selectedModifierGroups();
           rules = AsyncStructureWork.submit(() -> {
             var resolved = capturedDefinition.resolveDynamic(capturedLengths);
-            return new Compiled(resolved, resolved.rulesFor(capturedOrientation));
+            return new Compiled(resolved, ProjectionRules.compile(resolved, capturedOrientation, capturedGroups));
           });
         }
         if (rules == null || !rules.isDone()) {
@@ -97,7 +115,8 @@ final class AssemblyPreparation {
               epoch,
               BlockPos.ZERO,
               orientation,
-              compiled.rules());
+              compiled.rules(),
+              key.selectedModifierGroups());
         }
         int work = 0;
         while (!candidates.complete() && work < MAX_CAPTURE_WORK && System.nanoTime() < deadline) {

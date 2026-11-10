@@ -29,7 +29,11 @@ public final class ProjectionPreparation {
   }
 
   public ProjectionPreparation(MachineDefinition definition, long epoch, BlockPos origin, MachineOrientation orientation, Map<String, Integer> lengths) {
-    preparation = new AssemblyPreparation(definition, epoch, origin, orientation, lengths);
+    this(definition, epoch, origin, orientation, lengths, List.of());
+  }
+
+  public ProjectionPreparation(MachineDefinition definition, long epoch, BlockPos origin, MachineOrientation orientation, Map<String, Integer> lengths, List<String> selectedModifierGroups) {
+    preparation = new AssemblyPreparation(definition, epoch, origin, orientation, lengths, selectedModifierGroups);
   }
 
   public Ready advance(long deadline) {
@@ -45,6 +49,9 @@ public final class ProjectionPreparation {
     if (output == null) {
       var captured = pattern;
       output = AsyncStructureWork.submit(() -> {
+        if (captured.parts().stream().anyMatch(part -> part.states().isEmpty())) {
+          throw new IllegalArgumentException("Selected projection has an unrepresentable part");
+        }
         var entries = captured.parts().stream()
             .map(
                 part -> new ProjectionPayloads.Entry(
