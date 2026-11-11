@@ -12,6 +12,11 @@ import com.lw.modularmachine.machine.appearance.MachineComponentType;
 import com.lw.modularmachine.machine.controller.GenericControllerDiscovery;
 import com.lw.modularmachine.machine.controller.ControllerScriptState;
 import com.lw.modularmachine.machine.controller.ControllerScriptStateOwner;
+import com.lw.modularmachine.machine.controller.ControllerOwnershipState;
+import com.lw.modularmachine.machine.recipe.command.ControllerCommandState;
+import com.lw.modularmachine.machine.recipe.command.ControllerCommandSubject;
+import com.lw.modularmachine.machine.recipe.command.RecipeCommandService;
+import com.lw.modularmachine.machine.controller.ControllerOwnershipService;
 import com.lw.modularmachine.machine.factory.ControllerUpgrades;
 import com.lw.modularmachine.machine.factory.FactoryUpgradeRestrictions;
 import com.lw.modularmachine.machine.factory.FactoryUpgradeRuntimeWork;
@@ -54,6 +59,8 @@ import net.minecraft.core.HolderLookup;
 import net.minecraft.nbt.CompoundTag;
 import net.minecraft.nbt.Tag;
 import net.minecraft.network.chat.Component;
+import net.minecraft.network.Connection;
+import net.minecraft.network.protocol.game.ClientboundBlockEntityDataPacket;
 import net.minecraft.resources.ResourceLocation;
 import net.minecraft.server.level.ServerLevel;
 import net.minecraft.server.level.ServerPlayer;
@@ -67,7 +74,7 @@ import net.minecraft.world.level.block.state.BlockState;
 import net.neoforged.neoforge.network.PacketDistributor;
 import org.jetbrains.annotations.ApiStatus;
 
-public final class MachineControllerBlockEntity extends BlockEntity implements MenuProvider, UpgradeBusOwner, ControllerScriptStateOwner {
+public final class MachineControllerBlockEntity extends BlockEntity implements MenuProvider, UpgradeBusOwner, ControllerScriptStateOwner, ControllerCommandSubject {
   private static final int RECIPE_RETRY_INITIAL = 5;
   private static final int RECIPE_RETRY_MAX = 80;
   private final GenericControllerDiscovery genericDiscovery = new GenericControllerDiscovery();
@@ -88,6 +95,8 @@ public final class MachineControllerBlockEntity extends BlockEntity implements M
   private Tag unsupportedData;
   private ControllerScriptState controllerScriptState = ControllerScriptState.empty();
   private Tag unsupportedScriptData;
+  private ControllerOwnershipState ownership = ControllerOwnershipState.empty();
+  private ControllerCommandState commandState = new ControllerCommandState();
   private FrozenItemRun runningRecipe;
   private RunStartLease recipeStart;
   private RunUpdateLease recipeUpdate;
@@ -118,6 +127,39 @@ public final class MachineControllerBlockEntity extends BlockEntity implements M
   }
 
   @Override
+  @ApiStatus.Internal
+  public ControllerOwnershipState ownershipState() {
+    return ownership;
+  }
+
+  @Override
+  @ApiStatus.Internal
+  public ControllerCommandState commandState() {
+    return commandState;
+  }
+
+  @Override
+  @ApiStatus.Internal
+  public boolean commandExecutionAllowed() {
+    return commandState.valid()
+        && schemaSupported()
+        && !recipeStartInProgress()
+        && !SmartInterfaceEventPublisher.isDispatching();
+  }
+
+  @Override
+  @ApiStatus.Internal
+  public void initializePlayerOwner(UUID playerId) {
+    ControllerOwnershipService.requireInitialization(this);
+    checkBlueprintWrite();
+    if (ownership.valid() && ownership.ownerId().isEmpty()) {
+      ownership = ControllerOwnershipState.ownedBy(playerId);
+      setChanged();
+      ControllerOwnershipService.synchronize(this);
+    }
+  }
+
+  @Override
   public void onLoad() {
     super.onLoad();
     if (level instanceof ServerLevel && runningRecipe == null && blueprintMachineId() != null) {
@@ -125,10 +167,34 @@ public final class MachineControllerBlockEntity extends BlockEntity implements M
     }
     StructureService.register(this);
     refreshAppearanceState();
+    RecipeCommandService.schedule(this);
+  }
+
+  @Override
+  public CompoundTag getUpdateTag(HolderLookup.Provider registries) {
+    return ownership.clientTag();
+  }
+
+  @Override
+  public ClientboundBlockEntityDataPacket getUpdatePacket() {
+    return ClientboundBlockEntityDataPacket.create(this);
+  }
+
+  @Override
+  public void handleUpdateTag(CompoundTag tag, HolderLookup.Provider registries) {
+    if (level != null && level.isClientSide) {
+      ownership = ControllerOwnershipState.load(tag);
+    }
+  }
+
+  @Override
+  public void onDataPacket(Connection connection, ClientboundBlockEntityDataPacket packet, HolderLookup.Provider registries) {
+    handleUpdateTag(packet.getTag(), registries);
   }
 
   @Override
   public void setRemoved() {
+    RecipeCommandService.unschedule(this);
     genericDiscovery.clear();
     runtimeUpgrades.clear();
     upgrades.invalidate();
@@ -141,6 +207,7 @@ public final class MachineControllerBlockEntity extends BlockEntity implements M
 
   @Override
   public void onChunkUnloaded() {
+    RecipeCommandService.unschedule(this);
     genericDiscovery.clear();
     runtimeUpgrades.clear();
     upgrades.invalidate();
@@ -733,6 +800,7 @@ public final class MachineControllerBlockEntity extends BlockEntity implements M
     if (!server.getServer().isSameThread()) {
       throw new IllegalStateException("Controller tick outside server thread");
     }
+    RecipeCommandService.schedule(this);
     if (recipeStartInProgress()) {
       return;
     }
@@ -1024,6 +1092,8 @@ public final class MachineControllerBlockEntity extends BlockEntity implements M
       throw new IllegalStateException("Cannot save an unresolved recipe transaction");
     }
     super.saveAdditional(tag, registries);
+    ownership.save(tag);
+    tag.put(ControllerCommandState.NBT_KEY, commandState.save(false));
     tag.put("controller_blueprint", blueprintInventory.save(registries));
     tag.put(
         ControllerScriptState.NBT_KEY,
@@ -1047,13 +1117,15 @@ public final class MachineControllerBlockEntity extends BlockEntity implements M
     if (level instanceof ServerLevel server && !server.getServer().isSameThread()) {
       throw new IllegalStateException("Controller load outside server thread");
     }
-    if (recipeStartInProgress()) {
+    if (recipeStartInProgress() || level instanceof ServerLevel && SmartInterfaceEventPublisher.isDispatching()) {
       throw new IllegalStateException("Cannot reload a recipe transaction");
     }
     runtimeUpgrades.clear();
     upgrades.invalidate();
     recipeEngine.invalidate();
     super.loadAdditional(tag, registries);
+    ownership = ControllerOwnershipState.load(tag);
+    commandState = ControllerCommandState.load(tag.get(ControllerCommandState.NBT_KEY));
     controllerScriptState = ControllerScriptState.empty();
     unsupportedScriptData = null;
     try {
@@ -1093,6 +1165,8 @@ public final class MachineControllerBlockEntity extends BlockEntity implements M
    */
   public CompoundTag portableData(HolderLookup.Provider registries) {
     CompoundTag root = new CompoundTag();
+    ownership.save(root);
+    root.put(ControllerCommandState.NBT_KEY, commandState.save(true));
     root.put("controller_blueprint", blueprintInventory.save(registries));
     root.put(
         ControllerScriptState.NBT_KEY,

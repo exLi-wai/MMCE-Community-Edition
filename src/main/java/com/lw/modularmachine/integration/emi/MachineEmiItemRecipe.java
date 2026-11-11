@@ -44,8 +44,7 @@ final class MachineEmiItemRecipe extends BasicEmiRecipe {
         (graphics, mouseX, mouseY, delta) -> MachineRecipeDisplay.draw(graphics, recipe, layout));
     // Native slots remain last so tooltips never hide the hovered ingredient
     // from EMI's recipe/uses shortcuts on compact layouts.
-    widgets
-        .addTooltipText(MachineRecipeDisplay.details(id, recipe), 0, Math.max(0, layout.height - 9), layout.width, 9);
+    widgets.addTooltipText(MachineRecipeDisplay.details(recipe), 0, Math.max(0, layout.height - 9), layout.width, 9);
     widgets.addTooltipText(List.of(MachineRecipeDisplay.duration(recipe)), layout.arrowX, layout.arrowY, 22, 15);
     for (var part : layout.parts) {
       SlotWidget slot;

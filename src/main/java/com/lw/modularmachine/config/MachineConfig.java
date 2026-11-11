@@ -17,6 +17,8 @@ public final class MachineConfig {
   public static final ModConfigSpec SPEC;
   public static final ModConfigSpec.BooleanValue CLEAN_CUSTOM_DATA_ON_STRUCTURE_CHECK_FAILED;
   public static final ModConfigSpec.BooleanValue ENABLE_DURATION_MULTIPLIER;
+  public static final ModConfigSpec.BooleanValue ENABLE_SECURITY_SYSTEM;
+  public static final ModConfigSpec.IntValue RECIPE_COMMAND_PERMISSION_LEVEL;
   public static final ModConfigSpec.ConfigValue<String> DEFAULT_FAILURE_ACTION;
   public static final ModConfigSpec.BooleanValue MACHINE_PARALLEL_DEFAULT;
   public static final ModConfigSpec.BooleanValue RECIPE_PARALLEL_DEFAULT;
@@ -40,6 +42,13 @@ public final class MachineConfig {
   static {
     ModConfigSpec.Builder builder = new ModConfigSpec.Builder();
     builder.translation("mmcece.config.general").push("general");
+    RECIPE_COMMAND_PERMISSION_LEVEL = builder.translation("mmcece.config.general.recipeCommandPermissionLevel").comment(
+        "Maximum command permission for registered recipe actions, between 0 and 2. Owner sources also retain the owner's actual permission ceiling.")
+        .defineInRange("recipe-command-permission-level", 2, 0, 2);
+    ENABLE_SECURITY_SYSTEM = builder.translation("mmcece.config.general.enableSecuritySystem").comment(
+        "Prevent non-creative players from breaking another player's controller or placing a controller item owned by another player.",
+        "Unowned controllers remain usable. This does not restrict GUI access or change paid recipe runs.")
+        .define("enable-security-system", false);
     CLEAN_CUSTOM_DATA_ON_STRUCTURE_CHECK_FAILED = builder
         .translation("mmcece.config.general.cleanCustomDataOnStructureCheckFailed")
         .comment(
@@ -159,6 +168,14 @@ public final class MachineConfig {
 
   public static boolean durationMultiplierEnabled() {
     return SPEC.isLoaded() && ENABLE_DURATION_MULTIPLIER.get();
+  }
+
+  public static boolean securitySystemEnabled() {
+    return SPEC.isLoaded() && ENABLE_SECURITY_SYSTEM.get();
+  }
+
+  public static int recipeCommandPermissionLevel() {
+    return SPEC.isLoaded() ? RECIPE_COMMAND_PERMISSION_LEVEL.get() : 2;
   }
 
   public static int defaultCasingColor() {

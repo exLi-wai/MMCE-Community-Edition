@@ -44,6 +44,7 @@ final class FactoryControllerTooltipProvider implements IBlockComponentProvider,
     data.putString(PREFIX + "structure", factory.verificationState().name());
     data.putString(PREFIX + "failure", factory.verificationFailure().name());
     if (factory.getLevel() instanceof ServerLevel level) {
+      ControllerOwnershipTooltip.appendServerData(data, level, factory.getBlockPos());
       MachineControllerApi.structureDiagnostic(level, factory.getBlockPos()).ifPresent(diagnostic -> {
         data.putLong(DIAGNOSTIC + "_position", diagnostic.position().asLong());
         data.putString(DIAGNOSTIC + "_part", diagnostic.partId());
@@ -83,6 +84,7 @@ final class FactoryControllerTooltipProvider implements IBlockComponentProvider,
   @Override
   public void appendTooltip(ITooltip tooltip, BlockAccessor accessor, IPluginConfig config) {
     var data = accessor.getServerData();
+    ControllerOwnershipTooltip.appendTooltip(tooltip, accessor);
     if (!data.contains(PREFIX + "structure")) {
       return;
     }

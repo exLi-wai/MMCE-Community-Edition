@@ -13,6 +13,7 @@ import net.minecraft.core.BlockPos;
 import net.minecraft.nbt.CompoundTag;
 import net.minecraft.network.chat.Component;
 import net.minecraft.resources.ResourceLocation;
+import net.minecraft.server.level.ServerLevel;
 import snownee.jade.api.BlockAccessor;
 import snownee.jade.api.IBlockComponentProvider;
 import snownee.jade.api.IServerDataProvider;
@@ -50,6 +51,9 @@ final class MachineControllerTooltipProvider implements IBlockComponentProvider,
   public void appendServerData(CompoundTag data, BlockAccessor accessor) {
     if (!(accessor.getBlockEntity() instanceof MachineControllerBlockEntity controller)) {
       return;
+    }
+    if (controller.getLevel() instanceof ServerLevel level) {
+      ControllerOwnershipTooltip.appendServerData(data, level, controller.getBlockPos());
     }
     MachineControllerApi.inspect(controller).ifPresent(snapshot -> {
       data.putString(STRUCTURE, snapshot.structureState().name());
@@ -90,6 +94,7 @@ final class MachineControllerTooltipProvider implements IBlockComponentProvider,
   @Override
   public void appendTooltip(ITooltip tooltip, BlockAccessor accessor, IPluginConfig config) {
     var data = accessor.getServerData();
+    ControllerOwnershipTooltip.appendTooltip(tooltip, accessor);
     if (!data.contains(STRUCTURE)) {
       return;
     }

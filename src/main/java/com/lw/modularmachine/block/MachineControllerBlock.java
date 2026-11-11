@@ -5,6 +5,7 @@ import com.lw.modularmachine.machine.appearance.ControllerAppearance;
 import com.lw.modularmachine.machine.appearance.ControllerAppearanceState;
 import com.lw.modularmachine.machine.controller.DedicatedControllerCatalog.Entry;
 import com.lw.modularmachine.machine.controller.DedicatedControllerCatalog;
+import com.lw.modularmachine.machine.controller.ControllerOwnershipService;
 import com.lw.modularmachine.machine.orientation.ControllerOrientationActions;
 import com.lw.modularmachine.machine.orientation.ControllerPlacementData;
 import com.lw.modularmachine.api.orientation.MachineOrientation;
@@ -17,12 +18,15 @@ import net.minecraft.core.Direction;
 import net.minecraft.network.chat.Component;
 import net.minecraft.network.chat.MutableComponent;
 import net.minecraft.server.level.ServerPlayer;
+import net.minecraft.server.level.ServerLevel;
 import net.minecraft.world.InteractionResult;
 import net.minecraft.world.entity.player.Player;
+import net.minecraft.world.entity.LivingEntity;
 import net.minecraft.world.item.BlockItem;
 import net.minecraft.world.item.ItemStack;
 import net.minecraft.world.item.context.BlockPlaceContext;
 import net.minecraft.world.level.Level;
+import net.minecraft.world.level.LevelReader;
 import net.minecraft.world.level.BlockGetter;
 import net.minecraft.world.level.block.*;
 import net.minecraft.world.level.block.entity.BlockEntity;
@@ -153,6 +157,19 @@ public final class MachineControllerBlock extends BaseEntityBlock {
   @Override
   public BlockEntity newBlockEntity(BlockPos pos, BlockState state) {
     return new MachineControllerBlockEntity(pos, state);
+  }
+
+  @Override
+  public void setPlacedBy(Level level, BlockPos pos, BlockState state, LivingEntity placer, ItemStack stack) {
+    super.setPlacedBy(level, pos, state, placer, stack);
+    if (level instanceof ServerLevel server) {
+      ControllerOwnershipService.placed(server, pos, placer);
+    }
+  }
+
+  @Override
+  public ItemStack getCloneItemStack(LevelReader level, BlockPos pos, BlockState state) {
+    return ControllerOwnershipService.pick(level, pos, state);
   }
 
   @Override

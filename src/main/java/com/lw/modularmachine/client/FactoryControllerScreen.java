@@ -5,16 +5,21 @@ import com.lw.modularmachine.network.MachinePayloads;
 import com.lw.modularmachine.machine.recipe.MachineRecipe;
 import com.lw.modularmachine.machine.recipe.MachineRecipeRegistries;
 import com.lw.modularmachine.util.client.gui.GuiTextures;
+import com.lw.modularmachine.util.client.search.NameSearch;
 import java.util.Comparator;
 import java.util.List;
 import java.util.Locale;
+import java.util.Map;
 import java.util.Objects;
 import java.util.Optional;
+import java.util.stream.Collectors;
+import java.util.stream.Stream;
 import net.minecraft.Util;
 import net.minecraft.client.gui.GuiGraphics;
 import net.minecraft.client.gui.components.EditBox;
 import net.minecraft.client.gui.screens.inventory.AbstractContainerScreen;
 import net.minecraft.network.chat.Component;
+import net.minecraft.network.chat.ComponentUtils;
 import net.minecraft.resources.ResourceLocation;
 import net.minecraft.world.entity.player.Inventory;
 import net.minecraft.world.item.ItemStack;
@@ -58,10 +63,13 @@ public final class FactoryControllerScreen extends AbstractContainerScreen<Facto
       20,
       2);
   private final LegacyGuiScrollbar scrollbar = new LegacyGuiScrollbar();
+  private final NameSearch nameSearch = new NameSearch();
   private String editingThread, query = "", parallelText = "";
   private ResourceLocation editingMachine;
   private EditBox search, parallel;
   private List<RecipeHolder<MachineRecipe>> recipes = List.of(), filteredRecipes = List.of();
+  private Map<ResourceLocation, Component> recipeLabels = Map.of();
+  private Map<ResourceLocation, List<String>> recipeSearchNames = Map.of();
   private int recipePage;
   private PendingAction pending;
   private Component editorMessage = Component.empty();
@@ -210,6 +218,8 @@ public final class FactoryControllerScreen extends AbstractContainerScreen<Facto
     editingMachine = null;
     recipes = List.of();
     filteredRecipes = List.of();
+    recipeLabels = Map.of();
+    recipeSearchNames = Map.of();
     pending = null;
   }
 
@@ -219,12 +229,39 @@ public final class FactoryControllerScreen extends AbstractContainerScreen<Facto
         .getAllRecipesFor(MachineRecipeRegistries.ITEM_TYPE.get()).stream()
         .filter(holder -> holder.value().machineId().equals(editingMachine))
         .sorted(Comparator.comparing(holder -> holder.id().toString())).toList();
+    recipeLabels = recipes.stream()
+        .collect(Collectors.toUnmodifiableMap(RecipeHolder::id, holder -> recipeLabel(holder.value())));
+    recipeSearchNames = recipes.stream()
+        .collect(Collectors.toUnmodifiableMap(RecipeHolder::id, holder -> recipeNames(holder.value())));
     filterRecipes();
   }
 
+  private static Component recipeLabel(MachineRecipe recipe) {
+    return tr("recipe_items", itemNames(recipe.inputs()), itemNames(recipe.outputs()));
+  }
+
+  private static Component itemNames(List<MachineRecipe.ItemAmount> items) {
+    return items.isEmpty() ? tr("no_items") : ComponentUtils
+        .formatList(items, item -> item.displayStack().getHoverName());
+  }
+
+  private static List<String> recipeNames(MachineRecipe recipe) {
+    var items = Stream.concat(recipe.inputs().stream(), recipe.outputs().stream())
+        .map(item -> item.displayStack().getHoverName().getString());
+    var fluids = Stream.of(recipe.fluidInputs(), recipe.fluidOutputs(), List.of(recipe.fluidPerTick()))
+        .flatMap(List::stream).filter(fluid -> !fluid.isEmpty()).map(fluid -> fluid.getHoverName().getString());
+
+    return Stream.concat(items, fluids).map(name -> name.toLowerCase(Locale.ROOT)).distinct().toList();
+  }
+
   private void filterRecipes() {
-    String filter = query.strip().toLowerCase(Locale.ROOT);
-    filteredRecipes = recipes.stream().filter(holder -> holder.id().toString().contains(filter)).toList();
+    if (query.isBlank()) {
+      filteredRecipes = recipes;
+    } else {
+      var filter = nameSearch.query(query);
+      filteredRecipes = recipes.stream().filter(holder -> recipeSearchNames.get(holder.id()).stream().anyMatch(filter))
+          .toList();
+    }
     recipePage = Math.clamp(recipePage, 0, recipePages() - 1);
   }
 
@@ -350,9 +387,13 @@ public final class FactoryControllerScreen extends AbstractContainerScreen<Facto
           FONT_COLOR,
           false);
       drawEditorButton(graphics, 240, 4, 20, 16, Component.literal("X"), true, mouseX, mouseY);
-      var locked = tr(
-          "locked",
-          thread.lockedRecipe() == null ? tr("unlocked") : Component.literal(thread.lockedRecipe().toString()));
+      var lockedName = tr("unlocked");
+      if (thread.lockedRecipe() != null) {
+        lockedName = recipeLabels.getOrDefault(
+            thread.lockedRecipe(),
+            Component.translatable("menu.mmcece.factory.reason.locked_recipe_missing"));
+      }
+      var locked = tr("locked", lockedName);
       graphics.drawString(
           font,
           font.plainSubstrByWidth(locked.getString(), 174),
@@ -379,6 +420,7 @@ public final class FactoryControllerScreen extends AbstractContainerScreen<Facto
       int first = recipePage * RECIPES_PER_PAGE;
       for (int row = 0; row < Math.min(RECIPES_PER_PAGE, filteredRecipes.size() - first); row++) {
         var recipe = filteredRecipes.get(first + row);
+        var label = recipeLabels.get(recipe.id());
         int y = 94 + row * 25;
         boolean selected = recipe.id().equals(thread.lockedRecipe());
         graphics.fill(
@@ -394,7 +436,7 @@ public final class FactoryControllerScreen extends AbstractContainerScreen<Facto
         }
         graphics.drawString(
             font,
-            font.plainSubstrByWidth(recipe.id().toString(), 169),
+            font.plainSubstrByWidth(label.getString(), 169),
             editorLeft() + 32,
             editorTop() + y + 7,
             FONT_COLOR,
@@ -410,8 +452,7 @@ public final class FactoryControllerScreen extends AbstractContainerScreen<Facto
             mouseX,
             mouseY);
         if (editorHit(mouseX, mouseY, 8, y, 252, 23)) {
-          tooltip = icon.isEmpty() ? List.of(Component.literal(recipe.id().toString())) : List
-              .of(Component.literal(recipe.id().toString()), icon.getHoverName());
+          tooltip = List.of(label);
         }
       }
       if (filteredRecipes.isEmpty()) {
@@ -573,9 +614,7 @@ public final class FactoryControllerScreen extends AbstractContainerScreen<Facto
       threadState = Component.translatable("menu.mmcece.factory.reason." + thread.reason().toLowerCase(Locale.ROOT));
     }
     graphics.drawString(font, threadState, x, y + 12, FONT_COLOR, false);
-    if (thread.lockedRecipe() != null && thread.duration() == 0) {
-      graphics.drawString(font, Component.literal(thread.lockedRecipe().toString()), x, y + 22, FONT_COLOR, false);
-    } else if (thread.duration() == 0 && thread.parallelLimit() > 1) {
+    if (thread.duration() == 0 && thread.parallelLimit() > 1) {
       graphics.drawString(font, Component.literal("x" + thread.parallelLimit()), x, y + 22, FONT_COLOR, false);
     }
     if (thread.duration() > 0) {

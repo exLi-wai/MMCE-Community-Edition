@@ -1,5 +1,6 @@
 package com.lw.modularmachine.api.recipe;
 
+import com.lw.modularmachine.api.controller.ControllerOwnership;
 import com.lw.modularmachine.machine.recipe.FrozenItemRun;
 import com.lw.modularmachine.machine.recipe.RecipeLifecyclePublisher;
 import com.lw.modularmachine.machine.structure.VerificationFailure;
@@ -55,7 +56,8 @@ public final class RecipeLifecycleEvents {
       Optional<String> threadId,
       long tick,
       ResourceFailure resource,
-      RunSnapshot run) {
+      RunSnapshot run,
+      ControllerOwnership ownership) {
     public FailureContext {
       Objects.requireNonNull(dimension, "dimension");
       Objects.requireNonNull(controllerPosition, "controllerPosition");
@@ -63,6 +65,7 @@ public final class RecipeLifecycleEvents {
       Objects.requireNonNull(threadId, "threadId");
       Objects.requireNonNull(resource, "resource");
       Objects.requireNonNull(run, "run");
+      Objects.requireNonNull(ownership, "ownership");
       controllerPosition = controllerPosition.immutable();
       if (tick < 0
           || factory != threadId.isPresent()
@@ -109,7 +112,8 @@ public final class RecipeLifecycleEvents {
       VerificationFailure structureFailure,
       List<RunSnapshot> before,
       List<RunSnapshot> after,
-      Optional<ResourceFailure> resourceFailure) {
+      Optional<ResourceFailure> resourceFailure,
+      ControllerOwnership ownership) {
     public Context {
       Objects.requireNonNull(type, "type");
       Objects.requireNonNull(dimension, "dimension");
@@ -118,6 +122,7 @@ public final class RecipeLifecycleEvents {
       Objects.requireNonNull(structureState, "structureState");
       Objects.requireNonNull(structureFailure, "structureFailure");
       Objects.requireNonNull(resourceFailure, "resourceFailure");
+      Objects.requireNonNull(ownership, "ownership");
       controllerPosition = controllerPosition.immutable();
       before = List.copyOf(before);
       after = List.copyOf(after);

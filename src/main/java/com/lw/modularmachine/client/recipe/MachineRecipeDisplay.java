@@ -139,9 +139,8 @@ public final class MachineRecipeDisplay {
     return List.copyOf(result);
   }
 
-  public static List<Component> details(ResourceLocation id, MachineRecipe recipe) {
+  public static List<Component> details(MachineRecipe recipe) {
     return List.of(
-        Component.translatable("jei.mmcece.machine_item.details", id.toString()),
         Component.translatable("jei.mmcece.machine_item.priority", recipe.priority()),
         Component.translatable("jei.mmcece.machine_item.input_groups"));
   }

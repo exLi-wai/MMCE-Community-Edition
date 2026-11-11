@@ -9,6 +9,11 @@ import com.lw.modularmachine.machine.appearance.MachineComponentType;
 import com.lw.modularmachine.machine.controller.GenericControllerDiscovery;
 import com.lw.modularmachine.machine.controller.ControllerScriptState;
 import com.lw.modularmachine.machine.controller.ControllerScriptStateOwner;
+import com.lw.modularmachine.machine.controller.ControllerOwnershipState;
+import com.lw.modularmachine.machine.recipe.command.ControllerCommandState;
+import com.lw.modularmachine.machine.recipe.command.ControllerCommandSubject;
+import com.lw.modularmachine.machine.recipe.command.RecipeCommandService;
+import com.lw.modularmachine.machine.controller.ControllerOwnershipService;
 import com.lw.modularmachine.machine.factory.FactoryRunSet;
 import com.lw.modularmachine.machine.factory.FactoryRunSetCodec;
 import com.lw.modularmachine.machine.factory.FactoryScheduler;
@@ -71,6 +76,8 @@ import net.minecraft.nbt.ListTag;
 import net.minecraft.nbt.StringTag;
 import net.minecraft.nbt.Tag;
 import net.minecraft.network.chat.Component;
+import net.minecraft.network.Connection;
+import net.minecraft.network.protocol.game.ClientboundBlockEntityDataPacket;
 import net.minecraft.resources.ResourceLocation;
 import net.minecraft.server.level.ServerLevel;
 import net.minecraft.world.MenuProvider;
@@ -82,7 +89,7 @@ import net.minecraft.world.level.block.entity.BlockEntity;
 import net.minecraft.world.level.block.state.BlockState;
 import org.jetbrains.annotations.ApiStatus;
 
-public final class FactoryControllerBlockEntity extends BlockEntity implements MenuProvider, UpgradeBusOwner, ControllerScriptStateOwner {
+public final class FactoryControllerBlockEntity extends BlockEntity implements MenuProvider, UpgradeBusOwner, ControllerScriptStateOwner, ControllerCommandSubject {
   private static final int FACTORY_SCHEMA = 7;
   private static final int SEARCH_RETRY_INITIAL = 5;
   private static final int SEARCH_RETRY_MAX = 80;
@@ -93,6 +100,8 @@ public final class FactoryControllerBlockEntity extends BlockEntity implements M
   private CompoundTag opaqueFactoryState;
   private ControllerScriptState controllerScriptState = ControllerScriptState.empty();
   private Tag unsupportedScriptData;
+  private ControllerOwnershipState ownership = ControllerOwnershipState.empty();
+  private ControllerCommandState commandState = new ControllerCommandState();
   private final GenericControllerDiscovery genericDiscovery = new GenericControllerDiscovery();
   private ResourceLocation machineId = ControllerPlacementData.UNBOUND_MACHINE;
   private final ControllerBlueprintInventory blueprintInventory = new ControllerBlueprintInventory(
@@ -163,6 +172,40 @@ public final class FactoryControllerBlockEntity extends BlockEntity implements M
   }
 
   @Override
+  @ApiStatus.Internal
+  public ControllerOwnershipState ownershipState() {
+    return ownership;
+  }
+
+  @Override
+  @ApiStatus.Internal
+  public ControllerCommandState commandState() {
+    return commandState;
+  }
+
+  @Override
+  @ApiStatus.Internal
+  public boolean commandExecutionAllowed() {
+    return commandState.valid()
+        && persistentStateValid()
+        && startingThreads.isEmpty()
+        && !UpgradeLifecyclePublisher.isDispatchingAny()
+        && !SmartInterfaceEventPublisher.isDispatching();
+  }
+
+  @Override
+  @ApiStatus.Internal
+  public void initializePlayerOwner(UUID playerId) {
+    ControllerOwnershipService.requireInitialization(this);
+    checkBlueprintWrite();
+    if (ownership.valid() && ownership.ownerId().isEmpty()) {
+      ownership = ControllerOwnershipState.ownedBy(playerId);
+      setChanged();
+      ControllerOwnershipService.synchronize(this);
+    }
+  }
+
+  @Override
   public void onLoad() {
     super.onLoad();
     if (level instanceof ServerLevel
@@ -172,10 +215,34 @@ public final class FactoryControllerBlockEntity extends BlockEntity implements M
     }
     StructureService.register(this);
     refreshAppearanceState();
+    RecipeCommandService.schedule(this);
+  }
+
+  @Override
+  public CompoundTag getUpdateTag(HolderLookup.Provider registries) {
+    return ownership.clientTag();
+  }
+
+  @Override
+  public ClientboundBlockEntityDataPacket getUpdatePacket() {
+    return ClientboundBlockEntityDataPacket.create(this);
+  }
+
+  @Override
+  public void handleUpdateTag(CompoundTag tag, HolderLookup.Provider registries) {
+    if (level != null && level.isClientSide) {
+      ownership = ControllerOwnershipState.load(tag);
+    }
+  }
+
+  @Override
+  public void onDataPacket(Connection connection, ClientboundBlockEntityDataPacket packet, HolderLookup.Provider registries) {
+    handleUpdateTag(packet.getTag(), registries);
   }
 
   @Override
   public void setRemoved() {
+    RecipeCommandService.unschedule(this);
     genericDiscovery.clear();
     runtimeUpgrades.clear();
     clearUpgradeDiscovery();
@@ -193,6 +260,7 @@ public final class FactoryControllerBlockEntity extends BlockEntity implements M
 
   @Override
   public void onChunkUnloaded() {
+    RecipeCommandService.unschedule(this);
     genericDiscovery.clear();
     runtimeUpgrades.clear();
     clearUpgradeDiscovery();
@@ -1042,6 +1110,7 @@ public final class FactoryControllerBlockEntity extends BlockEntity implements M
     if (!(level instanceof ServerLevel server) || !server.getServer().isSameThread()) {
       return;
     }
+    RecipeCommandService.schedule(this);
     if (UpgradeLifecyclePublisher.isDispatchingAny()) {
       return;
     }
@@ -1827,6 +1896,8 @@ public final class FactoryControllerBlockEntity extends BlockEntity implements M
   @Override
   protected void saveAdditional(CompoundTag tag, HolderLookup.Provider registries) {
     super.saveAdditional(tag, registries);
+    ownership.save(tag);
+    tag.put(ControllerCommandState.NBT_KEY, commandState.save(false));
     tag.put("controller_blueprint", blueprintInventory.save(registries));
     tag.put(
         ControllerScriptState.NBT_KEY,
@@ -1864,12 +1935,16 @@ public final class FactoryControllerBlockEntity extends BlockEntity implements M
   protected void loadAdditional(CompoundTag tag, HolderLookup.Provider registries) {
     if (level instanceof ServerLevel server) {
       ServerThreadGuard.require(server, "Factory load");
-      if (UpgradeLifecyclePublisher.isDispatchingAny() || !startingThreads.isEmpty()) {
+      if (UpgradeLifecyclePublisher.isDispatchingAny()
+          || SmartInterfaceEventPublisher.isDispatching()
+          || !startingThreads.isEmpty()) {
         throw new IllegalStateException("Factory load during an active upgrade callback or startup");
       }
     }
     runtimeUpgrades.clear();
     super.loadAdditional(tag, registries);
+    ownership = ControllerOwnershipState.load(tag);
+    commandState = ControllerCommandState.load(tag.get(ControllerCommandState.NBT_KEY));
     controllerScriptState = ControllerScriptState.empty();
     unsupportedScriptData = null;
     try {
@@ -2004,5 +2079,15 @@ public final class FactoryControllerBlockEntity extends BlockEntity implements M
         opaqueFactoryState.put(key, tag.get(key).copy());
       }
     }
+  }
+
+  /**
+   * Carry paid state and command markers, never a deferred world command outbox.
+   */
+  public CompoundTag portableData(HolderLookup.Provider registries) {
+    var root = saveWithoutMetadata(registries);
+    root.put(ControllerCommandState.NBT_KEY, commandState.save(true));
+
+    return root;
   }
 }

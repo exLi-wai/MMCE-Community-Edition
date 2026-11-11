@@ -19,6 +19,7 @@ import com.lw.modularmachine.item.DedicatedControllerItem;
 import com.lw.modularmachine.item.MachineBlueprintItem;
 import com.lw.modularmachine.item.MachineConstructionTool;
 import com.lw.modularmachine.item.MachineControllerItem;
+import com.lw.modularmachine.item.ControllerBlockItem;
 import com.lw.modularmachine.item.MachineWrenchItem;
 import com.lw.modularmachine.item.ConfigurationCardItem;
 import com.lw.modularmachine.item.RangedConstructToolItem;
@@ -110,7 +111,8 @@ public final class MachineRegistries {
       }
     }
     ITEMS.register("machine_controller", () -> new MachineControllerItem(CONTROLLER.get(), new Item.Properties()));
-    ITEMS.registerSimpleBlockItem(FACTORY_CONTROLLER);
+    ITEMS
+        .register("factory_controller", () -> new ControllerBlockItem(FACTORY_CONTROLLER.get(), new Item.Properties()));
     ITEMS.registerSimpleBlockItem(SMART_INTERFACE);
     for (var tier : ParallelControllerTier.values()) {
       String id = "parallel_controller_" + tier.path();

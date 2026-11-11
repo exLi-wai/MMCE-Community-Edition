@@ -5,6 +5,9 @@ import com.lw.modularmachine.api.recipe.RecipeFailureAction;
 import com.lw.modularmachine.ModularMachine;
 import com.lw.modularmachine.blockentity.FactoryControllerBlockEntity;
 import com.lw.modularmachine.blockentity.MachineControllerBlockEntity;
+import com.lw.modularmachine.machine.controller.ControllerOwnershipService;
+import com.lw.modularmachine.machine.controller.ControllerOwnershipSubject;
+import com.lw.modularmachine.machine.recipe.command.RecipeCommandService;
 import com.lw.modularmachine.machine.structure.StructureService;
 import com.lw.modularmachine.machine.structure.VerificationFailure;
 import com.lw.modularmachine.machine.structure.VerificationState;
@@ -113,7 +116,10 @@ public final class RecipeLifecyclePublisher {
   }
 
   public static boolean hasListeners(Type type) {
-    return !DELIVERIES.getOrDefault(type, List.of()).isEmpty();
+    return !DELIVERIES.getOrDefault(type, List.of()).isEmpty()
+        || RecipeCommandService.hasActions(type)
+        || type == Type.FINISHED
+        || type == Type.DISCARDED;
   }
 
   public static boolean hasFailurePolicies() {
@@ -192,7 +198,8 @@ public final class RecipeLifecyclePublisher {
         threadId,
         level.getGameTime(),
         resource,
-        snapshot(run));
+        snapshot(run),
+        ControllerOwnershipService.snapshot(level, (ControllerOwnershipSubject) owner));
     var policySnapshot = FAILURE_POLICIES.snapshot();
     var deliveries = FAILURE_POLICIES.orderedSnapshot();
     activeOwner = owner;
@@ -255,7 +262,9 @@ public final class RecipeLifecyclePublisher {
 
   private static void dispatch(StructureService.StructureSubject owner, Optional<String> threadId, Type type, List<FrozenItemRun> before, List<FrozenItemRun> after, Optional<ResourceFailure> failure) {
     var deliveries = DELIVERIES.getOrDefault(type, List.of());
-    if (deliveries.isEmpty() || isDispatching() || !(owner.structureLevel() instanceof ServerLevel level)) {
+    if (deliveries.isEmpty() && !RecipeCommandService.wantsCapture(owner, type)
+        || isDispatching()
+        || !(owner.structureLevel() instanceof ServerLevel level)) {
       return;
     }
     ServerThreadGuard.require(level, "Recipe lifecycle event");
@@ -288,7 +297,9 @@ public final class RecipeLifecyclePublisher {
           structureFailure,
           before.stream().map(RecipeLifecyclePublisher::snapshot).toList(),
           after.stream().map(RecipeLifecyclePublisher::snapshot).toList(),
-          failure);
+          failure,
+          ControllerOwnershipService.snapshot(level, (ControllerOwnershipSubject) owner));
+      RecipeCommandService.capture(owner, context);
       activeOwner = owner;
       try {
         for (var delivery : deliveries) {

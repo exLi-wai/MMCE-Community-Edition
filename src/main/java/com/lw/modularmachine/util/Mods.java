@@ -4,7 +4,8 @@ import net.neoforged.fml.ModList;
 
 public enum Mods {
   AE2("ae2"),
-  GTM("gtceu");
+  GTM("gtceu"),
+  JEC("jecharacters");
 
   public final String modid;
 

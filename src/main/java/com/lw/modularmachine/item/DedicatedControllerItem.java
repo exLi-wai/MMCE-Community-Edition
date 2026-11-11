@@ -12,7 +12,6 @@ import net.minecraft.core.registries.BuiltInRegistries;
 import net.minecraft.nbt.Tag;
 import net.minecraft.network.chat.Component;
 import net.minecraft.resources.ResourceLocation;
-import net.minecraft.world.item.BlockItem;
 import net.minecraft.world.item.ItemStack;
 import net.minecraft.world.item.context.BlockPlaceContext;
 import net.minecraft.world.level.block.Block;
@@ -22,7 +21,7 @@ import net.minecraft.world.level.block.state.BlockState;
  * A real registered block item whose identity cannot be rebound through
  * portable NBT.
  */
-public final class DedicatedControllerItem extends BlockItem {
+public final class DedicatedControllerItem extends ControllerBlockItem {
   private final DedicatedControllerCatalog.Entry entry;
   public DedicatedControllerItem(Block block, Properties properties, DedicatedControllerCatalog.Entry entry) {
     super(block, properties);

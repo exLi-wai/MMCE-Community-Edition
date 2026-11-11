@@ -107,7 +107,7 @@ final class MachineItemRecipeJeiCategory implements IRecipeCategory<MachineRecip
   public void createRecipeExtras(IRecipeExtrasBuilder extras, MachineRecipeJeiPage page, IFocusGroup focuses) {
     var recipe = page.recipes().getFirst().value();
     extras.addTooltipArea(0, Math.max(0, layout.height - 9), layout.width, 9)
-        .setTooltip(MachineRecipeDisplay.details(page.recipes().getFirst().id(), recipe));
+        .setTooltip(MachineRecipeDisplay.details(recipe));
     extras.addTooltipArea(layout.arrowX, layout.arrowY, 22, 15)
         .setTooltip(List.of(MachineRecipeDisplay.duration(recipe)));
   }

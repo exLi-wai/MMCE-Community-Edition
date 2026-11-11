@@ -5,6 +5,7 @@ import com.lw.modularmachine.machine.appearance.ControllerAppearance;
 import com.lw.modularmachine.machine.appearance.ControllerAppearanceState;
 import com.lw.modularmachine.machine.controller.DedicatedControllerCatalog.Entry;
 import com.lw.modularmachine.machine.controller.DedicatedControllerCatalog;
+import com.lw.modularmachine.machine.controller.ControllerOwnershipService;
 import com.lw.modularmachine.machine.orientation.ControllerOrientationActions;
 import com.lw.modularmachine.api.orientation.MachineOrientation;
 import com.lw.modularmachine.machine.structure.StructureService;
@@ -15,13 +16,16 @@ import net.minecraft.core.BlockPos;
 import net.minecraft.core.Direction;
 import net.minecraft.network.chat.MutableComponent;
 import net.minecraft.server.level.ServerPlayer;
+import net.minecraft.server.level.ServerLevel;
 import net.minecraft.world.InteractionResult;
 import net.minecraft.world.entity.player.Player;
+import net.minecraft.world.entity.LivingEntity;
 import net.minecraft.world.item.BlockItem;
 import net.minecraft.world.item.ItemStack;
 import net.minecraft.world.item.context.BlockPlaceContext;
 import net.minecraft.world.level.BlockGetter;
 import net.minecraft.world.level.Level;
+import net.minecraft.world.level.LevelReader;
 import net.minecraft.world.level.block.BaseEntityBlock;
 import net.minecraft.world.level.block.Block;
 import net.minecraft.world.level.block.Mirror;
@@ -146,6 +150,19 @@ public final class FactoryControllerBlock extends BaseEntityBlock {
   }
 
   @Override
+  public void setPlacedBy(Level level, BlockPos pos, BlockState state, LivingEntity placer, ItemStack stack) {
+    super.setPlacedBy(level, pos, state, placer, stack);
+    if (level instanceof ServerLevel server) {
+      ControllerOwnershipService.placed(server, pos, placer);
+    }
+  }
+
+  @Override
+  public ItemStack getCloneItemStack(LevelReader level, BlockPos pos, BlockState state) {
+    return ControllerOwnershipService.pick(level, pos, state);
+  }
+
+  @Override
   public <T extends BlockEntity> BlockEntityTicker<T> getTicker(Level level, BlockState state, BlockEntityType<T> type) {
     return level.isClientSide ? null : createTickerHelper(
         type,
@@ -168,10 +185,8 @@ public final class FactoryControllerBlock extends BaseEntityBlock {
     if (params.getOptionalParameter(LootContextParams.BLOCK_ENTITY) instanceof FactoryControllerBlockEntity factory) {
       for (var stack : drops) {
         if (stack.is(asItem())) {
-          BlockItem.setBlockEntityData(
-              stack,
-              factory.getType(),
-              factory.saveWithoutMetadata(params.getLevel().registryAccess()));
+          BlockItem
+              .setBlockEntityData(stack, factory.getType(), factory.portableData(params.getLevel().registryAccess()));
         }
       }
     }

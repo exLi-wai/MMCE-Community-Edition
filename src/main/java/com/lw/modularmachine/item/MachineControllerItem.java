@@ -8,7 +8,6 @@ import net.minecraft.core.component.DataComponents;
 import net.minecraft.core.registries.BuiltInRegistries;
 import net.minecraft.nbt.Tag;
 import net.minecraft.network.chat.Component;
-import net.minecraft.world.item.BlockItem;
 import net.minecraft.world.item.context.BlockPlaceContext;
 import net.minecraft.world.level.block.Block;
 import net.minecraft.world.level.block.state.BlockState;
@@ -17,7 +16,7 @@ import net.minecraft.world.level.block.state.BlockState;
  * Validates the final item-carried state before vanilla writes it or consumes
  * the stack.
  */
-public final class MachineControllerItem extends BlockItem {
+public final class MachineControllerItem extends ControllerBlockItem {
   public MachineControllerItem(Block block, Properties properties) {
     super(block, properties);
   }
