@@ -1,0 +1,7 @@
+{
+  "parent": "mmcece:block/ported_shell",
+  "textures": {
+    "overlay": "mmcece:block/overlay/controllers/overlay_parallel_controller_ultimate_gradient_ring",
+    "casing": "mmcece:block/blockcasing_plain"
+  }
+}

@@ -36,8 +36,14 @@ public final class ParallelControllerBlock extends BaseEntityBlock {
 
   @Override
   public void appendHoverText(ItemStack stack, Item.TooltipContext context, List<Component> tooltip, TooltipFlag flag) {
-    tooltip.add(
-        Component.translatable("tooltip.mmcece.parallel_controller", tier.maximum()).withStyle(ChatFormatting.GRAY));
+    String key = "tooltip.mmcece.parallel_controller" + (tier.configurable() ? "" : ".fixed");
+    tooltip.add(Component.translatable(key, tier.maximum()).withStyle(ChatFormatting.GRAY));
+    if (tier == ParallelControllerTier.PIG) {
+      tooltip.add(
+          Component.translatable("tooltip.mmcece.parallel_controller.pig.description").withStyle(ChatFormatting.GRAY));
+      tooltip.add(
+          Component.translatable("tooltip.mmcece.parallel_controller.pig.technology").withStyle(ChatFormatting.BLACK));
+    }
   }
 
   @Override
@@ -57,7 +63,8 @@ public final class ParallelControllerBlock extends BaseEntityBlock {
 
   @Override
   protected InteractionResult useWithoutItem(BlockState state, Level level, BlockPos position, Player player, BlockHitResult hit) {
-    if (player instanceof ServerPlayer serverPlayer
+    if (tier.configurable()
+        && player instanceof ServerPlayer serverPlayer
         && level.getBlockEntity(position) instanceof ParallelControllerBlockEntity parallel
         && parallel.schemaSupported()) {
       serverPlayer.openMenu(parallel, position);

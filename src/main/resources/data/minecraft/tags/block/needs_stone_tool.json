@@ -54,11 +54,17 @@
     "mmcece:item_output_bus_reinforced",
     "mmcece:item_output_bus_small",
     "mmcece:item_output_bus_tiny",
+    "mmcece:parallel_controller_pig",
     "mmcece:parallel_controller_normal",
     "mmcece:parallel_controller_reinforced",
     "mmcece:parallel_controller_elite",
     "mmcece:parallel_controller_super",
     "mmcece:parallel_controller_ultimate",
+    "mmcece:parallel_controller_transcend",
+    "mmcece:parallel_controller_dark_extreme",
+    "mmcece:parallel_controller_photon",
+    "mmcece:parallel_controller_daydream",
+    "mmcece:parallel_controller_infinite",
     {
       "id": "mmcece:chemical_input_hatch_tiny",
       "required": false

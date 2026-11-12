@@ -114,6 +114,9 @@ public final class MachineConfig {
         .defineInRange("max-machine-parallelism", 2048, 1, Integer.MAX_VALUE);
     var maxima = new EnumMap<ParallelControllerTier, ModConfigSpec.IntValue>(ParallelControllerTier.class);
     for (var tier : ParallelControllerTier.values()) {
+      if (!tier.configurable()) {
+        continue;
+      }
       maxima.put(
           tier,
           builder.translation("mmcece.config.parallel_controller." + tier.path())

@@ -82,7 +82,8 @@ public final class ParallelControllerMenu extends AbstractContainerMenu {
 
   @Override
   public boolean stillValid(Player player) {
-    return !parallel.isRemoved()
+    return parallel.tier().configurable()
+        && !parallel.isRemoved()
         && parallel.schemaSupported()
         && parallel.getLevel() == player.level()
         && player.level().getBlockEntity(parallel.getBlockPos()) == parallel

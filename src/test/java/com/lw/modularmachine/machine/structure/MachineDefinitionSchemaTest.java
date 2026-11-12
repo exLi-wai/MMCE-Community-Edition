@@ -11,6 +11,8 @@ import com.lw.modularmachine.machine.orientation.PropertySpace;
 import com.lw.modularmachine.machine.orientation.StateOrientationAdapters;
 import java.io.ByteArrayInputStream;
 import java.nio.charset.StandardCharsets;
+import java.nio.file.Files;
+import java.nio.file.Path;
 import java.util.ArrayDeque;
 import java.util.List;
 import java.util.Map;
@@ -47,6 +49,27 @@ class MachineDefinitionSchemaTest {
         {"offset":[-1,0,0],"block":"energy_output"}
       ]}
       """;
+
+  @Test
+  void parallelColorFixturePassesReloadReferenceCollection() throws Exception {
+    var fixtureId = id("test_parallel_color");
+    JsonObject root;
+    try (var reader = Files.newBufferedReader(
+        Path.of("src/gameTest/resources/data/mmcece/mmcece/machines/test_parallel_color.json"),
+        StandardCharsets.UTF_8)) {
+      root = JsonParser.parseReader(reader).getAsJsonObject();
+    }
+    var references = MachineDefinition.blockReferences(Map.of(fixtureId, root));
+    assertEquals(
+        List.of(
+            id("parallel_controller_infinite"),
+            id("parallel_controller_transcend"),
+            id("parallel_controller_dark_extreme"),
+            id("parallel_controller_photon"),
+            id("parallel_controller_daydream"),
+            id("parallel_controller_pig")),
+        references.stream().map(reference -> reference.id()).toList());
+  }
 
   @Test
   void schemaTwoKeepsHorizontalDefaultsAndResourceContracts() {

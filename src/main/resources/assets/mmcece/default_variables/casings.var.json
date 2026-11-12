@@ -48,11 +48,16 @@
         "mmcece:energy_output_hatch_ultimate"
     ],
     "casings_parallel":[
+        "mmcece:parallel_controller_pig",
         "mmcece:parallel_controller_normal",
         "mmcece:parallel_controller_reinforced",
         "mmcece:parallel_controller_elite",
         "mmcece:parallel_controller_super",
-        "mmcece:parallel_controller_ultimate"
+        "mmcece:parallel_controller_ultimate",
+        "mmcece:parallel_controller_transcend",
+        "mmcece:parallel_controller_dark_extreme",
+        "mmcece:parallel_controller_photon",
+        "mmcece:parallel_controller_daydream"
     ],
     "casings_upgrade": [
         "mmcece:upgrade_bus_normal",

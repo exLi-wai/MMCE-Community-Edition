@@ -11,6 +11,7 @@ import com.lw.modularmachine.blockentity.SmartInterfaceBlockEntity;
 import com.lw.modularmachine.blockentity.UpgradeBusBlockEntity;
 import com.lw.modularmachine.api.orientation.MachineOrientation;
 import com.lw.modularmachine.machine.HatchTier;
+import com.lw.modularmachine.machine.ParallelControllerTier;
 import com.lw.modularmachine.machine.structure.StructureService;
 import com.lw.modularmachine.registry.MachineRegistries;
 import com.lw.modularmachine.util.Mods;
@@ -29,10 +30,6 @@ public final class MachineColorGameTests {
   public static void tinted_machine_components_persist_color_across_rebuild(GameTestHelper helper) {
     var level = helper.getLevel();
     var position = helper.absolutePos(new BlockPos(7, 5, 7));
-    var state = MachineRegistries.PARALLEL_CONTROLLERS.get("parallel_controller_normal").get().defaultBlockState();
-    level.setBlockAndUpdate(position, state);
-    var parallel = (ParallelControllerBlockEntity) level.getBlockEntity(position);
-    parallel.setMachineColor(0x38A6D2);
     var upgradePos = position.east();
     level.setBlockAndUpdate(
         upgradePos,
@@ -45,10 +42,96 @@ public final class MachineColorGameTests {
     smart.setMachineColor(0x38A6D2);
 
     helper.assertTrue(
-        restoredColor(parallel, position, state, level)
-            && restoredColor(upgrade, upgradePos, level.getBlockState(upgradePos), level)
+        restoredColor(upgrade, upgradePos, level.getBlockState(upgradePos), level)
             && restoredColor(smart, smartPos, level.getBlockState(smartPos), level),
         "A tinted machine component lost its color during save/load");
+    for (var tier : ParallelControllerTier.values()) {
+      var state = MachineRegistries.PARALLEL_CONTROLLERS.get("parallel_controller_" + tier.path()).get()
+          .defaultBlockState();
+      level.setBlockAndUpdate(position, state);
+      var parallel = (ParallelControllerBlockEntity) level.getBlockEntity(position);
+      parallel.setMachineColor(0x38A6D2);
+      helper.assertTrue(
+          restoredColor(parallel, position, state, level),
+          "Parallel controller lost saved/synced color: " + tier.path());
+    }
+    helper.succeed();
+  }
+
+  @GameTest(template = "empty16", batch = "machine_color", timeoutTicks = 120)
+  public static void infinite_parallel_controller_color_resumes_after_structure_work_budget(GameTestHelper helper) {
+    parallelControllerColorResumesAfterStructureWorkBudget(helper, ParallelControllerTier.INFINITE);
+  }
+
+  @GameTest(template = "empty16", batch = "machine_color", timeoutTicks = 120)
+  public static void transcend_parallel_controller_color_resumes_after_structure_work_budget(GameTestHelper helper) {
+    parallelControllerColorResumesAfterStructureWorkBudget(helper, ParallelControllerTier.TRANSCEND);
+  }
+
+  @GameTest(template = "empty16", batch = "machine_color", timeoutTicks = 120)
+  public static void dark_extreme_parallel_controller_color_resumes_after_structure_work_budget(GameTestHelper helper) {
+    parallelControllerColorResumesAfterStructureWorkBudget(helper, ParallelControllerTier.DARK_EXTREME);
+  }
+
+  @GameTest(template = "empty16", batch = "machine_color", timeoutTicks = 120)
+  public static void photon_parallel_controller_color_resumes_after_structure_work_budget(GameTestHelper helper) {
+    parallelControllerColorResumesAfterStructureWorkBudget(helper, ParallelControllerTier.PHOTON);
+  }
+
+  @GameTest(template = "empty16", batch = "machine_color", timeoutTicks = 120)
+  public static void daydream_parallel_controller_color_resumes_after_structure_work_budget(GameTestHelper helper) {
+    parallelControllerColorResumesAfterStructureWorkBudget(helper, ParallelControllerTier.DAYDREAM);
+  }
+
+  @GameTest(template = "empty16", batch = "machine_color", timeoutTicks = 120)
+  public static void pig_parallel_controller_color_resumes_after_structure_work_budget(GameTestHelper helper) {
+    parallelControllerColorResumesAfterStructureWorkBudget(helper, ParallelControllerTier.PIG);
+  }
+
+  private static void parallelControllerColorResumesAfterStructureWorkBudget(GameTestHelper helper, ParallelControllerTier tier) {
+    var level = helper.getLevel();
+    var origin = helper.absolutePos(new BlockPos(7, 5, 7));
+    level.setBlockAndUpdate(
+        origin,
+        MachineControllerBlock
+            .withOrientation(MachineRegistries.CONTROLLER.get().defaultBlockState(), MachineOrientation.IDENTITY));
+    var inputPos = origin.offset(-1, 0, 1);
+    var outputPos = origin.offset(1, 0, 1);
+    var parallelPos = origin.offset(0, 1, 1);
+    level.setBlockAndUpdate(inputPos, MachineRegistries.PORTS.get("item_input_bus_normal").get().defaultBlockState());
+    level.setBlockAndUpdate(outputPos, MachineRegistries.PORTS.get("item_output_bus_normal").get().defaultBlockState());
+    level.setBlockAndUpdate(
+        parallelPos,
+        MachineRegistries.PARALLEL_CONTROLLERS.get("parallel_controller_" + tier.path()).get().defaultBlockState());
+    var controller = (MachineControllerBlockEntity) level.getBlockEntity(origin);
+    controller.bindMachine(ResourceLocation.fromNamespaceAndPath("mmcece", "test_parallel_color"));
+    var input = (MachinePortBlockEntity) level.getBlockEntity(inputPos);
+    var output = (MachinePortBlockEntity) level.getBlockEntity(outputPos);
+    var parallel = (ParallelControllerBlockEntity) level.getBlockEntity(parallelPos);
+    for (int round = 0; round < 2; round++) {
+      input.setMachineColor(0xFFFFFF);
+      output.setMachineColor(0xFFFFFF);
+      parallel.setMachineColor(0xFFFFFF);
+      StructureService.requestAudit(controller);
+      boolean sawPartialDistribution = false;
+      for (int attempt = 0; attempt < 1000
+          && (!controller.canCommitProduction()
+              || input.machineColor() != 0x38A6D2
+              || output.machineColor() != 0x38A6D2
+              || parallel.machineColor() != 0x38A6D2); attempt++) {
+        StructureService.advance(level, 1, 1, 50_000_000L);
+        sawPartialDistribution |= input.machineColor() == 0x38A6D2
+            && output.machineColor() == 0x38A6D2
+            && parallel.machineColor() != 0x38A6D2;
+      }
+      helper.assertTrue(sawPartialDistribution, "The color budget did not yield before the last parallel component");
+      helper.assertTrue(
+          controller.canCommitProduction()
+              && input.machineColor() == 0x38A6D2
+              && output.machineColor() == 0x38A6D2
+              && parallel.machineColor() == 0x38A6D2,
+          "Parallel controller color distribution stopped at a work budget boundary: " + tier.path());
+    }
     helper.succeed();
   }
 
@@ -98,17 +181,14 @@ public final class MachineColorGameTests {
   private static boolean restoredColor(BlockEntity original, BlockPos position, BlockState state, ServerLevel level) {
     var saved = original.saveWithFullMetadata(level.registryAccess());
     var update = original.getUpdateTag(level.registryAccess());
-    if (!update.contains(MachineColorable.COLOR_TAG)) {
+    if (!update.contains(MachineColorable.COLOR_TAG) || update.getInt(MachineColorable.COLOR_TAG) != 0x38A6D2) {
       return false;
     }
     var restored = BlockEntity.loadStatic(position, state, saved, level.registryAccess());
-    if (!(restored instanceof MachineColorable colorable)) {
-      return false;
-    }
-    if (!colorable.machineColorAssigned()) {
-      colorable.setMachineColor(0xFFFFFF);
-    }
-    return colorable.machineColor() == 0x38A6D2;
+
+    return restored instanceof MachineColorable colorable
+        && colorable.machineColorAssigned()
+        && colorable.machineColor() == 0x38A6D2;
   }
 
   @GameTest(template = "empty16", batch = "machine_color", timeoutTicks = 80)

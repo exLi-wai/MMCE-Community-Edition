@@ -120,7 +120,7 @@ public final class RecipeExecutionTicket {
 
     return (int) Math.min(
         registration.pattern.definition.maxParallelism(),
-        Math.min(Integer.MAX_VALUE, hardware + ordinaryUpgrades.parallelLimit() - 1L));
+        Math.min(Integer.MAX_VALUE, (long) hardware + ordinaryUpgrades.parallelLimit() - 1L));
   }
 
   FactoryUpgradeSnapshot ordinaryUpgrades() {

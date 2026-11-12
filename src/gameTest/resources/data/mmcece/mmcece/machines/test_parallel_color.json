@@ -1,0 +1,16 @@
+{
+  "orientation": {"policy": "all_24"},
+  "color": "#38A6D2",
+  "parts": [
+    {"part_id": "input", "offset": [-1, 0, 1], "block": "item_input"},
+    {"part_id": "output", "offset": [1, 0, 1], "block": "item_output"},
+    {"part_id": "parallel", "offset": [0, 1, 1], "block": [
+      "mmcece:parallel_controller_infinite",
+      "mmcece:parallel_controller_transcend",
+      "mmcece:parallel_controller_dark_extreme",
+      "mmcece:parallel_controller_photon",
+      "mmcece:parallel_controller_daydream",
+      "mmcece:parallel_controller_pig"
+    ]}
+  ]
+}

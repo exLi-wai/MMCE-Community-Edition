@@ -26,8 +26,8 @@ import net.minecraft.world.level.block.entity.BlockEntity;
 import net.minecraft.world.level.block.state.BlockState;
 
 /**
- * Editable additive parallel contribution; tier capacity is always server
- * configuration.
+ * Parallel contribution; editable tiers use server configuration, fixed tiers
+ * retain their declared value.
  */
 public final class ParallelControllerBlockEntity extends BlockEntity implements MenuProvider, MachineColorable {
   private final ParallelControllerTier tier;
@@ -64,7 +64,7 @@ public final class ParallelControllerBlockEntity extends BlockEntity implements 
   }
 
   public int parallelism() {
-    return configured == null ? maximum() : Math.min(configured, maximum());
+    return !tier.configurable() || configured == null ? maximum() : Math.min(configured, maximum());
   }
 
   @Override
@@ -89,7 +89,7 @@ public final class ParallelControllerBlockEntity extends BlockEntity implements 
   }
 
   public boolean update(Player player, long expectedRevision, int value) {
-    if (!(level instanceof ServerLevel server)) {
+    if (!tier.configurable() || !(level instanceof ServerLevel server)) {
       return false;
     }
     ServerThreadGuard.require(server, "Parallel controller update");
@@ -194,7 +194,7 @@ public final class ParallelControllerBlockEntity extends BlockEntity implements 
     }
     instance = data.getUUID("instance");
     revision = data.getLong("revision");
-    configured = data.contains("value") ? data.getInt("value") : null;
+    configured = tier.configurable() && data.contains("value") ? data.getInt("value") : null;
     notifyStructure();
   }
 
@@ -210,6 +210,6 @@ public final class ParallelControllerBlockEntity extends BlockEntity implements 
 
   @Override
   public AbstractContainerMenu createMenu(int id, Inventory inventory, Player player) {
-    return schemaSupported() ? new ParallelControllerMenu(id, inventory, this) : null;
+    return tier.configurable() && schemaSupported() ? new ParallelControllerMenu(id, inventory, this) : null;
   }
 }
