@@ -6,7 +6,6 @@ import net.minecraft.core.BlockPos;
 import net.minecraft.nbt.CompoundTag;
 import net.minecraft.nbt.Tag;
 import net.minecraft.resources.ResourceLocation;
-
 import com.lw.modularmachine.api.upgrade.FactoryUpgradeBusData.Context;
 import com.lw.modularmachine.api.upgrade.FactoryUpgradeBusData.Preparer;
 import com.lw.modularmachine.api.upgrade.FactoryUpgradeBusData.Update;

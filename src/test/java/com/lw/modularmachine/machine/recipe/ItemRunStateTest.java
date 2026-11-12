@@ -4,7 +4,6 @@ import java.util.List;
 import java.util.Map;
 import net.minecraft.nbt.Tag;
 import org.junit.jupiter.api.Test;
-
 import static org.junit.jupiter.api.Assertions.*;
 
 class ItemRunStateTest {

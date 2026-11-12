@@ -3,8 +3,9 @@ package com.lw.modularmachine.machine.recipe;
 import com.lw.modularmachine.api.recipe.RecipeModifier;
 import com.lw.modularmachine.api.recipe.RecipeSelectors;
 import com.lw.modularmachine.api.recipe.RecipeFailureAction;
+import com.lw.modularmachine.api.recipe.ChemicalRecipeData;
+import com.mojang.serialization.JsonOps;
 import com.lw.modularmachine.config.MachineConfig;
-
 import com.google.gson.JsonElement;
 import com.google.gson.JsonObject;
 import com.google.gson.JsonParseException;
@@ -40,6 +41,7 @@ public final class MachineRecipeJson {
       "modifiers",
       "interface_inputs",
       "selectors",
+      "chemicals",
       "inputs",
       "outputs",
       "neoforge:conditions");
@@ -140,6 +142,18 @@ public final class MachineRecipeJson {
     }
     demands(object.get("inputs"), "$.inputs", true);
     demands(object.get("outputs"), "$.outputs", false);
+    var chemicals = validateChemicals(object);
+    if (object.getAsJsonArray("inputs").isEmpty()
+        && !object.has("fluid_inputs")
+        && !object.has("fluid_per_tick")
+        && energyPerTick == 0
+        && chemicals.inputs().isEmpty()
+        && chemicals.perTick().isEmpty()
+        || object.getAsJsonArray("outputs").isEmpty()
+            && !object.has("fluid_outputs")
+            && chemicals.outputs().isEmpty()) {
+      throw error("$", "A machine recipe requires resource input and output");
+    }
     if (object.has("interface_inputs")) {
       SmartNumberRequirement.parse(object.get("interface_inputs"), "$.interface_inputs");
     }
@@ -242,6 +256,12 @@ public final class MachineRecipeJson {
       modifyItems(result, "outputs", RecipeModifier.Io.OUTPUT, modifiers);
       modifyFluids(result, "fluid_inputs", RecipeModifier.Io.INPUT, modifiers);
       modifyFluids(result, "fluid_outputs", RecipeModifier.Io.OUTPUT, modifiers);
+      if (result.has("chemicals")) {
+        var chemicals = result.getAsJsonObject("chemicals");
+        modifyChemicals(chemicals, "inputs", RecipeModifier.Io.INPUT, modifiers);
+        modifyChemicals(chemicals, "outputs", RecipeModifier.Io.OUTPUT, modifiers);
+        modifyChemicals(chemicals, "per_tick", RecipeModifier.Io.INPUT, modifiers);
+      }
       if (result.has("fluid_per_tick")) {
         var fluid = result.getAsJsonObject("fluid_per_tick");
         long amount = modifiers.amount(
@@ -328,13 +348,66 @@ public final class MachineRecipeJson {
     }
   }
 
+  private static ChemicalRecipeData validateChemicals(JsonObject root) {
+    if (!root.has("chemicals")) {
+      return ChemicalRecipeData.NONE;
+    }
+    var chemicals = object(root.get("chemicals"), "$.chemicals");
+    fields(chemicals, Set.of("inputs", "outputs", "per_tick"), "$.chemicals");
+    for (String field : List.of("inputs", "outputs", "per_tick")) {
+      if (!chemicals.has(field)) {
+        continue;
+      }
+      String path = "$.chemicals." + field;
+      if (!chemicals.get(field).isJsonArray() || chemicals.getAsJsonArray(field).size() > MAX_DEMANDS) {
+        throw error(path, "Expected an array with at most " + MAX_DEMANDS + " requirements");
+      }
+      var values = chemicals.getAsJsonArray(field);
+      for (int index = 0; index < values.size(); index++) {
+        String at = path + "[" + index + "]";
+        var value = object(values.get(index), at);
+        fields(value, Set.of("chemical", "amount", "selector"), at);
+        identifier(value.get("chemical"), at + ".chemical");
+        if (integer(value.get("amount"), at + ".amount") <= 0) {
+          throw error(at + ".amount", "Expected a positive long chemical amount");
+        }
+        if (value.has("selector")) {
+          ResourceSelector.require(string(value.get("selector"), at + ".selector"));
+        }
+      }
+    }
+    try {
+      return ChemicalRecipeData.CODEC.parse(JsonOps.INSTANCE, chemicals).getOrThrow();
+    } catch (RuntimeException invalid) {
+      throw new JsonParseException("$.chemicals: " + invalid.getMessage(), invalid);
+    }
+  }
+
+  private static void modifyChemicals(JsonObject root, String field, RecipeModifier.Io io, RecipeModifiers modifiers) {
+    if (!root.has(field)) {
+      return;
+    }
+    var entries = root.getAsJsonArray(field);
+    for (int index = 0; index < entries.size(); index++) {
+      var entry = entries.get(index).getAsJsonObject();
+      entry.addProperty(
+          "amount",
+          modifiers.amount(
+              RecipeModifier.Target.CHEMICAL,
+              io,
+              integer(entry.get("amount"), "$.chemicals." + field + "[" + index + "].amount"),
+              1,
+              Long.MAX_VALUE));
+    }
+  }
+
   private static void demands(JsonElement element, String path, boolean input) {
     if (element == null || !element.isJsonArray()) {
       throw error(path, "Expected array");
     }
     var array = element.getAsJsonArray();
-    if (array.isEmpty() || array.size() > MAX_DEMANDS) {
-      throw error(path, "Expected 1.." + MAX_DEMANDS + " requirements");
+    if (array.size() > MAX_DEMANDS) {
+      throw error(path, "Expected at most " + MAX_DEMANDS + " requirements");
     }
     for (int i = 0; i < array.size(); i++) {
       String at = path + "[" + i + "]";

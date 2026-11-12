@@ -1,10 +1,8 @@
 package com.lw.modularmachine.machine.orientation;
 
 import com.lw.modularmachine.api.orientation.MachineOrientation;
-
 import net.minecraft.core.Direction;
 import org.junit.jupiter.api.Test;
-
 import static org.junit.jupiter.api.Assertions.*;
 
 class ControllerInteractionPolicyTest {

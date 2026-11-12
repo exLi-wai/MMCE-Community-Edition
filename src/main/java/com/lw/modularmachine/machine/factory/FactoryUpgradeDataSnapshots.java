@@ -1,7 +1,6 @@
 package com.lw.modularmachine.machine.factory;
 
 import com.lw.modularmachine.api.upgrade.FactoryUpgradeItemData;
-
 import java.io.DataOutputStream;
 import java.io.IOException;
 import java.io.OutputStream;

@@ -126,6 +126,7 @@ public final class MachineResourceMenu extends AbstractContainerMenu {
         && before.amount() == after.amount()
         && before.capacity() == after.capacity()
         && before.transferLimit() == after.transferLimit()
-        && before.fluid().equals(after.fluid());
+        && before.fluid().equals(after.fluid())
+        && before.chemical().equals(after.chemical());
   }
 }

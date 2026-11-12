@@ -43,11 +43,22 @@ public record HatchTier(String name, long capacity, long transferLimit) {
       new HatchTier("ludicrous", 524_288, 131_072),
       new HatchTier("ultimate", 2_097_152, 131_072));
 
+  public static final List<HatchTier> CHEMICALS = List.of(
+      new HatchTier("tiny", 100, 0),
+      new HatchTier("small", 400, 0),
+      new HatchTier("normal", 1_000, 0),
+      new HatchTier("reinforced", 2_000, 0),
+      new HatchTier("big", 4_500, 0),
+      new HatchTier("huge", 8_000, 0),
+      new HatchTier("ludicrous", 16_000, 0),
+      new HatchTier("vacuum", 32_000, 0));
+
   public static List<HatchTier> forResource(PortKind.Resource resource) {
     return switch (resource) {
       case ITEM -> ITEMS;
       case FLUID -> FLUIDS;
       case ENERGY -> ENERGY;
+      case CHEMICAL -> CHEMICALS;
     };
   }
 }

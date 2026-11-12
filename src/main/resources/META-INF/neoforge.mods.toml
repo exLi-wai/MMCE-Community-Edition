@@ -59,6 +59,13 @@ Retain Its Original Flavor MMCE
 
 # Optional integrations remain available through compileOnly + localRuntime in Gradle.
 [[dependencies.${mod_id}]]
+    modId="mekanism"
+    type="optional"
+    versionRange="[10.7.19,11)"
+    ordering="AFTER"
+    side="BOTH"
+
+[[dependencies.${mod_id}]]
     modId="botania"
     type="optional"
     versionRange="[454-SNAPSHOT,)"

@@ -1,5 +1,6 @@
 package com.lw.modularmachine.machine.recipe.command;
 
+import java.util.Objects;
 import com.lw.modularmachine.ModularMachine;
 import com.lw.modularmachine.api.recipe.RecipeCommandActions;
 import com.lw.modularmachine.api.recipe.RecipeCommandActions.Action;
@@ -67,7 +68,7 @@ public final class RecipeCommandService {
 
   public static void register(Action action) {
     ServerCallbackRegistry.requireServer();
-    java.util.Objects.requireNonNull(action, "action");
+    Objects.requireNonNull(action, "action");
     if (kubejsActions.containsKey(action.id())
         || JAVA_ACTIONS.find(action.id()) == null
             && JAVA_ACTIONS.snapshot().size() + kubejsActions.size() >= MAX_ACTIONS) {

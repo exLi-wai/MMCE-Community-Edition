@@ -2,7 +2,9 @@ package com.lw.modularmachine.machine.recipe;
 
 import com.lw.modularmachine.api.recipe.RecipeSelectors;
 import com.lw.modularmachine.api.recipe.RecipeFailureAction;
-
+import com.lw.modularmachine.api.recipe.ChemicalRecipeData;
+import com.lw.modularmachine.api.recipe.ChemicalRequirement;
+import com.google.gson.JsonObject;
 import com.lw.modularmachine.machine.PortKind;
 import com.lw.modularmachine.api.upgrade.FactoryUpgradeSnapshot;
 import com.lw.modularmachine.machine.structure.MachineDefinition;
@@ -69,6 +71,7 @@ public final class FrozenItemRun {
   private final Map<String, PortKind> logicalPorts;
   private final Map<String, String> logicalSelectors;
   private final RecipeSelectors selectors;
+  private final ChemicalRecipeData chemicals;
   private final int inputGroup;
   private final Map<String, Integer> logicalInputGroups;
   private final int parallelInstances;
@@ -168,13 +171,13 @@ public final class FrozenItemRun {
       mappedSelectors.put(id, ResourceSelector.require(port.getString("selector")));
       int group = InputGroup.require(port.contains("input_group") ? port.getInt("input_group") : InputGroup.SHARED);
       var kind = mapped.get(id);
-      if (group != InputGroup.SHARED && kind != PortKind.ITEM_INPUT && kind != PortKind.FLUID_INPUT) {
+      if (group != InputGroup.SHARED
+          && kind != PortKind.ITEM_INPUT
+          && kind != PortKind.FLUID_INPUT
+          && kind != PortKind.CHEMICAL_INPUT) {
         throw new IllegalArgumentException("Non-groupable frozen port");
       }
       mappedGroups.put(id, group);
-    }
-    if (!mapped.containsValue(PortKind.ITEM_INPUT) || !mapped.containsValue(PortKind.ITEM_OUTPUT)) {
-      throw new IllegalArgumentException("Item run lacks logical item ports");
     }
     logicalPorts = Map.copyOf(mapped);
     logicalSelectors = Map.copyOf(mappedSelectors);
@@ -196,6 +199,9 @@ public final class FrozenItemRun {
     declaration.addProperty("parallelized", definition.getBoolean("parallelized"));
     var header = MachineRecipeJson.validate(declaration);
     selectors = header.selectors();
+    chemicals = declaration.has("chemicals") ? ChemicalRecipeData.CODEC
+        .parse(JsonOps.INSTANCE, declaration.get("chemicals")).getOrThrow() : ChemicalRecipeData.NONE;
+    validateResourceBindings(declaration);
     if (!definition.getString("type").equals(MachineRecipeJson.TYPE)
         || !header.machine().equals(machineId.toString())
         || header.duration() != duration) {
@@ -245,6 +251,7 @@ public final class FrozenItemRun {
     logicalPorts = before.logicalPorts;
     logicalSelectors = before.logicalSelectors;
     selectors = before.selectors;
+    chemicals = before.chemicals;
     inputGroup = before.inputGroup;
     logicalInputGroups = before.logicalInputGroups;
     parallelInstances = before.parallelInstances;
@@ -380,6 +387,40 @@ public final class FrozenItemRun {
     return fluidPerTick == null ? decodeFluidPerTick(fluidPerTickData, registries) : fluidPerTick.copy();
   }
 
+  public List<ChemicalRequirement> chemicalPerTick() {
+    return chemicals.perTick();
+  }
+
+  public List<ChemicalRequirement> chemicalOutputs() {
+    if (!pendingOutput()) {
+      throw new IllegalStateException("Outputs have not been generated");
+    }
+
+    return chemicals.outputs();
+  }
+
+  private void validateResourceBindings(JsonObject declaration) {
+    if (!declaration.getAsJsonArray("inputs").isEmpty() && !logicalPorts.containsValue(PortKind.ITEM_INPUT)
+        || !declaration.getAsJsonArray("outputs").isEmpty() && !logicalPorts.containsValue(PortKind.ITEM_OUTPUT)) {
+      throw new IllegalArgumentException("Item requirements lack logical item ports");
+    }
+    chemicals.inputs().forEach(value -> requirePort(PortKind.CHEMICAL_INPUT, value.selector()));
+    chemicals.perTick().forEach(value -> requirePort(PortKind.CHEMICAL_INPUT, value.selector()));
+    chemicals.outputs().forEach(value -> requirePort(PortKind.CHEMICAL_OUTPUT, value.selector()));
+  }
+
+  private void requirePort(PortKind kind, String selector) {
+    boolean found = logicalPorts.entrySet().stream().anyMatch(
+        entry -> entry.getValue() == kind
+            && selector.equals(logicalSelectors.get(entry.getKey()))
+            && (!kind.isInput()
+                || logicalInputGroups.get(entry.getKey()) == InputGroup.SHARED
+                || logicalInputGroups.get(entry.getKey()) == inputGroup));
+    if (!found) {
+      throw new IllegalArgumentException("Frozen recipe lacks a matching " + kind.path() + " port");
+    }
+  }
+
   private static FluidStack decodeFluidPerTick(CompoundTag data, HolderLookup.Provider registries) {
     return FluidStack.CODEC.parse(registries.createSerializationContext(NbtOps.INSTANCE), data).getOrThrow();
   }
@@ -429,6 +470,12 @@ public final class FrozenItemRun {
     scaleRows(definition, "inputs", instances);
     scaleRows(definition, "fluid_inputs", instances);
     scaleRows(definition, "fluid_outputs", instances);
+    if (definition.contains("chemicals", Tag.TAG_COMPOUND)) {
+      var chemical = definition.getCompound("chemicals");
+      scaleRows(chemical, "inputs", instances);
+      scaleRows(chemical, "outputs", instances);
+      scaleRows(chemical, "per_tick", instances);
+    }
     if (definition.contains("fluid_per_tick", Tag.TAG_COMPOUND)) {
       var fee = definition.getCompound("fluid_per_tick");
       fee.putInt("amount", Math.toIntExact(Math.multiplyExact(fee.getInt("amount"), instances)));

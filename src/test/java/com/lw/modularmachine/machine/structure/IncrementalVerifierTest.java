@@ -3,7 +3,6 @@ package com.lw.modularmachine.machine.structure;
 import java.util.Random;
 import java.util.concurrent.atomic.AtomicBoolean;
 import org.junit.jupiter.api.Test;
-
 import static org.junit.jupiter.api.Assertions.*;
 
 class IncrementalVerifierTest {

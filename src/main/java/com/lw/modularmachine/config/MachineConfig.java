@@ -35,6 +35,7 @@ public final class MachineConfig {
   public static final ModConfigSpec.IntValue ASSEMBLY_SLICE_WORK;
   public static final Map<ParallelControllerTier, ModConfigSpec.IntValue> PARALLEL_CONTROLLER_MAXIMA;
   public static final Map<String, ModConfigSpec.IntValue> FLUID_HATCH_CAPACITY;
+  public static final Map<String, ModConfigSpec.LongValue> CHEMICAL_HATCH_CAPACITY;
   public static final Map<String, ModConfigSpec.LongValue> ENERGY_HATCH_CAPACITY;
   public static final Map<String, ModConfigSpec.LongValue> ENERGY_HATCH_TRANSFER;
   public static final Map<String, ModConfigSpec.IntValue> UPGRADE_BUS_SLOTS;
@@ -144,6 +145,7 @@ public final class MachineConfig {
     builder.pop();
 
     FLUID_HATCH_CAPACITY = hatchValues(builder, "fluid_hatch", HatchTier.FLUIDS, false, Integer.MAX_VALUE);
+    CHEMICAL_HATCH_CAPACITY = chemicalValues(builder);
     ENERGY_HATCH_CAPACITY = energyValues(builder, "energy_hatch", false, Long.MAX_VALUE);
     ENERGY_HATCH_TRANSFER = energyValues(builder, "energy_hatch_transfer", true, Long.MAX_VALUE - 1);
     builder.translation("mmcece.config.upgrade_bus").push("upgrade_bus");
@@ -219,6 +221,12 @@ public final class MachineConfig {
     return hatchValue(FLUID_HATCH_CAPACITY, tier.name(), tier.capacity());
   }
 
+  public static long chemicalHatchCapacity(HatchTier tier) {
+    var value = CHEMICAL_HATCH_CAPACITY.get(tier.name());
+
+    return value == null || !SPEC.isLoaded() ? tier.capacity() : value.get();
+  }
+
   public static long energyHatchCapacity(HatchTier tier) {
     return energyValue(ENERGY_HATCH_CAPACITY, tier, tier.capacity());
   }
@@ -264,6 +272,21 @@ public final class MachineConfig {
     var value = values.get(tier.name());
 
     return value == null || !SPEC.isLoaded() ? fallback : value.get();
+  }
+
+  private static Map<String, ModConfigSpec.LongValue> chemicalValues(ModConfigSpec.Builder builder) {
+    builder.translation("mmcece.config.chemical_hatch").push("chemical_hatch");
+    var values = new LinkedHashMap<String, ModConfigSpec.LongValue>();
+    for (var tier : HatchTier.CHEMICALS) {
+      values.put(
+          tier.name(),
+          builder.translation("mmcece.config.chemical_hatch." + tier.name()).comment(
+              "Chemical tank capacity in mB, independent of fluid hatch settings. Re-enter the world after changing.")
+              .worldRestart().defineInRange(tier.name(), tier.capacity(), 1L, Long.MAX_VALUE));
+    }
+    builder.pop();
+
+    return Map.copyOf(values);
   }
 
   private static Map<String, ModConfigSpec.LongValue> energyValues(ModConfigSpec.Builder builder, String section, boolean transfer, long maximum) {

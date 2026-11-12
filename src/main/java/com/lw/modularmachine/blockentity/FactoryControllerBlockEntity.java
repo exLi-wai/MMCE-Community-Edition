@@ -1,5 +1,6 @@
 package com.lw.modularmachine.blockentity;
 
+import java.util.stream.Collectors;
 import com.lw.modularmachine.machine.factory.UpgradeRecipeChecks;
 import com.lw.modularmachine.machine.factory.UpgradeLifecyclePublisher;
 import com.lw.modularmachine.block.FactoryControllerBlock;
@@ -667,8 +668,7 @@ public final class FactoryControllerBlockEntity extends BlockEntity implements M
 
   private void installConfiguration(FactoryScheduler replacement) {
     if (replacement.channels().size() > maximumBusinessThreads()) {
-      var existing = scheduler.channels().stream().map(FactoryThreadState::threadId)
-          .collect(java.util.stream.Collectors.toSet());
+      var existing = scheduler.channels().stream().map(FactoryThreadState::threadId).collect(Collectors.toSet());
       if (replacement.channels().size() >= scheduler.channels().size()
           || replacement.channels().stream().anyMatch(thread -> !existing.contains(thread.threadId()))) {
         throw new IllegalArgumentException("Factory configuration exceeds its machine business thread limit");
@@ -1407,13 +1407,21 @@ public final class FactoryControllerBlockEntity extends BlockEntity implements M
         continue;
       }
       if (entry.getValue().runs().size() > 1
-          && entry.getValue().runs().stream()
-              .anyMatch(run -> run.energyPerTick() > 0 || !run.fluidPerTick(server.registryAccess()).isEmpty())
+          && entry.getValue().runs().stream().anyMatch(
+              run -> run.energyPerTick() > 0
+                  || !run.fluidPerTick(server.registryAccess()).isEmpty()
+                  || !run.chemicalPerTick().isEmpty())
           || FactoryUpgradeService.snapshot().hasTickWork()) {
         var result = FactoryParallelResourceCommitter.tick(this, threadId, entry.getValue());
         switch (result) {
           case WAITING_ENERGY ->
             updateThreadState(thread, FactoryThreadState.State.WAITING, FactoryThreadState.Reason.WAITING_ENERGY);
+          case WAITING_CHEMICAL ->
+            updateThreadState(thread, FactoryThreadState.State.WAITING, FactoryThreadState.Reason.WAITING_CHEMICAL);
+          case MISSING_CHEMICAL_INPUT -> updateThreadState(
+              thread,
+              FactoryThreadState.State.WAITING,
+              FactoryThreadState.Reason.MISSING_CHEMICAL_INPUT);
           case WAITING_FLUID ->
             updateThreadState(thread, FactoryThreadState.State.WAITING, FactoryThreadState.Reason.WAITING_FLUID);
           case MISSING_ENERGY_INPUT ->
@@ -1442,7 +1450,9 @@ public final class FactoryControllerBlockEntity extends BlockEntity implements M
         if (run.pendingOutput()) {
           continue;
         }
-        if (run.energyPerTick() > 0 || !run.fluidPerTick(server.registryAccess()).isEmpty()) {
+        if (run.energyPerTick() > 0
+            || !run.fluidPerTick(server.registryAccess()).isEmpty()
+            || !run.chemicalPerTick().isEmpty()) {
           var result = FactoryRunResourceCommitter.tick(this, threadId, run);
           if (result == FactoryRunResourceCommitter.Result.WAITING_ENERGY) {
             threadState = FactoryThreadState.State.WAITING;
@@ -1453,6 +1463,12 @@ public final class FactoryControllerBlockEntity extends BlockEntity implements M
           } else if (result == FactoryRunResourceCommitter.Result.MISSING_FLUID_INPUT) {
             threadState = FactoryThreadState.State.WAITING;
             threadReason = FactoryThreadState.Reason.MISSING_FLUID_INPUT;
+          } else if (result == FactoryRunResourceCommitter.Result.WAITING_CHEMICAL) {
+            threadState = FactoryThreadState.State.WAITING;
+            threadReason = FactoryThreadState.Reason.WAITING_CHEMICAL;
+          } else if (result == FactoryRunResourceCommitter.Result.MISSING_CHEMICAL_INPUT) {
+            threadState = FactoryThreadState.State.WAITING;
+            threadReason = FactoryThreadState.Reason.MISSING_CHEMICAL_INPUT;
           } else if (result == FactoryRunResourceCommitter.Result.WAITING_FLUID) {
             threadState = FactoryThreadState.State.WAITING;
             threadReason = FactoryThreadState.Reason.WAITING_FLUID;
@@ -1552,6 +1568,10 @@ public final class FactoryControllerBlockEntity extends BlockEntity implements M
       case ADVANCED -> updateThreadState(thread, FactoryThreadState.State.RUNNING, FactoryThreadState.Reason.NONE);
       case WAITING_ENERGY ->
         updateThreadState(thread, FactoryThreadState.State.WAITING, FactoryThreadState.Reason.WAITING_ENERGY);
+      case WAITING_CHEMICAL ->
+        updateThreadState(thread, FactoryThreadState.State.WAITING, FactoryThreadState.Reason.WAITING_CHEMICAL);
+      case MISSING_CHEMICAL_INPUT ->
+        updateThreadState(thread, FactoryThreadState.State.WAITING, FactoryThreadState.Reason.MISSING_CHEMICAL_INPUT);
       case WAITING_FLUID ->
         updateThreadState(thread, FactoryThreadState.State.WAITING, FactoryThreadState.Reason.WAITING_FLUID);
       case WAITING_UPGRADE ->

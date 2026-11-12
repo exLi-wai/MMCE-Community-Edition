@@ -1,9 +1,7 @@
 package com.lw.modularmachine.machine.recipe;
 
 import com.lw.modularmachine.machine.factory.UpgradeLifecyclePublisher;
-
 import com.lw.modularmachine.api.recipe.RecipeLifecycleEvents;
-
 import com.lw.modularmachine.ModularMachine;
 import com.lw.modularmachine.blockentity.FactoryControllerBlockEntity;
 import com.lw.modularmachine.blockentity.MachinePortBlockEntity;
@@ -24,12 +22,14 @@ public final class FactoryRunResourceCommitter {
     ADVANCED,
     WAITING_ENERGY,
     WAITING_FLUID,
+    WAITING_CHEMICAL,
     WAITING_UPGRADE,
     UPGRADE_ERROR,
     STALE,
     UPGRADE_PENDING,
     MISSING_ENERGY_INPUT,
-    MISSING_FLUID_INPUT
+    MISSING_FLUID_INPUT,
+    MISSING_CHEMICAL_INPUT
   }
 
   private FactoryRunResourceCommitter() {
@@ -93,7 +93,23 @@ public final class FactoryRunResourceCommitter {
         return applyResourceFailure(factory, threadId, run, level.getGameTime(), Result.WAITING_FLUID);
       }
     }
-    if (energyTicket == null && fluidTicket == null && !tickCosts.hasRuntimeWork()) {
+    RecipeExecutionTicket chemicalTicket = null;
+    ChemicalTransactions.Batch chemicals = null;
+    if (!run.chemicalPerTick().isEmpty()) {
+      var captured = RecipeExecutionTicket.captureChemicalInputs(factory).orElse(null);
+      if (captured == null || !run.matchesInputGroups(captured)) {
+        return Result.STALE;
+      }
+      chemicalTicket = captured.withInputGroup(run.inputGroup());
+      if (ChemicalTransactions.missingInputs(chemicalTicket, run.chemicalPerTick())) {
+        return Result.MISSING_CHEMICAL_INPUT;
+      }
+      chemicals = ChemicalTransactions.inputs(chemicalTicket, run.chemicalPerTick());
+      if (chemicals == null) {
+        return applyResourceFailure(factory, threadId, run, level.getGameTime(), Result.WAITING_CHEMICAL);
+      }
+    }
+    if (energyTicket == null && fluidTicket == null && chemicalTicket == null && !tickCosts.hasRuntimeWork()) {
       return Result.STALE;
     }
     var energyLeases = new ArrayList<MachinePortBlockEntity.EnergyStartLease>();
@@ -105,10 +121,14 @@ public final class FactoryRunResourceCommitter {
           || energyTicket == null && fluidTicket == null && !factory.revalidateStructure(factory.registration())
           || energyTicket != null && !RecipeCommitGuard.validate(energyTicket)
           || fluidTicket != null && !RecipeCommitGuard.validate(fluidTicket)
+          || chemicalTicket != null && !RecipeCommitGuard.validate(chemicalTicket)
           || !tickCosts.versionsCurrent()) {
         return Result.STALE;
       }
       tickCosts.acquireInto(tickCostLeases);
+      if (chemicals != null) {
+        chemicals.acquire();
+      }
       for (var debit : energyDebits) {
         energyLeases.add(debit.port().identity().acquireEnergyStart(debit.port().revision()));
       }
@@ -151,7 +171,13 @@ public final class FactoryRunResourceCommitter {
       for (var lease : tickCostLeases) {
         lease.resolve(committed);
       }
+      if (chemicals != null) {
+        chemicals.resolve(committed);
+      }
       if (committed) {
+        if (chemicals != null) {
+          chemicals.publish();
+        }
         factory.upgradeRuntimeWork().clear(Phase.TICK, threadId);
         FactoryUpgradeStartCosts.publish(factory, tickCostLeases);
         if (RecipeLifecyclePublisher.hasListeners(RecipeLifecycleEvents.Type.TICK)) {
@@ -177,7 +203,11 @@ public final class FactoryRunResourceCommitter {
   }
 
   private static Result applyResourceFailure(FactoryControllerBlockEntity factory, String threadId, FrozenItemRun run, long tick, Result waiting) {
-    var resource = waiting == Result.WAITING_ENERGY ? RecipeLifecycleEvents.ResourceFailure.ENERGY : RecipeLifecycleEvents.ResourceFailure.FLUID;
+    var resource = switch (waiting) {
+      case WAITING_ENERGY -> RecipeLifecycleEvents.ResourceFailure.ENERGY;
+      case WAITING_CHEMICAL -> RecipeLifecycleEvents.ResourceFailure.CHEMICAL;
+      default -> RecipeLifecycleEvents.ResourceFailure.FLUID;
+    };
     var decision = RecipeLifecyclePublisher.decideResourceFailure(factory, Optional.of(threadId), run, resource);
     if (!factory.canCommitStructure()
         || factory.runSet(threadId).find(run.runId()).orElse(null) != run
@@ -200,6 +230,9 @@ public final class FactoryRunResourceCommitter {
   }
 
   private static boolean stillUnavailable(FactoryControllerBlockEntity factory, FrozenItemRun run, RecipeLifecycleEvents.ResourceFailure resource) {
+    if (resource == RecipeLifecycleEvents.ResourceFailure.CHEMICAL) {
+      return ChemicalTransactions.stillUnavailable(factory, List.of(run));
+    }
     if (resource == RecipeLifecycleEvents.ResourceFailure.ENERGY) {
       var ticket = RecipeExecutionTicket.captureEnergyInputs(factory).orElse(null);
       return ticket != null && planEnergyDebits(ticket, run.energyPerTick(), run.selectors().energyInput()) == null;

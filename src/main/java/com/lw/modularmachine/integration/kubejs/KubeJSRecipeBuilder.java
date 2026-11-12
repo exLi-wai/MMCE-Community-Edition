@@ -5,6 +5,8 @@ import com.google.gson.JsonElement;
 import com.google.gson.JsonObject;
 import com.lw.modularmachine.ModularMachine;
 import com.lw.modularmachine.api.recipe.RecipeFailureAction;
+import com.lw.modularmachine.api.recipe.ChemicalRecipeData;
+import com.lw.modularmachine.api.recipe.ChemicalRequirement;
 import com.lw.modularmachine.machine.recipe.ItemStackSnapshots;
 import com.lw.modularmachine.machine.recipe.MachineRecipe;
 import com.lw.modularmachine.machine.recipe.MachineRecipeJson;
@@ -83,7 +85,8 @@ public final class KubeJSRecipeBuilder {
       NONE,
       ITEM,
       ENERGY,
-      FLUID
+      FLUID,
+      CHEMICAL
     }
 
     private static final class ItemRow {
@@ -98,12 +101,29 @@ public final class KubeJSRecipeBuilder {
       }
     }
 
+    private static final class ChemicalRow {
+      final ResourceLocation chemical;
+      final long amount;
+      String selector = "";
+
+      ChemicalRow(ResourceLocation chemical, long amount) {
+        this.chemical = chemical;
+        this.amount = amount;
+      }
+
+      ChemicalRequirement requirement() {
+        return new ChemicalRequirement(chemical, amount, selector);
+      }
+    }
+
     private final RecipesKubeEvent event;
     private final ResourceLocation id, machine;
     private final int duration, priority;
     private final Thread owner = Thread.currentThread();
     private final List<ItemRow> inputs = new ArrayList<>(), outputs = new ArrayList<>();
     private final List<FluidStack> fluidInputs = new ArrayList<>(), fluidOutputs = new ArrayList<>();
+    private final List<ChemicalRow> chemicalInputs = new ArrayList<>(), chemicalOutputs = new ArrayList<>(),
+        chemicalPerTick = new ArrayList<>();
     private FluidStack fluidPerTick = FluidStack.EMPTY;
     private long energyPerTick;
     private int energyRequirements;
@@ -112,6 +132,7 @@ public final class KubeJSRecipeBuilder {
     private RecipeFailureAction failureAction;
     private LastRequirement last = LastRequirement.NONE;
     private ItemRow lastItem;
+    private ChemicalRow lastChemical;
     private boolean built;
 
     private RecipeBuilder(RecipesKubeEvent event, ResourceLocation id, ResourceLocation machine, int duration, int priority) {
@@ -206,6 +227,60 @@ public final class KubeJSRecipeBuilder {
       return this;
     }
 
+    public RecipeBuilder addChemicalInput(String chemical, Number amount) {
+      return addChemical(chemicalInputs, chemical, chemicalAmount(amount));
+    }
+
+    public RecipeBuilder addChemicalInput(String chemical, String amount) {
+      return addChemical(chemicalInputs, chemical, chemicalAmount(amount));
+    }
+
+    public RecipeBuilder addChemicalOutput(String chemical, Number amount) {
+      return addChemical(chemicalOutputs, chemical, chemicalAmount(amount));
+    }
+
+    public RecipeBuilder addChemicalOutput(String chemical, String amount) {
+      return addChemical(chemicalOutputs, chemical, chemicalAmount(amount));
+    }
+
+    public RecipeBuilder addChemicalPerTickInput(String chemical, Number amount) {
+      return addChemical(chemicalPerTick, chemical, chemicalAmount(amount));
+    }
+
+    public RecipeBuilder addChemicalPerTickInput(String chemical, String amount) {
+      return addChemical(chemicalPerTick, chemical, chemicalAmount(amount));
+    }
+
+    private RecipeBuilder addChemical(List<ChemicalRow> rows, String chemical, long amount) {
+      requireMutable();
+      if (rows.size() >= ChemicalRecipeData.MAX_REQUIREMENTS) {
+        throw new IllegalArgumentException("Too many machine recipe chemical requirements");
+      }
+      var row = new ChemicalRow(identifier(chemical, "chemical"), amount);
+      rows.add(row);
+      last = LastRequirement.CHEMICAL;
+      lastChemical = row;
+      lastItem = null;
+      return this;
+    }
+
+    private static long chemicalAmount(Number value) {
+      if ((value instanceof Double || value instanceof Float) && Math.abs(value.doubleValue()) > 9007199254740991D) {
+        throw new IllegalArgumentException("Large chemical amounts require an exact decimal string");
+      }
+
+      return integer(value, "chemical amount", 1, Long.MAX_VALUE);
+    }
+
+    private static long chemicalAmount(String value) {
+      Objects.requireNonNull(value, "chemical amount");
+      try {
+        return integer(new BigDecimal(value), "chemical amount", 1, Long.MAX_VALUE);
+      } catch (NumberFormatException invalid) {
+        throw new IllegalArgumentException("Chemical amount requires an exact decimal integer", invalid);
+      }
+    }
+
     private FluidStack detachedFluid(FluidStack fluid) {
       if (fluid == null || fluid.isEmpty()) {
         throw new IllegalArgumentException("Machine recipe fluid requirement must not be empty");
@@ -246,9 +321,11 @@ public final class KubeJSRecipeBuilder {
         lastItem.selector = selector;
       } else if (last == LastRequirement.ENERGY && energyRequirements == 1) {
         energySelector = selector;
+      } else if (last == LastRequirement.CHEMICAL && lastChemical != null) {
+        lastChemical.selector = selector;
       } else {
         throw new IllegalStateException(
-            "Tags require a last item or a unique energy requirement; per-row fluid tags are unsupported");
+            "Tags require a last item, chemical, or unique energy requirement; per-row fluid tags are unsupported");
       }
       return this;
     }
@@ -291,6 +368,13 @@ public final class KubeJSRecipeBuilder {
       }
       if (!fluidOutputs.isEmpty()) {
         json.add("fluid_outputs", encode(FluidStack.CODEC.listOf(), fluidOutputs));
+      }
+      var chemicals = new ChemicalRecipeData(
+          chemicalInputs.stream().map(ChemicalRow::requirement).toList(),
+          chemicalOutputs.stream().map(ChemicalRow::requirement).toList(),
+          chemicalPerTick.stream().map(ChemicalRow::requirement).toList());
+      if (!chemicals.isEmpty()) {
+        json.add("chemicals", encode(ChemicalRecipeData.CODEC, chemicals));
       }
       MachineRecipeJson.validate(json);
       MachineRecipe.CODEC.codec().parse(event.registries.access().createSerializationContext(JsonOps.INSTANCE), json)

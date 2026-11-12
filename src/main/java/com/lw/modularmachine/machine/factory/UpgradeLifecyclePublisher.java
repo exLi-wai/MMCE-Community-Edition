@@ -17,7 +17,6 @@ import net.minecraft.nbt.CompoundTag;
 import net.minecraft.resources.ResourceLocation;
 import net.minecraft.server.level.ServerLevel;
 import net.minecraft.world.item.ItemStack;
-
 import com.lw.modularmachine.api.upgrade.FactoryUpgradeEntry;
 import com.lw.modularmachine.api.upgrade.FactoryUpgradeEvents.Context;
 import com.lw.modularmachine.api.upgrade.FactoryUpgradeEvents.Listener;

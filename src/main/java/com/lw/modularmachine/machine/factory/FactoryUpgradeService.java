@@ -1,7 +1,6 @@
 package com.lw.modularmachine.machine.factory;
 
 import com.lw.modularmachine.api.upgrade.FactoryUpgradeRuntimeData;
-
 import com.google.gson.JsonParseException;
 import com.lw.modularmachine.machine.recipe.ItemResourceKey;
 import java.util.ArrayList;

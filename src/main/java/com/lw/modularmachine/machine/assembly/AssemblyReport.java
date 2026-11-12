@@ -1,5 +1,6 @@
 package com.lw.modularmachine.machine.assembly;
 
+import com.lw.modularmachine.ModularMachine;
 import com.lw.modularmachine.machine.structure.MachineDefinition;
 import com.lw.modularmachine.util.minecraft.placement.PlacementMaterials;
 import com.lw.modularmachine.util.minecraft.placement.PlacementMaterials.Choices;
@@ -235,7 +236,7 @@ final class AssemblyReport {
           work += advanced.work();
           plan = advanced.result();
         } catch (RuntimeException failure) {
-          com.lw.modularmachine.ModularMachine.LOGGER.warn("Assembly missing-material summary failed", failure);
+          ModularMachine.LOGGER.warn("Assembly missing-material summary failed", failure);
           summaryMessage = Component.translatable("message.mmcece.assembly.missing_unavailable");
           summaryReady = true;
           return Math.min(workBudget, Math.max(1, work));

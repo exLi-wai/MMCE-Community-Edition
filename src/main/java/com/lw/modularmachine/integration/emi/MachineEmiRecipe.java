@@ -8,7 +8,6 @@ import dev.emi.emi.api.recipe.EmiRecipeCategory;
 import dev.emi.emi.api.stack.EmiIngredient;
 import dev.emi.emi.api.stack.EmiStack;
 import dev.emi.emi.api.widget.WidgetHolder;
-
 import java.util.ArrayList;
 import java.util.List;
 import net.minecraft.resources.ResourceLocation;

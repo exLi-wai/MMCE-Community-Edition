@@ -1,7 +1,6 @@
 package com.lw.modularmachine.machine.assembly;
 
 import com.lw.modularmachine.machine.factory.UpgradeLifecyclePublisher;
-
 import com.lw.modularmachine.ModularMachine;
 import com.lw.modularmachine.config.MachineConfig;
 import com.lw.modularmachine.block.FactoryControllerBlock;

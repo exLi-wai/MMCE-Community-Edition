@@ -1,7 +1,6 @@
 package com.lw.modularmachine.machine.factory;
 
 import com.lw.modularmachine.api.upgrade.FactoryUpgradeSnapshot;
-
 import java.util.List;
 import net.minecraft.nbt.CompoundTag;
 import net.minecraft.nbt.ListTag;

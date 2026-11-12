@@ -1,7 +1,6 @@
 package com.lw.modularmachine.machine.recipe;
 
 import com.lw.modularmachine.machine.factory.UpgradeRecipeChecks;
-
 import com.lw.modularmachine.blockentity.MachineControllerBlockEntity;
 import com.lw.modularmachine.machine.PortKind;
 import com.lw.modularmachine.machine.controller.MachineControllerScriptDataService;
@@ -33,6 +32,8 @@ public final class ItemRecipePlan {
   private int startupInstances;
   private ParallelRecipeAdmission parallelAdmission;
   private int parallelRequest;
+  private ChemicalOutputLayout.Planning chemicalOutputAdmission;
+  private int chemicalOutputInstances;
 
   ItemRecipePlan(RecipeExecutionTicket source, ItemRecipeCatalog catalog, RecipeCandidate<ItemResourceKey> recipe, List<Deduction> deductions, List<Placement> placements, long inputChanceSeed, UpgradeRecipeChecks.Scope factoryScope) {
     this.source = source;
@@ -59,6 +60,9 @@ public final class ItemRecipePlan {
   static <K> Map<K, Long> sampledInputs(RecipeCandidate<K> recipe, long seed, int instances) {
     if (instances < 1) {
       throw new IllegalArgumentException("Invalid input chance instances");
+    }
+    if (recipe.inputs().isEmpty()) {
+      return Map.of();
     }
     var result = new HashMap<K, Long>();
     for (int instance = 0; instance < instances; instance++) {
@@ -263,6 +267,22 @@ public final class ItemRecipePlan {
     }
 
     return parallelAdmission.advance(budget);
+  }
+
+  record ChemicalOutputCheck(RecipePlanner.Status status, int workUsed) {
+  }
+
+  ChemicalOutputCheck prepareChemicalOutputs(MachineRecipe definition, int instances, int budget) {
+    if (chemicalOutputAdmission == null || chemicalOutputInstances != instances) {
+      chemicalOutputAdmission = new ChemicalOutputLayout(source)
+          .plan(ChemicalTransactions.scaled(definition.chemicals().outputs(), instances));
+      chemicalOutputInstances = instances;
+    }
+    int used = 0;
+    if (chemicalOutputAdmission.status() == RecipePlanner.Status.BUDGET_EXHAUSTED) {
+      used = chemicalOutputAdmission.advance(budget).workUsed();
+    }
+    return new ChemicalOutputCheck(chemicalOutputAdmission.status(), used);
   }
 
   public int maxRepeatableInputs() {

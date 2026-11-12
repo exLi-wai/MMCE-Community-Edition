@@ -1,5 +1,11 @@
 package com.lw.modularmachine.client.preview;
 
+import net.minecraft.world.level.ColorResolver;
+import net.minecraft.core.Direction;
+import net.minecraft.world.level.LightLayer;
+import net.minecraft.core.registries.Registries;
+import net.minecraft.world.flag.FeatureFlagSet;
+import net.minecraft.world.level.BlockGetter;
 import java.util.List;
 import java.util.UUID;
 import java.util.function.BooleanSupplier;
@@ -75,7 +81,7 @@ final class PreviewLevel extends Level {
       return light;
     }
     @Override
-    public net.minecraft.world.level.BlockGetter getLevel() {
+    public BlockGetter getLevel() {
       return PreviewLevel.this;
     }
   };
@@ -194,7 +200,7 @@ final class PreviewLevel extends Level {
     return environment.potionBrewing();
   }
   @Override
-  public net.minecraft.world.flag.FeatureFlagSet enabledFeatures() {
+  public FeatureFlagSet enabledFeatures() {
     return environment.enabledFeatures();
   }
   @Override
@@ -207,11 +213,10 @@ final class PreviewLevel extends Level {
   }
   @Override
   public Holder<Biome> getUncachedNoiseBiome(int x, int y, int z) {
-    return registryAccess().registryOrThrow(net.minecraft.core.registries.Registries.BIOME)
-        .getHolderOrThrow(Biomes.PLAINS);
+    return registryAccess().registryOrThrow(Registries.BIOME).getHolderOrThrow(Biomes.PLAINS);
   }
   @Override
-  public int getBrightness(net.minecraft.world.level.LightLayer layer, BlockPos pos) {
+  public int getBrightness(LightLayer layer, BlockPos pos) {
     return 15;
   }
   @Override
@@ -219,11 +224,11 @@ final class PreviewLevel extends Level {
     return 15;
   }
   @Override
-  public float getShade(net.minecraft.core.Direction direction, boolean shade) {
+  public float getShade(Direction direction, boolean shade) {
     return view.getShade(direction, shade);
   }
   @Override
-  public int getBlockTint(BlockPos pos, net.minecraft.world.level.ColorResolver resolver) {
+  public int getBlockTint(BlockPos pos, ColorResolver resolver) {
     return view.getBlockTint(pos, resolver);
   }
   @Override

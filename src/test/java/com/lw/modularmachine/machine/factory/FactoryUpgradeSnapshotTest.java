@@ -1,7 +1,6 @@
 package com.lw.modularmachine.machine.factory;
 
 import com.lw.modularmachine.api.upgrade.FactoryUpgradeSnapshot;
-
 import java.util.List;
 import org.junit.jupiter.api.Test;
 import static org.junit.jupiter.api.Assertions.assertEquals;

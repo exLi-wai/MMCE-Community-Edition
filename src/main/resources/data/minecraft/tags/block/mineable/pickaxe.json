@@ -57,7 +57,71 @@
     "mmcece:parallel_controller_reinforced",
     "mmcece:parallel_controller_elite",
     "mmcece:parallel_controller_super",
-    "mmcece:parallel_controller_ultimate"
+    "mmcece:parallel_controller_ultimate",
+    {
+      "id": "mmcece:chemical_input_hatch_tiny",
+      "required": false
+    },
+    {
+      "id": "mmcece:chemical_input_hatch_small",
+      "required": false
+    },
+    {
+      "id": "mmcece:chemical_input_hatch_normal",
+      "required": false
+    },
+    {
+      "id": "mmcece:chemical_input_hatch_reinforced",
+      "required": false
+    },
+    {
+      "id": "mmcece:chemical_input_hatch_big",
+      "required": false
+    },
+    {
+      "id": "mmcece:chemical_input_hatch_huge",
+      "required": false
+    },
+    {
+      "id": "mmcece:chemical_input_hatch_ludicrous",
+      "required": false
+    },
+    {
+      "id": "mmcece:chemical_input_hatch_vacuum",
+      "required": false
+    },
+    {
+      "id": "mmcece:chemical_output_hatch_tiny",
+      "required": false
+    },
+    {
+      "id": "mmcece:chemical_output_hatch_small",
+      "required": false
+    },
+    {
+      "id": "mmcece:chemical_output_hatch_normal",
+      "required": false
+    },
+    {
+      "id": "mmcece:chemical_output_hatch_reinforced",
+      "required": false
+    },
+    {
+      "id": "mmcece:chemical_output_hatch_big",
+      "required": false
+    },
+    {
+      "id": "mmcece:chemical_output_hatch_huge",
+      "required": false
+    },
+    {
+      "id": "mmcece:chemical_output_hatch_ludicrous",
+      "required": false
+    },
+    {
+      "id": "mmcece:chemical_output_hatch_vacuum",
+      "required": false
+    }
   ],
   "replace": false
 }

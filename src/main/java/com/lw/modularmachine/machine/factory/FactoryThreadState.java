@@ -1,7 +1,6 @@
 package com.lw.modularmachine.machine.factory;
 
 import com.lw.modularmachine.api.upgrade.FactoryUpgradeSnapshot;
-
 import java.util.Objects;
 import net.minecraft.resources.ResourceLocation;
 
@@ -187,6 +186,7 @@ public record FactoryThreadState(
     OUTPUT_BLOCKED,
     WAITING_ENERGY,
     WAITING_FLUID,
+    WAITING_CHEMICAL,
     SEARCH_BUDGET,
     STALE_RESOURCES,
     LOCKED_RECIPE_MISSING,
@@ -203,6 +203,8 @@ public record FactoryThreadState(
     MISSING_ITEM_OUTPUT,
     MISSING_ENERGY_INPUT,
     MISSING_FLUID_INPUT,
-    MISSING_FLUID_OUTPUT
+    MISSING_FLUID_OUTPUT,
+    MISSING_CHEMICAL_INPUT,
+    MISSING_CHEMICAL_OUTPUT
   }
 }

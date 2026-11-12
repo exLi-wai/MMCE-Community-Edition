@@ -1,5 +1,6 @@
 package com.lw.modularmachine.machine.assembly;
 
+import java.util.stream.Collectors;
 import com.lw.modularmachine.machine.structure.AsyncStructureWork;
 import com.lw.modularmachine.util.minecraft.placement.PlacementMaterials;
 import com.lw.modularmachine.util.minecraft.placement.PlacementMaterials.Choices;
@@ -69,7 +70,7 @@ final class AssemblyMaterialPlan {
       this.shortages = List.copyOf(shortages);
       this.incomplete = incomplete;
       reservedBlocks = assignments.keySet().stream().flatMap(choices -> choices.items().stream())
-          .collect(java.util.stream.Collectors.toUnmodifiableSet());
+          .collect(Collectors.toUnmodifiableSet());
       resources = supplies.stream().map(Supply::resource).toList();
       remaining = supplies.stream()
           .mapToLong(supply -> supply.quantity() / (supply.resource().item() == null ? FluidType.BUCKET_VOLUME : 1))
@@ -136,7 +137,7 @@ final class AssemblyMaterialPlan {
       var counts = groups.stream()
           .mapToLong(group -> assignments.get(group).values().stream().mapToLong(Long::longValue).sum()).toArray();
       var capacities = remaining.clone();
-      var excluded = rejected.stream().map(resources::indexOf).collect(java.util.stream.Collectors.toUnmodifiableSet());
+      var excluded = rejected.stream().map(resources::indexOf).collect(Collectors.toUnmodifiableSet());
       var capturedResources = resources;
       int target = groups.indexOf(choices);
       return AsyncStructureWork.submit(() -> {

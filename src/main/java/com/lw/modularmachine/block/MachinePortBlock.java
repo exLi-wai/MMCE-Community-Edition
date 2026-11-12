@@ -4,6 +4,7 @@ import com.lw.modularmachine.blockentity.MachinePortBlockEntity;
 import com.lw.modularmachine.config.MachineConfig;
 import com.lw.modularmachine.machine.HatchTier;
 import com.lw.modularmachine.machine.PortKind;
+import com.lw.modularmachine.machine.chemical.ChemicalPlatform;
 import com.lw.modularmachine.util.minecraft.energy.EnergyDisplay;
 import com.mojang.serialization.MapCodec;
 import java.util.List;
@@ -99,6 +100,14 @@ public final class MachinePortBlock extends BaseEntityBlock {
                   unit.component()).withStyle(ChatFormatting.GRAY));
         }
       }
+      case CHEMICAL -> {
+        tooltip.add(
+            Component.translatable("tooltip.mmcece.chemical_hatch.capacity", MachineConfig.chemicalHatchCapacity(tier))
+                .withStyle(ChatFormatting.GRAY));
+        if (kind.isInput()) {
+          tooltip.add(Component.translatable("tooltip.mmcece.input_group").withStyle(ChatFormatting.GRAY));
+        }
+      }
     }
   }
 
@@ -118,6 +127,18 @@ public final class MachinePortBlock extends BaseEntityBlock {
 
   @Override
   protected ItemInteractionResult useItemOn(ItemStack stack, BlockState state, Level level, BlockPos pos, Player player, InteractionHand hand, BlockHitResult hit) {
+    if (!player.isSecondaryUseActive()
+        && kind.resource() == PortKind.Resource.CHEMICAL
+        && ChemicalPlatform.hasContainer(stack)) {
+      if (level.isClientSide) {
+        return ItemInteractionResult.SUCCESS;
+      }
+      if (level.getBlockEntity(pos) instanceof MachinePortBlockEntity port
+          && port.schemaSupported()
+          && ChemicalPlatform.interact(player, hand, port)) {
+        return ItemInteractionResult.CONSUME;
+      }
+    }
     if (!player.isSecondaryUseActive()
         && kind.resource() == PortKind.Resource.FLUID
         && FluidUtil.getFluidHandler(stack).isPresent()) {

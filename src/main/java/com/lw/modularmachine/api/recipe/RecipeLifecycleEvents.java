@@ -27,7 +27,8 @@ public final class RecipeLifecycleEvents {
 
   public enum ResourceFailure {
     ENERGY,
-    FLUID
+    FLUID,
+    CHEMICAL
   }
 
   @FunctionalInterface

@@ -55,7 +55,6 @@ import net.neoforged.neoforge.client.event.RegisterColorHandlersEvent;
 import net.neoforged.neoforge.client.event.ModelEvent;
 import net.neoforged.neoforge.client.gui.ConfigurationScreen;
 import net.neoforged.neoforge.client.gui.IConfigScreenFactory;
-
 import java.util.ArrayList;
 
 @Mod(value = ModularMachine.MODID, dist = Dist.CLIENT)

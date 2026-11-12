@@ -1,7 +1,6 @@
 package com.lw.modularmachine.network;
 
 import com.lw.modularmachine.util.minecraft.network.BlockPosCodecs;
-
 import com.lw.modularmachine.machine.selection.RangedSelectionData;
 import com.lw.modularmachine.machine.selection.RangedSelectionData.*;
 import com.lw.modularmachine.machine.selection.RangedSelectionService;

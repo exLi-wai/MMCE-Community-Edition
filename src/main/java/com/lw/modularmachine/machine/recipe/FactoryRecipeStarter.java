@@ -1,7 +1,6 @@
 package com.lw.modularmachine.machine.recipe;
 
 import com.lw.modularmachine.machine.factory.UpgradeLifecyclePublisher;
-
 import com.lw.modularmachine.ModularMachine;
 import com.lw.modularmachine.blockentity.FactoryControllerBlockEntity;
 import com.lw.modularmachine.blockentity.MachinePortBlockEntity;
@@ -42,6 +41,7 @@ public final class FactoryRecipeStarter {
     boolean committed = false;
     var leases = new ArrayList<MachinePortBlockEntity.ItemStartLease>();
     var fluidLeases = new HashMap<String, MachinePortBlockEntity.FluidStartLease>();
+    ChemicalTransactions.Batch chemicals = null;
     var upgradeLeases = new ArrayList<StartCostLease>();
     try {
       var nativeRecipe = MachineRecipeService.definitionForStart(factory, plan);
@@ -108,6 +108,10 @@ public final class FactoryRecipeStarter {
       if (fluidDebits == null) {
         return Result.STALE;
       }
+      chemicals = ChemicalTransactions.inputs(ticket, nativeRecipe.orElseThrow().chemicals().inputs());
+      if (chemicals == null) {
+        return Result.STALE;
+      }
       var startCosts = plan.prepareFactoryStartup(factory, threadId, 1);
       if (!startCosts.current()) {
         return Result.STALE;
@@ -146,6 +150,7 @@ public final class FactoryRecipeStarter {
         return Result.STALE;
       }
       startCosts.acquireInto(upgradeLeases);
+      chemicals.acquire();
       for (var port : ticket.ports()) {
         if (port.kind().resource() == PortKind.Resource.ITEM) {
           var lease = port.identity().acquireItemStart(port.revision());
@@ -179,8 +184,12 @@ public final class FactoryRecipeStarter {
       for (var lease : upgradeLeases) {
         lease.resolve(committed);
       }
+      if (chemicals != null) {
+        chemicals.resolve(committed);
+      }
       factory.finishRunStart(threadId, committed);
       if (committed) {
+        chemicals.publish();
         factory.setChanged();
         FactoryUpgradeStartCosts.publish(factory, upgradeLeases);
         UpgradeLifecyclePublisher.recipeStarted(factory, threadId, factory.runSet(threadId).runs());

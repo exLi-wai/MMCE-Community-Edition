@@ -1,7 +1,6 @@
 package com.lw.modularmachine.machine.recipe;
 
 import com.lw.modularmachine.machine.factory.UpgradeRecipeChecks;
-
 import com.lw.modularmachine.blockentity.FactoryControllerBlockEntity;
 import com.lw.modularmachine.blockentity.MachineControllerBlockEntity;
 import com.lw.modularmachine.machine.PortKind;
@@ -31,6 +30,7 @@ public final class ItemRecipeSearch {
   private ItemRecipePlan selected;
   private final FluidOutputLayout fluidLayout;
   private FluidOutputLayout.Planning fluidPlan;
+  private ChemicalOutputLayout.Planning chemicalPlan;
   private long fluidWork;
   private final UpgradeRecipeChecks.Scope factoryScope;
   private final UpgradeBusOwner factory;
@@ -113,6 +113,7 @@ public final class ItemRecipeSearch {
       }
       componentReady.add(candidate.id());
       if (ticket.interfacesMatch(candidate.interfaceInputs())
+          && (definition == null || ChemicalTransactions.inputs(ticket, definition.chemicals().inputs()) != null)
           && fluidInputsAvailable(
               catalog.fluidInputs(candidate.id()),
               ticket,
@@ -310,6 +311,25 @@ public final class ItemRecipeSearch {
         session.rejectSelected();
         continue;
       }
+      if (chemicalPlan == null) {
+        var definition = catalog.definition(generic.candidate().id());
+        chemicalPlan = new ChemicalOutputLayout(ticket)
+            .plan(definition == null ? List.of() : definition.chemicals().outputs());
+      }
+      if (chemicalPlan.status() == RecipePlanner.Status.BUDGET_EXHAUSTED) {
+        var chemicalResult = chemicalPlan.advance(budget - used);
+        used += chemicalResult.workUsed();
+        fluidWork += chemicalResult.workUsed();
+      }
+      if (chemicalPlan.status() == RecipePlanner.Status.BUDGET_EXHAUSTED) {
+        return new Result(RecipePlanner.Status.BUDGET_EXHAUSTED, Optional.empty(), used);
+      }
+      if (chemicalPlan.status() == RecipePlanner.Status.NO_MATCH) {
+        chemicalPlan = null;
+        fluidPlan = null;
+        session.rejectSelected();
+        continue;
+      }
       if (pendingFactoryPlan == null) {
         long inputChanceSeed = ItemRecipePlan.newInputChanceSeed();
         var needed = new HashMap<>(ItemRecipePlan.sampledInputs(generic.candidate(), inputChanceSeed, 1));
@@ -353,6 +373,7 @@ public final class ItemRecipeSearch {
           case REJECTED -> {
             pendingFactoryPlan = null;
             fluidPlan = null;
+            chemicalPlan = null;
             session.rejectSelected();
             continue;
           }

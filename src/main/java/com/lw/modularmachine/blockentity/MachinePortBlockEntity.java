@@ -1,11 +1,12 @@
 package com.lw.modularmachine.blockentity;
 
 import com.lw.modularmachine.api.component.MachineColorable;
-
+import com.lw.modularmachine.api.component.ChemicalStackData;
 import com.lw.modularmachine.block.MachinePortBlock;
 import com.lw.modularmachine.config.MachineConfig;
 import com.lw.modularmachine.machine.HatchTier;
 import com.lw.modularmachine.machine.PortKind;
+import com.lw.modularmachine.machine.chemical.ChemicalPlatform;
 import com.lw.modularmachine.machine.recipe.InputGroup;
 import com.lw.modularmachine.machine.recipe.RecipeLifecyclePublisher;
 import com.lw.modularmachine.machine.structure.StructureService;
@@ -15,6 +16,7 @@ import com.lw.modularmachine.network.MachinePayloads;
 import com.lw.modularmachine.registry.MachineRegistries;
 import com.lw.modularmachine.storage.LongEnergyBuffer;
 import com.lw.modularmachine.storage.TransactionalFluidTank;
+import com.lw.modularmachine.storage.TransactionalChemicalTank;
 import com.lw.modularmachine.storage.TransactionalItemStackHandler;
 import net.minecraft.core.BlockPos;
 import net.minecraft.core.HolderLookup;
@@ -43,6 +45,7 @@ public final class MachinePortBlockEntity extends BlockEntity implements MenuPro
   private final HatchTier tier;
   private final TransactionalItemStackHandler items;
   private final TransactionalFluidTank tank;
+  private final TransactionalChemicalTank chemicalTank;
   private final LongEnergyBuffer energy;
   private final IItemHandler itemCapability;
   private final IFluidHandler fluidCapability;
@@ -67,6 +70,11 @@ public final class MachinePortBlockEntity extends BlockEntity implements MenuPro
         this::changed);
     tank = new TransactionalFluidTank(
         kind.resource() == PortKind.Resource.FLUID ? (int) MachineConfig.fluidHatchCapacity(tier) : 0,
+        this::assertMutationThread,
+        this::beforeResourceWrite,
+        this::changed);
+    chemicalTank = new TransactionalChemicalTank(
+        kind.resource() == PortKind.Resource.CHEMICAL ? MachineConfig.chemicalHatchCapacity(tier) : 0,
         this::assertMutationThread,
         this::beforeResourceWrite,
         this::changed);
@@ -264,6 +272,91 @@ public final class MachinePortBlockEntity extends BlockEntity implements MenuPro
       throw new IllegalStateException("Stale or unavailable fluid output hatch");
     }
     return new FluidStartLease(tank.acquire());
+  }
+
+  public ChemicalStartLease acquireChemicalStart(long expectedRevision) {
+    return acquireChemical(expectedRevision, PortKind.CHEMICAL_INPUT);
+  }
+
+  public ChemicalStartLease acquireChemicalOutputStart(long expectedRevision) {
+    return acquireChemical(expectedRevision, PortKind.CHEMICAL_OUTPUT);
+  }
+
+  private ChemicalStartLease acquireChemical(long expectedRevision, PortKind expectedKind) {
+    assertMutationThread();
+    if (!(level instanceof ServerLevel)
+        || isRemoved()
+        || !schemaSupported()
+        || kind != expectedKind
+        || resourceRevision != expectedRevision
+        || resourceRevision == Long.MAX_VALUE) {
+      throw new IllegalStateException("Stale or unavailable chemical hatch");
+    }
+
+    return new ChemicalStartLease(chemicalTank.acquire());
+  }
+
+  public final class ChemicalStartLease implements AutoCloseable {
+    private final TransactionalChemicalTank.Lease storage;
+    private boolean resolved, modified, notify, published;
+
+    private ChemicalStartLease(TransactionalChemicalTank.Lease storage) {
+      this.storage = storage;
+    }
+
+    public boolean drainExact(ChemicalStackData required) {
+      assertMutationThread();
+      if (resolved) {
+        throw new IllegalStateException("Resolved chemical lease");
+      }
+      boolean drained = storage.drainExact(required);
+      modified |= drained;
+
+      return drained;
+    }
+
+    public boolean fillExact(ChemicalStackData required) {
+      assertMutationThread();
+      if (resolved) {
+        throw new IllegalStateException("Resolved chemical lease");
+      }
+      boolean filled = storage.fillExact(required);
+      modified |= filled;
+
+      return filled;
+    }
+
+    public void resolve(boolean commit) {
+      assertMutationThread();
+      if (resolved) {
+        throw new IllegalStateException("Resolved chemical transaction");
+      }
+      storage.resolve(commit);
+      if (commit && modified) {
+        resourceRevision++;
+        notify = true;
+      }
+      resolved = true;
+    }
+
+    public void publish() {
+      assertMutationThread();
+      if (!resolved) {
+        throw new IllegalStateException("Unresolved chemical transaction");
+      }
+      if (notify && !published) {
+        published = true;
+        setChanged();
+        StructureService.resourceChanged((ServerLevel) level, worldPosition);
+      }
+    }
+
+    @Override
+    public void close() {
+      if (!resolved) {
+        resolve(false);
+      }
+    }
   }
 
   public final class EnergyStartLease implements AutoCloseable {
@@ -467,7 +560,7 @@ public final class MachinePortBlockEntity extends BlockEntity implements MenuPro
   }
 
   public boolean canGroupInput() {
-    return kind == PortKind.ITEM_INPUT || kind == PortKind.FLUID_INPUT;
+    return kind == PortKind.ITEM_INPUT || kind == PortKind.FLUID_INPUT || kind == PortKind.CHEMICAL_INPUT;
   }
 
   public int inputGroup() {
@@ -492,7 +585,8 @@ public final class MachinePortBlockEntity extends BlockEntity implements MenuPro
         || groupRevision != expectedRevision
         || groupRevision == Long.MAX_VALUE
         || items.isInTransaction()
-        || tank.isInTransaction()) {
+        || tank.isInTransaction()
+        || chemicalTank.isInTransaction()) {
       return false;
     }
     if (inputGroup == group) {
@@ -515,6 +609,10 @@ public final class MachinePortBlockEntity extends BlockEntity implements MenuPro
 
   public TransactionalFluidTank fluidTank() {
     return tank;
+  }
+
+  public TransactionalChemicalTank chemicalTank() {
+    return chemicalTank;
   }
 
   public LongEnergyBuffer energy() {
@@ -562,6 +660,10 @@ public final class MachinePortBlockEntity extends BlockEntity implements MenuPro
     return items.isInTransaction();
   }
 
+  public boolean chemicalStartInProgress() {
+    return chemicalTank.isInTransaction();
+  }
+
   @Override
   protected void saveAdditional(CompoundTag tag, HolderLookup.Provider registries) {
     super.saveAdditional(tag, registries);
@@ -580,6 +682,9 @@ public final class MachinePortBlockEntity extends BlockEntity implements MenuPro
     if (kind.resource() == PortKind.Resource.FLUID) {
       data.put("fluid", tank.writeToNBT(registries, new CompoundTag()));
     }
+    if (kind.resource() == PortKind.Resource.CHEMICAL) {
+      data.put("chemical", chemicalTank.save());
+    }
     if (kind.resource() == PortKind.Resource.ENERGY) {
       data.putLong("energy", energy.stored());
     }
@@ -592,7 +697,7 @@ public final class MachinePortBlockEntity extends BlockEntity implements MenuPro
     if (level instanceof ServerLevel && RecipeLifecyclePublisher.isDispatching()) {
       throw new IllegalStateException("Cannot reload resources during a read-only recipe notification");
     }
-    if (items.isInTransaction() || tank.isInTransaction()) {
+    if (items.isInTransaction() || tank.isInTransaction() || chemicalTank.isInTransaction()) {
       throw new IllegalStateException("Cannot reload a leased input/output port");
     }
     super.loadAdditional(tag, registries);
@@ -639,6 +744,24 @@ public final class MachinePortBlockEntity extends BlockEntity implements MenuPro
     if (kind.resource() == PortKind.Resource.FLUID && data.contains("fluid")) {
       tank.readFromNBT(registries, data.getCompound("fluid"));
     }
+    if (kind.resource() == PortKind.Resource.CHEMICAL) {
+      try {
+        if (data.contains("chemical") && !data.contains("chemical", Tag.TAG_COMPOUND)) {
+          throw new IllegalArgumentException("Invalid chemical storage tag");
+        }
+        var saved = ChemicalStackData.load(data.getCompound("chemical"));
+        if (!saved.isEmpty() && !ChemicalPlatform.contains(saved.chemical())) {
+          throw new IllegalArgumentException("Unavailable saved chemical");
+        }
+        chemicalTank.load(saved.save());
+      } catch (IllegalArgumentException invalid) {
+        unsupportedData = data.copy();
+        if (level instanceof ServerLevel server) {
+          StructureService.blockChanged(server, worldPosition);
+        }
+        return;
+      }
+    }
     if (kind.resource() == PortKind.Resource.ENERGY) {
       energy.load(data.getLong("energy"));
     }
@@ -662,6 +785,8 @@ public final class MachinePortBlockEntity extends BlockEntity implements MenuPro
     return switch (kind.resource()) {
       case ITEM -> Component.translatable("message.mmcece.item_port", items.getSlots());
       case FLUID -> Component.translatable("message.mmcece.fluid_port", tank.getFluidAmount(), tank.getCapacity());
+      case CHEMICAL ->
+        Component.translatable("message.mmcece.chemical_port", chemicalTank.getAmount(), chemicalTank.getCapacity());
       case ENERGY -> Component
           .translatable("message.mmcece.energy_port", energy.stored(), energy.capacity(), energy.transferLimit());
     };

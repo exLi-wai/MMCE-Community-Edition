@@ -7,7 +7,6 @@ import java.util.Map;
 import java.util.Objects;
 import net.minecraft.nbt.CompoundTag;
 import net.minecraft.resources.ResourceLocation;
-
 import com.lw.modularmachine.api.upgrade.FactoryUpgradeRuntimeData.Phase;
 import com.lw.modularmachine.api.upgrade.FactoryUpgradeRuntimeData.Preparer;
 import com.lw.modularmachine.api.upgrade.FactoryUpgradeRuntimeData.Context;

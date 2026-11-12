@@ -1,5 +1,7 @@
 package com.lw.modularmachine.machine.assembly;
 
+import net.minecraft.world.item.Item;
+import java.util.Set;
 import com.lw.modularmachine.util.minecraft.placement.PlacementMaterials;
 import com.lw.modularmachine.util.minecraft.placement.PlacementOutcome;
 import com.lw.modularmachine.util.minecraft.inventory.PlayerInventoryItems;
@@ -39,7 +41,7 @@ final class AssemblyFluidPlacement {
   private AssemblyFluidPlacement() {
   }
 
-  static PlacementOutcome place(ServerPlayer player, AssemblyPattern.Part part, FluidStack preferred, java.util.Set<net.minecraft.world.item.Item> reservedBlocks, BooleanSupplier current) {
+  static PlacementOutcome place(ServerPlayer player, AssemblyPattern.Part part, FluidStack preferred, Set<Item> reservedBlocks, BooleanSupplier current) {
     var level = player.serverLevel();
     ServerThreadGuard.require(level, "Backpack fluid assembly");
     if (level.captureBlockSnapshots || level.restoringBlockSnapshots || !level.capturedBlockSnapshots.isEmpty()) {

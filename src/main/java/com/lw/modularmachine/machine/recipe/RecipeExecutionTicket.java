@@ -3,6 +3,7 @@ package com.lw.modularmachine.machine.recipe;
 import com.lw.modularmachine.blockentity.FactoryControllerBlockEntity;
 import com.lw.modularmachine.blockentity.MachineControllerBlockEntity;
 import com.lw.modularmachine.blockentity.MachinePortBlockEntity;
+import com.lw.modularmachine.api.component.ChemicalStackData;
 import com.lw.modularmachine.api.smart.SmartInterfaceBinding;
 import com.lw.modularmachine.blockentity.SmartInterfaceBlockEntity;
 import com.lw.modularmachine.machine.PortKind;
@@ -133,7 +134,11 @@ public final class RecipeExecutionTicket {
   public List<Integer> inputGroups() {
     var groups = new TreeSet<Integer>();
     groups.add(InputGroup.SHARED);
-    ports.stream().filter(port -> port.kind() == PortKind.ITEM_INPUT || port.kind() == PortKind.FLUID_INPUT)
+    ports.stream()
+        .filter(
+            port -> port.kind() == PortKind.ITEM_INPUT
+                || port.kind() == PortKind.FLUID_INPUT
+                || port.kind() == PortKind.CHEMICAL_INPUT)
         .forEach(port -> groups.add(port.inputGroup()));
 
     return List.copyOf(groups);
@@ -181,6 +186,10 @@ public final class RecipeExecutionTicket {
     return capture(owner, CaptureMode.FLUID_INPUTS);
   }
 
+  public static Optional<RecipeExecutionTicket> captureChemicalInputs(StructureService.StructureSubject owner) {
+    return capture(owner, CaptureMode.CHEMICAL_INPUTS);
+  }
+
   private static Optional<RecipeExecutionTicket> capture(StructureService.StructureSubject owner, CaptureMode mode) {
     if (mode == CaptureMode.ALL
         && owner instanceof MachineControllerBlockEntity ordinary
@@ -222,8 +231,10 @@ public final class RecipeExecutionTicket {
       if (mode == CaptureMode.OUTPUTS
           && part.rule().port() != PortKind.ITEM_OUTPUT
           && part.rule().port() != PortKind.FLUID_OUTPUT
+          && part.rule().port() != PortKind.CHEMICAL_OUTPUT
           || mode == CaptureMode.ENERGY_INPUTS && part.rule().port() != PortKind.ENERGY_INPUT
-          || mode == CaptureMode.FLUID_INPUTS && part.rule().port() != PortKind.FLUID_INPUT) {
+          || mode == CaptureMode.FLUID_INPUTS && part.rule().port() != PortKind.FLUID_INPUT
+          || mode == CaptureMode.CHEMICAL_INPUTS && part.rule().port() != PortKind.CHEMICAL_INPUT) {
         continue;
       }
       var position = registration.pattern.position(index);
@@ -235,6 +246,9 @@ public final class RecipeExecutionTicket {
         return Optional.empty();
       }
       if (port.kind().resource() == PortKind.Resource.ITEM && port.itemStartInProgress()) {
+        return Optional.empty();
+      }
+      if (port.kind().resource() == PortKind.Resource.CHEMICAL && port.chemicalStartInProgress()) {
         return Optional.empty();
       }
       ports.add(new PortSnapshot(part.id(), position, port, level, part.selector()));
@@ -273,7 +287,8 @@ public final class RecipeExecutionTicket {
     ALL,
     OUTPUTS,
     ENERGY_INPUTS,
-    FLUID_INPUTS
+    FLUID_INPUTS,
+    CHEMICAL_INPUTS
   }
 
   public long structureRevision() {
@@ -411,6 +426,7 @@ public final class RecipeExecutionTicket {
     private final List<ItemStack> items;
     private final List<Integer> limits;
     private final FluidStack fluid;
+    private final ChemicalStackData chemical;
     private final long energy;
     private final long energyExtractable;
     private final long capacity;
@@ -438,11 +454,14 @@ public final class RecipeExecutionTicket {
       items = List.copyOf(stacks);
       limits = List.copyOf(slotLimits);
       fluid = kind.resource() == PortKind.Resource.FLUID ? port.fluidTank().getFluid().copy() : FluidStack.EMPTY;
+      chemical = kind.resource() == PortKind.Resource.CHEMICAL ? port.chemicalTank()
+          .getStack() : ChemicalStackData.EMPTY;
       energy = kind.resource() == PortKind.Resource.ENERGY ? port.energy().stored() : 0;
       energyExtractable = kind == PortKind.ENERGY_INPUT ? port.energy().extractableNow() : 0;
       capacity = switch (kind.resource()) {
         case ITEM -> 0;
         case FLUID -> port.fluidTank().getCapacity();
+        case CHEMICAL -> port.chemicalTank().getCapacity();
         case ENERGY -> port.energy().capacity();
       };
       transferLimit = kind.resource() == PortKind.Resource.ENERGY ? port.energy().transferLimit() : 0;
@@ -483,6 +502,10 @@ public final class RecipeExecutionTicket {
 
     public FluidStack fluid() {
       return fluid.copy();
+    }
+
+    public ChemicalStackData chemical() {
+      return chemical;
     }
 
     public long energy() {
@@ -538,6 +561,11 @@ public final class RecipeExecutionTicket {
             || !FluidStack.isSameFluidSameComponents(fluid, actual)) {
           return false;
         }
+      }
+      if (kind.resource() == PortKind.Resource.CHEMICAL
+          && (!chemical.equals(identity.chemicalTank().getStack())
+              || capacity != identity.chemicalTank().getCapacity())) {
+        return false;
       }
       return kind.resource() != PortKind.Resource.ENERGY
           || energy == identity.energy().stored()

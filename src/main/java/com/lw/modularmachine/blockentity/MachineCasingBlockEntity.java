@@ -2,7 +2,6 @@ package com.lw.modularmachine.blockentity;
 
 import com.lw.modularmachine.api.component.MachineColorable;
 import com.lw.modularmachine.config.MachineConfig;
-
 import com.lw.modularmachine.registry.MachineRegistries;
 import net.minecraft.core.BlockPos;
 import net.minecraft.core.HolderLookup;

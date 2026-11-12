@@ -1,17 +1,11 @@
 package com.lw.modularmachine.machine.factory;
 
 import com.lw.modularmachine.api.upgrade.FactoryUpgradeSnapshot;
-
 import com.lw.modularmachine.api.upgrade.FactoryUpgradeEntry;
-
 import com.lw.modularmachine.api.upgrade.FactoryUpgradeBusData;
-
 import com.lw.modularmachine.api.upgrade.FactoryUpgradeItemData;
-
 import com.lw.modularmachine.api.upgrade.FactoryUpgradeEvents;
-
 import com.lw.modularmachine.api.upgrade.FactoryDynamicUpgrades;
-
 import java.util.ArrayList;
 import java.util.List;
 import net.minecraft.core.BlockPos;

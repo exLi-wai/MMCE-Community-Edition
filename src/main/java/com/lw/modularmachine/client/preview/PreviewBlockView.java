@@ -1,5 +1,10 @@
 package com.lw.modularmachine.client.preview;
 
+import net.neoforged.neoforge.client.model.data.ModelData;
+import com.lw.modularmachine.ModularMachine;
+import java.util.HashSet;
+import java.util.Set;
+import java.util.LinkedHashMap;
 import net.minecraft.client.Minecraft;
 import net.minecraft.core.BlockPos;
 import net.minecraft.core.Direction;
@@ -22,8 +27,8 @@ public final class PreviewBlockView implements BlockAndTintGetter {
   private int layer, step;
   private final boolean worldNeighbors;
   private PreviewLevel level;
-  private final java.util.LinkedHashMap<Long, BlockEntity> entities = new java.util.LinkedHashMap<>(16, .75F, true);
-  private final java.util.Set<BlockState> failedEntities = new java.util.HashSet<>();
+  private final LinkedHashMap<Long, BlockEntity> entities = new LinkedHashMap<>(16, .75F, true);
+  private final Set<BlockState> failedEntities = new HashSet<>();
 
   public PreviewBlockView(PreviewRenderScene scene, int layer, int step) {
     this(scene, layer, step, false);
@@ -114,12 +119,12 @@ public final class PreviewBlockView implements BlockAndTintGetter {
       return entity;
     } catch (RuntimeException failure) {
       failedEntities.add(state);
-      com.lw.modularmachine.ModularMachine.LOGGER.warn("Cannot create preview block entity for {}", state, failure);
+      ModularMachine.LOGGER.warn("Cannot create preview block entity for {}", state, failure);
       return null;
     }
   }
 
-  net.neoforged.neoforge.client.model.data.ModelData modelData(BlockPos pos, BlockState state) {
+  ModelData modelData(BlockPos pos, BlockState state) {
     var world = Minecraft.getInstance().level;
     if (worldNeighbors
         && world != null
@@ -131,7 +136,7 @@ public final class PreviewBlockView implements BlockAndTintGetter {
       }
     }
     var entity = getBlockEntity(pos);
-    return entity == null ? net.neoforged.neoforge.client.model.data.ModelData.EMPTY : entity.getModelData();
+    return entity == null ? ModelData.EMPTY : entity.getModelData();
   }
   @Override
   public int getHeight() {

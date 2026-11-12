@@ -1,5 +1,6 @@
 package com.lw.modularmachine.client.preview;
 
+import com.mojang.blaze3d.platform.Lighting;
 import com.lw.modularmachine.ModularMachine;
 import com.lw.modularmachine.api.client.preview.PreviewSceneData;
 import com.mojang.blaze3d.systems.RenderSystem;
@@ -58,7 +59,7 @@ final class PreviewBlockEntityRenderer implements AutoCloseable {
     }
     var minecraft = Minecraft.getInstance();
     if (preview) {
-      com.mojang.blaze3d.platform.Lighting.setupFor3DItems();
+      Lighting.setupFor3DItems();
     }
     var pose = new PoseStack();
     var transform = new Matrix4f(RenderSystem.getModelViewMatrix()).invert().mul(matrix)

@@ -1,7 +1,6 @@
 package com.lw.modularmachine.machine.recipe;
 
 import com.lw.modularmachine.api.recipe.RecipeFailureAction;
-
 import com.lw.modularmachine.machine.PortKind;
 import java.util.Map;
 import java.util.UUID;
@@ -9,7 +8,6 @@ import net.minecraft.nbt.CompoundTag;
 import net.minecraft.nbt.ListTag;
 import net.minecraft.nbt.Tag;
 import org.junit.jupiter.api.Test;
-
 import static org.junit.jupiter.api.Assertions.*;
 
 class FrozenItemRunTest {

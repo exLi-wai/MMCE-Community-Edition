@@ -181,8 +181,9 @@ final class MachineControllerTooltipProvider implements IBlockComponentProvider,
 
   private static boolean resourceWait(String status) {
     return switch (status) {
-      case "WAITING_ENERGY", "WAITING_FLUID", "OUTPUT_BLOCKED", "OUTPUT_PLANNING", "MISSING_ITEM_INPUT",
-          "MISSING_ITEM_OUTPUT", "MISSING_ENERGY_INPUT", "MISSING_FLUID_INPUT", "MISSING_FLUID_OUTPUT" ->
+      case "WAITING_ENERGY", "WAITING_FLUID", "WAITING_CHEMICAL", "OUTPUT_BLOCKED", "OUTPUT_PLANNING",
+          "MISSING_ITEM_INPUT", "MISSING_ITEM_OUTPUT", "MISSING_ENERGY_INPUT", "MISSING_FLUID_INPUT",
+          "MISSING_FLUID_OUTPUT", "MISSING_CHEMICAL_INPUT", "MISSING_CHEMICAL_OUTPUT" ->
         true;
       default -> false;
     };

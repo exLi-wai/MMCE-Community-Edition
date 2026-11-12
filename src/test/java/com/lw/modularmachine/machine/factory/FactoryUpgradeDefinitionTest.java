@@ -1,9 +1,7 @@
 package com.lw.modularmachine.machine.factory;
 
 import com.lw.modularmachine.api.upgrade.FactoryUpgradeStartCost;
-
 import com.lw.modularmachine.api.upgrade.FactoryUpgradeEntry;
-
 import com.google.gson.JsonObject;
 import com.google.gson.JsonParseException;
 import com.google.gson.JsonParser;

@@ -1,7 +1,6 @@
 package com.lw.modularmachine.machine.orientation;
 
 import com.lw.modularmachine.api.orientation.MachineOrientation;
-
 import java.util.Objects;
 import java.util.Optional;
 import net.minecraft.core.Direction;

@@ -3,7 +3,6 @@ package com.lw.modularmachine.integration.kubejs;
 import java.util.HashSet;
 import net.minecraft.resources.ResourceLocation;
 import org.junit.jupiter.api.Test;
-
 import static org.junit.jupiter.api.Assertions.*;
 
 class KubeJSRegistrationIdsTest {

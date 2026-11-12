@@ -44,6 +44,16 @@ public final class MachineResourceScreen extends AbstractContainerScreen<Machine
       long amount = status.amount();
       long capacity = status.capacity();
       drawEnergyFill(graphics, x, y, fillPixels(amount, capacity));
+    } else if (status != null && status.kind().resource() == PortKind.Resource.CHEMICAL) {
+      int filled = fillPixels(status.amount(), status.capacity());
+      if (!status.chemical().isEmpty() && filled > 0) {
+        var appearance = ChemicalDisplay.describe(status.chemical());
+        var sprite = Minecraft.getInstance().getTextureAtlas(InventoryMenu.BLOCK_ATLAS).apply(appearance.texture());
+        int tint = appearance.tint();
+        graphics.setColor((tint >> 16 & 255) / 255.0F, (tint >> 8 & 255) / 255.0F, (tint & 255) / 255.0F, 1.0F);
+        graphics.blit(x + 15, y + 10 + 61 - filled, 0, 20, filled, sprite);
+        graphics.setColor(1, 1, 1, 1);
+      }
     } else if (status != null) {
       var fluid = status.fluid();
       int filled = fillPixels(status.amount(), status.capacity());
@@ -88,7 +98,8 @@ public final class MachineResourceScreen extends AbstractContainerScreen<Machine
     int localX = (int) mouseX - leftPos;
     int localY = (int) mouseY - topPos;
     if (button == 0
-        && menu.port().kind().resource() == PortKind.Resource.FLUID
+        && (menu.port().kind().resource() == PortKind.Resource.FLUID
+            || menu.port().kind().resource() == PortKind.Resource.CHEMICAL)
         && localX >= 15
         && localX <= 35
         && localY >= 10
@@ -100,7 +111,7 @@ public final class MachineResourceScreen extends AbstractContainerScreen<Machine
         if (!player.getItemInHand(hand).isEmpty()) {
           PacketDistributor.sendToServer(
               new MachinePayloads.ResourcePortActionPayload(
-                  MachinePayloads.PROTOCOL_VERSION,
+                  MachinePayloads.RESOURCE_PROTOCOL_VERSION,
                   menu.port().getBlockPos(),
                   hand));
           return true;
@@ -133,6 +144,14 @@ public final class MachineResourceScreen extends AbstractContainerScreen<Machine
                   EnergyDisplay.format(status.capacity()),
                   EnergyDisplay.format(status.transferLimit()),
                   EnergyDisplay.unitComponent())),
+          mouseX,
+          mouseY);
+    } else if (status.kind().resource() == PortKind.Resource.CHEMICAL) {
+      graphics.renderComponentTooltip(
+          font,
+          List.of(
+              ChemicalDisplay.describe(status.chemical()).name(),
+              Component.translatable("message.mmcece.chemical_port", status.amount(), status.capacity())),
           mouseX,
           mouseY);
     } else {

@@ -61,6 +61,21 @@ public final class RecipeResourceRequirements {
     if (!recipe.fluidPerTick().isEmpty() && !has(PortKind.FLUID_INPUT, recipe.selectors().fluidPerTick())) {
       return Optional.of(PortKind.FLUID_INPUT);
     }
+    for (var input : recipe.chemicals().inputs()) {
+      if (!has(PortKind.CHEMICAL_INPUT, input.selector())) {
+        return Optional.of(PortKind.CHEMICAL_INPUT);
+      }
+    }
+    for (var input : recipe.chemicals().perTick()) {
+      if (!has(PortKind.CHEMICAL_INPUT, input.selector())) {
+        return Optional.of(PortKind.CHEMICAL_INPUT);
+      }
+    }
+    for (var output : recipe.chemicals().outputs()) {
+      if (!has(PortKind.CHEMICAL_OUTPUT, output.selector())) {
+        return Optional.of(PortKind.CHEMICAL_OUTPUT);
+      }
+    }
     return Optional.empty();
   }
 
@@ -75,6 +90,8 @@ public final class RecipeResourceRequirements {
       case ENERGY_INPUT -> ItemRunEngine.Result.MISSING_ENERGY_INPUT;
       case FLUID_INPUT -> ItemRunEngine.Result.MISSING_FLUID_INPUT;
       case FLUID_OUTPUT -> ItemRunEngine.Result.MISSING_FLUID_OUTPUT;
+      case CHEMICAL_INPUT -> ItemRunEngine.Result.MISSING_CHEMICAL_INPUT;
+      case CHEMICAL_OUTPUT -> ItemRunEngine.Result.MISSING_CHEMICAL_OUTPUT;
       default -> throw new IllegalArgumentException("Unsupported missing recipe component: " + missing);
     };
   }
@@ -86,6 +103,8 @@ public final class RecipeResourceRequirements {
       case ENERGY_INPUT -> FactoryThreadState.Reason.MISSING_ENERGY_INPUT;
       case FLUID_INPUT -> FactoryThreadState.Reason.MISSING_FLUID_INPUT;
       case FLUID_OUTPUT -> FactoryThreadState.Reason.MISSING_FLUID_OUTPUT;
+      case CHEMICAL_INPUT -> FactoryThreadState.Reason.MISSING_CHEMICAL_INPUT;
+      case CHEMICAL_OUTPUT -> FactoryThreadState.Reason.MISSING_CHEMICAL_OUTPUT;
       default -> throw new IllegalArgumentException("Unsupported missing recipe component: " + missing);
     };
   }

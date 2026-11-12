@@ -99,6 +99,7 @@ public final class AtomicRecipeStarter {
     }
     var leases = new ArrayList<MachinePortBlockEntity.ItemStartLease>();
     var fluidLeases = new HashMap<String, MachinePortBlockEntity.FluidStartLease>();
+    ChemicalTransactions.Batch chemicals = null;
     var upgradeLeases = new ArrayList<UpgradeBusBlockEntity.StartCostLease>();
     boolean committed = false;
     var owner = controller.acquireRecipeStart();
@@ -157,6 +158,12 @@ public final class AtomicRecipeStarter {
       if (fluidDebits == null) {
         return Result.STALE;
       }
+      chemicals = ChemicalTransactions.inputs(
+          checked.orElseThrow(),
+          ChemicalTransactions.scaled(nativeRecipe.orElseThrow().chemicals().inputs(), instances));
+      if (chemicals == null) {
+        return Result.STALE;
+      }
       if (!plan.factoryAdmissionCurrent(controller, "main") || !startup.current()) {
         return Result.STALE;
       }
@@ -164,6 +171,7 @@ public final class AtomicRecipeStarter {
       // this critical
       // section.
       startup.acquireInto(upgradeLeases);
+      chemicals.acquire();
       for (var port : checked.orElseThrow().ports()) {
         if (port.kind().resource() == PortKind.Resource.ITEM) {
           leases.add(port.identity().acquireItemStart(port.revision()));
@@ -206,7 +214,11 @@ public final class AtomicRecipeStarter {
         lease.resolve(committed);
       }
       owner.resolve(committed);
+      if (chemicals != null) {
+        chemicals.resolve(committed);
+      }
     }
+    chemicals.publish();
     FactoryUpgradeStartCosts.publish(controller, upgradeLeases);
     boolean warning = false;
     try {

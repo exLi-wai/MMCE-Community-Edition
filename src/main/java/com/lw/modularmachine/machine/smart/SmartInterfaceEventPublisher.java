@@ -12,7 +12,6 @@ import java.util.Optional;
 import java.util.UUID;
 import net.minecraft.resources.ResourceLocation;
 import net.minecraft.server.level.ServerLevel;
-
 import com.lw.modularmachine.api.smart.SmartInterfaceEvents.Change;
 import com.lw.modularmachine.api.smart.SmartInterfaceEvents.Context;
 import com.lw.modularmachine.api.smart.SmartInterfaceEvents.Listener;

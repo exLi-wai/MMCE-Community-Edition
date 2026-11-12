@@ -21,7 +21,8 @@ public enum MachineComponentType implements StringRepresentable {
   ENERGY_HATCH("energy_hatch"),
   PARALLEL_CONTROLLER("parallel_controller"),
   UPGRADE_BUS("upgrade_bus"),
-  SMART_INTERFACE("smart_interface");
+  SMART_INTERFACE("smart_interface"),
+  CHEMICAL_HATCH("chemical_hatch");
 
   private final String name;
 
@@ -45,6 +46,7 @@ public enum MachineComponentType implements StringRepresentable {
       return switch (port.kind().resource()) {
         case ITEM -> ITEM_BUS;
         case FLUID -> FLUID_HATCH;
+        case CHEMICAL -> CHEMICAL_HATCH;
         case ENERGY -> ENERGY_HATCH;
       };
     }

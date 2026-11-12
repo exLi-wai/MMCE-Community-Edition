@@ -1,7 +1,6 @@
 package com.lw.modularmachine.machine.orientation;
 
 import com.lw.modularmachine.api.orientation.MachineOrientation;
-
 import com.lw.modularmachine.machine.structure.CompiledStructure;
 import java.util.HashSet;
 import java.util.List;
@@ -9,7 +8,6 @@ import java.util.Set;
 import net.minecraft.core.BlockPos;
 import net.minecraft.core.Direction;
 import org.junit.jupiter.api.Test;
-
 import static org.junit.jupiter.api.Assertions.*;
 
 class MachineOrientationTest {

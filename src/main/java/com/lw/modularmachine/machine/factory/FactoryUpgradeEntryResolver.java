@@ -1,7 +1,6 @@
 package com.lw.modularmachine.machine.factory;
 
 import com.lw.modularmachine.api.upgrade.FactoryUpgradeEntry;
-
 import java.util.List;
 import java.util.Optional;
 import net.minecraft.core.BlockPos;

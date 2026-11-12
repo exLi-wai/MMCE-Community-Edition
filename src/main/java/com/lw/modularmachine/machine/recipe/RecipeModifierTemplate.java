@@ -1,7 +1,6 @@
 package com.lw.modularmachine.machine.recipe;
 
 import com.lw.modularmachine.api.recipe.RecipeModifier;
-
 import com.google.gson.JsonObject;
 import com.mojang.serialization.JsonOps;
 import java.util.ArrayList;

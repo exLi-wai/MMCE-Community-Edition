@@ -1,11 +1,8 @@
 package com.lw.modularmachine.machine.factory;
 
 import com.lw.modularmachine.api.upgrade.FactoryUpgradeStartCost;
-
 import com.lw.modularmachine.api.upgrade.FactoryUpgradeRuntimeData;
-
 import com.lw.modularmachine.api.upgrade.FactoryUpgradeItemData;
-
 import com.lw.modularmachine.ModularMachine;
 import com.lw.modularmachine.block.UpgradeBusBlock;
 import com.lw.modularmachine.blockentity.UpgradeBusBlockEntity;

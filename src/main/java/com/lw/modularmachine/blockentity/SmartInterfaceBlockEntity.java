@@ -3,7 +3,6 @@ package com.lw.modularmachine.blockentity;
 import com.lw.modularmachine.api.component.MachineColorable;
 import com.lw.modularmachine.config.MachineConfig;
 import com.lw.modularmachine.api.smart.SmartInterfaceBinding;
-
 import com.lw.modularmachine.machine.recipe.RecipeLifecyclePublisher;
 import com.lw.modularmachine.machine.smart.SmartInterfaceEventPublisher;
 import com.lw.modularmachine.api.smart.SmartInterfaceEvents;

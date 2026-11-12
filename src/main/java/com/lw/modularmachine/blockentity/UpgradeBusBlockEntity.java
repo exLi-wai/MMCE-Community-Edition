@@ -1,17 +1,11 @@
 package com.lw.modularmachine.blockentity;
 
 import com.lw.modularmachine.machine.factory.UpgradeRuntimeDataHandlers;
-
 import com.lw.modularmachine.machine.factory.UpgradeBusDataHandlers;
-
 import com.lw.modularmachine.machine.factory.UpgradeItemDataHandlers;
-
 import com.lw.modularmachine.machine.factory.UpgradeRecipeChecks;
-
 import com.lw.modularmachine.machine.factory.UpgradeLifecyclePublisher;
-
 import com.lw.modularmachine.api.component.MachineColorable;
-
 import com.lw.modularmachine.block.UpgradeBusBlock;
 import com.lw.modularmachine.config.MachineConfig;
 import com.lw.modularmachine.machine.UpgradeBusTier;

@@ -7,7 +7,6 @@ import net.minecraft.nbt.Tag;
 import net.minecraft.resources.ResourceLocation;
 import net.minecraft.world.item.ItemStack;
 import net.minecraft.world.item.component.CustomData;
-
 import com.lw.modularmachine.api.upgrade.FactoryUpgradeItemData.Context;
 import com.lw.modularmachine.api.upgrade.FactoryUpgradeItemData.Preparer;
 import com.lw.modularmachine.api.upgrade.FactoryUpgradeItemData.Update;

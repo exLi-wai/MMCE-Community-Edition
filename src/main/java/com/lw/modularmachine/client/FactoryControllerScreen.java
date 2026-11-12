@@ -1,5 +1,7 @@
 package com.lw.modularmachine.client;
 
+import com.lw.modularmachine.api.component.ChemicalStackData;
+import com.lw.modularmachine.api.recipe.ChemicalRequirement;
 import com.lw.modularmachine.menu.FactoryControllerMenu;
 import com.lw.modularmachine.network.MachinePayloads;
 import com.lw.modularmachine.machine.recipe.MachineRecipe;
@@ -237,12 +239,25 @@ public final class FactoryControllerScreen extends AbstractContainerScreen<Facto
   }
 
   private static Component recipeLabel(MachineRecipe recipe) {
-    return tr("recipe_items", itemNames(recipe.inputs()), itemNames(recipe.outputs()));
+    var chemicalInputs = Stream.concat(recipe.chemicals().inputs().stream(), recipe.chemicals().perTick().stream())
+        .toList();
+
+    return tr(
+        "recipe_items",
+        resourceNames(recipe.inputs(), chemicalInputs),
+        resourceNames(recipe.outputs(), recipe.chemicals().outputs()));
   }
 
-  private static Component itemNames(List<MachineRecipe.ItemAmount> items) {
-    return items.isEmpty() ? tr("no_items") : ComponentUtils
-        .formatList(items, item -> item.displayStack().getHoverName());
+  private static Component resourceNames(List<MachineRecipe.ItemAmount> items, List<ChemicalRequirement> chemicals) {
+    var names = Stream.concat(
+        items.stream().map(item -> item.displayStack().getHoverName()),
+        chemicals.stream().map(FactoryControllerScreen::chemicalName)).toList();
+
+    return names.isEmpty() ? tr("no_items") : ComponentUtils.formatList(names, name -> name);
+  }
+
+  private static Component chemicalName(ChemicalRequirement chemical) {
+    return ChemicalDisplay.describe(new ChemicalStackData(chemical.chemical(), chemical.amount())).name();
   }
 
   private static List<String> recipeNames(MachineRecipe recipe) {
@@ -250,8 +265,11 @@ public final class FactoryControllerScreen extends AbstractContainerScreen<Facto
         .map(item -> item.displayStack().getHoverName().getString());
     var fluids = Stream.of(recipe.fluidInputs(), recipe.fluidOutputs(), List.of(recipe.fluidPerTick()))
         .flatMap(List::stream).filter(fluid -> !fluid.isEmpty()).map(fluid -> fluid.getHoverName().getString());
+    var chemicals = Stream.of(recipe.chemicals().inputs(), recipe.chemicals().outputs(), recipe.chemicals().perTick())
+        .flatMap(List::stream).map(value -> chemicalName(value).getString());
 
-    return Stream.concat(items, fluids).map(name -> name.toLowerCase(Locale.ROOT)).distinct().toList();
+    return Stream.of(items, fluids, chemicals).flatMap(stream -> stream).map(name -> name.toLowerCase(Locale.ROOT))
+        .distinct().toList();
   }
 
   private void filterRecipes() {

@@ -1,7 +1,6 @@
 package com.lw.modularmachine.machine.factory;
 
 import com.lw.modularmachine.api.upgrade.FactoryUpgradeSnapshot;
-
 import com.lw.modularmachine.api.recipe.RecipeModifier;
 import com.lw.modularmachine.machine.recipe.RecipeModifiers;
 import java.util.ArrayList;

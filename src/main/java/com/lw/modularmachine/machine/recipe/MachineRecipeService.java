@@ -1,5 +1,6 @@
 package com.lw.modularmachine.machine.recipe;
 
+import com.lw.modularmachine.machine.chemical.ChemicalPlatform;
 import com.lw.modularmachine.machine.factory.UpgradeRecipeChecks;
 import com.lw.modularmachine.api.recipe.RecipeModifier;
 import com.lw.modularmachine.api.recipe.RecipeSelectors;
@@ -128,6 +129,7 @@ public final class MachineRecipeService {
         }
       }
       validatePorts(entry.getKey(), recipe, machine);
+      validateChemicals(entry.getKey(), recipe);
       candidates.computeIfAbsent(recipe.machineId(), ignored -> new ArrayList<>())
           .add(recipe.compile(entry.getKey(), registries));
       effective.put(entry.getKey(), recipe);
@@ -174,6 +176,23 @@ public final class MachineRecipeService {
 
   public static Optional<ItemRecipeCatalog> catalogFor(MachineControllerBlockEntity controller) {
     return catalogFor((StructureService.StructureSubject) controller);
+  }
+
+  private static void validateChemicals(ResourceLocation recipeId, MachineRecipe recipe) {
+    if (recipe.chemicals().isEmpty()) {
+      return;
+    }
+    if (!ChemicalPlatform.available()) {
+      throw new IllegalArgumentException(recipeId + ": Chemical recipes require the Mekanism integration");
+    }
+    var requirements = new ArrayList<>(recipe.chemicals().inputs());
+    requirements.addAll(recipe.chemicals().outputs());
+    requirements.addAll(recipe.chemicals().perTick());
+    for (var requirement : requirements) {
+      if (!ChemicalPlatform.contains(requirement.chemical())) {
+        throw new IllegalArgumentException(recipeId + ": Unknown chemical " + requirement.chemical());
+      }
+    }
   }
 
   public static Optional<ItemRecipeCatalog> catalogFor(StructureService.StructureSubject owner) {

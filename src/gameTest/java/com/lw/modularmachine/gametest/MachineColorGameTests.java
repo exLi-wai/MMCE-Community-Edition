@@ -10,8 +10,10 @@ import com.lw.modularmachine.blockentity.MachinePortBlockEntity;
 import com.lw.modularmachine.blockentity.SmartInterfaceBlockEntity;
 import com.lw.modularmachine.blockentity.UpgradeBusBlockEntity;
 import com.lw.modularmachine.api.orientation.MachineOrientation;
+import com.lw.modularmachine.machine.HatchTier;
 import com.lw.modularmachine.machine.structure.StructureService;
 import com.lw.modularmachine.registry.MachineRegistries;
+import com.lw.modularmachine.util.Mods;
 import net.minecraft.core.BlockPos;
 import net.minecraft.gametest.framework.GameTest;
 import net.minecraft.gametest.framework.GameTestHelper;
@@ -107,6 +109,72 @@ public final class MachineColorGameTests {
       colorable.setMachineColor(0xFFFFFF);
     }
     return colorable.machineColor() == 0x38A6D2;
+  }
+
+  @GameTest(template = "empty16", batch = "machine_color", timeoutTicks = 80)
+  public static void chemical_hatch_tiers_persist_machine_color(GameTestHelper helper) {
+    if (!Mods.MEKANISM.isLoaded()) {
+      helper.succeed();
+      return;
+    }
+    var level = helper.getLevel();
+    var origin = helper.absolutePos(new BlockPos(2, 5, 2));
+    int index = 0;
+    for (String role : new String[]{"chemical_input_hatch_", "chemical_output_hatch_"}) {
+      for (var tier : HatchTier.CHEMICALS) {
+        var position = origin.offset(index % 4, 0, index / 4);
+        var state = MachineRegistries.PORTS.get(role + tier.name()).get().defaultBlockState();
+        level.setBlockAndUpdate(position, state);
+        var port = (MachinePortBlockEntity) level.getBlockEntity(position);
+        port.setMachineColor(0x38A6D2);
+        helper.assertTrue(
+            restoredColor(port, position, state, level),
+            "Chemical hatch lost saved/synced color: " + role + tier.name());
+        index++;
+      }
+    }
+    helper.succeed();
+  }
+
+  @GameTest(template = "empty16", batch = "machine_color", timeoutTicks = 120)
+  public static void chemical_hatch_color_distribution_resumes_after_budget(GameTestHelper helper) {
+    if (!Mods.MEKANISM.isLoaded()) {
+      helper.succeed();
+      return;
+    }
+    var level = helper.getLevel();
+    var origin = helper.absolutePos(new BlockPos(7, 5, 7));
+    level.setBlockAndUpdate(
+        origin,
+        MachineControllerBlock
+            .withOrientation(MachineRegistries.CONTROLLER.get().defaultBlockState(), MachineOrientation.IDENTITY));
+    var inputPos = origin.offset(-1, 0, 1);
+    var outputPos = origin.offset(1, 0, 1);
+    level.setBlockAndUpdate(
+        inputPos,
+        MachineRegistries.PORTS.get("chemical_input_hatch_normal").get().defaultBlockState());
+    level.setBlockAndUpdate(
+        outputPos,
+        MachineRegistries.PORTS.get("chemical_output_hatch_normal").get().defaultBlockState());
+    var controller = (MachineControllerBlockEntity) level.getBlockEntity(origin);
+    controller.bindMachine(ResourceLocation.fromNamespaceAndPath("mmcece", "test_chemical_color"));
+    var input = (MachinePortBlockEntity) level.getBlockEntity(inputPos);
+    var output = (MachinePortBlockEntity) level.getBlockEntity(outputPos);
+    for (int round = 0; round < 2; round++) {
+      input.setMachineColor(0xFFFFFF);
+      output.setMachineColor(0xFFFFFF);
+      StructureService.requestAudit(controller);
+      for (int attempt = 0; attempt < 200
+          && (!controller.canCommitProduction()
+              || input.machineColor() != 0x38A6D2
+              || output.machineColor() != 0x38A6D2); attempt++) {
+        StructureService.advance(level, 512, 1, 50_000_000L);
+      }
+      helper.assertTrue(
+          controller.canCommitProduction() && input.machineColor() == 0x38A6D2 && output.machineColor() == 0x38A6D2,
+          "Chemical hatch color distribution stopped at a work budget boundary");
+    }
+    helper.succeed();
   }
 
   private MachineColorGameTests() {

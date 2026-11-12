@@ -26,6 +26,7 @@ import com.lw.modularmachine.item.RangedConstructToolItem;
 import com.lw.modularmachine.machine.HatchTier;
 import com.lw.modularmachine.machine.ParallelControllerTier;
 import com.lw.modularmachine.machine.PortKind;
+import com.lw.modularmachine.machine.chemical.ChemicalPlatform;
 import com.lw.modularmachine.machine.UpgradeBusTier;
 import com.lw.modularmachine.machine.controller.DedicatedControllerCatalog;
 import com.lw.modularmachine.menu.FactoryControllerMenu;
@@ -134,6 +135,9 @@ public final class MachineRegistries {
       ITEMS.registerSimpleBlockItem(block);
     }
     for (PortKind kind : PortKind.values()) {
+      if (kind.resource() == PortKind.Resource.CHEMICAL && !ChemicalPlatform.available()) {
+        continue;
+      }
       for (HatchTier tier : HatchTier.forResource(kind.resource())) {
         String id = kind.path() + "_" + tier.name();
         DeferredBlock<MachinePortBlock> block = BLOCKS

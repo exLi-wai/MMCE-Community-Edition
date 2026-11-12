@@ -8,7 +8,6 @@ import java.util.Map;
 import net.minecraft.resources.ResourceLocation;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.Test;
-
 import static org.junit.jupiter.api.Assertions.*;
 
 class MachineItemRecipeKubeJSSourcesTest {

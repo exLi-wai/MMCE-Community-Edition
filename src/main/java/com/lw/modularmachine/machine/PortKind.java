@@ -6,7 +6,9 @@ public enum PortKind {
   FLUID_INPUT("fluid_input_hatch", Resource.FLUID, true),
   FLUID_OUTPUT("fluid_output_hatch", Resource.FLUID, false),
   ENERGY_INPUT("energy_input_hatch", Resource.ENERGY, true),
-  ENERGY_OUTPUT("energy_output_hatch", Resource.ENERGY, false);
+  ENERGY_OUTPUT("energy_output_hatch", Resource.ENERGY, false),
+  CHEMICAL_INPUT("chemical_input_hatch", Resource.CHEMICAL, true),
+  CHEMICAL_OUTPUT("chemical_output_hatch", Resource.CHEMICAL, false);
 
   private final String path;
   private final Resource resource;
@@ -33,7 +35,8 @@ public enum PortKind {
   public enum Resource {
     ITEM,
     FLUID,
-    ENERGY
+    ENERGY,
+    CHEMICAL
   }
 
 }

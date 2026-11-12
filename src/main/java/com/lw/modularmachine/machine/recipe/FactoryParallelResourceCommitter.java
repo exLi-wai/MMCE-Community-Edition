@@ -1,9 +1,7 @@
 package com.lw.modularmachine.machine.recipe;
 
 import com.lw.modularmachine.machine.factory.UpgradeLifecyclePublisher;
-
 import com.lw.modularmachine.api.recipe.RecipeLifecycleEvents;
-
 import com.lw.modularmachine.ModularMachine;
 import com.lw.modularmachine.blockentity.FactoryControllerBlockEntity;
 import com.lw.modularmachine.blockentity.MachinePortBlockEntity;
@@ -33,12 +31,14 @@ public final class FactoryParallelResourceCommitter {
     ADVANCED,
     WAITING_ENERGY,
     WAITING_FLUID,
+    WAITING_CHEMICAL,
     WAITING_UPGRADE,
     UPGRADE_ERROR,
     STALE,
     UPGRADE_PENDING,
     MISSING_ENERGY_INPUT,
-    MISSING_FLUID_INPUT
+    MISSING_FLUID_INPUT,
+    MISSING_CHEMICAL_INPUT
   }
 
   private record EnergyDebit(RecipeExecutionTicket.PortSnapshot port, long amount) {
@@ -146,10 +146,29 @@ public final class FactoryParallelResourceCommitter {
       }
       fluidDebits.addAll(planned);
     }
+    boolean hasChemicals = activeRuns.stream().anyMatch(run -> !run.chemicalPerTick().isEmpty());
+    var chemicalTicket = hasChemicals ? RecipeExecutionTicket.captureChemicalInputs(factory).orElse(null) : null;
+    ChemicalTransactions.Batch chemicals = null;
+    if (hasChemicals) {
+      if (chemicalTicket == null || activeRuns.stream().anyMatch(run -> !run.matchesInputGroups(chemicalTicket))) {
+        return Result.STALE;
+      }
+      for (var run : activeRuns) {
+        if (ChemicalTransactions
+            .missingInputs(chemicalTicket.withInputGroup(run.inputGroup()), run.chemicalPerTick())) {
+          return Result.MISSING_CHEMICAL_INPUT;
+        }
+      }
+      chemicals = ChemicalTransactions.fees(chemicalTicket, activeRuns);
+      if (chemicals == null) {
+        return applyFailure(factory, threadId, set, activeRuns, level.getGameTime(), Result.WAITING_CHEMICAL);
+      }
+    }
     if (!tickCosts.current()
         || energyTicket == null && fluidTicket == null && !factory.revalidateStructure(factory.registration())
         || energyTicket != null && !RecipeCommitGuard.validate(energyTicket)
         || fluidTicket != null && !RecipeCommitGuard.validate(fluidTicket)
+        || chemicalTicket != null && !RecipeCommitGuard.validate(chemicalTicket)
         || !tickCosts.versionsCurrent()) {
       return Result.STALE;
     }
@@ -160,6 +179,9 @@ public final class FactoryParallelResourceCommitter {
     boolean committed = false;
     try {
       tickCosts.acquireInto(tickCostLeases);
+      if (chemicals != null) {
+        chemicals.acquire();
+      }
       for (var debit : energyDebits) {
         var lease = debit.port().identity().acquireEnergyStart(debit.port().revision());
         energyLeases.add(lease);
@@ -207,7 +229,13 @@ public final class FactoryParallelResourceCommitter {
       for (var lease : tickCostLeases) {
         lease.resolve(committed);
       }
+      if (chemicals != null) {
+        chemicals.resolve(committed);
+      }
       if (committed) {
+        if (chemicals != null) {
+          chemicals.publish();
+        }
         factory.upgradeRuntimeWork().clear(Phase.TICK, threadId);
         FactoryUpgradeStartCosts.publish(factory, tickCostLeases);
         if (!advancedRuns.isEmpty()) {
@@ -224,7 +252,11 @@ public final class FactoryParallelResourceCommitter {
   private static Result applyFailure(FactoryControllerBlockEntity factory, String threadId, FactoryRunSet set, List<FrozenItemRun> activeRuns, long tick, Result result) {
     var replacements = new HashMap<UUID, FrozenItemRun>();
     var discarded = new HashSet<UUID>();
-    var resource = result == Result.WAITING_ENERGY ? RecipeLifecycleEvents.ResourceFailure.ENERGY : RecipeLifecycleEvents.ResourceFailure.FLUID;
+    var resource = switch (result) {
+      case WAITING_ENERGY -> RecipeLifecycleEvents.ResourceFailure.ENERGY;
+      case WAITING_CHEMICAL -> RecipeLifecycleEvents.ResourceFailure.CHEMICAL;
+      default -> RecipeLifecycleEvents.ResourceFailure.FLUID;
+    };
     boolean notify = RecipeLifecyclePublisher.hasListeners(RecipeLifecycleEvents.Type.RESOURCE_FAILURE);
     boolean notifyDiscard = RecipeLifecyclePublisher.hasListeners(RecipeLifecycleEvents.Type.DISCARDED);
     List<FrozenItemRun> before = notify ? new ArrayList<>() : List.of();
@@ -269,6 +301,9 @@ public final class FactoryParallelResourceCommitter {
   }
 
   private static boolean resourceStillUnavailable(FactoryControllerBlockEntity factory, List<FrozenItemRun> runs, Result result) {
+    if (result == Result.WAITING_CHEMICAL) {
+      return ChemicalTransactions.stillUnavailable(factory, runs);
+    }
     if (result == Result.WAITING_ENERGY) {
       var ticket = RecipeExecutionTicket.captureEnergyInputs(factory).orElse(null);
       if (ticket == null) {

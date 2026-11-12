@@ -1,7 +1,6 @@
 package com.lw.modularmachine.machine.recipe;
 
 import com.lw.modularmachine.api.recipe.RecipeFailureAction;
-
 import com.lw.modularmachine.ModularMachine;
 import com.lw.modularmachine.blockentity.FactoryControllerBlockEntity;
 import com.lw.modularmachine.blockentity.MachineControllerBlockEntity;
@@ -23,7 +22,6 @@ import java.util.Set;
 import java.util.WeakHashMap;
 import net.minecraft.resources.ResourceLocation;
 import net.minecraft.server.level.ServerLevel;
-
 import com.lw.modularmachine.api.recipe.RecipeLifecycleEvents.Context;
 import com.lw.modularmachine.api.recipe.RecipeLifecycleEvents.FailureContext;
 import com.lw.modularmachine.api.recipe.RecipeLifecycleEvents.FailureDecision;

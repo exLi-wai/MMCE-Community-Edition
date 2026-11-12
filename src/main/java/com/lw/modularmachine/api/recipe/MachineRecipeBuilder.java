@@ -29,6 +29,9 @@ public final class MachineRecipeBuilder {
   private final List<ItemRow> outputs = new ArrayList<>();
   private final List<FluidStack> fluidInputs = new ArrayList<>();
   private final List<FluidStack> fluidOutputs = new ArrayList<>();
+  private final List<ChemicalRequirement> chemicalInputs = new ArrayList<>();
+  private final List<ChemicalRequirement> chemicalOutputs = new ArrayList<>();
+  private final List<ChemicalRequirement> chemicalPerTick = new ArrayList<>();
   private final List<SmartNumberRequirement> interfaceInputs = new ArrayList<>();
   private final List<RecipeModifier> modifiers = new ArrayList<>();
   private RecipeSelectors selectors = RecipeSelectors.NONE;
@@ -83,6 +86,33 @@ public final class MachineRecipeBuilder {
 
   public MachineRecipeBuilder fluidOutput(FluidStack fluid) {
     fluidOutputs.add(requireFluid(fluid));
+    return this;
+  }
+
+  public MachineRecipeBuilder chemicalInput(ResourceLocation chemical, long amount) {
+    return chemicalInput(chemical, amount, "");
+  }
+
+  public MachineRecipeBuilder chemicalInput(ResourceLocation chemical, long amount, String selector) {
+    chemicalInputs.add(new ChemicalRequirement(chemical, amount, selector));
+    return this;
+  }
+
+  public MachineRecipeBuilder chemicalOutput(ResourceLocation chemical, long amount) {
+    return chemicalOutput(chemical, amount, "");
+  }
+
+  public MachineRecipeBuilder chemicalOutput(ResourceLocation chemical, long amount, String selector) {
+    chemicalOutputs.add(new ChemicalRequirement(chemical, amount, selector));
+    return this;
+  }
+
+  public MachineRecipeBuilder chemicalPerTick(ResourceLocation chemical, long amount) {
+    return chemicalPerTick(chemical, amount, "");
+  }
+
+  public MachineRecipeBuilder chemicalPerTick(ResourceLocation chemical, long amount, String selector) {
+    chemicalPerTick.add(new ChemicalRequirement(chemical, amount, selector));
     return this;
   }
 
@@ -171,6 +201,10 @@ public final class MachineRecipeBuilder {
     }
     addFluids(json, "fluid_inputs", fluidInputs, registries);
     addFluids(json, "fluid_outputs", fluidOutputs, registries);
+    var chemicals = new ChemicalRecipeData(chemicalInputs, chemicalOutputs, chemicalPerTick);
+    if (!chemicals.isEmpty()) {
+      json.add("chemicals", encode(ChemicalRecipeData.CODEC, chemicals, registries));
+    }
     if (failureAction != null) {
       json.addProperty("failure_action", failureAction.serialized());
     }

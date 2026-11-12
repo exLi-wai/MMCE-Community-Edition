@@ -5,7 +5,6 @@ import java.util.Objects;
 import net.minecraft.core.BlockPos;
 import net.minecraft.nbt.CompoundTag;
 import net.minecraft.resources.ResourceLocation;
-
 import com.lw.modularmachine.machine.factory.UpgradeBusDataHandlers;
 import com.lw.modularmachine.machine.factory.FactoryUpgradeDataSnapshots;
 

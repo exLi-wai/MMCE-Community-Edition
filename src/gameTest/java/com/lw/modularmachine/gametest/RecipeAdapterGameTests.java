@@ -1,5 +1,6 @@
 package com.lw.modularmachine.gametest;
 
+import java.util.stream.Collectors;
 import com.lw.modularmachine.api.recipe.MachineRecipeBuilder;
 import com.lw.modularmachine.api.recipe.adapter.RecipeAdapterContext;
 import com.lw.modularmachine.api.recipe.adapter.RecipeAdapterImport;
@@ -112,8 +113,7 @@ public final class RecipeAdapterGameTests {
         "golden_horse_armor");
     var goldInputs = inputs(gold, registries);
     helper.assertTrue(
-        goldInputs
-            .equals(expected.stream().map(item -> "minecraft:" + item).collect(java.util.stream.Collectors.toSet())),
+        goldInputs.equals(expected.stream().map(item -> "minecraft:" + item).collect(Collectors.toSet())),
         "Vanilla gold recycling must retain all ten ordinary OR inputs");
     for (var builder : gold) {
       var json = builder.toJson(registries);

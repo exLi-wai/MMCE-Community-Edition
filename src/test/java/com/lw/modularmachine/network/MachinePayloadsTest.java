@@ -120,7 +120,7 @@ class MachinePayloadsTest {
   @Test
   void resourceActionsAreVersionedAndPositionBound() {
     var action = new MachinePayloads.ResourcePortActionPayload(
-        MachinePayloads.PROTOCOL_VERSION,
+        MachinePayloads.RESOURCE_PROTOCOL_VERSION,
         new BlockPos(7, 8, 9),
         InteractionHand.MAIN_HAND);
     assertEquals(new BlockPos(7, 8, 9), action.position());
@@ -128,7 +128,7 @@ class MachinePayloadsTest {
     assertThrows(
         IllegalArgumentException.class,
         () -> new MachinePayloads.ResourcePortActionPayload(
-            MachinePayloads.PROTOCOL_VERSION + 1,
+            MachinePayloads.RESOURCE_PROTOCOL_VERSION + 1,
             action.position(),
             action.hand()));
   }

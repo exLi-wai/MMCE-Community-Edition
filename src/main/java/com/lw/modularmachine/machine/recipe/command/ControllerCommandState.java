@@ -1,5 +1,6 @@
 package com.lw.modularmachine.machine.recipe.command;
 
+import java.util.Objects;
 import com.lw.modularmachine.api.recipe.RecipeCommandActions;
 import com.lw.modularmachine.api.recipe.RecipeCommandActions.Action;
 import com.lw.modularmachine.api.recipe.RecipeCommandActions.Source;
@@ -62,11 +63,11 @@ public final class ControllerCommandState {
       Optional<UUID> owner,
       String command) {
     public Pending {
-      java.util.Objects.requireNonNull(action, "action");
-      java.util.Objects.requireNonNull(run, "run");
-      java.util.Objects.requireNonNull(recipe, "recipe");
-      java.util.Objects.requireNonNull(dimension, "dimension");
-      java.util.Objects.requireNonNull(owner, "owner");
+      Objects.requireNonNull(action, "action");
+      Objects.requireNonNull(run, "run");
+      Objects.requireNonNull(recipe, "recipe");
+      Objects.requireNonNull(dimension, "dimension");
+      Objects.requireNonNull(owner, "owner");
       position = position.immutable();
       if (progress < 0
           || parallel < 1

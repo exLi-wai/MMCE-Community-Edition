@@ -5,7 +5,6 @@ import net.minecraft.core.BlockPos;
 import net.minecraft.nbt.CompoundTag;
 import net.minecraft.resources.ResourceLocation;
 import net.minecraft.world.item.ItemStack;
-
 import com.lw.modularmachine.api.upgrade.FactoryDynamicUpgrades.Context;
 import com.lw.modularmachine.api.upgrade.FactoryDynamicUpgrades.Evaluator;
 import com.lw.modularmachine.api.upgrade.FactoryUpgradeEntry;

@@ -2,7 +2,8 @@ package com.lw.modularmachine.machine.recipe;
 
 import com.lw.modularmachine.api.recipe.RecipeSelectors;
 import com.lw.modularmachine.api.recipe.RecipeFailureAction;
-
+import com.lw.modularmachine.api.recipe.ChemicalRecipeData;
+import com.lw.modularmachine.api.recipe.ChemicalRequirement;
 import com.lw.modularmachine.machine.smart.SmartInterfaceType;
 import com.lw.modularmachine.api.smart.SmartNumberRequirement;
 import com.mojang.serialization.Codec;
@@ -119,7 +120,9 @@ public final class MachineRecipe implements Recipe<RecipeInput> {
           ItemAmount.CODEC.listOf().fieldOf("outputs").forGetter(MachineRecipe::outputs),
           SmartNumberRequirement.CODEC.listOf().optionalFieldOf("interface_inputs", List.of())
               .forGetter(MachineRecipe::interfaceInputs),
-          RecipeSelectors.CODEC.optionalFieldOf("selectors", RecipeSelectors.NONE).forGetter(MachineRecipe::selectors))
+          RecipeSelectors.CODEC.optionalFieldOf("selectors", RecipeSelectors.NONE).forGetter(MachineRecipe::selectors),
+          ChemicalRecipeData.CODEC.optionalFieldOf("chemicals", ChemicalRecipeData.NONE)
+              .forGetter(MachineRecipe::chemicals))
           .apply(instance, MachineRecipe::new));
   public static final MapCodec<MachineRecipe> CODEC = new MapCodec<>() {
     @Override
@@ -171,8 +174,9 @@ public final class MachineRecipe implements Recipe<RecipeInput> {
   private final List<ItemAmount> inputs, outputs;
   private final List<SmartNumberRequirement> interfaceInputs;
   private final RecipeSelectors selectors;
+  private final ChemicalRecipeData chemicals;
 
-  private MachineRecipe(ResourceLocation machineId, int priority, int duration, long energyPerTick, FluidStack fluidPerTick, List<FluidStack> fluidInputs, List<FluidStack> fluidOutputs, String failureAction, boolean parallelized, long randomSeed, List<ItemAmount> inputs, List<ItemAmount> outputs, List<SmartNumberRequirement> interfaceInputs, RecipeSelectors selectors) {
+  private MachineRecipe(ResourceLocation machineId, int priority, int duration, long energyPerTick, FluidStack fluidPerTick, List<FluidStack> fluidInputs, List<FluidStack> fluidOutputs, String failureAction, boolean parallelized, long randomSeed, List<ItemAmount> inputs, List<ItemAmount> outputs, List<SmartNumberRequirement> interfaceInputs, RecipeSelectors selectors, ChemicalRecipeData chemicals) {
     if (duration <= 0 || energyPerTick < 0) {
       throw new IllegalArgumentException("Nonpositive duration");
     }
@@ -193,11 +197,21 @@ public final class MachineRecipe implements Recipe<RecipeInput> {
     this.outputs = List.copyOf(outputs);
     this.interfaceInputs = List.copyOf(interfaceInputs);
     this.selectors = Objects.requireNonNull(selectors, "selectors");
+    this.chemicals = Objects.requireNonNull(chemicals, "chemicals");
     if (interfaceInputs.size() > SmartInterfaceType.MAX_TYPES) {
       throw new IllegalArgumentException("Unsupported interface requirements/selectors for recipe schema");
     }
     validateAmounts(this.inputs);
     validateAmounts(this.outputs);
+    if (this.inputs.isEmpty()
+        && this.fluidInputs.isEmpty()
+        && this.fluidPerTick.isEmpty()
+        && energyPerTick == 0
+        && chemicals.inputs().isEmpty()
+        && chemicals.perTick().isEmpty()
+        || this.outputs.isEmpty() && this.fluidOutputs.isEmpty() && chemicals.outputs().isEmpty()) {
+      throw new IllegalArgumentException("A machine recipe requires resource input and output");
+    }
     if (this.inputs.size() != 1 && this.inputs.stream().anyMatch(ItemAmount::ignoresComponents)
         || this.outputs.stream().anyMatch(ItemAmount::ignoresComponents)) {
       throw new IllegalArgumentException("Item-only matching requires one item input and exact outputs");
@@ -205,8 +219,8 @@ public final class MachineRecipe implements Recipe<RecipeInput> {
   }
 
   private static void validateAmounts(List<ItemAmount> values) {
-    if (values.isEmpty() || values.size() > MachineRecipeJson.MAX_DEMANDS) {
-      throw new IllegalArgumentException("Expected 1..256 item requirements");
+    if (values.size() > MachineRecipeJson.MAX_DEMANDS) {
+      throw new IllegalArgumentException("Expected at most 256 item requirements");
     }
     var totals = new HashMap<StackIdentity, Long>();
     for (var value : values) {
@@ -285,6 +299,10 @@ public final class MachineRecipe implements Recipe<RecipeInput> {
     return selectors;
   }
 
+  public ChemicalRecipeData chemicals() {
+    return chemicals;
+  }
+
   RecipeCandidate<ItemResourceKey> compile(ResourceLocation id, HolderLookup.Provider registries) {
     return new RecipeCandidate<>(
         id.toString(),
@@ -320,6 +338,7 @@ public final class MachineRecipe implements Recipe<RecipeInput> {
         && randomSeed == other.randomSeed
         && interfaceInputs.equals(other.interfaceInputs)
         && selectors.equals(other.selectors)
+        && chemicals.equals(other.chemicals)
         && sameAmounts(inputs, other.inputs)
         && sameAmounts(outputs, other.outputs);
   }
@@ -353,7 +372,7 @@ public final class MachineRecipe implements Recipe<RecipeInput> {
   }
 
   private static void write(RegistryFriendlyByteBuf buffer, MachineRecipe value) {
-    buffer.writeVarInt(12);
+    buffer.writeVarInt(13);
     buffer.writeResourceLocation(value.machineId);
     buffer.writeVarInt(value.priority);
     buffer.writeVarInt(value.duration);
@@ -382,6 +401,35 @@ public final class MachineRecipe implements Recipe<RecipeInput> {
     buffer.writeUtf(value.selectors.fluidOutput(), ResourceSelector.MAX_LENGTH);
     buffer.writeUtf(value.selectors.energyInput(), ResourceSelector.MAX_LENGTH);
     buffer.writeUtf(value.selectors.fluidPerTick(), ResourceSelector.MAX_LENGTH);
+    writeChemicals(buffer, value.chemicals.inputs());
+    writeChemicals(buffer, value.chemicals.outputs());
+    writeChemicals(buffer, value.chemicals.perTick());
+  }
+
+  private static void writeChemicals(RegistryFriendlyByteBuf buffer, List<ChemicalRequirement> values) {
+    buffer.writeVarInt(values.size());
+    for (var value : values) {
+      buffer.writeResourceLocation(value.chemical());
+      buffer.writeVarLong(value.amount());
+      buffer.writeUtf(value.selector(), ResourceSelector.MAX_LENGTH);
+    }
+  }
+
+  private static List<ChemicalRequirement> readChemicals(RegistryFriendlyByteBuf buffer) {
+    int count = buffer.readVarInt();
+    if (count < 0 || count > ChemicalRecipeData.MAX_REQUIREMENTS) {
+      throw new DecoderException("Invalid chemical requirement count");
+    }
+    var values = new ArrayList<ChemicalRequirement>(count);
+    for (int index = 0; index < count; index++) {
+      values.add(
+          new ChemicalRequirement(
+              buffer.readResourceLocation(),
+              buffer.readVarLong(),
+              buffer.readUtf(ResourceSelector.MAX_LENGTH)));
+    }
+
+    return List.copyOf(values);
   }
 
   private static void writeAmounts(RegistryFriendlyByteBuf buffer, List<ItemAmount> values) {
@@ -398,7 +446,7 @@ public final class MachineRecipe implements Recipe<RecipeInput> {
   private static MachineRecipe read(RegistryFriendlyByteBuf buffer) {
     try {
       int schema = buffer.readVarInt();
-      if (schema != 12) {
+      if (schema != 13) {
         throw new DecoderException("Unsupported machine recipe wire schema");
       }
       var machine = buffer.readResourceLocation();
@@ -429,6 +477,7 @@ public final class MachineRecipe implements Recipe<RecipeInput> {
           buffer.readUtf(ResourceSelector.MAX_LENGTH),
           buffer.readUtf(ResourceSelector.MAX_LENGTH),
           buffer.readUtf(ResourceSelector.MAX_LENGTH));
+      var chemicals = new ChemicalRecipeData(readChemicals(buffer), readChemicals(buffer), readChemicals(buffer));
       return new MachineRecipe(
           machine,
           priority,
@@ -443,7 +492,8 @@ public final class MachineRecipe implements Recipe<RecipeInput> {
           inputs,
           outputs,
           interfaceInputs,
-          selectors);
+          selectors,
+          chemicals);
     } catch (IllegalArgumentException | ArithmeticException | IndexOutOfBoundsException invalid) {
       throw new DecoderException("Invalid machine recipe packet", invalid);
     }
@@ -475,7 +525,7 @@ public final class MachineRecipe implements Recipe<RecipeInput> {
 
   private static List<ItemAmount> readAmounts(RegistryFriendlyByteBuf buffer) {
     int size = buffer.readVarInt();
-    if (size < 1 || size > MachineRecipeJson.MAX_DEMANDS) {
+    if (size < 0 || size > MachineRecipeJson.MAX_DEMANDS) {
       throw new DecoderException("Invalid machine recipe list size");
     }
     var values = new ArrayList<ItemAmount>(size);
@@ -508,6 +558,9 @@ public final class MachineRecipe implements Recipe<RecipeInput> {
 
   @Override
   public ItemStack getResultItem(HolderLookup.Provider registries) {
+    if (outputs.isEmpty()) {
+      return ItemStack.EMPTY;
+    }
     var result = outputs.getFirst().prototype(registries);
     result.setCount((int) Math.min(outputs.getFirst().amount, result.getMaxStackSize()));
     return result;

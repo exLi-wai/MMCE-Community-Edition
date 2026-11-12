@@ -1,10 +1,12 @@
 package com.lw.modularmachine.network;
 
 import com.lw.modularmachine.ModularMachine;
+import com.lw.modularmachine.api.component.ChemicalStackData;
 import com.lw.modularmachine.api.controller.MachineControllerApi;
 import com.lw.modularmachine.blockentity.FactoryControllerBlockEntity;
 import com.lw.modularmachine.blockentity.MachinePortBlockEntity;
 import com.lw.modularmachine.machine.PortKind;
+import com.lw.modularmachine.machine.chemical.ChemicalPlatform;
 import com.lw.modularmachine.machine.factory.FactoryThreadState;
 import com.lw.modularmachine.machine.factory.FactoryThreadStateCodec;
 import com.lw.modularmachine.machine.recipe.ControllerMetrics;
@@ -31,6 +33,7 @@ import net.neoforged.neoforge.network.handling.IPayloadContext;
 /** Versioned, bounded controller state payloads for menus and observers. */
 public final class MachinePayloads {
   public static final int PROTOCOL_VERSION = 3;
+  public static final int RESOURCE_PROTOCOL_VERSION = 4;
   public static final int MAX_SHORTAGES = 8;
   public static final int MAX_TEXT_LENGTH = 512;
   public static final ResourceLocation STATUS_ID = ResourceLocation
@@ -78,11 +81,11 @@ public final class MachinePayloads {
     event.registrar(String.valueOf(PROTOCOL_VERSION)).playToClient(STATUS_TYPE, STATUS_CODEC, (payload, context) -> {
       context.enqueueWork(() -> clientReceiver.accept(payload));
     });
-    event.registrar(String.valueOf(PROTOCOL_VERSION)).playToClient(
+    event.registrar(String.valueOf(RESOURCE_PROTOCOL_VERSION)).playToClient(
         RESOURCE_STATUS_TYPE,
         RESOURCE_STATUS_CODEC,
         (payload, context) -> context.enqueueWork(() -> resourceClientReceiver.accept(payload)));
-    event.registrar(String.valueOf(PROTOCOL_VERSION)).playToServer(
+    event.registrar(String.valueOf(RESOURCE_PROTOCOL_VERSION)).playToServer(
         RESOURCE_ACTION_TYPE,
         RESOURCE_ACTION_CODEC,
         (payload, context) -> context.enqueueWork(() -> handleResourceAction(payload, context)));
@@ -131,11 +134,16 @@ public final class MachinePayloads {
     if (!(context.player() instanceof ServerPlayer player)
         || !(player.containerMenu instanceof MachineResourceMenu menu)
         || !menu.stillValid(player)
-        || !menu.port().getBlockPos().equals(payload.position())
-        || menu.port().kind().resource() != PortKind.Resource.FLUID) {
+        || !menu.port().getBlockPos().equals(payload.position())) {
       return;
     }
-    FluidUtil.interactWithFluidHandler(player, payload.hand(), menu.port().fluidTank());
+    if (menu.port().kind().resource() == PortKind.Resource.FLUID) {
+      FluidUtil.interactWithFluidHandler(player, payload.hand(), menu.port().fluidTank());
+    } else if (menu.port().kind().resource() == PortKind.Resource.CHEMICAL) {
+      ChemicalPlatform.interact(player, payload.hand(), menu.port());
+    } else {
+      return;
+    }
     PacketDistributor.sendToPlayer(player, resourceStatus(menu.port()));
   }
 
@@ -162,25 +170,30 @@ public final class MachinePayloads {
   public static ResourcePortStatusPayload resourceStatus(MachinePortBlockEntity port) {
     var fluid = port.kind().resource() == PortKind.Resource.FLUID ? port.fluidTank().getFluid()
         .copy() : FluidStack.EMPTY;
+    var chemical = port.kind().resource() == PortKind.Resource.CHEMICAL ? port.chemicalTank()
+        .getStack() : ChemicalStackData.EMPTY;
     long amount = switch (port.kind().resource()) {
       case ITEM -> 0;
       case FLUID -> fluid.getAmount();
+      case CHEMICAL -> chemical.amount();
       case ENERGY -> port.energy().stored();
     };
     long capacity = switch (port.kind().resource()) {
       case ITEM -> 0;
       case FLUID -> port.fluidTank().getCapacity();
+      case CHEMICAL -> port.chemicalTank().getCapacity();
       case ENERGY -> port.energy().capacity();
     };
     return new ResourcePortStatusPayload(
-        PROTOCOL_VERSION,
+        RESOURCE_PROTOCOL_VERSION,
         port.getBlockPos(),
         port.kind(),
         port.tier().name(),
         amount,
         capacity,
         port.kind().resource() == PortKind.Resource.ENERGY ? port.energy().transferLimit() : 0,
-        fluid);
+        fluid,
+        chemical);
   }
 
   public record ResourcePortStatusPayload(
@@ -191,20 +204,25 @@ public final class MachinePayloads {
       long amount,
       long capacity,
       long transferLimit,
-      FluidStack fluid) implements CustomPacketPayload {
+      FluidStack fluid,
+      ChemicalStackData chemical) implements CustomPacketPayload {
     public ResourcePortStatusPayload {
-      if (version != PROTOCOL_VERSION
+      if (version != RESOURCE_PROTOCOL_VERSION
+          || position == null
           || kind == null
           || kind.resource() == PortKind.Resource.ITEM
           || tier == null
           || !tier.matches("[a-z_]{1,32}")
           || amount < 0
           || capacity <= 0
-          || amount > capacity
+          || amount > capacity && kind.resource() != PortKind.Resource.CHEMICAL
           || transferLimit < 0
           || fluid == null
-          || kind.resource() == PortKind.Resource.ENERGY && !fluid.isEmpty()
-          || !fluid.isEmpty() && fluid.getAmount() != amount) {
+          || chemical == null
+          || kind.resource() != PortKind.Resource.FLUID && !fluid.isEmpty()
+          || kind.resource() == PortKind.Resource.FLUID && fluid.getAmount() != amount
+          || kind.resource() != PortKind.Resource.CHEMICAL && !chemical.isEmpty()
+          || kind.resource() == PortKind.Resource.CHEMICAL && chemical.amount() != amount) {
         throw new IllegalArgumentException("Invalid resource port status payload");
       }
       position = position.immutable();
@@ -226,7 +244,7 @@ public final class MachinePayloads {
       implements
         CustomPacketPayload {
     public ResourcePortActionPayload {
-      if (version != PROTOCOL_VERSION || position == null || hand == null) {
+      if (version != RESOURCE_PROTOCOL_VERSION || position == null || hand == null) {
         throw new IllegalArgumentException("Invalid resource port action payload");
       }
       position = position.immutable();
@@ -555,6 +573,8 @@ public final class MachinePayloads {
     buffer.writeVarLong(payload.capacity());
     buffer.writeVarLong(payload.transferLimit());
     FluidStack.OPTIONAL_STREAM_CODEC.encode(buffer, payload.fluid());
+    buffer.writeResourceLocation(payload.chemical().chemical());
+    buffer.writeVarLong(payload.chemical().amount());
   }
 
   private static void writeFactoryStatus(RegistryFriendlyByteBuf buffer, FactoryStatusPayload payload) {
@@ -702,7 +722,8 @@ public final class MachinePayloads {
         buffer.readVarLong(),
         buffer.readVarLong(),
         buffer.readVarLong(),
-        FluidStack.OPTIONAL_STREAM_CODEC.decode(buffer));
+        FluidStack.OPTIONAL_STREAM_CODEC.decode(buffer),
+        new ChemicalStackData(buffer.readResourceLocation(), buffer.readVarLong()));
   }
 
   private static void writeResourceAction(RegistryFriendlyByteBuf buffer, ResourcePortActionPayload payload) {

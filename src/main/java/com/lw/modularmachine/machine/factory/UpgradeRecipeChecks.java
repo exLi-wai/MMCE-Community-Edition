@@ -12,7 +12,6 @@ import net.minecraft.nbt.NbtOps;
 import net.minecraft.resources.ResourceLocation;
 import net.minecraft.server.level.ServerLevel;
 import net.minecraft.world.item.crafting.Recipe;
-
 import com.lw.modularmachine.api.upgrade.FactoryUpgradeEvents;
 import com.lw.modularmachine.api.upgrade.FactoryUpgradeRecipeChecks.Checker;
 import com.lw.modularmachine.api.upgrade.FactoryUpgradeRecipeChecks.Context;

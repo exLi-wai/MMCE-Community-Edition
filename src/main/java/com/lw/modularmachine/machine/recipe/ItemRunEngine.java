@@ -1,9 +1,7 @@
 package com.lw.modularmachine.machine.recipe;
 
 import com.lw.modularmachine.machine.factory.UpgradeLifecyclePublisher;
-
 import com.lw.modularmachine.api.recipe.RecipeLifecycleEvents;
-
 import com.lw.modularmachine.ModularMachine;
 import com.lw.modularmachine.blockentity.MachineControllerBlockEntity;
 import com.lw.modularmachine.blockentity.MachinePortBlockEntity;
@@ -39,6 +37,7 @@ public final class ItemRunEngine {
     ADVANCED,
     WAITING_ENERGY,
     WAITING_FLUID,
+    WAITING_CHEMICAL,
     OUTPUT_PLANNING,
     OUTPUT_BLOCKED,
     STALE,
@@ -52,7 +51,9 @@ public final class ItemRunEngine {
     MISSING_ITEM_OUTPUT,
     MISSING_ENERGY_INPUT,
     MISSING_FLUID_INPUT,
-    MISSING_FLUID_OUTPUT
+    MISSING_FLUID_OUTPUT,
+    MISSING_CHEMICAL_INPUT,
+    MISSING_CHEMICAL_OUTPUT
   }
 
   private long lastAttempt = Long.MIN_VALUE;
@@ -68,6 +69,7 @@ public final class ItemRunEngine {
     final RecipeExecutionTicket ticket;
     final ItemOutputLayout layout;
     final FluidOutputLayout.Planning fluidPlan;
+    final ChemicalOutputLayout.Planning chemicalPlan;
     final RecipePlanner.Session<ItemResourceKey> planner;
 
     Work(FrozenItemRun run, RecipeExecutionTicket ticket, ServerLevel level) {
@@ -84,6 +86,7 @@ public final class ItemRunEngine {
       layout = new ItemOutputLayout(ticket, keys);
       fluidPlan = new FluidOutputLayout(ticket, level.registryAccess())
           .plan(run.fluidOutputClaims(level.registryAccess()), run.selectors().fluidOutput());
+      chemicalPlan = new ChemicalOutputLayout(ticket).plan(run.chemicalOutputs());
       planner = claims.isEmpty() ? null : RecipePlanner.prepareOutputs(layout.snapshot, candidate);
     }
   }
@@ -198,6 +201,22 @@ public final class ItemRunEngine {
           }
         }
         var beforeTick = run;
+        RecipeExecutionTicket chemicalTicket = null;
+        ChemicalTransactions.Batch chemicals = null;
+        if (!run.chemicalPerTick().isEmpty()) {
+          var captured = RecipeExecutionTicket.captureChemicalInputs(controller);
+          if (captured.isEmpty() || !run.matchesInputGroups(captured.orElseThrow())) {
+            return status = Result.PAUSED;
+          }
+          chemicalTicket = captured.orElseThrow().withInputGroup(run.inputGroup());
+          if (ChemicalTransactions.missingInputs(chemicalTicket, run.chemicalPerTick())) {
+            return status = Result.MISSING_CHEMICAL_INPUT;
+          }
+          chemicals = ChemicalTransactions.inputs(chemicalTicket, run.chemicalPerTick());
+          if (chemicals == null) {
+            return status = applyResourceFailure(controller, run, now, Result.WAITING_CHEMICAL);
+          }
+        }
         var owner = controller.acquireRunUpdate(run);
         var energyLeases = new ArrayList<MachinePortBlockEntity.EnergyStartLease>();
         var fluidLeases = new ArrayList<MachinePortBlockEntity.FluidStartLease>();
@@ -210,10 +229,14 @@ public final class ItemRunEngine {
               || !qualified(controller, run)
               || energyTicket != null && !RecipeCommitGuard.validate(energyTicket)
               || fluidTicket != null && !RecipeCommitGuard.validate(fluidTicket)
+              || chemicalTicket != null && !RecipeCommitGuard.validate(chemicalTicket)
               || !tickCosts.versionsCurrent()) {
             return status = Result.PAUSED;
           }
           tickCosts.acquireInto(tickCostLeases);
+          if (chemicals != null) {
+            chemicals.acquire();
+          }
           for (var debit : debits) {
             energyLeases.add(debit.port().identity().acquireEnergyStart(debit.port().revision()));
           }
@@ -251,6 +274,12 @@ public final class ItemRunEngine {
             lease.resolve(commit);
           }
           owner.resolve(commit);
+          if (chemicals != null) {
+            chemicals.resolve(commit);
+          }
+        }
+        if (chemicals != null) {
+          chemicals.publish();
         }
         controller.upgradeRuntimeWork().clear(Phase.TICK, "main");
         FactoryUpgradeStartCosts.publish(controller, tickCostLeases);
@@ -290,7 +319,11 @@ public final class ItemRunEngine {
   }
 
   private Result applyResourceFailure(MachineControllerBlockEntity controller, FrozenItemRun run, long tick, Result result) {
-    var resource = result == Result.WAITING_ENERGY ? RecipeLifecycleEvents.ResourceFailure.ENERGY : RecipeLifecycleEvents.ResourceFailure.FLUID;
+    var resource = switch (result) {
+      case WAITING_ENERGY -> RecipeLifecycleEvents.ResourceFailure.ENERGY;
+      case WAITING_CHEMICAL -> RecipeLifecycleEvents.ResourceFailure.CHEMICAL;
+      default -> RecipeLifecycleEvents.ResourceFailure.FLUID;
+    };
     var decision = RecipeLifecyclePublisher.decideResourceFailure(controller, Optional.empty(), run, resource);
     if (controller.runningRecipe().orElse(null) != run
         || !controller.canCommitProduction()
@@ -333,6 +366,9 @@ public final class ItemRunEngine {
   }
 
   private static boolean stillUnavailable(MachineControllerBlockEntity controller, FrozenItemRun run, RecipeLifecycleEvents.ResourceFailure resource) {
+    if (resource == RecipeLifecycleEvents.ResourceFailure.CHEMICAL) {
+      return ChemicalTransactions.stillUnavailable(controller, List.of(run));
+    }
     if (resource == RecipeLifecycleEvents.ResourceFailure.ENERGY) {
       var ticket = RecipeExecutionTicket.captureEnergyInputs(controller).orElse(null);
       return ticket != null && planEnergyDebits(ticket, run.energyPerTick(), run.selectors().energyInput()) == null;
@@ -435,6 +471,16 @@ public final class ItemRunEngine {
       return Result.OUTPUT_BLOCKED;
     }
     var fluidAdditions = active.fluidPlan.additions();
+    if (active.chemicalPlan.status() == RecipePlanner.Status.BUDGET_EXHAUSTED) {
+      var result = active.chemicalPlan.advance(budget);
+      budget -= result.workUsed();
+    }
+    if (active.chemicalPlan.status() == RecipePlanner.Status.BUDGET_EXHAUSTED) {
+      return Result.OUTPUT_PLANNING;
+    }
+    if (active.chemicalPlan.status() == RecipePlanner.Status.NO_MATCH) {
+      return Result.OUTPUT_BLOCKED;
+    }
     var replacements = Map.<String, NonNullList<ItemStack>>of();
     if (active.planner != null) {
       var result = active.planner.advance(budget);
@@ -478,10 +524,12 @@ public final class ItemRunEngine {
     var leases = new HashMap<String, MachinePortBlockEntity.ItemStartLease>();
     var fluidLeases = new HashMap<String, MachinePortBlockEntity.FluidStartLease>();
     var upgradeLeases = new ArrayList<StartCostLease>();
+    var chemicals = ChemicalTransactions.outputs(checked.orElseThrow(), active.chemicalPlan.additions());
     var owner = controller.acquireRunUpdate(run);
     boolean commit = false;
     try {
       runtime.acquireInto(upgradeLeases);
+      chemicals.acquire();
       for (var port : checked.orElseThrow().ports()) {
         if (port.kind() == PortKind.ITEM_OUTPUT) {
           leases.put(port.partId(), port.identity().acquireItemStart(port.revision()));
@@ -512,11 +560,13 @@ public final class ItemRunEngine {
         lease.resolve(commit);
       }
       owner.resolve(commit);
+      chemicals.resolve(commit);
       if (commit) {
         work = null;
       }
     }
     controller.upgradeRuntimeWork().clear(Phase.FINISHED, "main");
+    chemicals.publish();
     FactoryUpgradeStartCosts.publish(controller, upgradeLeases);
     publishController(controller);
     UpgradeLifecyclePublisher.recipeFinished(controller, "main", List.of(run));

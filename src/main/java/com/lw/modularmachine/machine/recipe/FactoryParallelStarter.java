@@ -1,7 +1,6 @@
 package com.lw.modularmachine.machine.recipe;
 
 import com.lw.modularmachine.machine.factory.UpgradeLifecyclePublisher;
-
 import com.lw.modularmachine.ModularMachine;
 import com.lw.modularmachine.blockentity.FactoryControllerBlockEntity;
 import com.lw.modularmachine.blockentity.MachinePortBlockEntity;
@@ -50,6 +49,7 @@ public final class FactoryParallelStarter {
     boolean committed = false;
     var leases = new ArrayList<MachinePortBlockEntity.ItemStartLease>();
     var fluidLeases = new HashMap<String, MachinePortBlockEntity.FluidStartLease>();
+    ChemicalTransactions.Batch chemicals = null;
     var upgradeLeases = new ArrayList<StartCostLease>();
     try {
       var nativeRecipe = MachineRecipeService.definitionForStart(factory, plans.get(0));
@@ -91,6 +91,11 @@ public final class FactoryParallelStarter {
       }
       var replacements = new HashMap<String, NonNullList<ItemStack>>();
       var fluidRequirements = nativeRecipe.orElseThrow().fluidInputs();
+      chemicals = ChemicalTransactions
+          .inputs(ticket, ChemicalTransactions.scaled(nativeRecipe.orElseThrow().chemicals().inputs(), plans.size()));
+      if (chemicals == null) {
+        return Result.STALE;
+      }
       for (var plan : uniquePlans) {
         if (!plan.validateForStart()
             || plan.source().inputGroup() != ticket.inputGroup()
@@ -161,6 +166,15 @@ public final class FactoryParallelStarter {
         }
       }
       var startCosts = plans.getFirst().prepareFactoryStartup(factory, threadId, plans.size());
+      var chemicalOutputCheck = plans.getFirst()
+          .prepareChemicalOutputs(nativeRecipe.orElseThrow(), plans.size(), Math.max(0, checkBudget));
+      checkBudget -= chemicalOutputCheck.workUsed();
+      if (chemicalOutputCheck.status() == RecipePlanner.Status.BUDGET_EXHAUSTED) {
+        return Result.CHECK_PENDING;
+      }
+      if (chemicalOutputCheck.status() != RecipePlanner.Status.SELECTED) {
+        return Result.STALE;
+      }
       if (!startCosts.current()) {
         return Result.STALE;
       }
@@ -200,6 +214,7 @@ public final class FactoryParallelStarter {
         return Result.STALE;
       }
       startCosts.acquireInto(upgradeLeases);
+      chemicals.acquire();
       for (var port : ticket.ports()) {
         if (port.kind().resource() == PortKind.Resource.ITEM) {
           var lease = port.identity().acquireItemStart(port.revision());
@@ -241,8 +256,12 @@ public final class FactoryParallelStarter {
       for (var lease : upgradeLeases) {
         lease.resolve(committed);
       }
+      if (chemicals != null) {
+        chemicals.resolve(committed);
+      }
       factory.finishRunStart(threadId, committed);
       if (committed) {
+        chemicals.publish();
         factory.setChanged();
         FactoryUpgradeStartCosts.publish(factory, upgradeLeases);
         UpgradeLifecyclePublisher.recipeStarted(factory, threadId, factory.runSet(threadId).runs());

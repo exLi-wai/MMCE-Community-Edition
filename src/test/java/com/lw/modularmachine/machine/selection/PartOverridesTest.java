@@ -3,7 +3,6 @@ package com.lw.modularmachine.machine.selection;
 import com.google.gson.JsonParser;
 import com.lw.modularmachine.machine.selection.RangedSelectionData.PartEdit;
 import org.junit.jupiter.api.Test;
-
 import static org.junit.jupiter.api.Assertions.*;
 
 class PartOverridesTest {

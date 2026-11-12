@@ -37,6 +37,7 @@ public record RecipeModifier(Target target, Io io, Operation operation, double v
   public enum Target {
     ITEM,
     FLUID,
+    CHEMICAL,
     ENERGY,
     DURATION;
 
@@ -48,6 +49,7 @@ public record RecipeModifier(Target target, Io io, Operation operation, double v
       return switch (value) {
         case "item" -> ITEM;
         case "fluid" -> FLUID;
+        case "chemical" -> CHEMICAL;
         case "energy" -> ENERGY;
         case "duration" -> DURATION;
         default -> throw new IllegalArgumentException("Unknown modifier target: " + value);

@@ -1,7 +1,6 @@
 package com.lw.modularmachine.blockentity;
 
 import com.lw.modularmachine.machine.factory.UpgradeLifecyclePublisher;
-
 import com.lw.modularmachine.ModularMachine;
 import com.lw.modularmachine.api.controller.MachineControllerApi;
 import com.lw.modularmachine.block.MachineControllerBlock;

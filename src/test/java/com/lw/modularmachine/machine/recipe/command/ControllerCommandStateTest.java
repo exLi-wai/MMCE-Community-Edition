@@ -1,9 +1,9 @@
 package com.lw.modularmachine.machine.recipe.command;
 
+import java.util.Locale;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertTrue;
-
 import com.lw.modularmachine.api.recipe.RecipeCommandActions.Action;
 import com.lw.modularmachine.api.recipe.RecipeCommandActions.Source;
 import com.lw.modularmachine.api.recipe.RecipeLifecycleEvents.Type;
@@ -95,7 +95,7 @@ class ControllerCommandStateTest {
 
   private static ControllerCommandState.Pending pending(Type type, UUID run, int progress, long tick) {
     var action = new Action(
-        ResourceLocation.parse("kubejs:test_" + type.name().toLowerCase(java.util.Locale.ROOT)),
+        ResourceLocation.parse("kubejs:test_" + type.name().toLowerCase(Locale.ROOT)),
         MACHINE,
         Optional.of(RECIPE),
         type,

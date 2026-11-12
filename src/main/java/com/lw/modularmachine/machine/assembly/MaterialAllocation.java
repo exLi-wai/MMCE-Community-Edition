@@ -1,5 +1,6 @@
 package com.lw.modularmachine.machine.assembly;
 
+import java.util.Comparator;
 import java.util.ArrayDeque;
 import java.util.ArrayList;
 import java.util.Arrays;
@@ -65,8 +66,7 @@ final class MaterialAllocation {
         remnants.add(resource);
       }
     }
-    remnants
-        .sort(java.util.Comparator.comparingLong((Integer resource) -> quantity[resource] % unit[resource]).reversed());
+    remnants.sort(Comparator.comparingLong((Integer resource) -> quantity[resource] % unit[resource]).reversed());
     var capacity = new long[quantity.length + remnants.size()];
     for (int resource = 0; resource < quantity.length; resource++) {
       capacity[resource] = quantity[resource] / unit[resource];

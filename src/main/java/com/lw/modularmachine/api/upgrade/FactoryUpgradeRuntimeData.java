@@ -7,7 +7,6 @@ import java.util.UUID;
 import net.minecraft.core.BlockPos;
 import net.minecraft.nbt.CompoundTag;
 import net.minecraft.resources.ResourceLocation;
-
 import com.lw.modularmachine.machine.factory.UpgradeRuntimeDataHandlers;
 import com.lw.modularmachine.machine.factory.FactoryUpgradeCatalog;
 import com.lw.modularmachine.machine.factory.FactoryUpgradeDataSnapshots;

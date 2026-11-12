@@ -1,0 +1,7 @@
+{
+  "textures": {
+    "casing": "mmcece:block/blockcasing_plain",
+    "overlay": "mmcece:block/overlay/inputs/overlay_chemicalinputhatch_normal"
+  },
+  "parent": "mmcece:block/ported_shell"
+}

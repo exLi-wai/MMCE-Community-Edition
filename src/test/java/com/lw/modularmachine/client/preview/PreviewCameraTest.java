@@ -2,7 +2,6 @@ package com.lw.modularmachine.client.preview;
 
 import com.lw.modularmachine.api.client.preview.PreviewCamera;
 import org.junit.jupiter.api.Test;
-
 import static org.junit.jupiter.api.Assertions.*;
 
 class PreviewCameraTest {

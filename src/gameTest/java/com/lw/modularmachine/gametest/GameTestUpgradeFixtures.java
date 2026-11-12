@@ -1,7 +1,6 @@
 package com.lw.modularmachine.gametest;
 
 import net.minecraft.resources.ResourceLocation;
-
 import com.google.gson.JsonParser;
 import com.lw.modularmachine.machine.factory.FactoryUpgradeDefinition;
 import com.lw.modularmachine.machine.factory.FactoryUpgradeService;

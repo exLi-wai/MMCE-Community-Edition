@@ -1,5 +1,6 @@
 package com.lw.modularmachine.client.preview;
 
+import java.util.Arrays;
 import java.util.List;
 import java.util.ArrayList;
 import java.nio.ByteBuffer;
@@ -66,7 +67,7 @@ class TransparentQuadOrderTest {
     assertEquals(48.75F, buffer.getFloat(8));
     assertEquals(.125F, buffer.getFloat(12));
     assertEquals(.875F, buffer.getFloat(16));
-    assertArrayEquals(new byte[]{0x33, 0x66, (byte) 0x99, 0x64}, java.util.Arrays.copyOfRange(bytes, 20, 24));
+    assertArrayEquals(new byte[]{0x33, 0x66, (byte) 0x99, 0x64}, Arrays.copyOfRange(bytes, 20, 24));
     assertEquals(.25F, Float.intBitsToFloat(vertices[0]));
   }
 }

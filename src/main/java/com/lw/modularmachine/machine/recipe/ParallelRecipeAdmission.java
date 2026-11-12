@@ -16,6 +16,7 @@ final class ParallelRecipeAdmission {
   private int low = 1, high, probe;
   private RecipePlanner.Session<ItemResourceKey> items;
   private FluidOutputLayout.Planning fluidPlan;
+  private ChemicalOutputLayout.Planning chemicalPlan;
 
   ParallelRecipeAdmission(ItemRecipePlan plan, MachineRecipe definition, int limit, boolean aggregateDefinition) {
     this.plan = plan;
@@ -23,6 +24,7 @@ final class ParallelRecipeAdmission {
     high = Math.min(
         definition.parallelized() ? limit : Math.min(limit, 1),
         Math.min(plan.maxRepeatableInputs(), plan.maxRepeatableOutputs()));
+    high = ChemicalTransactions.arithmeticLimit(definition, high);
     var requiredFluids = new HashMap<FluidResourceKey, Long>();
     for (var fluid : definition.fluidInputs()) {
       requiredFluids.merge(
@@ -92,6 +94,8 @@ final class ParallelRecipeAdmission {
                     Math.multiplyExact((long) fluid.getAmount(), probe)))
             .toList();
         fluidPlan = fluids.planClaims(fluidClaims);
+        chemicalPlan = new ChemicalOutputLayout(plan.source())
+            .plan(ChemicalTransactions.scaled(definition.chemicals().outputs(), probe));
       }
       if (fluidPlan.status() == RecipePlanner.Status.BUDGET_EXHAUSTED) {
         var fluidResult = fluidPlan.advance(budget);
@@ -101,6 +105,17 @@ final class ParallelRecipeAdmission {
         return -1;
       }
       boolean matches = fluidPlan.status() == RecipePlanner.Status.SELECTED;
+      if (matches && chemicalPlan.status() == RecipePlanner.Status.BUDGET_EXHAUSTED) {
+        var result = chemicalPlan.advance(budget);
+        budget -= result.workUsed();
+        if (result.status() == RecipePlanner.Status.BUDGET_EXHAUSTED) {
+          return -1;
+        }
+      }
+      matches = matches
+          && chemicalPlan.status() == RecipePlanner.Status.SELECTED
+          && ChemicalTransactions
+              .inputs(plan.source(), ChemicalTransactions.scaled(definition.chemicals().inputs(), probe)) != null;
       if (matches && items != null) {
         var itemResult = items.advance(budget);
         budget -= itemResult.workUsed();
@@ -115,6 +130,7 @@ final class ParallelRecipeAdmission {
         high = probe - 1;
       }
       fluidPlan = null;
+      chemicalPlan = null;
       items = null;
     }
 

@@ -1,5 +1,6 @@
 package com.lw.modularmachine.client.appearance;
 
+import net.minecraft.world.level.ChunkPos;
 import com.lw.modularmachine.ModularMachine;
 import com.lw.modularmachine.network.MachineVisibilityPayloads;
 import com.lw.modularmachine.registry.MachineRegistries;
@@ -210,8 +211,7 @@ public final class MachineVisibilityClient {
         long position = owner.positions.get(owner.cleanupCursor++);
         MEMBERS_BY_POSITION.computeIfPresent(position, (ignored, previous) -> remaining(previous, owner, null));
         var blockPosition = BlockPos.of(position);
-        Chunk chunk = CHUNKS
-            .get(net.minecraft.world.level.ChunkPos.asLong(blockPosition.getX() >> 4, blockPosition.getZ() >> 4));
+        Chunk chunk = CHUNKS.get(ChunkPos.asLong(blockPosition.getX() >> 4, blockPosition.getZ() >> 4));
         if (chunk != null) {
           Set<Owner> references = chunk.ownersAtPosition.get(position);
           if (references != null) {
