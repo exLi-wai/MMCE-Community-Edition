@@ -1,1 +1,1 @@
-{"textures":{"casing":"mmcece:block/blockcasing_plain","overlay":"mmcece:block/overlay_upgrade_bus_super"},"parent":"mmcece:block/ported_shell"}
+{"textures":{"casing":"mmcece:block/blockcasing_plain","overlay":"mmcece:block/overlay/upgrades/overlay_upgrade_bus_super"},"parent":"mmcece:block/ported_shell"}

@@ -1,7 +1,7 @@
 {
   "parent": "mmcece:block/ported_shell",
   "textures": {
-    "overlay": "mmcece:block/overlay_vent",
+    "overlay": "mmcece:block/overlay/casings/overlay_vent",
     "casing": "mmcece:block/blockcasing_plain"
   }
 }

@@ -40,6 +40,8 @@ public final class DedicatedControllerCatalog {
   private static final long MAX_FILE_BYTES = 67_108_864L;
   private static final long MAX_TOTAL_BYTES = 1_073_741_824L;
   private static final int MAX_MACHINE_FILES = 1024;
+  private static final String CONTROLLER_OVERLAY = "mmcece:block/overlay/controllers/overlay_controller";
+  private static final String FACTORY_CONTROLLER_OVERLAY = "mmcece:block/overlay/controllers/overlay_factory_controller";
 
   /** Internal immutable resources for one controller appearance. */
   public record Appearance(ResourceLocation casing, ResourceLocation overlay, ResourceLocation model) {
@@ -263,11 +265,7 @@ public final class DedicatedControllerCatalog {
         }
         var casing = location(text(source, "casing", "mmcece:block/blockcasing_plain"));
         var overlay = location(
-            text(
-                source,
-                "overlay",
-                type.equals(
-                    "factory") ? "mmcece:block/overlay_factory_controller" : "mmcece:block/overlay_controller"));
+            text(source, "overlay", type.equals("factory") ? FACTORY_CONTROLLER_OVERLAY : CONTROLLER_OVERLAY));
         var model = source.has("model") ? location(text(source, "model", null)) : null;
         result.add(
             new Entry(
@@ -321,7 +319,7 @@ public final class DedicatedControllerCatalog {
                   factory,
                   "",
                   location("mmcece:block/blockcasing_plain"),
-                  location(factory ? "mmcece:block/overlay_factory_controller" : "mmcece:block/overlay_controller"),
+                  location(factory ? FACTORY_CONTROLLER_OVERLAY : CONTROLLER_OVERLAY),
                   null));
         }
       }

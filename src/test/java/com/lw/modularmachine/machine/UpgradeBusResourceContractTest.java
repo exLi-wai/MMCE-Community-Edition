@@ -31,10 +31,11 @@ class UpgradeBusResourceContractTest {
       var model = resource("/assets/mmcece/models/block/" + block + ".json");
       assertEquals("mmcece:block/ported_shell", model.get("parent").getAsString());
       assertEquals(
-          "mmcece:block/overlay_upgrade_bus_" + tier,
+          "mmcece:block/overlay/upgrades/overlay_upgrade_bus_" + tier,
           model.getAsJsonObject("textures").get("overlay").getAsString());
       try (var overlay = Objects.requireNonNull(
-          getClass().getResourceAsStream("/assets/mmcece/textures/block/overlay_upgrade_bus_" + tier + ".png"))) {
+          getClass().getResourceAsStream(
+              "/assets/mmcece/textures/block/overlay/upgrades/overlay_upgrade_bus_" + tier + ".png"))) {
         BufferedImage image = ImageIO.read(overlay);
         assertEquals(32, image.getWidth());
         assertEquals(32, image.getHeight());

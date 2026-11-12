@@ -1,1 +1,1 @@
-{"parent":"mmcece:block/ported_shell","render_type":"minecraft:cutout","textures":{"casing":"mmcece:block/blockcasing_plain","overlay":"mmcece:block/overlay_smartinterface_number"}}
+{"parent":"mmcece:block/ported_shell","render_type":"minecraft:cutout","textures":{"casing":"mmcece:block/blockcasing_plain","overlay":"mmcece:block/overlay/interfaces/overlay_smartinterface_number"}}

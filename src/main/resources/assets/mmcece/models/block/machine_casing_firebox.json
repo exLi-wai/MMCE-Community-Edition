@@ -1,7 +1,7 @@
 {
   "parent": "mmcece:block/ported_shell",
   "textures": {
-    "overlay": "mmcece:block/overlay_firebox",
+    "overlay": "mmcece:block/overlay/casings/overlay_firebox",
     "casing": "mmcece:block/blockcasing_plain"
   }
 }

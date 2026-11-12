@@ -1,7 +1,7 @@
 {
   "textures": {
     "casing": "mmcece:block/blockcasing_plain",
-    "overlay": "mmcece:block/overlay_fluidinputhatch_reinforced"
+    "overlay": "mmcece:block/overlay/inputs/overlay_fluidinputhatch_reinforced"
   },
   "parent": "mmcece:block/ported_shell"
 }

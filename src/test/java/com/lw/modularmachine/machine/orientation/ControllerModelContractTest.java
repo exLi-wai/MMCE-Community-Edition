@@ -27,7 +27,9 @@ class ControllerModelContractTest {
       for (int roll = 0; roll < 4; roll++) {
         String path = "/assets/mmcece/models/block/controller/" + front + "_" + roll + ".json";
         var model = resource(path);
-        assertEquals("mmcece:block/overlay_controller", model.getAsJsonObject("textures").get("overlay").getAsString());
+        assertEquals(
+            "mmcece:block/overlay/controllers/overlay_controller",
+            model.getAsJsonObject("textures").get("overlay").getAsString());
         assertFalse(model.getAsJsonObject("textures").has("up_arrow"));
         assertEquals(2, model.getAsJsonArray("elements").size());
         var element = model.getAsJsonArray("elements").get(1).getAsJsonObject();

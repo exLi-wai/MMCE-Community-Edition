@@ -1,7 +1,7 @@
 {
   "textures": {
     "casing": "mmcece:block/blockcasing_plain",
-    "overlay": "mmcece:block/overlay_outputbus_tiny"
+    "overlay": "mmcece:block/overlay/outputs/overlay_outputbus_tiny"
   },
   "parent": "mmcece:block/ported_shell"
 }
