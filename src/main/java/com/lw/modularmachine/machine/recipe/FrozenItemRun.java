@@ -316,16 +316,21 @@ public final class FrozenItemRun {
     tag.putLong("random_seed", seed);
     tag.put("definition", definition);
     var mapping = new ListTag();
+    var logicalBindings = new LinkedHashMap<String, CompoundTag>();
     for (var port : ports) {
       var entry = new CompoundTag();
-      entry.putString("id", port.partId());
+      entry.putString("id", port.logicalPartId());
       entry.putString("kind", port.kind().name());
       entry.putInt("input_group", port.inputGroup());
       if (!port.selector().isEmpty()) {
         entry.putString("selector", port.selector());
       }
-      mapping.add(entry);
+      var previous = logicalBindings.putIfAbsent(port.logicalPartId(), entry);
+      if (previous != null && !previous.equals(entry)) {
+        throw new IllegalArgumentException("Conflicting physical tanks for one logical port");
+      }
     }
+    logicalBindings.values().forEach(mapping::add);
     tag.put("ports", mapping);
     if (!dynamicLengths.isEmpty()) {
       var lengths = new CompoundTag();

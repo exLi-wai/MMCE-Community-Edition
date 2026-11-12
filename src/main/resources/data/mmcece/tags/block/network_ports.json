@@ -1,0 +1,29 @@
+{
+  "replace": false,
+  "values": [
+    {
+      "id": "mmcece:me_item_input_bus",
+      "required": false
+    },
+    {
+      "id": "mmcece:me_item_output_bus",
+      "required": false
+    },
+    {
+      "id": "mmcece:me_fluid_input_bus",
+      "required": false
+    },
+    {
+      "id": "mmcece:me_fluid_output_bus",
+      "required": false
+    },
+    {
+      "id": "mmcece:me_chemical_input_bus",
+      "required": false
+    },
+    {
+      "id": "mmcece:me_chemical_output_bus",
+      "required": false
+    }
+  ]
+}

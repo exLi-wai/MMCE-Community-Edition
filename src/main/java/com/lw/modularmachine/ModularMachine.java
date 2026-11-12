@@ -5,6 +5,7 @@ import com.lw.modularmachine.config.MachineConfig;
 import com.lw.modularmachine.config.MachineStartupConfig;
 import com.lw.modularmachine.item.WrenchInteractions;
 import com.lw.modularmachine.integration.mekanism.MekanismIntegration;
+import com.lw.modularmachine.integration.ae2.Ae2Integration;
 import com.lw.modularmachine.util.Mods;
 import com.lw.modularmachine.machine.assembly.AssemblyInteractions;
 import com.lw.modularmachine.machine.assembly.AssemblyService;
@@ -14,9 +15,11 @@ import com.lw.modularmachine.machine.factory.FactoryUpgradeService;
 import com.lw.modularmachine.machine.recipe.MachineRecipeRegistries;
 import com.lw.modularmachine.machine.recipe.MachineRecipeService;
 import com.lw.modularmachine.machine.recipe.RecipeLifecyclePublisher;
+import com.lw.modularmachine.machine.network.NetworkPortService;
 import com.lw.modularmachine.machine.smart.SmartInterfaceEventPublisher;
 import com.lw.modularmachine.machine.structure.StructureService;
 import com.lw.modularmachine.network.GroupInputPayloads;
+import com.lw.modularmachine.network.NetworkPortPayloads;
 import com.lw.modularmachine.network.BlueprintPreviewPayloads;
 import com.lw.modularmachine.network.RangedSelectionPayloads;
 import com.lw.modularmachine.machine.selection.RangedSelectionService;
@@ -74,6 +77,7 @@ public class ModularMachine {
     NeoForge.EVENT_BUS.register(StructureService.class);
     NeoForge.EVENT_BUS.register(MachineComponentVisibility.class);
     NeoForge.EVENT_BUS.register(MachineRecipeService.class);
+    NeoForge.EVENT_BUS.register(NetworkPortService.class);
     NeoForge.EVENT_BUS.register(MachineJeiPayloads.class);
     NeoForge.EVENT_BUS.register(FactoryUpgradeService.class);
     NeoForge.EVENT_BUS.register(SmartInterfaceEventPublisher.class);
@@ -87,6 +91,9 @@ public class ModularMachine {
   public static void RegisterIntegration(IEventBus modEventBus) {
     if (Mods.MEKANISM.isLoaded()) {
       MekanismIntegration.initialize(modEventBus);
+    }
+    if (Mods.AE2.isLoaded()) {
+      Ae2Integration.initialize(modEventBus);
     }
   }
 
@@ -104,6 +111,7 @@ public class ModularMachine {
     modEventBus.addListener(MachineVisibilityPayloads::register);
     modEventBus.addListener(ParallelControllerPayloads::register);
     modEventBus.addListener(GroupInputPayloads::register);
+    modEventBus.addListener(NetworkPortPayloads::register);
     modEventBus.addListener(MachineCapabilities::register);
   }
 

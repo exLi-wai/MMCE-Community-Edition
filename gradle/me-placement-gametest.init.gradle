@@ -1,0 +1,33 @@
+// Isolated native-registry regression for ME output placement capacity.
+allprojects {
+    afterEvaluate {
+        if (extensions.findByName('neoForge') != null) {
+            def runtimeMods = [
+                'mezz.jei:jei-1.21.1-neoforge',
+                'dev.latvian.mods:rhino',
+                'curse.maven:applied-energistics-2-223794',
+                'curse.maven:guideme-1173950',
+                'curse.maven:mek-268560',
+                'maven.modrinth:applied-mekanistics'
+            ] as Set
+            configurations.named('localRuntime') {
+                withDependencies { dependencies ->
+                    dependencies.removeAll { dependency -> !runtimeMods.contains(dependency.group + ':' + dependency.name) }
+                }
+            }
+            neoForge.runs.named('gameTestServer') {
+                gameDirectory = project.file('build/gametest-me-placement')
+                systemProperty 'neoforge.enabledGameTestNamespaces', 'mmcece_placement'
+                logLevel = org.slf4j.event.Level.INFO
+            }
+            def fixtures = tasks.register('prepareMePlacementFixtures', Copy) {
+                from project.file('src/gameTest/resources/data/mmcece/mmcece/machines')
+                into project.file('build/gametest-me-placement/config/modularmachinery/machinery')
+                include '**/*.json'
+            }
+            tasks.named('runGameTestServer') {
+                dependsOn fixtures
+            }
+        }
+    }
+}

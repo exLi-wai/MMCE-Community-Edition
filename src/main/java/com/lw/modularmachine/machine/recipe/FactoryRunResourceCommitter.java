@@ -139,7 +139,7 @@ public final class FactoryRunResourceCommitter {
         }
       }
       for (var debit : fluidDebits) {
-        var lease = debit.port().identity().acquireFluidStart(debit.port().revision());
+        var lease = debit.port().identity().acquireFluidStart(debit.port().revision(), debit.port().tankIndex());
         fluidLeases.add(lease);
         if (!lease.drainExact(debit.amount())) {
           return Result.STALE;

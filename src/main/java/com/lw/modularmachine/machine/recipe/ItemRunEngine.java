@@ -246,7 +246,8 @@ public final class ItemRunEngine {
             }
           }
           for (var debit : fluidDebits) {
-            fluidLeases.add(debit.port().identity().acquireFluidStart(debit.port().revision()));
+            fluidLeases
+                .add(debit.port().identity().acquireFluidStart(debit.port().revision(), debit.port().tankIndex()));
           }
           for (int index = 0; index < fluidDebits.size(); index++) {
             if (!fluidLeases.get(index).drainExact(fluidDebits.get(index).amount())) {
@@ -534,7 +535,7 @@ public final class ItemRunEngine {
         if (port.kind() == PortKind.ITEM_OUTPUT) {
           leases.put(port.partId(), port.identity().acquireItemStart(port.revision()));
         } else if (fluidAdditions.containsKey(port.partId())) {
-          fluidLeases.put(port.partId(), port.identity().acquireFluidOutputStart(port.revision()));
+          fluidLeases.put(port.partId(), port.identity().acquireFluidOutputStart(port.revision(), port.tankIndex()));
         }
       }
       for (var port : checked.orElseThrow().ports()) {

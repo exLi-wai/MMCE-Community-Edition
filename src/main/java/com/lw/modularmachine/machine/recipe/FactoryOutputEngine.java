@@ -212,7 +212,7 @@ public final class FactoryOutputEngine {
           itemLeases.put(port.partId(), port.identity().acquireItemStart(port.revision()));
         }
         if (additions.containsKey(port.partId())) {
-          fluidLeases.put(port.partId(), port.identity().acquireFluidOutputStart(port.revision()));
+          fluidLeases.put(port.partId(), port.identity().acquireFluidOutputStart(port.revision(), port.tankIndex()));
         }
       }
       for (var replacement : replacements.entrySet()) {

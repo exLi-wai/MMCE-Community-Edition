@@ -1,0 +1,7 @@
+{
+  "variants": {
+    "": {
+      "model": "mmcece:block/me_chemical_input_bus"
+    }
+  }
+}

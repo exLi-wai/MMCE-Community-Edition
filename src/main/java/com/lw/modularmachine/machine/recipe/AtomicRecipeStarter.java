@@ -176,7 +176,7 @@ public final class AtomicRecipeStarter {
         if (port.kind().resource() == PortKind.Resource.ITEM) {
           leases.add(port.identity().acquireItemStart(port.revision()));
         } else if (port.kind() == PortKind.FLUID_INPUT && !fluidDebits.isEmpty()) {
-          fluidLeases.put(port.partId(), port.identity().acquireFluidStart(port.revision()));
+          fluidLeases.put(port.partId(), port.identity().acquireFluidStart(port.revision(), port.tankIndex()));
         }
       }
       int index = 0;

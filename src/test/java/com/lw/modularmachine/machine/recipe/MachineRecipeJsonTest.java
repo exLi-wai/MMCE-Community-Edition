@@ -14,8 +14,8 @@ class MachineRecipeJsonTest {
   }
 
   private static void reject(JsonObject root, String path) {
-    assertTrue(
-        assertThrows(JsonParseException.class, () -> MachineRecipeJson.validate(root)).getMessage().contains(path));
+    var failure = assertThrows(JsonParseException.class, () -> MachineRecipeJson.validate(root));
+    assertTrue(failure.getMessage().contains(path), failure::getMessage);
   }
 
   @Test
@@ -174,11 +174,16 @@ class MachineRecipeJsonTest {
   }
 
   @Test
-  void rejectsEmptyRequirementsAndWrongComponentShapes() {
+  void rejectsMissingResourceSidesAndWrongComponentShapes() {
+    // Empty item lists are legal when another resource supplies that side.
+    for (String side : new String[]{"inputs", "outputs"}) {
+      var root = valid();
+      root.getAsJsonArray(side).remove(0);
+      assertEquals(
+          "$: A machine recipe requires resource input and output",
+          assertThrows(JsonParseException.class, () -> MachineRecipeJson.validate(root)).getMessage());
+    }
     var root = valid();
-    root.getAsJsonArray("inputs").remove(0);
-    reject(root, "$.inputs");
-    root = valid();
     root.getAsJsonArray("inputs").get(0).getAsJsonObject().getAsJsonObject("stack")
         .addProperty("components", "not a map");
     reject(root, "$.inputs[0].stack.components");

@@ -15,6 +15,7 @@ import java.util.Map;
 import java.util.EnumMap;
 import java.util.Iterator;
 import java.util.concurrent.CancellationException;
+import java.util.stream.Stream;
 import net.minecraft.core.BlockPos;
 import net.minecraft.resources.ResourceLocation;
 import net.minecraft.world.level.block.Rotation;
@@ -108,7 +109,7 @@ public record AssemblyPattern(
     private MachineDefinition.Rule activeRule;
     private List<BlockState> activeStates;
     private List<MachineDefinition.Alternative> activeAlternatives;
-    private Iterator<DeferredBlock<MachinePortBlock>> portScan;
+    private Iterator<MachinePortBlock> portScan;
     private ArrayList<BlockState> portStates;
     private boolean finished;
 
@@ -154,7 +155,9 @@ public record AssemblyPattern(
             activeStates = new ArrayList<>();
             activeAlternatives = new ArrayList<>();
           } else if (!ports.containsKey(activeRule.port())) {
-            portScan = MachineRegistries.PORTS.values().iterator();
+            portScan = Stream.<MachinePortBlock>concat(
+                MachineRegistries.PORTS.values().stream().map(DeferredBlock::get),
+                MachineRegistries.NETWORK_PORTS.values().stream().map(DeferredBlock::get)).iterator();
             portStates = new ArrayList<>();
           }
           used++;
@@ -162,7 +165,7 @@ public record AssemblyPattern(
         }
         if (portScan != null) {
           if (portScan.hasNext()) {
-            var block = portScan.next().get();
+            var block = portScan.next();
             if (block.kind() == activeRule.port()) {
               portStates.add(block.defaultBlockState());
             }

@@ -4,6 +4,7 @@ import net.neoforged.fml.ModList;
 
 public enum Mods {
   AE2("ae2"),
+  APPMEK("appmek"),
   MEKANISM("mekanism"),
   GTM("gtceu"),
   JEC("jecharacters");

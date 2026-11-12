@@ -14,7 +14,7 @@ import net.minecraft.world.item.ItemStack;
  * inserted during planning.
  */
 final class ItemOutputLayout {
-  private record Slot(String part, int index, ItemStack before) {
+  private record Slot(String part, int index, ItemStack before, ItemSlotDomain domain) {
   }
 
   private final List<Slot> slots;
@@ -32,9 +32,9 @@ final class ItemOutputLayout {
       for (int i = 0; i < items.size(); i++) {
         var stack = items.get(i);
         int limit = port.slotLimits().get(i);
-        var domain = new ItemSlotDomain(limit, port.selector());
+        var domain = new ItemSlotDomain(limit, port.selector(), port.bulkItems());
         var limits = limitsBySize.computeIfAbsent(domain, current -> current.limits(keys));
-        refs.add(new Slot(port.partId(), i, stack));
+        refs.add(new Slot(port.partId(), i, stack, domain));
         spaces.add(
             new ItemResourceSnapshot.OutputSlot<>(
                 stack.isEmpty() ? null : ItemResourceKey.of(stack).withSelector(port.selector()),
@@ -65,15 +65,15 @@ final class ItemOutputLayout {
         return result;
       });
       int amount = Math.toIntExact(insertion.count());
+      int total = Math.addExact(slot.before().getCount(), amount);
+      if (amount <= 0 || total > slot.domain().capacityFor(insertion.key())) {
+        throw new IllegalStateException("Output stack limit exceeded");
+      }
       if (slot.before().isEmpty()) {
-        contents.set(slot.index(), insertion.key().stack(amount));
+        contents.set(slot.index(), insertion.key().stack(1).copyWithCount(total));
       } else {
         if (!insertion.key().matches(slot.before())) {
           throw new IllegalStateException("Output component mismatch");
-        }
-        int total = Math.addExact(slot.before().getCount(), amount);
-        if (total > insertion.key().maxStackSize()) {
-          throw new IllegalStateException("Output stack limit exceeded");
         }
         contents.set(slot.index(), slot.before().copyWithCount(total));
       }

@@ -1,5 +1,6 @@
 {
   "values": [
+    "#mmcece:network_ports",
     "mmcece:machine_controller",
     "mmcece:machine_casing_plain",
     "mmcece:machine_casing_vent",

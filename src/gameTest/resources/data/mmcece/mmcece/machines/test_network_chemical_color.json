@@ -1,0 +1,26 @@
+{
+  "orientation": {
+    "policy": "all_24"
+  },
+  "color": "#38A6D2",
+  "parts": [
+    {
+      "part_id": "input",
+      "offset": [
+        -1,
+        0,
+        1
+      ],
+      "block": "chemical_input"
+    },
+    {
+      "part_id": "output",
+      "offset": [
+        1,
+        0,
+        1
+      ],
+      "block": "chemical_output"
+    }
+  ]
+}

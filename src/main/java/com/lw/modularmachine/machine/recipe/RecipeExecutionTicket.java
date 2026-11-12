@@ -147,7 +147,7 @@ public final class RecipeExecutionTicket {
   boolean inputGroupsMatch(Map<String, Integer> expected) {
     requireServerThread();
 
-    return ports.stream().allMatch(port -> expected.getOrDefault(port.partId(), 0) == port.inputGroup());
+    return ports.stream().allMatch(port -> expected.getOrDefault(port.logicalPartId(), 0) == port.inputGroup());
   }
 
   /**
@@ -245,15 +245,19 @@ public final class RecipeExecutionTicket {
           || port.kind() != part.rule().port()) {
         return Optional.empty();
       }
-      if (port.kind().resource() == PortKind.Resource.ITEM && port.itemStartInProgress()) {
+      if (port.resourceTransactionInProgress()) {
         return Optional.empty();
       }
-      if (port.kind().resource() == PortKind.Resource.CHEMICAL && port.chemicalStartInProgress()) {
-        return Optional.empty();
+      int tankCount = switch (port.kind().resource()) {
+        case FLUID -> port.fluidTankCount();
+        case CHEMICAL -> port.chemicalTankCount();
+        default -> 1;
+      };
+      for (int tank = 0; tank < tankCount; tank++) {
+        ports.add(new PortSnapshot(part.id(), position, port, level, part.selector(), tank, tankCount));
       }
-      ports.add(new PortSnapshot(part.id(), position, port, level, part.selector()));
     }
-    ports.sort(Comparator.comparing(PortSnapshot::partId));
+    ports.sort(Comparator.comparing(PortSnapshot::logicalPartId).thenComparingInt(PortSnapshot::tankIndex));
     var ticket = new RecipeExecutionTicket(owner, level, registration, ports, mode, interfaces);
     return ticket.matchesLive() ? Optional.of(ticket) : Optional.empty();
   }
@@ -418,6 +422,10 @@ public final class RecipeExecutionTicket {
 
   public static final class PortSnapshot {
     private final String partId;
+    private final String logicalPartId;
+    private final int tankIndex;
+    private final int tankCount;
+    private final boolean bulkItems;
     private final BlockPos position;
     private final MachinePortBlockEntity identity;
     private final ServerLevel level;
@@ -434,8 +442,15 @@ public final class RecipeExecutionTicket {
     private final String selector;
     private final int inputGroup;
 
-    private PortSnapshot(String partId, BlockPos position, MachinePortBlockEntity port, ServerLevel level, String selector) {
-      this.partId = partId;
+    private PortSnapshot(String logicalPartId, BlockPos position, MachinePortBlockEntity port, ServerLevel level, String selector, int tankIndex, int tankCount) {
+      this.logicalPartId = logicalPartId;
+      // Encode every transient address, including single tanks and item buses.
+      // Length framing makes arbitrary user IDs unambiguous; only logical IDs
+      // persist.
+      partId = logicalPartId.length() + ":" + logicalPartId + ":" + tankIndex;
+      this.tankIndex = tankIndex;
+      this.tankCount = tankCount;
+      bulkItems = port.bulkItems();
       this.selector = ResourceSelector.require(selector);
       inputGroup = port.inputGroup();
       this.position = position.immutable();
@@ -453,15 +468,16 @@ public final class RecipeExecutionTicket {
       }
       items = List.copyOf(stacks);
       limits = List.copyOf(slotLimits);
-      fluid = kind.resource() == PortKind.Resource.FLUID ? port.fluidTank().getFluid().copy() : FluidStack.EMPTY;
-      chemical = kind.resource() == PortKind.Resource.CHEMICAL ? port.chemicalTank()
+      fluid = kind.resource() == PortKind.Resource.FLUID ? port.fluidTank(tankIndex).getFluid()
+          .copy() : FluidStack.EMPTY;
+      chemical = kind.resource() == PortKind.Resource.CHEMICAL ? port.chemicalTank(tankIndex)
           .getStack() : ChemicalStackData.EMPTY;
       energy = kind.resource() == PortKind.Resource.ENERGY ? port.energy().stored() : 0;
       energyExtractable = kind == PortKind.ENERGY_INPUT ? port.energy().extractableNow() : 0;
       capacity = switch (kind.resource()) {
         case ITEM -> 0;
-        case FLUID -> port.fluidTank().getCapacity();
-        case CHEMICAL -> port.chemicalTank().getCapacity();
+        case FLUID -> port.fluidTank(tankIndex).getCapacity();
+        case CHEMICAL -> port.chemicalTank(tankIndex).getCapacity();
         case ENERGY -> port.energy().capacity();
       };
       transferLimit = kind.resource() == PortKind.Resource.ENERGY ? port.energy().transferLimit() : 0;
@@ -469,6 +485,18 @@ public final class RecipeExecutionTicket {
 
     public String partId() {
       return partId;
+    }
+
+    public String logicalPartId() {
+      return logicalPartId;
+    }
+
+    public int tankIndex() {
+      return tankIndex;
+    }
+
+    public boolean bulkItems() {
+      return bulkItems;
     }
 
     public String selector() {
@@ -535,12 +563,13 @@ public final class RecipeExecutionTicket {
           && level.getBlockEntity(position) == identity
           && identity.schemaSupported()
           && identity.kind() == kind
+          && identity.bulkItems() == bulkItems
           && identity.resourceRevision() == revision
           && identity.inputGroup() == inputGroup;
     }
 
     private boolean matches(ServerLevel level) {
-      if (!sameLiveStamp(level)) {
+      if (!sameLiveStamp(level) || identity.resourceTransactionInProgress()) {
         return false;
       }
       if (kind.resource() == PortKind.Resource.ITEM) {
@@ -555,16 +584,20 @@ public final class RecipeExecutionTicket {
         }
       }
       if (kind.resource() == PortKind.Resource.FLUID) {
-        var actual = identity.fluidTank().getFluid();
-        if (identity.fluidTank().getCapacity() != capacity
+        if (identity.fluidTankCount() != tankCount) {
+          return false;
+        }
+        var actual = identity.fluidTank(tankIndex).getFluid();
+        if (identity.fluidTank(tankIndex).getCapacity() != capacity
             || fluid.getAmount() != actual.getAmount()
             || !FluidStack.isSameFluidSameComponents(fluid, actual)) {
           return false;
         }
       }
       if (kind.resource() == PortKind.Resource.CHEMICAL
-          && (!chemical.equals(identity.chemicalTank().getStack())
-              || capacity != identity.chemicalTank().getCapacity())) {
+          && (identity.chemicalTankCount() != tankCount
+              || !chemical.equals(identity.chemicalTank(tankIndex).getStack())
+              || capacity != identity.chemicalTank(tankIndex).getCapacity())) {
         return false;
       }
       return kind.resource() != PortKind.Resource.ENERGY

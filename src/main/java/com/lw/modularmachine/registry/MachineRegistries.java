@@ -5,6 +5,7 @@ import com.lw.modularmachine.block.FactoryControllerBlock;
 import com.lw.modularmachine.block.MachineControllerBlock;
 import com.lw.modularmachine.block.MachineCasingBlock;
 import com.lw.modularmachine.block.MachinePortBlock;
+import com.lw.modularmachine.block.NetworkPortBlock;
 import com.lw.modularmachine.block.ParallelControllerBlock;
 import com.lw.modularmachine.block.SmartInterfaceBlock;
 import com.lw.modularmachine.block.UpgradeBusBlock;
@@ -12,6 +13,7 @@ import com.lw.modularmachine.blockentity.FactoryControllerBlockEntity;
 import com.lw.modularmachine.blockentity.MachineControllerBlockEntity;
 import com.lw.modularmachine.blockentity.MachineCasingBlockEntity;
 import com.lw.modularmachine.blockentity.MachinePortBlockEntity;
+import com.lw.modularmachine.blockentity.NetworkPortBlockEntity;
 import com.lw.modularmachine.blockentity.ParallelControllerBlockEntity;
 import com.lw.modularmachine.blockentity.SmartInterfaceBlockEntity;
 import com.lw.modularmachine.blockentity.UpgradeBusBlockEntity;
@@ -21,18 +23,21 @@ import com.lw.modularmachine.item.MachineConstructionTool;
 import com.lw.modularmachine.item.MachineControllerItem;
 import com.lw.modularmachine.item.ControllerBlockItem;
 import com.lw.modularmachine.item.MachineWrenchItem;
+import com.lw.modularmachine.item.NetworkPortBlockItem;
 import com.lw.modularmachine.item.ConfigurationCardItem;
 import com.lw.modularmachine.item.RangedConstructToolItem;
 import com.lw.modularmachine.machine.HatchTier;
 import com.lw.modularmachine.machine.ParallelControllerTier;
 import com.lw.modularmachine.machine.PortKind;
 import com.lw.modularmachine.machine.chemical.ChemicalPlatform;
+import com.lw.modularmachine.machine.network.MachineNetworkPlatform;
 import com.lw.modularmachine.machine.UpgradeBusTier;
 import com.lw.modularmachine.machine.controller.DedicatedControllerCatalog;
 import com.lw.modularmachine.menu.FactoryControllerMenu;
 import com.lw.modularmachine.menu.GroupInputMenu;
 import com.lw.modularmachine.menu.MachineControllerMenu;
 import com.lw.modularmachine.menu.MachinePortMenu;
+import com.lw.modularmachine.menu.NetworkPortMenu;
 import com.lw.modularmachine.menu.MachineResourceMenu;
 import com.lw.modularmachine.menu.ParallelControllerMenu;
 import com.lw.modularmachine.menu.SmartInterfaceMenu;
@@ -74,6 +79,7 @@ public final class MachineRegistries {
   public static final Map<ResourceLocation, DeferredItem<MachineBlueprintItem>> BLUEPRINTS = new LinkedHashMap<>();
   public static final Map<String, DeferredBlock<? extends Block>> CASINGS = new LinkedHashMap<>();
   public static final Map<String, DeferredBlock<MachinePortBlock>> PORTS = new LinkedHashMap<>();
+  public static final Map<String, DeferredBlock<NetworkPortBlock>> NETWORK_PORTS = new LinkedHashMap<>();
   public static final Map<String, DeferredBlock<UpgradeBusBlock>> UPGRADE_BUSES = new LinkedHashMap<>();
   public static final Map<String, DeferredBlock<ParallelControllerBlock>> PARALLEL_CONTROLLERS = new LinkedHashMap<>();
 
@@ -146,6 +152,19 @@ public final class MachineRegistries {
         ITEMS.registerSimpleBlockItem(block);
       }
     }
+    if (MachineNetworkPlatform.available()) {
+      for (PortKind kind : new PortKind[]{PortKind.ITEM_INPUT, PortKind.ITEM_OUTPUT, PortKind.FLUID_INPUT,
+          PortKind.FLUID_OUTPUT, PortKind.CHEMICAL_INPUT, PortKind.CHEMICAL_OUTPUT}) {
+        if (kind.resource() == PortKind.Resource.CHEMICAL && !MachineNetworkPlatform.chemicalAvailable()) {
+          continue;
+        }
+        String direction = kind.isInput() ? "input" : "output";
+        String id = "me_" + kind.resource().name().toLowerCase(Locale.ROOT) + "_" + direction + "_bus";
+        var block = BLOCKS.register(id, () -> new NetworkPortBlock(properties().strength(3F, 10F), kind));
+        NETWORK_PORTS.put(id, block);
+        ITEMS.register(id, () -> new NetworkPortBlockItem(block.get(), new Item.Properties()));
+      }
+    }
   }
 
   public static final DeferredHolder<BlockEntityType<?>, BlockEntityType<MachinePortBlockEntity>> PORT_ENTITY = BLOCK_ENTITIES
@@ -161,6 +180,13 @@ public final class MachineRegistries {
           () -> BlockEntityType.Builder.of(
               MachineCasingBlockEntity::new,
               CASINGS.values().stream().map(DeferredBlock::get).toArray(Block[]::new)).build(null));
+
+  public static final DeferredHolder<BlockEntityType<?>, BlockEntityType<NetworkPortBlockEntity>> NETWORK_PORT_ENTITY = BLOCK_ENTITIES
+      .register(
+          "network_port",
+          () -> BlockEntityType.Builder.of(
+              NetworkPortBlockEntity::new,
+              NETWORK_PORTS.values().stream().map(DeferredBlock::get).toArray(Block[]::new)).build(null));
 
   public static final DeferredHolder<BlockEntityType<?>, BlockEntityType<MachineControllerBlockEntity>> CONTROLLER_ENTITY = BLOCK_ENTITIES
       .register(
@@ -198,6 +224,8 @@ public final class MachineRegistries {
 
   public static final DeferredHolder<MenuType<?>, MenuType<MachinePortMenu>> PORT_MENU = MENUS
       .register("machine_port", () -> IMenuTypeExtension.create(MachinePortMenu::new));
+  public static final DeferredHolder<MenuType<?>, MenuType<NetworkPortMenu>> NETWORK_PORT_MENU = MENUS
+      .register("network_port", () -> IMenuTypeExtension.create(NetworkPortMenu::new));
   public static final DeferredHolder<MenuType<?>, MenuType<GroupInputMenu>> GROUP_INPUT_MENU = MENUS
       .register("input_group", () -> IMenuTypeExtension.create(GroupInputMenu::new));
   public static final DeferredHolder<BlockEntityType<?>, BlockEntityType<SmartInterfaceBlockEntity>> SMART_INTERFACE_ENTITY = BLOCK_ENTITIES
@@ -238,6 +266,7 @@ public final class MachineRegistries {
             output.accept(RANGED_CONSTRUCT_TOOL.get());
             CASINGS.values().forEach(block -> output.accept(block.get()));
             PORTS.values().forEach(block -> output.accept(block.get()));
+            NETWORK_PORTS.values().forEach(block -> output.accept(block.get()));
           }).build());
 
   private MachineRegistries() {

@@ -32,6 +32,7 @@ import net.minecraft.world.entity.player.Player;
 import net.minecraft.world.inventory.AbstractContainerMenu;
 import net.minecraft.world.item.ItemStack;
 import net.minecraft.world.level.block.entity.BlockEntity;
+import net.minecraft.world.level.block.entity.BlockEntityType;
 import net.minecraft.world.level.block.state.BlockState;
 import net.neoforged.neoforge.energy.IEnergyStorage;
 import net.neoforged.neoforge.fluids.FluidStack;
@@ -40,7 +41,7 @@ import net.neoforged.neoforge.items.IItemHandler;
 import net.neoforged.neoforge.items.ItemStackHandler;
 import net.neoforged.neoforge.network.PacketDistributor;
 
-public final class MachinePortBlockEntity extends BlockEntity implements MenuProvider, MachineColorable {
+public class MachinePortBlockEntity extends BlockEntity implements MenuProvider, MachineColorable {
   private final PortKind kind;
   private final HatchTier tier;
   private final TransactionalItemStackHandler items;
@@ -59,22 +60,27 @@ public final class MachinePortBlockEntity extends BlockEntity implements MenuPro
   private boolean machineColorAssigned;
 
   public MachinePortBlockEntity(BlockPos pos, BlockState state) {
-    super(MachineRegistries.PORT_ENTITY.get(), pos, state);
+    this(MachineRegistries.PORT_ENTITY.get(), pos, state);
+  }
+
+  protected MachinePortBlockEntity(BlockEntityType<?> type, BlockPos pos, BlockState state) {
+    super(type, pos, state);
     MachinePortBlock block = (MachinePortBlock) state.getBlock();
     kind = block.kind();
     tier = block.tier();
     items = new TransactionalItemStackHandler(
-        kind.resource() == PortKind.Resource.ITEM ? (int) tier.capacity() : 0,
+        block.itemSlots(),
+        block.itemSlotLimit(),
         this::assertMutationThread,
         this::beforeItemWrite,
         this::changed);
     tank = new TransactionalFluidTank(
-        kind.resource() == PortKind.Resource.FLUID ? (int) MachineConfig.fluidHatchCapacity(tier) : 0,
+        block.fluidCapacity(),
         this::assertMutationThread,
         this::beforeResourceWrite,
         this::changed);
     chemicalTank = new TransactionalChemicalTank(
-        kind.resource() == PortKind.Resource.CHEMICAL ? MachineConfig.chemicalHatchCapacity(tier) : 0,
+        block.chemicalCapacity(),
         this::assertMutationThread,
         this::beforeResourceWrite,
         this::changed);
@@ -185,7 +191,7 @@ public final class MachinePortBlockEntity extends BlockEntity implements MenuPro
     };
   }
 
-  private void changed() {
+  protected void changed() {
     if (level instanceof ServerLevel server) {
       if (!server.getServer().isSameThread()) {
         throw new IllegalStateException("Port write outside server thread");
@@ -196,7 +202,7 @@ public final class MachinePortBlockEntity extends BlockEntity implements MenuPro
     }
   }
 
-  private void assertMutationThread() {
+  protected void assertMutationThread() {
     if (level instanceof ServerLevel server && !server.getServer().isSameThread()) {
       throw new IllegalStateException("Port write outside server thread");
     }
@@ -206,7 +212,7 @@ public final class MachinePortBlockEntity extends BlockEntity implements MenuPro
     beforeResourceWrite();
   }
 
-  private void beforeResourceWrite() {
+  protected void beforeResourceWrite() {
     assertMutationThread();
     if (level instanceof ServerLevel && RecipeLifecyclePublisher.isDispatching()) {
       throw new IllegalStateException("Cannot mutate resources during a read-only recipe notification");
@@ -248,6 +254,10 @@ public final class MachinePortBlockEntity extends BlockEntity implements MenuPro
   }
 
   public FluidStartLease acquireFluidStart(long expectedRevision) {
+    return acquireFluidStart(expectedRevision, 0);
+  }
+
+  public FluidStartLease acquireFluidStart(long expectedRevision, int tankIndex) {
     assertMutationThread();
     if (!(level instanceof ServerLevel)
         || isRemoved()
@@ -258,10 +268,14 @@ public final class MachinePortBlockEntity extends BlockEntity implements MenuPro
       throw new IllegalStateException("Stale or unavailable fluid input hatch");
     }
 
-    return new FluidStartLease(tank.acquire());
+    return new FluidStartLease(fluidTank(tankIndex).acquire());
   }
 
   public FluidStartLease acquireFluidOutputStart(long expectedRevision) {
+    return acquireFluidOutputStart(expectedRevision, 0);
+  }
+
+  public FluidStartLease acquireFluidOutputStart(long expectedRevision, int tankIndex) {
     assertMutationThread();
     if (!(level instanceof ServerLevel)
         || isRemoved()
@@ -271,18 +285,26 @@ public final class MachinePortBlockEntity extends BlockEntity implements MenuPro
         || resourceRevision == Long.MAX_VALUE) {
       throw new IllegalStateException("Stale or unavailable fluid output hatch");
     }
-    return new FluidStartLease(tank.acquire());
+    return new FluidStartLease(fluidTank(tankIndex).acquire());
   }
 
   public ChemicalStartLease acquireChemicalStart(long expectedRevision) {
-    return acquireChemical(expectedRevision, PortKind.CHEMICAL_INPUT);
+    return acquireChemicalStart(expectedRevision, 0);
+  }
+
+  public ChemicalStartLease acquireChemicalStart(long expectedRevision, int tankIndex) {
+    return acquireChemical(expectedRevision, PortKind.CHEMICAL_INPUT, tankIndex);
   }
 
   public ChemicalStartLease acquireChemicalOutputStart(long expectedRevision) {
-    return acquireChemical(expectedRevision, PortKind.CHEMICAL_OUTPUT);
+    return acquireChemicalOutputStart(expectedRevision, 0);
   }
 
-  private ChemicalStartLease acquireChemical(long expectedRevision, PortKind expectedKind) {
+  public ChemicalStartLease acquireChemicalOutputStart(long expectedRevision, int tankIndex) {
+    return acquireChemical(expectedRevision, PortKind.CHEMICAL_OUTPUT, tankIndex);
+  }
+
+  private ChemicalStartLease acquireChemical(long expectedRevision, PortKind expectedKind, int tankIndex) {
     assertMutationThread();
     if (!(level instanceof ServerLevel)
         || isRemoved()
@@ -293,7 +315,7 @@ public final class MachinePortBlockEntity extends BlockEntity implements MenuPro
       throw new IllegalStateException("Stale or unavailable chemical hatch");
     }
 
-    return new ChemicalStartLease(chemicalTank.acquire());
+    return new ChemicalStartLease(chemicalTank(tankIndex).acquire());
   }
 
   public final class ChemicalStartLease implements AutoCloseable {
@@ -417,6 +439,16 @@ public final class MachinePortBlockEntity extends BlockEntity implements MenuPro
 
     private FluidStartLease(TransactionalFluidTank.Lease storage) {
       this.storage = storage;
+    }
+
+    /** Internal callback-free commit after an external network transfer. */
+    public void replacePrepared(FluidStack prepared) {
+      assertMutationThread();
+      if (resolved) {
+        throw new IllegalStateException("Resolved fluid lease");
+      }
+      storage.replacePrepared(prepared);
+      modified = true;
     }
 
     public boolean drainExact(FluidStack required) {
@@ -584,9 +616,7 @@ public final class MachinePortBlockEntity extends BlockEntity implements MenuPro
         || isRemoved()
         || groupRevision != expectedRevision
         || groupRevision == Long.MAX_VALUE
-        || items.isInTransaction()
-        || tank.isInTransaction()
-        || chemicalTank.isInTransaction()) {
+        || resourceTransactionInProgress()) {
       return false;
     }
     if (inputGroup == group) {
@@ -611,8 +641,51 @@ public final class MachinePortBlockEntity extends BlockEntity implements MenuPro
     return tank;
   }
 
+  public int fluidTankCount() {
+    return 1;
+  }
+
+  public TransactionalFluidTank fluidTank(int index) {
+    if (index != 0) {
+      throw new IndexOutOfBoundsException(index);
+    }
+    return tank;
+  }
+
   public TransactionalChemicalTank chemicalTank() {
     return chemicalTank;
+  }
+
+  public int chemicalTankCount() {
+    return 1;
+  }
+
+  public TransactionalChemicalTank chemicalTank(int index) {
+    if (index != 0) {
+      throw new IndexOutOfBoundsException(index);
+    }
+    return chemicalTank;
+  }
+
+  public boolean bulkItems() {
+    return false;
+  }
+
+  public boolean resourceTransactionInProgress() {
+    if (items.isInTransaction() || tank.isInTransaction() || chemicalTank.isInTransaction()) {
+      return true;
+    }
+    for (int index = 1; index < fluidTankCount(); index++) {
+      if (fluidTank(index).isInTransaction()) {
+        return true;
+      }
+    }
+    for (int index = 1; index < chemicalTankCount(); index++) {
+      if (chemicalTank(index).isInTransaction()) {
+        return true;
+      }
+    }
+    return false;
   }
 
   public LongEnergyBuffer energy() {
@@ -697,7 +770,7 @@ public final class MachinePortBlockEntity extends BlockEntity implements MenuPro
     if (level instanceof ServerLevel && RecipeLifecyclePublisher.isDispatching()) {
       throw new IllegalStateException("Cannot reload resources during a read-only recipe notification");
     }
-    if (items.isInTransaction() || tank.isInTransaction() || chemicalTank.isInTransaction()) {
+    if (resourceTransactionInProgress()) {
       throw new IllegalStateException("Cannot reload a leased input/output port");
     }
     super.loadAdditional(tag, registries);

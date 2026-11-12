@@ -27,7 +27,7 @@ import net.minecraft.world.level.block.state.BlockState;
 import net.minecraft.world.phys.BlockHitResult;
 import net.neoforged.neoforge.fluids.FluidUtil;
 
-public final class MachinePortBlock extends BaseEntityBlock {
+public class MachinePortBlock extends BaseEntityBlock {
   private final PortKind kind;
   private final HatchTier tier;
   private final MapCodec<MachinePortBlock> codec;
@@ -60,6 +60,22 @@ public final class MachinePortBlock extends BaseEntityBlock {
 
   public HatchTier tier() {
     return tier;
+  }
+
+  public int itemSlots() {
+    return kind.resource() == PortKind.Resource.ITEM ? (int) tier.capacity() : 0;
+  }
+
+  public int itemSlotLimit() {
+    return 64;
+  }
+
+  public int fluidCapacity() {
+    return kind.resource() == PortKind.Resource.FLUID ? (int) MachineConfig.fluidHatchCapacity(tier) : 0;
+  }
+
+  public long chemicalCapacity() {
+    return kind.resource() == PortKind.Resource.CHEMICAL ? MachineConfig.chemicalHatchCapacity(tier) : 0;
   }
 
   @Override
@@ -159,6 +175,7 @@ public final class MachinePortBlock extends BaseEntityBlock {
     if (!state.is(newState.getBlock())
         && !isMoving
         && !level.isClientSide
+        && dropContentsOnRemoval()
         && kind.resource() == PortKind.Resource.ITEM
         && level.getBlockEntity(pos) instanceof MachinePortBlockEntity port) {
       for (int slot = 0; slot < port.inventory().getSlots(); slot++) {
@@ -170,6 +187,10 @@ public final class MachinePortBlock extends BaseEntityBlock {
       }
     }
     super.onRemove(state, level, pos, newState, isMoving);
+  }
+
+  protected boolean dropContentsOnRemoval() {
+    return true;
   }
 
 }

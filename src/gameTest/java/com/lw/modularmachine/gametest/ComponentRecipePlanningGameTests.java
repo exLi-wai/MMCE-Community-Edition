@@ -116,13 +116,14 @@ public final class ComponentRecipePlanningGameTests {
         List.of(new RecipeCandidate.Output<>(key(Items.DIAMOND), 2)));
     var catalog = catalog(recipe("a", 10, key(Items.DIRT), 1, key(Items.IRON_INGOT), 1), b);
     var plan = plan(helper, controller, catalog);
+    var ticket = RecipeExecutionTicket.capture(controller).orElseThrow();
     helper.assertTrue(
         plan.recipe().id().equals("b")
             && plan.deductions().stream().mapToInt(ItemRecipePlan.Deduction::count).sum() == 5,
         "Duplicate inputs or priority/output rule failed");
     helper.assertTrue(
-        plan.deductions().stream().allMatch(d -> d.slot().partId().equals("item_in"))
-            && plan.placements().stream().allMatch(p -> p.slot().partId().equals("item_out")),
+        plan.deductions().stream().allMatch(d -> logicalPartId(ticket, d.slot().partId()).equals("item_in"))
+            && plan.placements().stream().allMatch(p -> logicalPartId(ticket, p.slot().partId()).equals("item_out")),
         "World position replaced stable logical slot");
     helper.assertTrue(
         plan.placements().stream().mapToInt(ItemRecipePlan.Placement::count).sum() == 2
@@ -358,13 +359,13 @@ public final class ComponentRecipePlanningGameTests {
       var controller = RecipeResourceTicketGameTests.build(helper, origin, orientation);
       port(helper, controller, "item_in").inventory().setStackInSlot(0, new ItemStack(Items.DIRT, 1));
       var plan = plan(helper, controller, catalog);
+      var ticket = RecipeExecutionTicket.capture(controller).orElseThrow();
       helper.assertTrue(
-          plan.deductions().getFirst().slot().partId().equals("item_in")
+          logicalPartId(ticket, plan.deductions().getFirst().slot().partId()).equals("item_in")
               && plan.deductions().getFirst().slot().slot() == 0
-              && plan.placements().getFirst().slot().partId().equals("item_out")
+              && logicalPartId(ticket, plan.placements().getFirst().slot().partId()).equals("item_out")
               && plan.validateForStart(catalog),
           "Rotation reordered logical slots");
-      var ticket = RecipeExecutionTicket.capture(controller).orElseThrow();
       for (var port : ticket.ports()) {
         helper.getLevel().setBlockAndUpdate(port.position(), Blocks.AIR.defaultBlockState());
       }
@@ -376,6 +377,11 @@ public final class ComponentRecipePlanningGameTests {
   private static MachineControllerBlockEntity build(GameTestHelper helper) {
     return RecipeResourceTicketGameTests
         .build(helper, helper.absolutePos(new BlockPos(7, 5, 7)), MachineOrientation.IDENTITY);
+  }
+
+  private static String logicalPartId(RecipeExecutionTicket ticket, String address) {
+    return ticket.ports().stream().filter(port -> port.partId().equals(address))
+        .map(RecipeExecutionTicket.PortSnapshot::logicalPartId).findFirst().orElseThrow();
   }
 
   private static MachinePortBlockEntity port(GameTestHelper helper, MachineControllerBlockEntity controller, String id) {

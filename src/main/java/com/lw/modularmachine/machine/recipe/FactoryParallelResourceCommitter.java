@@ -192,7 +192,7 @@ public final class FactoryParallelResourceCommitter {
       for (var debit : fluidDebits) {
         var lease = fluidLeases.computeIfAbsent(
             debit.port().partId(),
-            ignored -> debit.port().identity().acquireFluidStart(debit.port().revision()));
+            ignored -> debit.port().identity().acquireFluidStart(debit.port().revision(), debit.port().tankIndex()));
         if (!lease.drainExact(debit.amount())) {
           return Result.STALE;
         }

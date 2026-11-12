@@ -1,6 +1,7 @@
 package com.lw.modularmachine.machine.chemical;
 
 import com.lw.modularmachine.blockentity.MachinePortBlockEntity;
+import com.lw.modularmachine.api.component.ChemicalStackData;
 import java.util.Objects;
 import net.minecraft.resources.ResourceLocation;
 import net.minecraft.world.InteractionHand;
@@ -25,6 +26,10 @@ public final class ChemicalPlatform {
     boolean hasContainer(ItemStack stack);
 
     boolean interact(Player player, InteractionHand hand, MachinePortBlockEntity port);
+
+    default ChemicalStackData sampleContainer(ItemStack stack) {
+      return ChemicalStackData.EMPTY;
+    }
   }
 
   public static void install(Adapter value) {
@@ -36,6 +41,10 @@ public final class ChemicalPlatform {
 
   public static boolean available() {
     return adapter != null;
+  }
+
+  public static ChemicalStackData sampleContainer(ItemStack stack) {
+    return adapter == null ? ChemicalStackData.EMPTY : adapter.sampleContainer(stack.copy());
   }
 
   public static boolean contains(ResourceLocation chemical) {

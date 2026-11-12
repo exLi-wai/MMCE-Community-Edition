@@ -3,6 +3,8 @@ package com.lw.modularmachine.storage;
 import net.minecraft.core.HolderLookup;
 import net.minecraft.core.NonNullList;
 import net.minecraft.nbt.CompoundTag;
+import net.minecraft.nbt.ListTag;
+import net.minecraft.nbt.Tag;
 import net.minecraft.world.item.ItemStack;
 import net.neoforged.neoforge.items.ItemStackHandler;
 
@@ -14,10 +16,19 @@ public final class TransactionalItemStackHandler extends ItemStackHandler {
   private final Runnable threadCheck;
   private final Runnable beforeWrite;
   private final Runnable changed;
+  private final int slotLimit;
   private Lease active;
 
   public TransactionalItemStackHandler(int size, Runnable threadCheck, Runnable beforeWrite, Runnable changed) {
+    this(size, 64, threadCheck, beforeWrite, changed);
+  }
+
+  public TransactionalItemStackHandler(int size, int slotLimit, Runnable threadCheck, Runnable beforeWrite, Runnable changed) {
     super(size);
+    if (slotLimit < 1) {
+      throw new IllegalArgumentException("Invalid owned slot capacity");
+    }
+    this.slotLimit = slotLimit;
     this.threadCheck = threadCheck;
     this.beforeWrite = beforeWrite;
     this.changed = changed;
@@ -55,7 +66,12 @@ public final class TransactionalItemStackHandler extends ItemStackHandler {
   @Override
   public int getSlotLimit(int slot) {
     readAllowed();
-    return super.getSlotLimit(slot);
+    return slotLimit;
+  }
+
+  @Override
+  protected int getStackLimit(int slot, ItemStack stack) {
+    return slotLimit > 64 ? slotLimit : super.getStackLimit(slot, stack);
   }
 
   @Override
@@ -102,12 +118,64 @@ public final class TransactionalItemStackHandler extends ItemStackHandler {
   @Override
   public CompoundTag serializeNBT(HolderLookup.Provider registries) {
     readAllowed();
+    if (slotLimit > 64) {
+      var data = new CompoundTag();
+      data.putInt("Size", stacks.size());
+      var entries = new ListTag();
+      for (int index = 0; index < stacks.size(); index++) {
+        var stack = stacks.get(index);
+        if (!stack.isEmpty()) {
+          var entry = new CompoundTag();
+          entry.putInt("Slot", index);
+          entry.putInt("Amount", stack.getCount());
+          entry.put("Prototype", stack.copyWithCount(1).save(registries));
+          entries.add(entry);
+        }
+      }
+      data.put("BulkItems", entries);
+      return data;
+    }
     return super.serializeNBT(registries);
   }
 
   @Override
   public void deserializeNBT(HolderLookup.Provider registries, CompoundTag data) {
     writeAllowed();
+    if (slotLimit > 64) {
+      if (data.getInt("Size") != stacks.size() || !data.contains("BulkItems", Tag.TAG_LIST)) {
+        throw new IllegalArgumentException("Invalid bulk inventory");
+      }
+      var contents = NonNullList.withSize(stacks.size(), ItemStack.EMPTY);
+      var raw = (ListTag) data.get("BulkItems");
+      if (!raw.isEmpty() && raw.getElementType() != Tag.TAG_COMPOUND) {
+        throw new IllegalArgumentException("Bulk items require compound entries");
+      }
+      var entries = data.getList("BulkItems", Tag.TAG_COMPOUND);
+      if (entries.size() > stacks.size()) {
+        throw new IllegalArgumentException("Too many bulk slots");
+      }
+      for (int index = 0; index < entries.size(); index++) {
+        var entry = entries.getCompound(index);
+        int slot = entry.getInt("Slot");
+        int amount = entry.getInt("Amount");
+        if (!entry.contains("Slot", Tag.TAG_INT)
+            || !entry.contains("Amount", Tag.TAG_INT)
+            || slot < 0
+            || slot >= stacks.size()
+            || amount <= 0
+            || amount > slotLimit
+            || !contents.get(slot).isEmpty()) {
+          throw new IllegalArgumentException("Invalid bulk slot");
+        }
+        var stack = ItemStack.parse(registries, entry.getCompound("Prototype"))
+            .orElseThrow(() -> new IllegalArgumentException("Invalid bulk item prototype"));
+        contents.set(slot, stack.copyWithCount(amount));
+      }
+      stacks = contents;
+      onLoad();
+      changed.run();
+      return;
+    }
     super.deserializeNBT(registries, data);
   }
 

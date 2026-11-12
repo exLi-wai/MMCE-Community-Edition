@@ -1,6 +1,7 @@
 package com.lw.modularmachine.integration.jei;
 
 import com.lw.modularmachine.ModularMachine;
+import com.lw.modularmachine.client.NetworkPortScreen;
 import com.lw.modularmachine.machine.recipe.MachineRecipe;
 import com.lw.modularmachine.machine.recipe.MachineRecipeRegistries;
 import com.lw.modularmachine.registry.MachineRegistries;
@@ -14,6 +15,7 @@ import java.util.TreeSet;
 import mezz.jei.api.IModPlugin;
 import mezz.jei.api.JeiPlugin;
 import mezz.jei.api.constants.VanillaTypes;
+import mezz.jei.api.registration.IGuiHandlerRegistration;
 import mezz.jei.api.registration.IRecipeCatalystRegistration;
 import mezz.jei.api.registration.IRecipeCategoryRegistration;
 import mezz.jei.api.registration.IRecipeRegistration;
@@ -32,6 +34,11 @@ public final class MachineJeiPlugin implements IModPlugin {
   @Override
   public ResourceLocation getPluginUid() {
     return ResourceLocation.fromNamespaceAndPath(ModularMachine.MODID, "jei");
+  }
+
+  @Override
+  public void registerGuiHandlers(IGuiHandlerRegistration registration) {
+    registration.addGhostIngredientHandler(NetworkPortScreen.class, new NetworkPortGhostIngredientHandler());
   }
 
   @Override

@@ -224,7 +224,7 @@ public final class FactoryParallelStarter {
           }
           leases.add(lease);
         } else if (port.kind() == PortKind.FLUID_INPUT && !fluidRequirements.isEmpty()) {
-          fluidLeases.put(port.partId(), port.identity().acquireFluidStart(port.revision()));
+          fluidLeases.put(port.partId(), port.identity().acquireFluidStart(port.revision(), port.tankIndex()));
         }
       }
       var reservedFluids = new HashMap<String, Integer>();

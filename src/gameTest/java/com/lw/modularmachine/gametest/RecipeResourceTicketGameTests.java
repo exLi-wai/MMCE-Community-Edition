@@ -53,7 +53,7 @@ public final class RecipeResourceTicketGameTests {
       input.inventory().setStackInSlot(0, stack);
       var ticket = capture(helper, controller);
       helper.assertTrue(
-          ticket.ports().stream().map(RecipeExecutionTicket.PortSnapshot::partId).toList()
+          ticket.ports().stream().map(RecipeExecutionTicket.PortSnapshot::logicalPartId).toList()
               .equals(List.of("energy_in", "energy_out", "fluid_in", "fluid_out", "item_in", "item_out")),
           "Part order depends on world axes");
       var view = view(ticket, "item_in");
@@ -332,7 +332,7 @@ public final class RecipeResourceTicketGameTests {
   }
 
   private static RecipeExecutionTicket.PortSnapshot view(RecipeExecutionTicket ticket, String part) {
-    return ticket.ports().stream().filter(p -> p.partId().equals(part)).findFirst().orElseThrow();
+    return ticket.ports().stream().filter(p -> p.logicalPartId().equals(part)).findFirst().orElseThrow();
   }
 
   static MachinePortBlockEntity port(GameTestHelper helper, MachineControllerBlockEntity controller, String part) {

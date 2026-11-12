@@ -160,7 +160,7 @@ public final class FactoryRecipeStarter {
           }
           leases.add(lease);
         } else if (port.kind() == PortKind.FLUID_INPUT && !fluidDebits.isEmpty()) {
-          fluidLeases.put(port.partId(), port.identity().acquireFluidStart(port.revision()));
+          fluidLeases.put(port.partId(), port.identity().acquireFluidStart(port.revision(), port.tankIndex()));
         }
       }
       for (var debit : fluidDebits) {

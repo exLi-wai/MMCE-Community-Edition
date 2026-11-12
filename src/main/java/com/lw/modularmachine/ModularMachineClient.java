@@ -101,6 +101,7 @@ public class ModularMachineClient {
     MachineRegistries.DEDICATED_CONTROLLERS.values().forEach(holder -> blocks.add(holder.get()));
     MachineRegistries.DEDICATED_FACTORIES.values().forEach(holder -> blocks.add(holder.get()));
     MachineRegistries.PORTS.values().forEach(holder -> blocks.add(holder.get()));
+    MachineRegistries.NETWORK_PORTS.values().forEach(holder -> blocks.add(holder.get()));
     MachineRegistries.CASINGS.values().forEach(holder -> blocks.add(holder.get()));
     MachineRegistries.PARALLEL_CONTROLLERS.values().forEach(holder -> blocks.add(holder.get()));
     MachineRegistries.UPGRADE_BUSES.values().forEach(holder -> blocks.add(holder.get()));
@@ -116,6 +117,7 @@ public class ModularMachineClient {
     MachineRegistries.DEDICATED_CONTROLLERS.values().forEach(holder -> items.add(holder.get().asItem()));
     MachineRegistries.DEDICATED_FACTORIES.values().forEach(holder -> items.add(holder.get().asItem()));
     MachineRegistries.PORTS.values().forEach(holder -> items.add(holder.get().asItem()));
+    MachineRegistries.NETWORK_PORTS.values().forEach(holder -> items.add(holder.get().asItem()));
     MachineRegistries.CASINGS.values().forEach(holder -> items.add(holder.get().asItem()));
     MachineRegistries.PARALLEL_CONTROLLERS.values().forEach(holder -> items.add(holder.get().asItem()));
     MachineRegistries.UPGRADE_BUSES.values().forEach(holder -> items.add(holder.get().asItem()));
@@ -210,6 +212,7 @@ public class ModularMachineClient {
   @SubscribeEvent
   static void registerScreens(RegisterMenuScreensEvent event) {
     event.register(MachineRegistries.PORT_MENU.get(), MachinePortScreen::new);
+    event.register(MachineRegistries.NETWORK_PORT_MENU.get(), NetworkPortScreen::new);
     event.register(MachineRegistries.CONTROLLER_MENU.get(), MachineControllerScreen::new);
     event.register(MachineRegistries.RESOURCE_MENU.get(), MachineResourceScreen::new);
     event.register(MachineRegistries.FACTORY_CONTROLLER_MENU.get(), FactoryControllerScreen::new);
@@ -220,6 +223,7 @@ public class ModularMachineClient {
   }
 
   static void SetClientReceiver() {
+    NetworkPortPayloads.setClientReceiver(NetworkPortScreen::receive);
     RangedSelectionPayloads.setReceiver(RangedSelectionClient::receive);
     RangedSelectionPayloads.setPreviewReceiver(RangedSelectionClient::receivePreview);
     ParallelControllerPayloads.setClientReceiver(payload -> {

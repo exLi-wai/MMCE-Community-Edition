@@ -25,7 +25,7 @@ public final class ItemRecipeSearch {
   private final RecipeExecutionTicket ticket;
   private final ItemRecipeCatalog catalog;
   private final List<InputSlot> inputs;
-  private final List<ItemSlotRef> outputs;
+  private final List<OutputSlot> outputs;
   private final RecipePlanner.Session<ItemResourceKey> session;
   private ItemRecipePlan selected;
   private final FluidOutputLayout fluidLayout;
@@ -49,6 +49,9 @@ public final class ItemRecipeSearch {
   private record MissingResource(RecipeCandidate<ItemResourceKey> candidate, PortKind kind) {
   }
 
+  private record OutputSlot(ItemSlotRef ref, ItemResourceSnapshot.OutputSlot<ItemResourceKey> snapshot) {
+  }
+
   private ItemRecipeSearch(RecipeExecutionTicket ticket, ItemRecipeCatalog catalog, Set<String> allowedIds, String factoryThread, List<Integer> groups) {
     this.ticket = ticket;
     this.catalog = catalog;
@@ -70,7 +73,7 @@ public final class ItemRecipeSearch {
     factory = this.factoryThread != null && ticket.owner() instanceof UpgradeBusOwner owner ? owner : null;
     factoryScope = factory == null ? null : UpgradeRecipeChecks.capture(factory, this.factoryThread);
     var inputSlots = new ArrayList<InputSlot>();
-    var outputSlots = new ArrayList<ItemSlotRef>();
+    var outputSlots = new ArrayList<OutputSlot>();
     var counts = new LinkedHashMap<ItemResourceKey, Long>();
     var itemAliases = new HashMap<ItemResourceKey, ItemResourceKey>();
     var spaces = new ArrayList<ItemResourceSnapshot.OutputSlot<ItemResourceKey>>();
@@ -93,10 +96,11 @@ public final class ItemRecipeSearch {
           }
         } else {
           int slotLimit = port.slotLimits().get(slot);
-          var domain = new ItemSlotDomain(slotLimit, port.selector());
+          var domain = new ItemSlotDomain(slotLimit, port.selector(), port.bulkItems());
           var limits = limitCache.computeIfAbsent(domain, current -> current.limits(catalog.recipes().outputKeys()));
-          outputSlots.add(ref);
-          spaces.add(new ItemResourceSnapshot.OutputSlot<>(key, stack.getCount(), slotLimit, limits));
+          var space = new ItemResourceSnapshot.OutputSlot<>(key, stack.getCount(), slotLimit, limits);
+          outputSlots.add(new OutputSlot(ref, space));
+          spaces.add(space);
         }
       }
     }
@@ -348,8 +352,9 @@ public final class ItemRecipeSearch {
         }
         var placements = generic.insertions().stream()
             .map(
-                insertion -> new ItemRecipePlan.Placement(
-                    outputs.get(insertion.slot()),
+                insertion -> ItemRecipePlan.Placement.inSlot(
+                    outputs.get(insertion.slot()).ref(),
+                    outputs.get(insertion.slot()).snapshot(),
                     insertion.key(),
                     Math.toIntExact(insertion.count())))
             .toList();

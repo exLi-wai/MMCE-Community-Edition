@@ -15,8 +15,12 @@ public final class ItemStackSnapshots {
     if (stack.isEmpty()) {
       return ItemStack.EMPTY;
     }
-    var result = ItemStack.parse(registries, stack.save(registries).copy())
+    // The native codec only represents ordinary stack counts. Snapshot the
+    // component-bearing prototype, then restore the owned buffer's int count.
+    int count = stack.getCount();
+    var result = ItemStack.parse(registries, stack.copyWithCount(1).save(registries).copy())
         .orElseThrow(() -> new IllegalArgumentException("Cannot snapshot item and components"));
+    result.setCount(count);
     // Network-only/nonpersistent components must never disappear into an
     // ID-equivalent key.
     if (!ItemStack.matches(stack, result)) {

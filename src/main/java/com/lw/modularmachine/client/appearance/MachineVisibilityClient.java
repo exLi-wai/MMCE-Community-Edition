@@ -293,6 +293,7 @@ public final class MachineVisibilityClient {
     var ids = new HashSet<ResourceLocation>();
     MachineRegistries.CASINGS.values().forEach(holder -> ids.add(holder.getId()));
     MachineRegistries.PORTS.values().forEach(holder -> ids.add(holder.getId()));
+    MachineRegistries.NETWORK_PORTS.values().forEach(holder -> ids.add(holder.getId()));
     MachineRegistries.PARALLEL_CONTROLLERS.values().forEach(holder -> ids.add(holder.getId()));
     MachineRegistries.UPGRADE_BUSES.values().forEach(holder -> ids.add(holder.getId()));
     ids.add(MachineRegistries.SMART_INTERFACE.getId());

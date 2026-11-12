@@ -13,6 +13,7 @@ import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Objects;
 import java.util.function.Consumer;
+import java.util.stream.Stream;
 import net.minecraft.core.BlockPos;
 import net.minecraft.network.RegistryFriendlyByteBuf;
 import net.minecraft.network.codec.StreamCodec;
@@ -273,7 +274,10 @@ public final class MachineJeiPayloads {
   }
   private static List<BlockState> states(MachineDefinition.Rule rule) {
     if (rule.port() != null) {
-      return MachineRegistries.PORTS.values().stream().map(holder -> holder.get())
+      return Stream
+          .concat(
+              MachineRegistries.PORTS.values().stream().map(holder -> holder.get()),
+              MachineRegistries.NETWORK_PORTS.values().stream().map(holder -> holder.get()))
           .filter(block -> block.kind() == rule.port()).map(Block::defaultBlockState).toList();
     }
     return rule.alternatives().stream()

@@ -1,8 +1,8 @@
 package com.lw.modularmachine.machine.recipe;
 
 /**
- * Stable logical address. Physical identity and permissions remain in
- * RecipeExecutionTicket.
+ * Transient structure-local buffer address. Logical bindings, physical identity
+ * and permissions remain in RecipeExecutionTicket; this address is not saved.
  */
 public record ItemSlotRef(String partId, int slot) {
   public ItemSlotRef {

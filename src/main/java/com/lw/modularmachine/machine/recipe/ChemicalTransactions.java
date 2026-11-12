@@ -7,7 +7,7 @@ import com.lw.modularmachine.api.recipe.ChemicalRequirement;
 import com.lw.modularmachine.blockentity.MachinePortBlockEntity;
 import com.lw.modularmachine.machine.PortKind;
 import java.util.ArrayList;
-import java.util.IdentityHashMap;
+import java.util.HashSet;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
@@ -40,7 +40,7 @@ final class ChemicalTransactions {
   }
 
   static Batch inputs(List<InputClaim> claims) {
-    var changes = new LinkedHashMap<MachinePortBlockEntity, Change>();
+    var changes = new LinkedHashMap<TankIdentity, Change>();
     for (var claim : claims) {
       for (var demand : claim.requirements()) {
         long remaining = demand.amount();
@@ -50,14 +50,15 @@ final class ChemicalTransactions {
               || !port.chemical().chemical().equals(demand.chemical())) {
             continue;
           }
-          var previous = changes.get(port.identity());
+          var tank = new TankIdentity(port.identity(), port.tankIndex());
+          var previous = changes.get(tank);
           if (previous != null && previous.port().revision() != port.revision()) {
             return null;
           }
           long reserved = previous == null ? 0 : previous.amount().amount();
           long take = Math.min(remaining, port.chemical().amount() - reserved);
           if (take > 0) {
-            changes.put(port.identity(), new Change(port, new ChemicalStackData(demand.chemical(), reserved + take)));
+            changes.put(tank, new Change(port, new ChemicalStackData(demand.chemical(), reserved + take)));
             remaining -= take;
           }
           if (remaining == 0) {
@@ -74,11 +75,12 @@ final class ChemicalTransactions {
 
   static Batch outputs(RecipeExecutionTicket ticket, Map<String, ChemicalStackData> additions) {
     var changes = new ArrayList<Change>();
-    var found = new IdentityHashMap<MachinePortBlockEntity, Boolean>();
+    var found = new HashSet<TankIdentity>();
     for (var port : ticket.ports()) {
       var amount = additions.get(port.partId());
       if (amount != null) {
-        if (port.kind() != PortKind.CHEMICAL_OUTPUT || found.put(port.identity(), true) != null) {
+        if (port.kind() != PortKind.CHEMICAL_OUTPUT
+            || !found.add(new TankIdentity(port.identity(), port.tankIndex()))) {
           throw new IllegalStateException("Invalid chemical output identity");
         }
         changes.add(new Change(port, amount));
@@ -133,6 +135,9 @@ final class ChemicalTransactions {
   private record Change(RecipeExecutionTicket.PortSnapshot port, ChemicalStackData amount) {
   }
 
+  private record TankIdentity(MachinePortBlockEntity identity, int index) {
+  }
+
   static final class Batch {
     private final List<Change> changes;
     private final boolean output;
@@ -147,8 +152,8 @@ final class ChemicalTransactions {
       for (var change : changes) {
         var port = change.port();
         leases.add(
-            output ? port.identity().acquireChemicalOutputStart(port.revision()) : port.identity()
-                .acquireChemicalStart(port.revision()));
+            output ? port.identity().acquireChemicalOutputStart(port.revision(), port.tankIndex()) : port.identity()
+                .acquireChemicalStart(port.revision(), port.tankIndex()));
       }
       for (int index = 0; index < changes.size(); index++) {
         var amount = changes.get(index).amount();

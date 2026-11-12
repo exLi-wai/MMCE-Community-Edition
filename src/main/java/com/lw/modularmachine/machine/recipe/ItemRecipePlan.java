@@ -338,8 +338,8 @@ public final class ItemRecipePlan {
         for (int slot = 0; slot < stacks.size(); slot++) {
           var stack = stacks.get(slot);
           if (stack.isEmpty() || entry.getKey().matches(stack)) {
-            capacity += Math
-                .max(0, Math.min(port.slotLimits().get(slot), entry.getKey().maxStackSize()) - stack.getCount());
+            var domain = new ItemSlotDomain(port.slotLimits().get(slot), port.selector(), port.bulkItems());
+            capacity += Math.max(0, domain.capacityFor(entry.getKey()) - stack.getCount());
           }
         }
       }
@@ -391,11 +391,17 @@ public final class ItemRecipePlan {
     }
   }
 
-  public record Placement(ItemSlotRef slot, ItemResourceKey key, int count) {
+  public record Placement(ItemSlotRef slot, ItemResourceKey key, int count, int availableCapacity) {
     public Placement {
-      if (slot == null || key == null || key.ignoresComponents() || count <= 0 || count > key.maxStackSize()) {
+      if (slot == null || key == null || key.ignoresComponents() || count <= 0 || count > availableCapacity) {
         throw new IllegalArgumentException("Invalid slot placement");
       }
+    }
+
+    /** Use the same captured, key-specific free space as the output planner. */
+    static Placement inSlot(ItemSlotRef slot, ItemResourceSnapshot.OutputSlot<ItemResourceKey> output, ItemResourceKey key, int count) {
+      long available = output.canAccept(key) ? output.capacityFor(key) - output.count() : 0;
+      return new Placement(slot, key, count, Math.toIntExact(available));
     }
   }
 }

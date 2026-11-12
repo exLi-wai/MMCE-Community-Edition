@@ -41,8 +41,8 @@ public final class MekanismIntegration implements ChemicalPlatform.Adapter {
 
   @Override
   public boolean contains(ResourceLocation chemical) {
-    return MekanismAPI.CHEMICAL_REGISTRY.containsKey(chemical)
-        && !MekanismAPI.CHEMICAL_REGISTRY.get(chemical).isEmptyType();
+    return MekanismAPI.CHEMICAL_REGISTRY.getHolder(chemical)
+        .filter(holder -> !holder.is(MekanismAPI.EMPTY_CHEMICAL_KEY)).isPresent();
   }
 
   @Override
@@ -51,23 +51,43 @@ public final class MekanismIntegration implements ChemicalPlatform.Adapter {
   }
 
   @Override
+  public ChemicalStackData sampleContainer(ItemStack stack) {
+    var handler = Capabilities.CHEMICAL.getCapability(stack);
+    if (handler == null || handler.getChemicalTanks() > 64) {
+      return ChemicalStackData.EMPTY;
+    }
+    for (int tank = 0; tank < handler.getChemicalTanks(); tank++) {
+      var chemical = handler.getChemicalInTank(tank);
+      if (!chemical.isEmpty()) {
+        return data(chemical).withAmount(1);
+      }
+    }
+    return ChemicalStackData.EMPTY;
+  }
+
+  @Override
   public boolean interact(Player player, InteractionHand hand, MachinePortBlockEntity port) {
     return MekanismChemicalContainers.interact(player, hand, port);
   }
 
   static ChemicalStackData data(ChemicalStack stack) {
-    return stack
-        .isEmpty() ? ChemicalStackData.EMPTY : new ChemicalStackData(stack.getTypeRegistryName(), stack.getAmount());
+    if (stack.isEmpty()) {
+      return ChemicalStackData.EMPTY;
+    }
+    var key = stack.getChemicalHolder().getKey();
+
+    return new ChemicalStackData(
+        key == null ? MekanismAPI.CHEMICAL_REGISTRY.getDefaultKey() : key.location(),
+        stack.getAmount());
   }
 
   static ChemicalStack stack(ChemicalStackData value) {
     if (value.isEmpty()) {
       return ChemicalStack.EMPTY;
     }
-    var chemical = MekanismAPI.CHEMICAL_REGISTRY.get(value.chemical());
-    if (chemical == null || chemical.isEmptyType()) {
-      throw new IllegalArgumentException("Unknown chemical: " + value.chemical());
-    }
+    var chemical = MekanismAPI.CHEMICAL_REGISTRY.getHolder(value.chemical())
+        .filter(holder -> !holder.is(MekanismAPI.EMPTY_CHEMICAL_KEY))
+        .orElseThrow(() -> new IllegalArgumentException("Unknown chemical: " + value.chemical()));
 
     return new ChemicalStack(chemical, value.amount());
   }

@@ -183,6 +183,23 @@ public final class TransactionalFluidTank extends FluidTank {
       this.before = before;
     }
 
+    /**
+     * Caller has already verified identity and capacity before any external
+     * transfer.
+     */
+    public void replacePrepared(FluidStack prepared) {
+      threadCheck.run();
+      if (resolved
+          || active != this
+          || prepared == null
+          || prepared.getAmount() < 0
+          || prepared.getAmount() > Math.max(capacity, before.getAmount())) {
+        throw new IllegalStateException("Invalid prepared fluid replacement");
+      }
+      fluid = prepared;
+      modified = true;
+    }
+
     public boolean drainExact(FluidStack required) {
       threadCheck.run();
       if (resolved || active != this) {
