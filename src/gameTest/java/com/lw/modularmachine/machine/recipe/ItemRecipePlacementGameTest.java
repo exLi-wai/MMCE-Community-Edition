@@ -1,5 +1,9 @@
 package com.lw.modularmachine.machine.recipe;
 
+import com.lw.modularmachine.machine.recipe.search.ResourceSnapshot;
+import com.lw.modularmachine.machine.recipe.search.ItemSlotDomain;
+import com.lw.modularmachine.machine.recipe.search.RecipeCandidate;
+import com.lw.modularmachine.machine.recipe.search.RecipePlanner;
 import java.util.List;
 import java.util.Map;
 import java.util.Set;
@@ -29,13 +33,13 @@ public final class ItemRecipePlacementGameTest {
     var output = output(iron, 0, Integer.MAX_VALUE, true);
     for (int amount : new int[]{128, Integer.MAX_VALUE}) {
       var recipe = RecipeCandidate.outputOnly("bulk", List.of(new RecipeCandidate.Output<>(iron, amount)));
-      var result = RecipePlanner.prepareOutputs(new ItemResourceSnapshot<>(0, Map.of(), List.of(output)), recipe)
+      var result = RecipePlanner.prepareOutputs(new ResourceSnapshot<>(0, Map.of(), List.of(output)), recipe)
           .advance(4096);
       helper.assertTrue(result.status() == RecipePlanner.Status.SELECTED, "Bulk output was not planned");
       var insertions = result.plan().orElseThrow().insertions();
       helper.assertTrue(insertions.size() == 1, "Bulk output must fit a single physical slot");
       var insertion = insertions.getFirst();
-      var placement = ItemRecipePlan.Placement
+      var placement = RecipeStartPlan.Placement
           .inSlot(SLOT, output, insertion.key(), Math.toIntExact(insertion.count()));
       helper.assertTrue(placement.count() == amount, "Native placement truncated the planned output");
       helper
@@ -50,12 +54,12 @@ public final class ItemRecipePlacementGameTest {
     var pearl = key(helper, Items.ENDER_PEARL);
     var output = output(iron, Integer.MAX_VALUE - 128, Integer.MAX_VALUE, true);
     helper.assertTrue(
-        ItemRecipePlan.Placement.inSlot(SLOT, output, iron, 128).availableCapacity() == 128,
+        RecipeStartPlan.Placement.inSlot(SLOT, output, iron, 128).availableCapacity() == 128,
         "Existing contents were not deducted from free space");
-    reject(() -> ItemRecipePlan.Placement.inSlot(SLOT, output, iron, 129));
-    reject(() -> ItemRecipePlan.Placement.inSlot(SLOT, output, pearl, 1));
-    reject(() -> ItemRecipePlan.Placement.inSlot(SLOT, output, iron.ignoringComponents(), 1));
-    reject(() -> ItemRecipePlan.Placement.inSlot(SLOT, output, iron, 0));
+    reject(() -> RecipeStartPlan.Placement.inSlot(SLOT, output, iron, 129));
+    reject(() -> RecipeStartPlan.Placement.inSlot(SLOT, output, pearl, 1));
+    reject(() -> RecipeStartPlan.Placement.inSlot(SLOT, output, iron.ignoringComponents(), 1));
+    reject(() -> RecipeStartPlan.Placement.inSlot(SLOT, output, iron, 0));
     helper.succeed();
   }
 
@@ -65,16 +69,16 @@ public final class ItemRecipePlacementGameTest {
     var pearl = key(helper, Items.ENDER_PEARL);
     var normal = output(iron, 0, 64, false);
     helper.assertTrue(
-        ItemRecipePlan.Placement.inSlot(SLOT, normal, iron, 64).count() == 64,
+        RecipeStartPlan.Placement.inSlot(SLOT, normal, iron, 64).count() == 64,
         "Ordinary full stack was rejected");
-    reject(() -> ItemRecipePlan.Placement.inSlot(SLOT, normal, iron, 128));
+    reject(() -> RecipeStartPlan.Placement.inSlot(SLOT, normal, iron, 128));
     var smaller = output(iron, 0, 32, false);
-    reject(() -> ItemRecipePlan.Placement.inSlot(SLOT, smaller, iron, 33));
+    reject(() -> RecipeStartPlan.Placement.inSlot(SLOT, smaller, iron, 33));
     var nativeLimit = output(pearl, 0, 64, false);
     helper.assertTrue(
-        ItemRecipePlan.Placement.inSlot(SLOT, nativeLimit, pearl, 16).count() == 16,
+        RecipeStartPlan.Placement.inSlot(SLOT, nativeLimit, pearl, 16).count() == 16,
         "Native pearl stack was rejected");
-    reject(() -> ItemRecipePlan.Placement.inSlot(SLOT, nativeLimit, pearl, 17));
+    reject(() -> RecipeStartPlan.Placement.inSlot(SLOT, nativeLimit, pearl, 17));
     helper.succeed();
   }
 
@@ -82,9 +86,9 @@ public final class ItemRecipePlacementGameTest {
     return ItemResourceKey.of(new ItemStack(item), helper.getLevel().registryAccess());
   }
 
-  private static ItemResourceSnapshot.OutputSlot<ItemResourceKey> output(ItemResourceKey key, int count, int capacity, boolean bulk) {
+  private static ResourceSnapshot.OutputSlot<ItemResourceKey> output(ItemResourceKey key, int count, int capacity, boolean bulk) {
     var domain = new ItemSlotDomain(capacity, key.selector(), bulk);
-    return new ItemResourceSnapshot.OutputSlot<>(count == 0 ? null : key, count, capacity, domain.limits(Set.of(key)));
+    return new ResourceSnapshot.OutputSlot<>(count == 0 ? null : key, count, capacity, domain.limits(Set.of(key)));
   }
 
   private static void reject(Runnable action) {

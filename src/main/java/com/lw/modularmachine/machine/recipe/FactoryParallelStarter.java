@@ -1,5 +1,11 @@
 package com.lw.modularmachine.machine.recipe;
 
+import com.lw.modularmachine.machine.recipe.search.FluidOutputLayout;
+import com.lw.modularmachine.machine.recipe.search.FluidResourceKey;
+import com.lw.modularmachine.machine.recipe.search.ItemOutputLayout;
+import com.lw.modularmachine.machine.recipe.search.RecipeCandidate;
+import com.lw.modularmachine.machine.recipe.search.RecipePlanner;
+import com.lw.modularmachine.machine.recipe.search.RecipeResourceRequirements;
 import com.lw.modularmachine.machine.factory.UpgradeLifecyclePublisher;
 import com.lw.modularmachine.ModularMachine;
 import com.lw.modularmachine.blockentity.FactoryControllerBlockEntity;
@@ -38,7 +44,7 @@ public final class FactoryParallelStarter {
     UPGRADE_COST_MISSING
   }
 
-  public static Result commit(FactoryControllerBlockEntity factory, String threadId, List<ItemRecipePlan> plans) {
+  public static Result commit(FactoryControllerBlockEntity factory, String threadId, List<RecipeStartPlan> plans) {
     var admission = admit(factory, threadId, plans, plans.size(), plans.size(), plans.size());
     if (admission.result() != Result.ADMITTED) {
       return admission.result();
@@ -104,7 +110,7 @@ public final class FactoryParallelStarter {
           return Result.STALE;
         }
       }
-      var allocated = ItemRecipePlan.combineInputs(plans);
+      var allocated = RecipeStartPlan.combineInputs(plans);
       for (var deduction : allocated.deductions()) {
         var port = ports.get(deduction.slot().partId());
         if (port == null || port.kind() != PortKind.ITEM_INPUT) {
@@ -148,7 +154,7 @@ public final class FactoryParallelStarter {
       if (!outputClaims.isEmpty()) {
         var outputLayout = new ItemOutputLayout(outputTicket, outputKeys);
         var outputPlanner = RecipePlanner.prepareOutputs(
-            outputLayout.snapshot,
+            outputLayout.snapshot(),
             RecipeCandidate.outputOnly(plans.get(0).recipe().id() + "/parallel", outputClaims));
         var outputResult = outputPlanner.advance(65_536);
         if (outputResult.status() != RecipePlanner.Status.SELECTED) {
@@ -306,7 +312,7 @@ public final class FactoryParallelStarter {
   private FactoryParallelStarter() {
   }
 
-  public static Admission admit(FactoryControllerBlockEntity factory, String threadId, List<ItemRecipePlan> plans, int inputCapacity, int outputCapacity, int startBudget) {
+  public static Admission admit(FactoryControllerBlockEntity factory, String threadId, List<RecipeStartPlan> plans, int inputCapacity, int outputCapacity, int startBudget) {
     Objects.requireNonNull(factory, "factory");
     Objects.requireNonNull(plans, "plans");
     var thread = factory.scheduler().channels().stream().filter(candidate -> candidate.threadId().equals(threadId))

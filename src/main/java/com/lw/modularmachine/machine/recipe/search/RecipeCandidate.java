@@ -1,10 +1,12 @@
-package com.lw.modularmachine.machine.recipe;
+package com.lw.modularmachine.machine.recipe.search;
 
+import org.jetbrains.annotations.ApiStatus;
 import com.lw.modularmachine.api.smart.SmartNumberRequirement;
 import java.util.List;
 import java.util.Objects;
 
 /** A compiled candidate with no mutable machine or world references. */
+@ApiStatus.Internal
 public record RecipeCandidate<K>(
     String id,
     int priority,

@@ -25,6 +25,7 @@ import net.minecraft.core.BlockPos;
 import net.minecraft.server.level.ServerLevel;
 import net.minecraft.world.item.ItemStack;
 import net.neoforged.neoforge.fluids.FluidStack;
+import org.jetbrains.annotations.ApiStatus;
 
 /**
  * Ephemeral server-thread resource ticket, not a serializable run or an
@@ -311,11 +312,13 @@ public final class RecipeExecutionTicket {
     return controller;
   }
 
-  StructureService.StructureSubject owner() {
+  @ApiStatus.Internal
+  public StructureService.StructureSubject owner() {
     return owner;
   }
 
-  ServerLevel level() {
+  @ApiStatus.Internal
+  public ServerLevel level() {
     return level;
   }
 
@@ -323,7 +326,8 @@ public final class RecipeExecutionTicket {
     return owner.revalidateStructure(registration);
   }
 
-  void requireServerThread() {
+  @ApiStatus.Internal
+  public void requireServerThread() {
     ServerThreadGuard.require(level, "Recipe resource access");
   }
 
@@ -344,7 +348,8 @@ public final class RecipeExecutionTicket {
         .empty();
   }
 
-  boolean dependenciesCurrent() {
+  @ApiStatus.Internal
+  public boolean dependenciesCurrent() {
     ServerThreadGuard.require(level, "Recipe resource access");
     return matchesDependencies();
   }

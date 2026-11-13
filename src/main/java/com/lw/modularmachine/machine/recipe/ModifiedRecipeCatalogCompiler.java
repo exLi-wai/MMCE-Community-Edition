@@ -1,5 +1,8 @@
 package com.lw.modularmachine.machine.recipe;
 
+import com.lw.modularmachine.machine.recipe.search.CompiledRecipeSet;
+import com.lw.modularmachine.machine.recipe.search.RecipeCatalog;
+import com.lw.modularmachine.machine.recipe.search.RecipeCandidate;
 import com.lw.modularmachine.api.recipe.RecipeModifier;
 import com.lw.modularmachine.api.recipe.RecipeSelectors;
 import com.lw.modularmachine.ModularMachine;
@@ -19,7 +22,7 @@ import net.neoforged.neoforge.fluids.FluidStack;
  */
 final class ModifiedRecipeCatalogCompiler {
   static final int RECIPES_PER_TICK = 8;
-  private final ItemRecipeCatalog base;
+  private final RecipeCatalog base;
   private final MachineDefinition machine;
   private final Map<ResourceLocation, RecipeModifierTemplate> templates;
   private final List<RecipeModifier> rules;
@@ -32,21 +35,21 @@ final class ModifiedRecipeCatalogCompiler {
   private int cursor;
   private long lastTick = Long.MIN_VALUE;
   private boolean failed;
-  private ItemRecipeCatalog result;
+  private RecipeCatalog result;
 
-  ModifiedRecipeCatalogCompiler(ItemRecipeCatalog base, MachineDefinition machine, Map<ResourceLocation, RecipeModifierTemplate> templates, List<RecipeModifier> rules) {
+  ModifiedRecipeCatalogCompiler(RecipeCatalog base, MachineDefinition machine, Map<ResourceLocation, RecipeModifierTemplate> templates, List<RecipeModifier> rules) {
     this(base, machine, templates, rules, false);
   }
 
-  ModifiedRecipeCatalogCompiler(ItemRecipeCatalog base, MachineDefinition machine, Map<ResourceLocation, RecipeModifierTemplate> templates, List<RecipeModifier> rules, boolean durationMultiplier) {
+  ModifiedRecipeCatalogCompiler(RecipeCatalog base, MachineDefinition machine, Map<ResourceLocation, RecipeModifierTemplate> templates, List<RecipeModifier> rules, boolean durationMultiplier) {
     this(base, machine, templates, rules, durationMultiplier, base::isCurrent);
   }
 
-  ModifiedRecipeCatalogCompiler(ItemRecipeCatalog base, MachineDefinition machine, Map<ResourceLocation, RecipeModifierTemplate> templates, List<RecipeModifier> rules, boolean durationMultiplier, BooleanSupplier authority) {
+  ModifiedRecipeCatalogCompiler(RecipeCatalog base, MachineDefinition machine, Map<ResourceLocation, RecipeModifierTemplate> templates, List<RecipeModifier> rules, boolean durationMultiplier, BooleanSupplier authority) {
     this(base, machine, templates, rules, durationMultiplier, authority, MachineRecipeJson.currentDefaults());
   }
 
-  ModifiedRecipeCatalogCompiler(ItemRecipeCatalog base, MachineDefinition machine, Map<ResourceLocation, RecipeModifierTemplate> templates, List<RecipeModifier> rules, boolean durationMultiplier, BooleanSupplier authority, MachineRecipeJson.Defaults defaults) {
+  ModifiedRecipeCatalogCompiler(RecipeCatalog base, MachineDefinition machine, Map<ResourceLocation, RecipeModifierTemplate> templates, List<RecipeModifier> rules, boolean durationMultiplier, BooleanSupplier authority, MachineRecipeJson.Defaults defaults) {
     this.base = base;
     this.machine = machine;
     this.templates = templates;
@@ -86,7 +89,7 @@ final class ModifiedRecipeCatalogCompiler {
           outputs.put(id, recipe.fluidOutputs());
           selectors.put(id, recipe.selectors());
         });
-        result = new ItemRecipeCatalog(
+        result = new RecipeCatalog(
             base.machineId(),
             new CompiledRecipeSet<>(candidates),
             inputs,
@@ -108,7 +111,7 @@ final class ModifiedRecipeCatalogCompiler {
     }
   }
 
-  ItemRecipeCatalog result() {
+  RecipeCatalog result() {
     return result;
   }
 

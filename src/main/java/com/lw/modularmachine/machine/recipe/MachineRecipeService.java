@@ -1,5 +1,8 @@
 package com.lw.modularmachine.machine.recipe;
 
+import com.lw.modularmachine.machine.recipe.search.CompiledRecipeSet;
+import com.lw.modularmachine.machine.recipe.search.RecipeCatalog;
+import com.lw.modularmachine.machine.recipe.search.RecipeCandidate;
 import com.lw.modularmachine.machine.chemical.ChemicalPlatform;
 import com.lw.modularmachine.machine.factory.UpgradeRecipeChecks;
 import com.lw.modularmachine.api.recipe.RecipeModifier;
@@ -174,7 +177,7 @@ public final class MachineRecipeService {
     PREPARED.put(manager, candidate);
   }
 
-  public static Optional<ItemRecipeCatalog> catalogFor(MachineControllerBlockEntity controller) {
+  public static Optional<RecipeCatalog> catalogFor(MachineControllerBlockEntity controller) {
     return catalogFor((StructureService.StructureSubject) controller);
   }
 
@@ -195,7 +198,7 @@ public final class MachineRecipeService {
     }
   }
 
-  public static Optional<ItemRecipeCatalog> catalogFor(StructureService.StructureSubject owner) {
+  public static Optional<RecipeCatalog> catalogFor(StructureService.StructureSubject owner) {
     if (!(owner.structureLevel() instanceof ServerLevel level)) {
       return Optional.empty();
     }
@@ -234,7 +237,7 @@ public final class MachineRecipeService {
     // registered before its machine has the required physical resource parts.
   }
 
-  public static Optional<ItemRecipeCatalog> catalogForFactory(FactoryControllerBlockEntity factory, String threadId, ItemRecipeCatalog base) {
+  public static Optional<RecipeCatalog> catalogForFactory(FactoryControllerBlockEntity factory, String threadId, RecipeCatalog base) {
     if (!(factory.getLevel() instanceof ServerLevel level)) {
       return Optional.empty();
     }
@@ -246,7 +249,7 @@ public final class MachineRecipeService {
     return contextCatalog(published, factory, base, thread.upgradeSnapshot().recipeModifiers(), true);
   }
 
-  private static Optional<ItemRecipeCatalog> contextCatalog(Published published, StructureService.StructureSubject owner, ItemRecipeCatalog base, List<RecipeModifier> extraRules, boolean reportFailure) {
+  private static Optional<RecipeCatalog> contextCatalog(Published published, StructureService.StructureSubject owner, RecipeCatalog base, List<RecipeModifier> extraRules, boolean reportFailure) {
     var level = (ServerLevel) owner.structureLevel();
     var registration = owner.structureRegistration();
     if (registration == null || !registration.canCommit(level)) {
@@ -333,11 +336,11 @@ public final class MachineRecipeService {
     return Optional.of(recipe != null && recipe.machineId().equals(machineId));
   }
 
-  static Optional<MachineRecipe> definitionForStart(MachineControllerBlockEntity controller, ItemRecipePlan plan) {
+  static Optional<MachineRecipe> definitionForStart(MachineControllerBlockEntity controller, RecipeStartPlan plan) {
     return definitionForStart((StructureService.StructureSubject) controller, plan);
   }
 
-  public static Optional<MachineRecipe> definitionForStart(StructureService.StructureSubject owner, ItemRecipePlan plan) {
+  public static Optional<MachineRecipe> definitionForStart(StructureService.StructureSubject owner, RecipeStartPlan plan) {
     if (!(owner.structureLevel() instanceof ServerLevel level)) {
       return Optional.empty();
     }
@@ -417,7 +420,7 @@ public final class MachineRecipeService {
     final Prepared prepared;
     final boolean durationMultiplier;
     final MachineRecipeJson.Defaults defaults;
-    final Map<ResourceLocation, ItemRecipeCatalog> catalogs;
+    final Map<ResourceLocation, RecipeCatalog> catalogs;
     final LinkedHashMap<ModifierCatalogKey, ModifiedRecipeCatalogCompiler> modifiedCatalogs = new LinkedHashMap<>(
         16,
         0.75F,
@@ -429,7 +432,7 @@ public final class MachineRecipeService {
       this.prepared = prepared;
       this.durationMultiplier = durationMultiplier;
       this.defaults = defaults;
-      var values = new HashMap<ResourceLocation, ItemRecipeCatalog>();
+      var values = new HashMap<ResourceLocation, RecipeCatalog>();
       prepared.candidates().forEach((machine, recipes) -> {
         var fluids = new HashMap<String, List<FluidStack>>();
         var outputs = new HashMap<String, List<FluidStack>>();
@@ -445,7 +448,7 @@ public final class MachineRecipeService {
         });
         values.put(
             machine,
-            new ItemRecipeCatalog(
+            new RecipeCatalog(
                 machine,
                 recipes,
                 fluids,

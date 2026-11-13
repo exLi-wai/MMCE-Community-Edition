@@ -1,5 +1,6 @@
-package com.lw.modularmachine.machine.recipe;
+package com.lw.modularmachine.machine.recipe.search;
 
+import com.lw.modularmachine.machine.recipe.RecipeStartPlan;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Map;
@@ -25,7 +26,7 @@ class RecipePlannerTest {
             new RecipeCandidate.Input<>("minecraft:bucket", 1, 0),
             new RecipeCandidate.Input<>("minecraft:diamond", 2, 1)),
         List.of(new RecipeCandidate.Output<>("minecraft:emerald", 1)));
-    var sampled = ItemRecipePlan.sampledInputs(candidate, 42, 1);
+    var sampled = RecipeStartPlan.sampledInputs(candidate, 42, 1);
 
     assertFalse(sampled.containsKey("minecraft:bucket"));
     assertEquals(2L, sampled.get("minecraft:diamond"));
@@ -38,13 +39,13 @@ class RecipePlannerTest {
         0,
         List.of(new RecipeCandidate.Input<>("minecraft:diamond", 1, .5D)),
         List.of(new RecipeCandidate.Output<>("minecraft:emerald", 1)));
-    assertEquals(ItemRecipePlan.sampledInputs(candidate, 81, 12), ItemRecipePlan.sampledInputs(candidate, 81, 12));
-    assertTrue(ItemRecipePlan.sampledInputs(candidate, 81, 12).getOrDefault("minecraft:diamond", 0L) <= 12);
+    assertEquals(RecipeStartPlan.sampledInputs(candidate, 81, 12), RecipeStartPlan.sampledInputs(candidate, 81, 12));
+    assertTrue(RecipeStartPlan.sampledInputs(candidate, 81, 12).getOrDefault("minecraft:diamond", 0L) <= 12);
   }
 
   @Test
   void choosesHighestPriorityCompleteCandidate() {
-    var snapshot = new ItemResourceSnapshot<String>(7, Map.of("minecraft:dirt", 2L), List.of(empty(0)));
+    var snapshot = new ResourceSnapshot<String>(7, Map.of("minecraft:dirt", 2L), List.of(empty(0)));
     var selected = RecipePlanner.select(
         snapshot,
         List.of(recipe("low", 1, "minecraft:dirt", 1, "mmcece:b"), recipe("high", 5, "minecraft:dirt", 1, "mmcece:a")))
@@ -62,16 +63,16 @@ class RecipePlannerTest {
             new RecipeCandidate.Input<String>("minecraft:dirt", 2),
             new RecipeCandidate.Input<String>("minecraft:dirt", 2)),
         List.of(new RecipeCandidate.Output<String>("mmcece:brick", 1)));
-    var snapshot = new ItemResourceSnapshot<String>(0, Map.of("minecraft:dirt", 3L), List.of(empty(0)));
+    var snapshot = new ResourceSnapshot<String>(0, Map.of("minecraft:dirt", 3L), List.of(empty(0)));
     assertTrue(RecipePlanner.select(snapshot, List.of(candidate)).isEmpty());
   }
 
   @Test
   void outputBlockedHighPriorityFallsThroughToLowerPriorityCandidate() {
-    var snapshot = new ItemResourceSnapshot<String>(
+    var snapshot = new ResourceSnapshot<String>(
         0,
         Map.of("minecraft:dirt", 1L),
-        List.of(new ItemResourceSnapshot.OutputSlot<String>("mmcece:b", 63, 64)));
+        List.of(new ResourceSnapshot.OutputSlot<String>("mmcece:b", 63, 64)));
     var selected = RecipePlanner
         .select(
             snapshot,
@@ -83,10 +84,10 @@ class RecipePlannerTest {
 
   @Test
   void failedCandidateDoesNotLeaveCapacityReservationForNextCandidate() {
-    var snapshot = new ItemResourceSnapshot<String>(
+    var snapshot = new ResourceSnapshot<String>(
         0,
         Map.of("minecraft:dirt", 1L),
-        List.of(new ItemResourceSnapshot.OutputSlot<String>(null, 0, 1)));
+        List.of(new ResourceSnapshot.OutputSlot<String>(null, 0, 1)));
     var a = new RecipeCandidate<String>(
         "a",
         10,
@@ -98,7 +99,7 @@ class RecipePlannerTest {
 
   @Test
   void plannerDoesNotMutateSnapshot() {
-    var snapshot = new ItemResourceSnapshot<String>(3, Map.of("minecraft:dirt", 1L), List.of(empty(0)));
+    var snapshot = new ResourceSnapshot<String>(3, Map.of("minecraft:dirt", 1L), List.of(empty(0)));
     RecipePlanner.select(snapshot, List.of(recipe("a", 1, "minecraft:dirt", 1, "mmcece:a"))).orElseThrow();
     assertEquals(1, snapshot.inputCount("minecraft:dirt"));
     assertEquals(0, snapshot.outputs().getFirst().count());
@@ -106,7 +107,7 @@ class RecipePlannerTest {
 
   @Test
   void samePriorityOrderingIsStableByRecipeId() {
-    var snapshot = new ItemResourceSnapshot<String>(0, Map.of("minecraft:dirt", 1L), List.of(empty(0)));
+    var snapshot = new ResourceSnapshot<String>(0, Map.of("minecraft:dirt", 1L), List.of(empty(0)));
     var selected = RecipePlanner
         .select(
             snapshot,
@@ -117,7 +118,7 @@ class RecipePlannerTest {
 
   @Test
   void differentOutputsCannotShareOneEmptySlot() {
-    var snapshot = new ItemResourceSnapshot<String>(0, Map.of("minecraft:dirt", 1L), List.of(empty(0)));
+    var snapshot = new ResourceSnapshot<String>(0, Map.of("minecraft:dirt", 1L), List.of(empty(0)));
     var candidate = new RecipeCandidate<String>(
         "two_outputs",
         1,
@@ -128,12 +129,12 @@ class RecipePlannerTest {
 
   @Test
   void existingMatchingStackIsPreferredOverWildcardSlot() {
-    var snapshot = new ItemResourceSnapshot<String>(
+    var snapshot = new ResourceSnapshot<String>(
         0,
         Map.of("minecraft:dirt", 1L),
         List.of(
-            new ItemResourceSnapshot.OutputSlot<String>(null, 0, 1),
-            new ItemResourceSnapshot.OutputSlot<String>("mmcece:b", 63, 64)));
+            new ResourceSnapshot.OutputSlot<String>(null, 0, 1),
+            new ResourceSnapshot.OutputSlot<String>("mmcece:b", 63, 64)));
     var candidate = new RecipeCandidate<String>(
         "two_outputs",
         1,
@@ -152,18 +153,18 @@ class RecipePlannerTest {
             new RecipeCandidate.Input<String>("minecraft:dirt", Long.MAX_VALUE),
             new RecipeCandidate.Input<String>("minecraft:dirt", 1)),
         List.of(new RecipeCandidate.Output<String>("mmcece:a", 1)));
-    var snapshot = new ItemResourceSnapshot<String>(0, Map.of("minecraft:dirt", Long.MAX_VALUE), List.of(empty(0)));
+    var snapshot = new ResourceSnapshot<String>(0, Map.of("minecraft:dirt", Long.MAX_VALUE), List.of(empty(0)));
     assertThrows(IllegalArgumentException.class, () -> RecipePlanner.select(snapshot, List.of(candidate)));
   }
 
   @Test
   void unequalEmptyCapacitiesRequireExactAssignment() {
-    var snapshot = new ItemResourceSnapshot<String>(
+    var snapshot = new ResourceSnapshot<String>(
         0,
         Map.of("minecraft:dirt", 1L),
         List.of(
-            new ItemResourceSnapshot.OutputSlot<String>(null, 0, 1),
-            new ItemResourceSnapshot.OutputSlot<String>(null, 0, 64)));
+            new ResourceSnapshot.OutputSlot<String>(null, 0, 1),
+            new ResourceSnapshot.OutputSlot<String>(null, 0, 64)));
     var candidate = new RecipeCandidate<String>(
         "mixed",
         1,
@@ -176,7 +177,7 @@ class RecipePlannerTest {
 
   @Test
   void budgetExhaustionDoesNotSelectALowerPriorityRecipeOrClaimNoMatch() {
-    var snapshot = new ItemResourceSnapshot<String>(0, Map.of("minecraft:dirt", 1L), List.of(empty(0)));
+    var snapshot = new ResourceSnapshot<String>(0, Map.of("minecraft:dirt", 1L), List.of(empty(0)));
     var result = RecipePlanner.search(
         snapshot,
         List.of(recipe("a", 10, "minecraft:dirt", 1, "a"), recipe("b", 0, "minecraft:dirt", 1, "b")),
@@ -199,7 +200,7 @@ class RecipePlannerTest {
             new RecipeCandidate.Input<String>("rare_d", 1)),
         List.of(new RecipeCandidate.Output<String>("high_output", 1)));
     var low = recipe("low", 1, "present", 1, "low_output");
-    var snapshot = new ItemResourceSnapshot<String>(0, Map.of("present", 1L), List.of(empty(0)));
+    var snapshot = new ResourceSnapshot<String>(0, Map.of("present", 1L), List.of(empty(0)));
     var compiled = new CompiledRecipeSet<>(List.of(high, low));
     assertEquals(1, compiled.entriesFor(snapshot, false).size());
     var session = RecipePlanner.prepare(snapshot, compiled);
@@ -221,15 +222,15 @@ class RecipePlannerTest {
     var b = recipe("b", 1, "minecraft:dirt", 1, "b");
     assertTrue(
         RecipePlanner.select(
-            new ItemResourceSnapshot<String>(
+            new ResourceSnapshot<String>(
                 0,
                 Map.of("minecraft:dirt", 1L),
-                List.of(new ItemResourceSnapshot.OutputSlot<String>("b", 64, 64))),
+                List.of(new ResourceSnapshot.OutputSlot<String>("b", 64, 64))),
             List.of(a, b)).isEmpty());
     assertEquals(
         "a",
         RecipePlanner
-            .select(new ItemResourceSnapshot<String>(1, Map.of("minecraft:dirt", 1L), List.of(empty(0))), List.of(a, b))
+            .select(new ResourceSnapshot<String>(1, Map.of("minecraft:dirt", 1L), List.of(empty(0))), List.of(a, b))
             .orElseThrow().candidate().id());
   }
 
@@ -237,11 +238,11 @@ class RecipePlannerTest {
   void exactAllocationMatchesIndependentSlotTypeEnumeration() {
     var random = new Random(0x2406L);
     for (int example = 0; example < 1000; example++) {
-      var slots = new ArrayList<ItemResourceSnapshot.OutputSlot<String>>();
+      var slots = new ArrayList<ResourceSnapshot.OutputSlot<String>>();
       for (int i = 0, n = random.nextInt(5); i < n; i++) {
         int type = random.nextInt(4), capacity = 1 + random.nextInt(5);
         slots.add(
-            new ItemResourceSnapshot.OutputSlot<String>(
+            new ResourceSnapshot.OutputSlot<String>(
                 type == 3 ? null : "o" + type,
                 type == 3 ? 0 : random.nextInt(capacity + 1),
                 capacity));
@@ -259,7 +260,7 @@ class RecipePlannerTest {
           outputs);
       boolean reference = enumerate(slots, 0, wanted, new long[3]);
       var result = RecipePlanner
-          .search(new ItemResourceSnapshot<String>(0, Map.of("dirt", 1L), slots), List.of(candidate), 100_000);
+          .search(new ResourceSnapshot<String>(0, Map.of("dirt", 1L), slots), List.of(candidate), 100_000);
       assertNotEquals(RecipePlanner.Status.BUDGET_EXHAUSTED, result.status());
       assertEquals(reference, result.plan().isPresent(), "Example " + example + ": " + slots);
       result.plan().ifPresent(plan -> {
@@ -285,7 +286,7 @@ class RecipePlannerTest {
 
   // Independent oracle assigns a whole empty slot to a type and compares summed
   // capacity.
-  private static boolean enumerate(List<ItemResourceSnapshot.OutputSlot<String>> slots, int index, long[] wanted, long[] capacity) {
+  private static boolean enumerate(List<ResourceSnapshot.OutputSlot<String>> slots, int index, long[] wanted, long[] capacity) {
     if (index == slots.size()) {
       for (int i = 0; i < wanted.length; i++) {
         if (capacity[i] < wanted[i]) {
@@ -308,7 +309,7 @@ class RecipePlannerTest {
     return false;
   }
 
-  private static ItemResourceSnapshot.OutputSlot<String> empty(long count) {
-    return new ItemResourceSnapshot.OutputSlot<String>(null, count, 64);
+  private static ResourceSnapshot.OutputSlot<String> empty(long count) {
+    return new ResourceSnapshot.OutputSlot<String>(null, count, 64);
   }
 }

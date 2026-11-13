@@ -1,5 +1,6 @@
 package com.lw.modularmachine.machine.recipe;
 
+import com.lw.modularmachine.machine.recipe.search.RecipeResourceRequirements;
 import com.lw.modularmachine.machine.factory.UpgradeLifecyclePublisher;
 import com.lw.modularmachine.api.recipe.RecipeLifecycleEvents;
 import com.lw.modularmachine.ModularMachine;

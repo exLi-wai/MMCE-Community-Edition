@@ -1,5 +1,6 @@
-package com.lw.modularmachine.machine.recipe;
+package com.lw.modularmachine.machine.recipe.search;
 
+import org.jetbrains.annotations.ApiStatus;
 import java.math.BigInteger;
 import java.util.ArrayList;
 import java.util.Collection;
@@ -13,6 +14,7 @@ import java.util.Set;
  * Exact-key planner. Sessions hold only immutable snapshots and private
  * resumable scratch state.
  */
+@ApiStatus.Internal
 public final class RecipePlanner {
   private static final int DEFAULT_SEARCH_BUDGET = 65_536;
   public static final int MAX_OUTPUT_SLOTS = 8192;
@@ -40,7 +42,7 @@ public final class RecipePlanner {
    * Convenience entry point; runtime callers compile once and retain a Session
    * instead.
    */
-  public static <K> Optional<RecipePlan<K>> select(ItemResourceSnapshot<K> snapshot, Collection<RecipeCandidate<K>> candidates) {
+  public static <K> Optional<RecipePlan<K>> select(ResourceSnapshot<K> snapshot, Collection<RecipeCandidate<K>> candidates) {
     var result = search(snapshot, candidates, DEFAULT_SEARCH_BUDGET);
     if (result.status() == Status.BUDGET_EXHAUSTED) {
       throw new IllegalStateException("Recipe planning budget exhausted; resume a Session");
@@ -48,19 +50,19 @@ public final class RecipePlanner {
     return result.plan();
   }
 
-  public static <K> SearchResult<K> search(ItemResourceSnapshot<K> snapshot, Collection<RecipeCandidate<K>> candidates, int workBudget) {
+  public static <K> SearchResult<K> search(ResourceSnapshot<K> snapshot, Collection<RecipeCandidate<K>> candidates, int workBudget) {
     return prepare(snapshot, new CompiledRecipeSet<>(candidates)).advance(workBudget);
   }
 
-  public static <K> Session<K> prepare(ItemResourceSnapshot<K> snapshot, CompiledRecipeSet<K> recipes) {
+  public static <K> Session<K> prepare(ResourceSnapshot<K> snapshot, CompiledRecipeSet<K> recipes) {
     return new Session<>(snapshot, recipes, false, null);
   }
 
-  static <K> Session<K> prepare(ItemResourceSnapshot<K> snapshot, CompiledRecipeSet<K> recipes, Set<String> allowedIds) {
+  static <K> Session<K> prepare(ResourceSnapshot<K> snapshot, CompiledRecipeSet<K> recipes, Set<String> allowedIds) {
     return new Session<>(snapshot, recipes, false, allowedIds);
   }
 
-  public static <K> Session<K> prepareOutputs(ItemResourceSnapshot<K> snapshot, RecipeCandidate<K> paidOutput) {
+  public static <K> Session<K> prepareOutputs(ResourceSnapshot<K> snapshot, RecipeCandidate<K> paidOutput) {
     return new Session<>(snapshot, new CompiledRecipeSet<>(List.of(paidOutput)), true, null);
   }
 
@@ -77,7 +79,7 @@ public final class RecipePlanner {
       EMPTY
     }
 
-    private final ItemResourceSnapshot<K> snapshot;
+    private final ResourceSnapshot<K> snapshot;
     private final List<CompiledRecipeSet.Entry<K>> candidates;
     private final boolean outputOnly;
     private final List<RecipePlan.Insertion<K>> insertions = new ArrayList<>();
@@ -87,6 +89,7 @@ public final class RecipePlanner {
     private int candidateCursor, inputCursor, outputCursor, depth, missingTypes;
     private long[] remaining, amounts;
     private int[] next, chosen;
+    private boolean[] triedPlacement;
     private Status terminal;
     private RecipePlan<K> selected;
     private long totalWork;
@@ -94,7 +97,7 @@ public final class RecipePlanner {
     private int capacityKey, capacitySlot;
     private long capacityCount;
 
-    private Session(ItemResourceSnapshot<K> snapshot, CompiledRecipeSet<K> recipes, boolean outputOnly, Set<String> allowedIds) {
+    private Session(ResourceSnapshot<K> snapshot, CompiledRecipeSet<K> recipes, boolean outputOnly, Set<String> allowedIds) {
       this.snapshot = Objects.requireNonNull(snapshot, "snapshot");
       Objects.requireNonNull(recipes, "recipes");
       this.outputOnly = outputOnly;
@@ -196,12 +199,14 @@ public final class RecipePlanner {
       var slot = snapshot.outputs().get(slotIndex);
       if (slot.key() == null) {
         if (slot.capacity() > 0) {
-          emptySlots.add(slotIndex);
           long max = 0;
           for (var key : current.outputKeys) {
             max = Math.max(max, slot.capacityFor(key));
           }
-          emptyCapacity = emptyCapacity.add(BigInteger.valueOf(max));
+          if (max > 0) {
+            emptySlots.add(slotIndex);
+            emptyCapacity = emptyCapacity.add(BigInteger.valueOf(max));
+          }
         }
         return;
       }
@@ -228,6 +233,7 @@ public final class RecipePlanner {
         next = new int[emptySlots.size()];
         chosen = new int[emptySlots.size()];
         amounts = new long[emptySlots.size()];
+        triedPlacement = new boolean[emptySlots.size()];
         phase = Phase.EMPTY;
         return;
       }
@@ -252,7 +258,8 @@ public final class RecipePlanner {
         finish();
         return;
       }
-      if (depth == emptySlots.size()) {
+      // Each remaining kind needs its own slot, even if total capacity is enough.
+      if (missingTypes > emptySlots.size() - depth) {
         backtrack();
         return;
       }
@@ -267,6 +274,7 @@ public final class RecipePlanner {
         if (amount == 0) {
           return;
         }
+        triedPlacement[depth] = true;
         chosen[depth] = key;
         amounts[depth] = amount;
         remaining[key] -= amount;
@@ -275,12 +283,14 @@ public final class RecipePlanner {
         }
         descend();
       } else {
-        if (key == remaining.length) {
+        if (key == remaining.length && !triedPlacement[depth]) {
           // Some slots reject all remaining keys. Skipping must be an explicit branch.
           chosen[depth] = -1;
           amounts[depth] = 0;
           descend();
         } else {
+          // A solution that leaves this slot empty could move a compatible output
+          // here from a later slot. Once all placements failed, skipping cannot help.
           backtrack();
         }
       }
@@ -290,6 +300,7 @@ public final class RecipePlanner {
       depth++;
       if (depth < next.length) {
         next[depth] = 0;
+        triedPlacement[depth] = false;
       }
     }
 

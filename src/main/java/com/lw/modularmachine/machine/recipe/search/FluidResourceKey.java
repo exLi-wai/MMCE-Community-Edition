@@ -1,16 +1,19 @@
-package com.lw.modularmachine.machine.recipe;
+package com.lw.modularmachine.machine.recipe.search;
 
+import com.lw.modularmachine.machine.recipe.ResourceSelector;
 import net.minecraft.core.HolderLookup;
 import net.minecraft.nbt.NbtOps;
 import net.neoforged.neoforge.fluids.FluidStack;
+import org.jetbrains.annotations.ApiStatus;
 
 /** Exact fluid and persistent components, independent of quantity. */
-final class FluidResourceKey {
+@ApiStatus.Internal
+public final class FluidResourceKey {
   private final FluidStack prototype;
   private final int hash;
   private final String selector;
 
-  FluidResourceKey(FluidStack source, HolderLookup.Provider registries) {
+  public FluidResourceKey(FluidStack source, HolderLookup.Provider registries) {
     if (source.isEmpty()) {
       throw new IllegalArgumentException("Empty fluid cannot identify an output");
     }
@@ -31,15 +34,15 @@ final class FluidResourceKey {
         .hashCode();
   }
 
-  FluidResourceKey withSelector(String selector) {
+  public FluidResourceKey withSelector(String selector) {
     return this.selector.equals(selector) ? this : new FluidResourceKey(this, selector);
   }
 
-  String selector() {
+  public String selector() {
     return selector;
   }
 
-  FluidStack amount(int amount) {
+  public FluidStack amount(int amount) {
     return prototype.copyWithAmount(amount);
   }
 

@@ -1,5 +1,7 @@
 package com.lw.modularmachine.machine.recipe;
 
+import com.lw.modularmachine.machine.recipe.search.ChemicalResourceKey;
+import com.lw.modularmachine.machine.recipe.search.RecipeResourceRequirements;
 import com.lw.modularmachine.machine.structure.StructureService;
 import com.lw.modularmachine.ModularMachine;
 import com.lw.modularmachine.api.component.ChemicalStackData;
@@ -18,7 +20,7 @@ import org.jetbrains.annotations.ApiStatus;
  * transactions.
  */
 @ApiStatus.Internal
-final class ChemicalTransactions {
+public final class ChemicalTransactions {
   private ChemicalTransactions() {
   }
 
@@ -37,6 +39,14 @@ final class ChemicalTransactions {
 
   static Batch inputs(RecipeExecutionTicket ticket, List<ChemicalRequirement> requirements) {
     return inputs(List.of(new InputClaim(ticket, requirements)));
+  }
+
+  /**
+   * Read-only admission check; no transaction batch escapes to search callers.
+   */
+  public static boolean inputsAvailable(RecipeExecutionTicket ticket, List<ChemicalRequirement> requirements) {
+    ticket.requireServerThread();
+    return inputs(ticket, requirements) != null;
   }
 
   static Batch inputs(List<InputClaim> claims) {

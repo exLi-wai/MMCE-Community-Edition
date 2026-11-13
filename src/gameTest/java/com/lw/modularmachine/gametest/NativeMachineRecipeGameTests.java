@@ -11,10 +11,10 @@ import com.lw.modularmachine.machine.factory.FactoryThreadState.State;
 import com.lw.modularmachine.machine.factory.FactoryThreadState;
 import com.lw.modularmachine.api.upgrade.FactoryUpgradeSnapshot;
 import com.lw.modularmachine.api.orientation.MachineOrientation;
-import com.lw.modularmachine.machine.recipe.ItemRecipeSearch;
+import com.lw.modularmachine.machine.recipe.search.RecipeSearch;
 import com.lw.modularmachine.machine.recipe.MachineRecipe;
 import com.lw.modularmachine.machine.recipe.MachineRecipeService;
-import com.lw.modularmachine.machine.recipe.RecipePlanner;
+import com.lw.modularmachine.machine.recipe.search.RecipePlanner;
 import com.lw.modularmachine.machine.structure.StructureService;
 import com.lw.modularmachine.registry.MachineRegistries;
 import com.mojang.serialization.JsonOps;
@@ -255,7 +255,7 @@ public final class NativeMachineRecipeGameTests {
               output.inventory().setStackInSlot(slot, new ItemStack(Items.DIAMOND, 63));
             }
             var catalog = MachineRecipeService.catalogFor(controller).orElseThrow();
-            var plan = ItemRecipeSearch.begin(controller).orElseThrow().advance(10_000).plan().orElseThrow();
+            var plan = RecipeSearch.begin(controller).orElseThrow().advance(10_000).plan().orElseThrow();
             helper.assertTrue(
                 plan.recipe().id().equals(id("mmcece/test_native_b").toString()) && plan.validateForStart(),
                 "Native A/B priority/output semantics failed");
@@ -289,7 +289,7 @@ public final class NativeMachineRecipeGameTests {
             }
             ((MachinePortBlockEntity) helper.getLevel().getBlockEntity(inPos)).inventory()
                 .setStackInSlot(0, new ItemStack(Items.DIRT, 1));
-            var legacyPlan = ItemRecipeSearch.begin(legacy).orElseThrow().advance(10_000).plan().orElseThrow();
+            var legacyPlan = RecipeSearch.begin(legacy).orElseThrow().advance(10_000).plan().orElseThrow();
             var manager = server.getRecipeManager();
             var recipes = List.copyOf(manager.getRecipes());
             var view = manager.getRecipes();
@@ -331,7 +331,7 @@ public final class NativeMachineRecipeGameTests {
                         next != catalog && !catalog.isCurrent() && !plan.validateForStart(),
                         "Old native catalog survived reload generation");
                     helper.assertTrue(
-                        ItemRecipeSearch.begin(restored).orElseThrow().advance(10_000)
+                        RecipeSearch.begin(restored).orElseThrow().advance(10_000)
                             .status() == RecipePlanner.Status.SELECTED,
                         "Reload did not recover native recipe search");
                     helper.succeed();

@@ -1,5 +1,11 @@
 package com.lw.modularmachine.machine.recipe;
 
+import com.lw.modularmachine.machine.recipe.search.ChemicalOutputLayout;
+import com.lw.modularmachine.machine.recipe.search.RecipeCatalog;
+import com.lw.modularmachine.machine.recipe.search.ResourceSnapshot;
+import com.lw.modularmachine.machine.recipe.search.ItemSlotDomain;
+import com.lw.modularmachine.machine.recipe.search.RecipeCandidate;
+import com.lw.modularmachine.machine.recipe.search.RecipePlanner;
 import com.lw.modularmachine.machine.factory.UpgradeRecipeChecks;
 import com.lw.modularmachine.blockentity.MachineControllerBlockEntity;
 import com.lw.modularmachine.machine.PortKind;
@@ -19,9 +25,10 @@ import org.jetbrains.annotations.ApiStatus;
  * Read-only start admission: deductions are not applied and placements do not
  * reserve future output.
  */
-public final class ItemRecipePlan {
+@ApiStatus.Internal
+public final class RecipeStartPlan {
   private final RecipeExecutionTicket source;
-  private final ItemRecipeCatalog catalog;
+  private final RecipeCatalog catalog;
   private final RecipeCandidate<ItemResourceKey> recipe;
   private final List<Deduction> deductions;
   private final List<Placement> placements;
@@ -35,7 +42,7 @@ public final class ItemRecipePlan {
   private ChemicalOutputLayout.Planning chemicalOutputAdmission;
   private int chemicalOutputInstances;
 
-  ItemRecipePlan(RecipeExecutionTicket source, ItemRecipeCatalog catalog, RecipeCandidate<ItemResourceKey> recipe, List<Deduction> deductions, List<Placement> placements, long inputChanceSeed, UpgradeRecipeChecks.Scope factoryScope) {
+  RecipeStartPlan(RecipeExecutionTicket source, RecipeCatalog catalog, RecipeCandidate<ItemResourceKey> recipe, List<Deduction> deductions, List<Placement> placements, long inputChanceSeed, UpgradeRecipeChecks.Scope factoryScope) {
     this.source = source;
     this.catalog = catalog;
     this.recipe = recipe;
@@ -52,12 +59,17 @@ public final class ItemRecipePlan {
     return inputChanceSeed;
   }
 
-  static long newInputChanceSeed() {
+  /** Internal read-only admission assembled by the resource search. */
+  public static RecipeStartPlan prepared(RecipeExecutionTicket source, RecipeCatalog catalog, RecipeCandidate<ItemResourceKey> recipe, List<Deduction> deductions, List<Placement> placements, long inputChanceSeed, UpgradeRecipeChecks.Scope factoryScope) {
+    return new RecipeStartPlan(source, catalog, recipe, deductions, placements, inputChanceSeed, factoryScope);
+  }
+
+  public static long newInputChanceSeed() {
     long seed = RandomSource.create().nextLong() & Long.MAX_VALUE;
     return seed == 0 ? 1 : seed;
   }
 
-  static <K> Map<K, Long> sampledInputs(RecipeCandidate<K> recipe, long seed, int instances) {
+  public static <K> Map<K, Long> sampledInputs(RecipeCandidate<K> recipe, long seed, int instances) {
     if (instances < 1) {
       throw new IllegalArgumentException("Invalid input chance instances");
     }
@@ -171,7 +183,7 @@ public final class ItemRecipePlan {
     return placements;
   }
 
-  ItemRecipePlan scaled(int instances) {
+  RecipeStartPlan scaled(int instances) {
     if (instances < 1) {
       throw new IllegalArgumentException("Invalid parallel instances");
     }
@@ -203,10 +215,10 @@ public final class ItemRecipePlan {
       throw new IllegalStateException("Parallel input allocation exceeds physical resources");
     }
 
-    return new ItemRecipePlan(source, catalog, recipe, scaledDeductions, placements, inputChanceSeed, factoryScope);
+    return new RecipeStartPlan(source, catalog, recipe, scaledDeductions, placements, inputChanceSeed, factoryScope);
   }
 
-  static ItemRecipePlan combineInputs(List<ItemRecipePlan> plans) {
+  static RecipeStartPlan combineInputs(List<RecipeStartPlan> plans) {
     if (plans == null || plans.isEmpty()) {
       throw new IllegalArgumentException("No parallel recipe plans");
     }
@@ -245,7 +257,7 @@ public final class ItemRecipePlan {
       throw new IllegalStateException("Parallel input chance allocation exceeds physical resources");
     }
 
-    return new ItemRecipePlan(
+    return new RecipeStartPlan(
         first.source,
         first.catalog,
         first.recipe,
@@ -353,7 +365,7 @@ public final class ItemRecipePlan {
    * The server owner must supply its currently published catalog; this still
    * performs no transaction.
    */
-  public boolean validateForStart(ItemRecipeCatalog currentCatalog) {
+  public boolean validateForStart(RecipeCatalog currentCatalog) {
     source.requireServerThread();
     return currentCatalog == catalog && checkedTicket().isPresent();
   }
@@ -375,7 +387,7 @@ public final class ItemRecipePlan {
     return source;
   }
 
-  ItemRecipeCatalog catalog() {
+  RecipeCatalog catalog() {
     return catalog;
   }
 
@@ -399,7 +411,7 @@ public final class ItemRecipePlan {
     }
 
     /** Use the same captured, key-specific free space as the output planner. */
-    static Placement inSlot(ItemSlotRef slot, ItemResourceSnapshot.OutputSlot<ItemResourceKey> output, ItemResourceKey key, int count) {
+    public static Placement inSlot(ItemSlotRef slot, ResourceSnapshot.OutputSlot<ItemResourceKey> output, ItemResourceKey key, int count) {
       long available = output.canAccept(key) ? output.capacityFor(key) - output.count() : 0;
       return new Placement(slot, key, count, Math.toIntExact(available));
     }

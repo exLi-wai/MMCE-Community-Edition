@@ -1,5 +1,11 @@
-package com.lw.modularmachine.machine.recipe;
+package com.lw.modularmachine.machine.recipe.search;
 
+import com.lw.modularmachine.machine.recipe.ChemicalTransactions;
+import com.lw.modularmachine.machine.recipe.RecipeStartPlan;
+import com.lw.modularmachine.machine.recipe.ItemResourceKey;
+import com.lw.modularmachine.machine.recipe.ItemSlotRef;
+import com.lw.modularmachine.machine.recipe.MachineRecipeService;
+import com.lw.modularmachine.machine.recipe.RecipeExecutionTicket;
 import com.lw.modularmachine.machine.factory.UpgradeRecipeChecks;
 import com.lw.modularmachine.blockentity.FactoryControllerBlockEntity;
 import com.lw.modularmachine.blockentity.MachineControllerBlockEntity;
@@ -15,46 +21,50 @@ import java.util.Map;
 import java.util.Objects;
 import java.util.Optional;
 import java.util.Set;
-import net.neoforged.neoforge.fluids.FluidStack;
+import org.jetbrains.annotations.ApiStatus;
 
 /**
- * Server-owned bridge to a pure resumable planner. No method consumes or
- * inserts an item.
+ * Server-owned multi-resource search with resumable candidate and output
+ * planning. It does not consume resources or commit production.
  */
-public final class ItemRecipeSearch {
+@ApiStatus.Internal
+public final class RecipeSearch {
   private final RecipeExecutionTicket ticket;
-  private final ItemRecipeCatalog catalog;
+  private final RecipeCatalog catalog;
+  private final RecipeSearchResources resources;
   private final List<InputSlot> inputs;
   private final List<OutputSlot> outputs;
   private final RecipePlanner.Session<ItemResourceKey> session;
-  private ItemRecipePlan selected;
-  private final FluidOutputLayout fluidLayout;
+  private RecipeStartPlan selected;
+  private FluidOutputLayout fluidLayout;
   private FluidOutputLayout.Planning fluidPlan;
   private ChemicalOutputLayout.Planning chemicalPlan;
   private long fluidWork;
   private final UpgradeRecipeChecks.Scope factoryScope;
   private final UpgradeBusOwner factory;
   private final String factoryThread;
-  private ItemRecipePlan pendingFactoryPlan;
+  private RecipeStartPlan pendingFactoryPlan;
   private long checkWork;
   private List<Integer> groups;
   private Set<String> allowedIds;
   private int groupCursor;
-  private ItemRecipeSearch groupSearch;
-  private ItemRecipePlan groupBest;
+  private RecipeSearch groupSearch;
+  private RecipeStartPlan groupBest;
   private long completedGroupWork;
   private final Map<String, MissingResource> missingResources = new HashMap<>();
   private final Set<String> componentReady = new HashSet<>();
+  private boolean resourcesDiagnosed;
 
   private record MissingResource(RecipeCandidate<ItemResourceKey> candidate, PortKind kind) {
   }
 
-  private record OutputSlot(ItemSlotRef ref, ItemResourceSnapshot.OutputSlot<ItemResourceKey> snapshot) {
+  private record OutputSlot(ItemSlotRef ref, ResourceSnapshot.OutputSlot<ItemResourceKey> snapshot) {
   }
 
-  private ItemRecipeSearch(RecipeExecutionTicket ticket, ItemRecipeCatalog catalog, Set<String> allowedIds, String factoryThread, List<Integer> groups) {
+  private RecipeSearch(RecipeExecutionTicket ticket, RecipeCatalog catalog, Set<String> allowedIds, String factoryThread, List<Integer> groups) {
     this.ticket = ticket;
     this.catalog = catalog;
+    resources = new RecipeSearchResources(catalog);
     this.allowedIds = allowedIds == null ? null : Set.copyOf(allowedIds);
     this.factoryThread = startThread(ticket, factoryThread);
     this.groups = List.copyOf(groups);
@@ -66,41 +76,38 @@ public final class ItemRecipeSearch {
     fluidLayout = null;
   }
 
-  private ItemRecipeSearch(RecipeExecutionTicket ticket, ItemRecipeCatalog catalog, Set<String> allowedIds, String factoryThread) {
+  private RecipeSearch(RecipeExecutionTicket ticket, RecipeCatalog catalog, Set<String> allowedIds, String factoryThread, RecipeSearchResources resources) {
     this.ticket = ticket;
     this.catalog = catalog;
+    this.resources = resources;
+    this.allowedIds = allowedIds == null ? null : Set.copyOf(allowedIds);
     this.factoryThread = startThread(ticket, factoryThread);
     factory = this.factoryThread != null && ticket.owner() instanceof UpgradeBusOwner owner ? owner : null;
     factoryScope = factory == null ? null : UpgradeRecipeChecks.capture(factory, this.factoryThread);
     var inputSlots = new ArrayList<InputSlot>();
     var outputSlots = new ArrayList<OutputSlot>();
     var counts = new LinkedHashMap<ItemResourceKey, Long>();
-    var itemAliases = new HashMap<ItemResourceKey, ItemResourceKey>();
-    var spaces = new ArrayList<ItemResourceSnapshot.OutputSlot<ItemResourceKey>>();
-    // All core item buses use the same validity rules; reuse one limit map for each
-    // slot capacity.
-    var limitCache = new HashMap<ItemSlotDomain, Map<ItemResourceKey, Long>>();
+    var spaces = new ArrayList<ResourceSnapshot.OutputSlot<ItemResourceKey>>();
     for (var port : ticket.ports()) {
       if (port.kind().resource() != PortKind.Resource.ITEM) {
         continue;
       }
-      var stacks = port.items();
-      for (int slot = 0; slot < stacks.size(); slot++) {
-        var stack = stacks.get(slot);
-        var key = stack.isEmpty() ? null : ItemResourceKey.of(stack).withSelector(port.selector());
-        var ref = new ItemSlotRef(port.partId(), slot);
+      for (var slot : resources.items(port)) {
+        var key = slot.key();
         if (port.kind() == PortKind.ITEM_INPUT) {
           if (key != null) {
-            counts.merge(key, (long) stack.getCount(), Math::addExact);
-            inputSlots.add(new InputSlot(ref, key, stack.getCount()));
+            counts.merge(key, (long) slot.count(), Math::addExact);
+            inputSlots.add(new InputSlot(slot.ref(), key, slot.count()));
+            if (!catalog.itemInputAliases().isEmpty()) {
+              var alias = key.ignoringComponents();
+              if (catalog.itemInputAliases().contains(alias)) {
+                counts.merge(alias, (long) slot.count(), Math::addExact);
+              }
+            }
           }
         } else {
-          int slotLimit = port.slotLimits().get(slot);
-          var domain = new ItemSlotDomain(slotLimit, port.selector(), port.bulkItems());
-          var limits = limitCache.computeIfAbsent(domain, current -> current.limits(catalog.recipes().outputKeys()));
-          var space = new ItemResourceSnapshot.OutputSlot<>(key, stack.getCount(), slotLimit, limits);
-          outputSlots.add(new OutputSlot(ref, space));
-          spaces.add(space);
+          outputSlots.add(new OutputSlot(slot.ref(), slot.output()));
+          spaces.add(slot.output());
         }
       }
     }
@@ -108,47 +115,25 @@ public final class ItemRecipeSearch {
     outputs = List.copyOf(outputSlots);
     var fluidCandidates = new HashSet<String>();
     var requirements = RecipeResourceRequirements.capture(ticket);
-    for (var candidate : catalog.recipes().candidatesFor(allowedIds)) {
+    var fluids = resources.fluids(ticket);
+    for (var candidate : catalog.candidatesForInputs(counts, fluids.inputKeys(), allowedIds)) {
       var definition = catalog.definition(candidate.id());
       var missing = definition == null ? Optional.<PortKind>empty() : requirements.missing(definition);
       if (missing.isPresent()) {
-        missingResources.put(candidate.id(), new MissingResource(candidate, missing.orElseThrow()));
         continue;
       }
-      componentReady.add(candidate.id());
       if (ticket.interfacesMatch(candidate.interfaceInputs())
-          && (definition == null || ChemicalTransactions.inputs(ticket, definition.chemicals().inputs()) != null)
-          && fluidInputsAvailable(
-              catalog.fluidInputs(candidate.id()),
-              ticket,
-              catalog.selectors(candidate.id()).fluidInput())
-          && fluidOutputsAvailable(
-              catalog.fluidOutputs(candidate.id()),
-              ticket,
-              catalog.selectors(candidate.id()).fluidOutput())) {
+          && (definition == null
+              || definition.chemicals().inputs().isEmpty()
+              || ChemicalTransactions.inputsAvailable(ticket, definition.chemicals().inputs()))
+          && catalog.fluidsAvailable(candidate.id(), fluids)) {
         fluidCandidates.add(candidate.id());
-        if (!candidate.inputs().isEmpty() && candidate.inputs().getFirst().key().ignoresComponents()) {
-          if (candidate.inputs().size() != 1) {
-            throw new IllegalArgumentException("Item-only matching requires a single item input row");
-          }
-          var key = candidate.inputs().getFirst().key();
-          itemAliases.put(key, key);
-        }
-      }
-    }
-    if (!itemAliases.isEmpty()) {
-      for (var slot : inputs) {
-        var alias = itemAliases.get(slot.key().ignoringComponents());
-        if (alias != null) {
-          counts.merge(alias, (long) slot.count(), Math::addExact);
-        }
       }
     }
     // Logical aliases are counted once per physical slot and are needed only by
     // single-row item-only candidates. The ticket retains exact physical stamps.
-    var snapshot = new ItemResourceSnapshot<>(ticket.structureRevision(), counts, spaces);
+    var snapshot = new ResourceSnapshot<>(ticket.structureRevision(), counts, spaces);
     session = RecipePlanner.prepare(snapshot, catalog.recipes(), fluidCandidates);
-    fluidLayout = new FluidOutputLayout(ticket, ticket.level().registryAccess());
   }
 
   private static String startThread(RecipeExecutionTicket ticket, String threadId) {
@@ -159,71 +144,18 @@ public final class ItemRecipeSearch {
     return threadId;
   }
 
-  private static boolean fluidInputsAvailable(List<FluidStack> required, RecipeExecutionTicket ticket, String selector) {
-    var reserved = new HashMap<String, Integer>();
-    for (var demand : required) {
-      int remaining = demand.getAmount();
-      for (var port : ticket.ports()) {
-        if (port.kind() == PortKind.FLUID_INPUT
-            && port.selector().equals(selector)
-            && FluidStack.isSameFluidSameComponents(port.fluid(), demand)) {
-          int already = reserved.getOrDefault(port.partId(), 0);
-          int available = Math.max(0, port.fluid().getAmount() - already);
-          int amount = Math.min(remaining, available);
-          reserved.put(port.partId(), already + amount);
-          remaining -= amount;
-          if (remaining == 0) {
-            break;
-          }
-        }
-      }
-      if (remaining > 0) {
-        return false;
-      }
-    }
-    return true;
-  }
-
-  private static boolean fluidOutputsAvailable(List<FluidStack> required, RecipeExecutionTicket ticket, String selector) {
-    var reserved = new HashMap<String, Integer>();
-    for (var demand : required) {
-      int remaining = demand.getAmount();
-      for (var port : ticket.ports()) {
-        if (port.kind() != PortKind.FLUID_OUTPUT || !port.selector().equals(selector)) {
-          continue;
-        }
-        var stored = port.fluid();
-        if (!stored.isEmpty() && !FluidStack.isSameFluidSameComponents(stored, demand)) {
-          continue;
-        }
-        int already = reserved.getOrDefault(port.partId(), 0);
-        int available = Math.max(0, Math.toIntExact(port.capacity()) - stored.getAmount() - already);
-        int amount = Math.min(remaining, available);
-        reserved.put(port.partId(), already + amount);
-        remaining -= amount;
-        if (remaining == 0) {
-          break;
-        }
-      }
-      if (remaining > 0) {
-        return false;
-      }
-    }
-    return true;
-  }
-
-  public static Optional<ItemRecipeSearch> begin(MachineControllerBlockEntity controller, ItemRecipeCatalog catalog) {
+  public static Optional<RecipeSearch> begin(MachineControllerBlockEntity controller, RecipeCatalog catalog) {
     if (controller.runningRecipe().isPresent() || controller.recipeStartInProgress()) {
       return Optional.empty();
     }
     return begin((StructureService.StructureSubject) controller, catalog, null);
   }
 
-  public static Optional<ItemRecipeSearch> begin(StructureService.StructureSubject owner, ItemRecipeCatalog catalog, Set<String> allowedIds) {
+  public static Optional<RecipeSearch> begin(StructureService.StructureSubject owner, RecipeCatalog catalog, Set<String> allowedIds) {
     return begin(owner, catalog, allowedIds, null);
   }
 
-  private static Optional<ItemRecipeSearch> begin(StructureService.StructureSubject owner, ItemRecipeCatalog catalog, Set<String> allowedIds, String factoryThread) {
+  private static Optional<RecipeSearch> begin(StructureService.StructureSubject owner, RecipeCatalog catalog, Set<String> allowedIds, String factoryThread) {
     Objects.requireNonNull(catalog, "catalog");
     // capture enforces server affinity before the search reads any inventory or
     // compiles slot
@@ -234,11 +166,12 @@ public final class ItemRecipeSearch {
     }
     var ticket = captured.orElseThrow();
     var groups = ticket.inputGroups();
-    var search = groups.size() == 1 ? new ItemRecipeSearch(
+    var search = groups.size() == 1 ? new RecipeSearch(
         ticket,
         catalog,
         allowedIds,
-        factoryThread) : new ItemRecipeSearch(ticket, catalog, allowedIds, factoryThread, groups);
+        factoryThread,
+        new RecipeSearchResources(catalog)) : new RecipeSearch(ticket, catalog, allowedIds, factoryThread, groups);
     return catalog.isCurrent() ? Optional.of(search) : Optional.empty();
   }
 
@@ -246,21 +179,21 @@ public final class ItemRecipeSearch {
    * Native data-pack entry point. Returns no authority while catalogs are
    * unvalidated or stale.
    */
-  public static Optional<ItemRecipeSearch> begin(MachineControllerBlockEntity controller) {
+  public static Optional<RecipeSearch> begin(MachineControllerBlockEntity controller) {
     return MachineRecipeService.catalogFor(controller).flatMap(catalog -> begin(controller, catalog));
   }
 
-  public static Optional<ItemRecipeSearch> begin(StructureService.StructureSubject owner, Set<String> allowedIds) {
+  public static Optional<RecipeSearch> begin(StructureService.StructureSubject owner, Set<String> allowedIds) {
     return MachineRecipeService.catalogFor(owner).flatMap(catalog -> begin(owner, catalog, allowedIds));
   }
 
-  public static Optional<ItemRecipeSearch> beginFactory(FactoryControllerBlockEntity factory, String threadId, ItemRecipeCatalog catalog, Set<String> allowedIds) {
+  public static Optional<RecipeSearch> beginFactory(FactoryControllerBlockEntity factory, String threadId, RecipeCatalog catalog, Set<String> allowedIds) {
     Objects.requireNonNull(threadId, "threadId");
     return MachineRecipeService.catalogForFactory(factory, threadId, catalog)
         .flatMap(effective -> begin(factory, effective, allowedIds, threadId));
   }
 
-  public static Optional<ItemRecipeSearch> beginFactory(FactoryControllerBlockEntity factory, String threadId) {
+  public static Optional<RecipeSearch> beginFactory(FactoryControllerBlockEntity factory, String threadId) {
     return MachineRecipeService.catalogFor(factory).flatMap(catalog -> {
       var thread = factory.scheduler().channel(threadId);
       if (thread == null) {
@@ -272,7 +205,7 @@ public final class ItemRecipeSearch {
     });
   }
 
-  public record Result(RecipePlanner.Status status, Optional<ItemRecipePlan> plan, int workUsed) {
+  public record Result(RecipePlanner.Status status, Optional<RecipeStartPlan> plan, int workUsed) {
   }
 
   public Result advance(int budget) {
@@ -298,6 +231,9 @@ public final class ItemRecipeSearch {
       }
       var generic = result.plan().orElseThrow();
       if (fluidPlan == null) {
+        if (fluidLayout == null) {
+          fluidLayout = new FluidOutputLayout(ticket, ticket.level().registryAccess());
+        }
         fluidPlan = fluidLayout.plan(
             catalog.fluidOutputs(generic.candidate().id()),
             catalog.selectors(generic.candidate().id()).fluidOutput());
@@ -335,16 +271,16 @@ public final class ItemRecipeSearch {
         continue;
       }
       if (pendingFactoryPlan == null) {
-        long inputChanceSeed = ItemRecipePlan.newInputChanceSeed();
-        var needed = new HashMap<>(ItemRecipePlan.sampledInputs(generic.candidate(), inputChanceSeed, 1));
-        var deductions = new ArrayList<ItemRecipePlan.Deduction>();
+        long inputChanceSeed = RecipeStartPlan.newInputChanceSeed();
+        var needed = new HashMap<>(RecipeStartPlan.sampledInputs(generic.candidate(), inputChanceSeed, 1));
+        var deductions = new ArrayList<RecipeStartPlan.Deduction>();
         for (var slot : inputs) {
-          var expected = ItemRecipePlan.inputKey(generic.candidate(), slot.key());
+          var expected = RecipeStartPlan.inputKey(generic.candidate(), slot.key());
           long amount = Math.min(needed.getOrDefault(expected, 0L), slot.count());
           if (amount == 0) {
             continue;
           }
-          deductions.add(new ItemRecipePlan.Deduction(slot.ref(), slot.key(), Math.toIntExact(amount)));
+          deductions.add(new RecipeStartPlan.Deduction(slot.ref(), slot.key(), Math.toIntExact(amount)));
           needed.put(expected, needed.get(expected) - amount);
         }
         if (needed.values().stream().anyMatch(count -> count != 0)) {
@@ -352,20 +288,14 @@ public final class ItemRecipeSearch {
         }
         var placements = generic.insertions().stream()
             .map(
-                insertion -> ItemRecipePlan.Placement.inSlot(
+                insertion -> RecipeStartPlan.Placement.inSlot(
                     outputs.get(insertion.slot()).ref(),
                     outputs.get(insertion.slot()).snapshot(),
                     insertion.key(),
                     Math.toIntExact(insertion.count())))
             .toList();
-        pendingFactoryPlan = new ItemRecipePlan(
-            ticket,
-            catalog,
-            generic.candidate(),
-            deductions,
-            placements,
-            inputChanceSeed,
-            factoryScope);
+        pendingFactoryPlan = RecipeStartPlan
+            .prepared(ticket, catalog, generic.candidate(), deductions, placements, inputChanceSeed, factoryScope);
       }
       if (factoryScope != null) {
         var checked = pendingFactoryPlan.advanceFactoryChecks(factory, factoryThread, budget - used);
@@ -413,13 +343,7 @@ public final class ItemRecipeSearch {
       if (groupSearch == null) {
         Set<String> competitive = allowedIds;
         if (groupBest != null) {
-          competitive = new HashSet<>();
-          for (var candidate : catalog.recipes().candidates()) {
-            if (precedes(candidate, groupBest.recipe())
-                && (allowedIds == null || allowedIds.contains(candidate.id()))) {
-              competitive.add(candidate.id());
-            }
-          }
+          competitive = catalog.recipes().candidateIdsBefore(groupBest.recipe().id(), allowedIds);
           if (competitive.isEmpty()) {
             // Later groups cannot beat a complete, higher-priority match.
             groupCursor = groups.size();
@@ -429,11 +353,12 @@ public final class ItemRecipeSearch {
         // Charge even an empty group, so a long list cannot bypass the tick budget.
         used++;
         completedGroupWork++;
-        groupSearch = new ItemRecipeSearch(
+        groupSearch = new RecipeSearch(
             ticket.withInputGroup(groups.get(groupCursor)),
             catalog,
             competitive,
-            factoryThread);
+            factoryThread,
+            resources);
       }
       var result = groupSearch.advance(budget - used);
       used += result.workUsed();
@@ -447,8 +372,6 @@ public final class ItemRecipeSearch {
         }
       }
       completedGroupWork += groupSearch.totalWork();
-      missingResources.putAll(groupSearch.missingResources);
-      componentReady.addAll(groupSearch.componentReady);
       groupSearch = null;
       groupCursor++;
     }
@@ -475,6 +398,19 @@ public final class ItemRecipeSearch {
     if (selected != null) {
       return Optional.empty();
     }
+    if (!resourcesDiagnosed) {
+      // Diagnostics cover every allowed recipe even when an input anchor excludes
+      // it. Successful searches never need this full component-role pass.
+      var candidates = catalog.recipes().candidatesFor(allowedIds);
+      if (groups == null) {
+        diagnoseResources(ticket, candidates);
+      } else {
+        for (int group : groups) {
+          diagnoseResources(ticket.withInputGroup(group), candidates);
+        }
+      }
+      resourcesDiagnosed = true;
+    }
     MissingResource first = null;
     for (var missing : missingResources.values()) {
       if (!componentReady.contains(missing.candidate().id())
@@ -483,6 +419,19 @@ public final class ItemRecipeSearch {
       }
     }
     return first == null ? Optional.empty() : Optional.of(first.kind());
+  }
+
+  private void diagnoseResources(RecipeExecutionTicket source, List<RecipeCandidate<ItemResourceKey>> candidates) {
+    var requirements = RecipeResourceRequirements.capture(source);
+    for (var candidate : candidates) {
+      var definition = catalog.definition(candidate.id());
+      var missing = definition == null ? Optional.<PortKind>empty() : requirements.missing(definition);
+      if (missing.isPresent()) {
+        missingResources.put(candidate.id(), new MissingResource(candidate, missing.orElseThrow()));
+      } else {
+        componentReady.add(candidate.id());
+      }
+    }
   }
 
   private record InputSlot(ItemSlotRef ref, ItemResourceKey key, int count) {

@@ -1,5 +1,6 @@
 package com.lw.modularmachine.machine.recipe;
 
+import com.lw.modularmachine.machine.recipe.search.RecipeResourceRequirements;
 import com.lw.modularmachine.machine.factory.UpgradeRecipeChecks;
 import com.lw.modularmachine.machine.factory.UpgradeLifecyclePublisher;
 import com.lw.modularmachine.ModularMachine;
@@ -37,7 +38,7 @@ public final class AtomicRecipeStarter {
     FAILED
   }
 
-  public static Result start(ItemRecipePlan plan) {
+  public static Result start(RecipeStartPlan plan) {
     Objects.requireNonNull(plan, "plan");
     plan.source().requireServerThread();
     var controller = plan.source().controller();

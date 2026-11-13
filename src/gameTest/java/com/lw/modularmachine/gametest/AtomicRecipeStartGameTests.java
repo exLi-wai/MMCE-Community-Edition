@@ -7,8 +7,8 @@ import com.lw.modularmachine.machine.PortKind;
 import com.lw.modularmachine.api.orientation.MachineOrientation;
 import com.lw.modularmachine.machine.recipe.AtomicRecipeStarter;
 import com.lw.modularmachine.machine.recipe.FrozenItemRun;
-import com.lw.modularmachine.machine.recipe.ItemRecipePlan;
-import com.lw.modularmachine.machine.recipe.ItemRecipeSearch;
+import com.lw.modularmachine.machine.recipe.RecipeStartPlan;
+import com.lw.modularmachine.machine.recipe.search.RecipeSearch;
 import com.lw.modularmachine.machine.structure.StructureService;
 import com.lw.modularmachine.registry.MachineRegistries;
 import com.mojang.authlib.GameProfile;
@@ -173,7 +173,7 @@ public final class AtomicRecipeStartGameTests {
             && run.progress() == 0,
         "Start generated outputs or lost frozen recipe metadata");
     helper.assertTrue(
-        plan.start() == AtomicRecipeStarter.Result.ALREADY_RUNNING && ItemRecipeSearch.begin(controller).isEmpty(),
+        plan.start() == AtomicRecipeStarter.Result.ALREADY_RUNNING && RecipeSearch.begin(controller).isEmpty(),
         "Repeated start consumed twice or selected another recipe");
     fill(output, ItemStack.EMPTY);
     input.inventory().setStackInSlot(0, new ItemStack(Items.DIRT, 5));
@@ -487,8 +487,8 @@ public final class AtomicRecipeStartGameTests {
     return RecipeResourceTicketGameTests.port(h, c, id);
   }
 
-  private static ItemRecipePlan plan(MachineControllerBlockEntity c) {
-    return ItemRecipeSearch.begin(c).orElseThrow().advance(10_000).plan().orElseThrow();
+  private static RecipeStartPlan plan(MachineControllerBlockEntity c) {
+    return RecipeSearch.begin(c).orElseThrow().advance(10_000).plan().orElseThrow();
   }
 
   private static void confirm(GameTestHelper h, MachineControllerBlockEntity c) {

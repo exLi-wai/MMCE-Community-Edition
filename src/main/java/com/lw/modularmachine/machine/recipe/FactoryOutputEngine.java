@@ -1,5 +1,12 @@
 package com.lw.modularmachine.machine.recipe;
 
+import com.lw.modularmachine.machine.recipe.search.ChemicalOutputLayout;
+import com.lw.modularmachine.machine.recipe.search.ChemicalResourceKey;
+import com.lw.modularmachine.machine.recipe.search.FluidOutputLayout;
+import com.lw.modularmachine.machine.recipe.search.FluidResourceKey;
+import com.lw.modularmachine.machine.recipe.search.ItemOutputLayout;
+import com.lw.modularmachine.machine.recipe.search.RecipeCandidate;
+import com.lw.modularmachine.machine.recipe.search.RecipePlanner;
 import com.lw.modularmachine.machine.factory.UpgradeLifecyclePublisher;
 import com.lw.modularmachine.ModularMachine;
 import com.lw.modularmachine.blockentity.FactoryControllerBlockEntity;
@@ -63,7 +70,7 @@ public final class FactoryOutputEngine {
           .map(entry -> new RecipeCandidate.Output<>(entry.getKey(), entry.getValue())).toList();
       itemLayout = itemClaims.isEmpty() ? null : new ItemOutputLayout(ticket, itemKeys);
       itemPlanner = itemLayout == null ? null : RecipePlanner.prepareOutputs(
-          itemLayout.snapshot,
+          itemLayout.snapshot(),
           RecipeCandidate.outputOnly(set.runs().getFirst().recipeId() + "/parallel", itemClaims));
       var fluidClaims = fluidTotals.entrySet().stream()
           .map(entry -> new RecipeCandidate.Output<>(entry.getKey(), entry.getValue())).toList();

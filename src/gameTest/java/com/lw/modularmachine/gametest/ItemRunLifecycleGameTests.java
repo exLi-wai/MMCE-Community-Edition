@@ -8,7 +8,7 @@ import com.lw.modularmachine.blockentity.MachinePortBlockEntity;
 import com.lw.modularmachine.config.MachineConfig;
 import com.lw.modularmachine.api.orientation.MachineOrientation;
 import com.lw.modularmachine.machine.recipe.AtomicRecipeStarter;
-import com.lw.modularmachine.machine.recipe.ItemRecipeSearch;
+import com.lw.modularmachine.machine.recipe.search.RecipeSearch;
 import com.lw.modularmachine.machine.recipe.ItemRunEngine;
 import com.lw.modularmachine.machine.recipe.MachineRecipeService;
 import com.lw.modularmachine.machine.structure.MachineDefinition;
@@ -630,7 +630,7 @@ public final class ItemRunLifecycleGameTests {
 
   private static void start(GameTestHelper h, MachineControllerBlockEntity c, Item input, int count) {
     port(h, c, "input").inventory().setStackInSlot(0, new ItemStack(input, count));
-    var search = ItemRecipeSearch.begin(c);
+    var search = RecipeSearch.begin(c);
     h.assertTrue(search.isPresent(), "No coordinated lifecycle catalog: " + c.statusMessage().getString());
     var plan = search.orElseThrow().advance(10_000).plan();
     h.assertTrue(plan.isPresent(), "Lifecycle recipe not admitted");

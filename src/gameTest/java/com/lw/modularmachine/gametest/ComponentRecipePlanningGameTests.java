@@ -3,14 +3,14 @@ package com.lw.modularmachine.gametest;
 import com.lw.modularmachine.blockentity.MachineControllerBlockEntity;
 import com.lw.modularmachine.blockentity.MachinePortBlockEntity;
 import com.lw.modularmachine.api.orientation.MachineOrientation;
-import com.lw.modularmachine.machine.recipe.ItemRecipeCatalog;
-import com.lw.modularmachine.machine.recipe.ItemRecipePlan;
-import com.lw.modularmachine.machine.recipe.ItemRecipeSearch;
+import com.lw.modularmachine.machine.recipe.search.RecipeCatalog;
+import com.lw.modularmachine.machine.recipe.RecipeStartPlan;
+import com.lw.modularmachine.machine.recipe.search.RecipeSearch;
 import com.lw.modularmachine.machine.recipe.ItemResourceKey;
-import com.lw.modularmachine.machine.recipe.ItemResourceSnapshot;
-import com.lw.modularmachine.machine.recipe.RecipeCandidate;
+import com.lw.modularmachine.machine.recipe.search.ResourceSnapshot;
+import com.lw.modularmachine.machine.recipe.search.RecipeCandidate;
 import com.lw.modularmachine.machine.recipe.RecipeExecutionTicket;
-import com.lw.modularmachine.machine.recipe.RecipePlanner;
+import com.lw.modularmachine.machine.recipe.search.RecipePlanner;
 import com.lw.modularmachine.machine.structure.StructureService;
 import java.util.HashMap;
 import java.util.List;
@@ -119,14 +119,14 @@ public final class ComponentRecipePlanningGameTests {
     var ticket = RecipeExecutionTicket.capture(controller).orElseThrow();
     helper.assertTrue(
         plan.recipe().id().equals("b")
-            && plan.deductions().stream().mapToInt(ItemRecipePlan.Deduction::count).sum() == 5,
+            && plan.deductions().stream().mapToInt(RecipeStartPlan.Deduction::count).sum() == 5,
         "Duplicate inputs or priority/output rule failed");
     helper.assertTrue(
         plan.deductions().stream().allMatch(d -> logicalPartId(ticket, d.slot().partId()).equals("item_in"))
             && plan.placements().stream().allMatch(p -> logicalPartId(ticket, p.slot().partId()).equals("item_out")),
         "World position replaced stable logical slot");
     helper.assertTrue(
-        plan.placements().stream().mapToInt(ItemRecipePlan.Placement::count).sum() == 2
+        plan.placements().stream().mapToInt(RecipeStartPlan.Placement::count).sum() == 2
             && plan.validateForStart(catalog),
         "Physical plan does not fit current storage");
     helper.assertTrue(
@@ -202,7 +202,7 @@ public final class ComponentRecipePlanningGameTests {
     in.inventory().setStackInSlot(0, new ItemStack(Items.DIRT, 1));
     var catalog = catalog(recipe("a", 10, key(Items.DIRT), 1, key(Items.IRON_INGOT), 1));
     var search = search(helper, controller, catalog);
-    ItemRecipeSearch.Result result;
+    RecipeSearch.Result result;
     int calls = 0;
     do {
       result = search.advance(1);
@@ -301,9 +301,10 @@ public final class ComponentRecipePlanningGameTests {
     var plan = plan(helper, controller, catalog);
     helper.assertTrue(!plan.validateForStart(catalog(recipe)), "New recipe catalog inherited previous admission");
     helper.assertTrue(
-        ItemRecipeSearch.begin(
-            controller,
-            new ItemRecipeCatalog(ResourceLocation.fromNamespaceAndPath("mmcece", "other_machine"), List.of(recipe)))
+        RecipeSearch
+            .begin(
+                controller,
+                new RecipeCatalog(ResourceLocation.fromNamespaceAndPath("mmcece", "other_machine"), List.of(recipe)))
             .isEmpty(),
         "Recipe catalog matched the wrong machine");
     StructureService.reorient(controller, MachineOrientation.of(Direction.NORTH, 1));
@@ -320,10 +321,10 @@ public final class ComponentRecipePlanningGameTests {
     var catalog = catalog(recipe("a", 0, inputKey, 1, outputKey, 1));
     var search = search(helper, controller, catalog);
     var pure = RecipePlanner.prepare(
-        new ItemResourceSnapshot<>(
+        new ResourceSnapshot<>(
             0,
             Map.of(inputKey, 1L),
-            List.of(new ItemResourceSnapshot.OutputSlot<ItemResourceKey>(null, 0, 64, Map.of(outputKey, 64L)))),
+            List.of(new ResourceSnapshot.OutputSlot<ItemResourceKey>(null, 0, 64, Map.of(outputKey, 64L)))),
         catalog.recipes());
     helper.assertTrue(
         CompletableFuture.supplyAsync(() -> pure.advance(1000).plan().isPresent()).join(),
@@ -407,17 +408,17 @@ public final class ComponentRecipePlanningGameTests {
   }
 
   @SafeVarargs
-  private static ItemRecipeCatalog catalog(RecipeCandidate<ItemResourceKey>... recipes) {
-    return new ItemRecipeCatalog(MACHINE, List.of(recipes));
+  private static RecipeCatalog catalog(RecipeCandidate<ItemResourceKey>... recipes) {
+    return new RecipeCatalog(MACHINE, List.of(recipes));
   }
 
-  private static ItemRecipeSearch search(GameTestHelper helper, MachineControllerBlockEntity controller, ItemRecipeCatalog catalog) {
-    var search = ItemRecipeSearch.begin(controller, catalog);
+  private static RecipeSearch search(GameTestHelper helper, MachineControllerBlockEntity controller, RecipeCatalog catalog) {
+    var search = RecipeSearch.begin(controller, catalog);
     helper.assertTrue(search.isPresent(), "Could not capture native item inventory");
     return search.orElseThrow();
   }
 
-  private static ItemRecipePlan plan(GameTestHelper helper, MachineControllerBlockEntity controller, ItemRecipeCatalog catalog) {
+  private static RecipeStartPlan plan(GameTestHelper helper, MachineControllerBlockEntity controller, RecipeCatalog catalog) {
     var result = search(helper, controller, catalog).advance(10_000);
     helper.assertTrue(
         result.status() == RecipePlanner.Status.SELECTED,

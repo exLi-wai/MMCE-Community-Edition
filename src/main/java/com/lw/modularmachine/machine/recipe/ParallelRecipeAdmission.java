@@ -1,5 +1,11 @@
 package com.lw.modularmachine.machine.recipe;
 
+import com.lw.modularmachine.machine.recipe.search.ChemicalOutputLayout;
+import com.lw.modularmachine.machine.recipe.search.FluidOutputLayout;
+import com.lw.modularmachine.machine.recipe.search.FluidResourceKey;
+import com.lw.modularmachine.machine.recipe.search.ItemOutputLayout;
+import com.lw.modularmachine.machine.recipe.search.RecipeCandidate;
+import com.lw.modularmachine.machine.recipe.search.RecipePlanner;
 import com.lw.modularmachine.machine.PortKind;
 import java.util.HashMap;
 import java.util.HashSet;
@@ -9,7 +15,7 @@ import net.neoforged.neoforge.fluids.FluidStack;
  * Pure-snapshot binary admission; -1 means yield, zero means no feasible batch.
  */
 final class ParallelRecipeAdmission {
-  private final ItemRecipePlan plan;
+  private final RecipeStartPlan plan;
   private final MachineRecipe definition;
   private final ItemOutputLayout layout;
   private final FluidOutputLayout fluids;
@@ -18,7 +24,7 @@ final class ParallelRecipeAdmission {
   private FluidOutputLayout.Planning fluidPlan;
   private ChemicalOutputLayout.Planning chemicalPlan;
 
-  ParallelRecipeAdmission(ItemRecipePlan plan, MachineRecipe definition, int limit, boolean aggregateDefinition) {
+  ParallelRecipeAdmission(RecipeStartPlan plan, MachineRecipe definition, int limit, boolean aggregateDefinition) {
     this.plan = plan;
     this.definition = definition;
     high = Math.min(
@@ -84,7 +90,7 @@ final class ParallelRecipeAdmission {
             .map(output -> new RecipeCandidate.Output<>(output.key(), Math.multiplyExact(output.count(), probe)))
             .toList();
         items = claims.isEmpty() ? null : RecipePlanner.prepareOutputs(
-            layout.snapshot,
+            layout.snapshot(),
             RecipeCandidate.outputOnly(plan.recipe().id() + "/parallel_admission", claims));
         var fluidClaims = definition.fluidOutputs().stream()
             .map(

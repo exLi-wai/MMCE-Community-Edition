@@ -1,5 +1,9 @@
 package com.lw.modularmachine.machine.recipe;
 
+import com.lw.modularmachine.machine.recipe.search.ChemicalResourceKey;
+import com.lw.modularmachine.machine.recipe.search.ResourceSnapshot;
+import com.lw.modularmachine.machine.recipe.search.RecipeCandidate;
+import com.lw.modularmachine.machine.recipe.search.RecipePlanner;
 import com.lw.modularmachine.api.recipe.ChemicalRequirement;
 import com.lw.modularmachine.machine.factory.FactoryRunSet;
 import java.util.ArrayList;
@@ -30,10 +34,10 @@ class FactoryChemicalOutputTest {
     var key = new ChemicalResourceKey(OXYGEN, "");
     assertEquals(List.of(new RecipeCandidate.Output<>(key, total)), claims);
 
-    var snapshot = new ItemResourceSnapshot<ChemicalResourceKey>(
+    var snapshot = new ResourceSnapshot<ChemicalResourceKey>(
         0,
         Map.of(),
-        List.of(new ItemResourceSnapshot.OutputSlot<>(null, 0, total)));
+        List.of(new ResourceSnapshot.OutputSlot<>(null, 0, total)));
     var result = RecipePlanner.prepareOutputs(snapshot, RecipeCandidate.outputOnly("chemical_parallel", claims))
         .advance(4096);
     assertEquals(RecipePlanner.Status.SELECTED, result.status());

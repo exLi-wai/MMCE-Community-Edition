@@ -1,5 +1,6 @@
 package com.lw.modularmachine.machine.recipe;
 
+import com.lw.modularmachine.machine.recipe.search.RecipeResourceRequirements;
 import com.lw.modularmachine.machine.factory.UpgradeLifecyclePublisher;
 import com.lw.modularmachine.ModularMachine;
 import com.lw.modularmachine.blockentity.FactoryControllerBlockEntity;
@@ -34,7 +35,7 @@ public final class FactoryRecipeStarter {
   private FactoryRecipeStarter() {
   }
 
-  public static Result start(FactoryControllerBlockEntity factory, String threadId, ItemRecipePlan plan) {
+  public static Result start(FactoryControllerBlockEntity factory, String threadId, RecipeStartPlan plan) {
     if (factory == null || threadId == null || plan == null || !factory.beginRunStart(threadId)) {
       return Result.BUSY;
     }

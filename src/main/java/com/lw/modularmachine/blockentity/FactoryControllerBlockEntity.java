@@ -20,7 +20,7 @@ import com.lw.modularmachine.machine.factory.FactoryRunSetCodec;
 import com.lw.modularmachine.machine.factory.FactoryScheduler;
 import com.lw.modularmachine.machine.factory.FactoryThreadPreset;
 import com.lw.modularmachine.machine.factory.FactoryThreadState;
-import com.lw.modularmachine.machine.recipe.RecipeResourceRequirements;
+import com.lw.modularmachine.machine.recipe.search.RecipeResourceRequirements;
 import com.lw.modularmachine.machine.factory.FactoryThreadStateCodec;
 import com.lw.modularmachine.machine.factory.FactoryUpgradeCatalog;
 import com.lw.modularmachine.api.upgrade.FactoryUpgradeEntry;
@@ -44,8 +44,8 @@ import com.lw.modularmachine.machine.recipe.ControllerMetrics;
 import com.lw.modularmachine.machine.recipe.FactoryRecipeStarter;
 import com.lw.modularmachine.machine.recipe.FactoryRunResourceCommitter;
 import com.lw.modularmachine.machine.recipe.FrozenItemRun;
-import com.lw.modularmachine.machine.recipe.ItemRecipePlan;
-import com.lw.modularmachine.machine.recipe.ItemRecipeSearch;
+import com.lw.modularmachine.machine.recipe.RecipeStartPlan;
+import com.lw.modularmachine.machine.recipe.search.RecipeSearch;
 import com.lw.modularmachine.machine.recipe.MachineRecipeService;
 import com.lw.modularmachine.api.recipe.RecipeLifecycleEvents.Type;
 import com.lw.modularmachine.machine.recipe.RecipeLifecyclePublisher;
@@ -111,8 +111,8 @@ public final class FactoryControllerBlockEntity extends BlockEntity implements M
   private StructureService.Registration registration;
   private VerificationState detachedState = VerificationState.PENDING;
   private VerificationFailure detachedFailure = VerificationFailure.UNVERIFIED;
-  private final Map<String, ItemRecipeSearch> searches = new HashMap<>();
-  private final Map<String, ItemRecipePlan> plans = new HashMap<>();
+  private final Map<String, RecipeSearch> searches = new HashMap<>();
+  private final Map<String, RecipeStartPlan> plans = new HashMap<>();
   private final Map<String, Long> searchRetryAfter = new HashMap<>();
   private final Map<String, Integer> searchRetryInterval = new HashMap<>();
   private final Map<String, FactoryRunSet> runSets = new HashMap<>();
@@ -1627,7 +1627,7 @@ public final class FactoryControllerBlockEntity extends BlockEntity implements M
         }
         var allowed = thread.lockedRecipe() == null ? null : Set.of(thread.lockedRecipe().toString());
         try {
-          search = ItemRecipeSearch.beginFactory(this, thread.threadId(), catalog, allowed).orElse(null);
+          search = RecipeSearch.beginFactory(this, thread.threadId(), catalog, allowed).orElse(null);
         } catch (UpgradeRecipeChecks.FailedException invalid) {
           updateThreadState(thread, FactoryThreadState.State.WAITING, FactoryThreadState.Reason.CHECK_ERROR);
           backoffSearch(thread.threadId(), now);

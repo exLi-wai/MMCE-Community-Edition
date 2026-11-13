@@ -12,8 +12,8 @@ import com.lw.modularmachine.machine.factory.FactoryUpgradeService;
 import com.lw.modularmachine.machine.recipe.FactoryOutputEngine;
 import com.lw.modularmachine.machine.recipe.FactoryParallelStarter;
 import com.lw.modularmachine.machine.recipe.FactoryRecipeStarter;
-import com.lw.modularmachine.machine.recipe.ItemRecipePlan;
-import com.lw.modularmachine.machine.recipe.ItemRecipeSearch;
+import com.lw.modularmachine.machine.recipe.RecipeStartPlan;
+import com.lw.modularmachine.machine.recipe.search.RecipeSearch;
 import com.lw.modularmachine.registry.MachineRegistries;
 import java.util.ArrayList;
 import java.util.Collections;
@@ -340,8 +340,8 @@ public final class UpgradeLifecycleGameTests {
     return new Fixture(restored, before.bus(), before.input(), before.output());
   }
 
-  private static ItemRecipePlan plan(Fixture fixture) {
-    var search = ItemRecipeSearch.begin(fixture.factory(), null).orElseThrow();
+  private static RecipeStartPlan plan(Fixture fixture) {
+    var search = RecipeSearch.begin(fixture.factory(), null).orElseThrow();
 
     return search.advance(65_536).plan().orElseThrow();
   }

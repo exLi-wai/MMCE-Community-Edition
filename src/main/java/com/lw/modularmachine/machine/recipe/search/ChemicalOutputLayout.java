@@ -1,5 +1,6 @@
-package com.lw.modularmachine.machine.recipe;
+package com.lw.modularmachine.machine.recipe.search;
 
+import com.lw.modularmachine.machine.recipe.RecipeExecutionTicket;
 import com.lw.modularmachine.machine.PortKind;
 import java.util.ArrayList;
 import java.util.HashMap;
@@ -8,28 +9,30 @@ import java.util.List;
 import java.util.Map;
 import com.lw.modularmachine.api.component.ChemicalStackData;
 import com.lw.modularmachine.api.recipe.ChemicalRequirement;
+import org.jetbrains.annotations.ApiStatus;
 
 /**
  * Reuses the exact, resumable slot allocator for single-chemical output tanks.
  */
-final class ChemicalOutputLayout {
+@ApiStatus.Internal
+public final class ChemicalOutputLayout {
   private final List<String> parts;
-  private final ItemResourceSnapshot<ChemicalResourceKey> snapshot;
+  private final ResourceSnapshot<ChemicalResourceKey> snapshot;
 
   private final List<String> selectors;
 
-  ChemicalOutputLayout(RecipeExecutionTicket ticket) {
+  public ChemicalOutputLayout(RecipeExecutionTicket ticket) {
 
     var ids = new ArrayList<String>();
     var labels = new ArrayList<String>();
-    var spaces = new ArrayList<ItemResourceSnapshot.OutputSlot<ChemicalResourceKey>>();
+    var spaces = new ArrayList<ResourceSnapshot.OutputSlot<ChemicalResourceKey>>();
     for (var port : ticket.ports()) {
       if (port.kind() == PortKind.CHEMICAL_OUTPUT) {
         var stored = port.chemical();
         ids.add(port.partId());
         labels.add(port.selector());
         spaces.add(
-            new ItemResourceSnapshot.OutputSlot<>(
+            new ResourceSnapshot.OutputSlot<>(
                 stored.isEmpty() ? null : new ChemicalResourceKey(stored.chemical(), port.selector()),
                 stored.amount(),
                 Math.max(stored.amount(), port.capacity())));
@@ -37,10 +40,10 @@ final class ChemicalOutputLayout {
     }
     parts = List.copyOf(ids);
     selectors = List.copyOf(labels);
-    snapshot = new ItemResourceSnapshot<>(ticket.structureRevision(), Map.of(), spaces);
+    snapshot = new ResourceSnapshot<>(ticket.structureRevision(), Map.of(), spaces);
   }
 
-  Planning plan(List<ChemicalRequirement> requirements) {
+  public Planning plan(List<ChemicalRequirement> requirements) {
     return planClaims(
         requirements.stream()
             .map(
@@ -49,36 +52,36 @@ final class ChemicalOutputLayout {
                     value.amount()))
             .toList());
   }
-  Planning planClaims(List<RecipeCandidate.Output<ChemicalResourceKey>> claims) {
+  public Planning planClaims(List<RecipeCandidate.Output<ChemicalResourceKey>> claims) {
     return new Planning(claims);
   }
 
-  final class Planning {
+  public final class Planning {
     private final RecipePlanner.Session<ChemicalResourceKey> session;
     private RecipePlan<ChemicalResourceKey> selected;
     private RecipePlanner.Status status;
 
     private Planning(List<RecipeCandidate.Output<ChemicalResourceKey>> claims) {
-      var spaces = new ArrayList<ItemResourceSnapshot.OutputSlot<ChemicalResourceKey>>();
+      var spaces = new ArrayList<ResourceSnapshot.OutputSlot<ChemicalResourceKey>>();
       for (int index = 0; index < snapshot.outputs().size(); index++) {
         var slot = snapshot.outputs().get(index);
         var limits = new HashMap<ChemicalResourceKey, Long>();
         for (var claim : claims) {
           limits.put(claim.key(), selectors.get(index).equals(claim.key().selector()) ? slot.capacity() : 0L);
         }
-        spaces.add(new ItemResourceSnapshot.OutputSlot<>(slot.key(), slot.count(), slot.capacity(), limits));
+        spaces.add(new ResourceSnapshot.OutputSlot<>(slot.key(), slot.count(), slot.capacity(), limits));
       }
-      var selectedDomain = new ItemResourceSnapshot<ChemicalResourceKey>(snapshot.revision(), Map.of(), spaces);
+      var selectedDomain = new ResourceSnapshot<ChemicalResourceKey>(snapshot.revision(), Map.of(), spaces);
       session = claims.isEmpty() ? null : RecipePlanner
           .prepareOutputs(selectedDomain, RecipeCandidate.outputOnly("chemical_outputs", claims));
       status = session == null ? RecipePlanner.Status.SELECTED : RecipePlanner.Status.BUDGET_EXHAUSTED;
     }
 
-    RecipePlanner.Status status() {
+    public RecipePlanner.Status status() {
       return status;
     }
 
-    RecipePlanner.SearchResult<ChemicalResourceKey> advance(int budget) {
+    public RecipePlanner.SearchResult<ChemicalResourceKey> advance(int budget) {
       if (session == null) {
         throw new IllegalStateException("Empty chemical output needs no planning");
       }
@@ -89,7 +92,7 @@ final class ChemicalOutputLayout {
       return result;
     }
 
-    Map<String, ChemicalStackData> additions() {
+    public Map<String, ChemicalStackData> additions() {
       if (session == null) {
         return Map.of();
       }

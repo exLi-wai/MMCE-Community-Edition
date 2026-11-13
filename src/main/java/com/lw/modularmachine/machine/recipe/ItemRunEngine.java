@@ -1,5 +1,11 @@
 package com.lw.modularmachine.machine.recipe;
 
+import com.lw.modularmachine.machine.recipe.search.ChemicalOutputLayout;
+import com.lw.modularmachine.machine.recipe.search.FluidOutputLayout;
+import com.lw.modularmachine.machine.recipe.search.ItemOutputLayout;
+import com.lw.modularmachine.machine.recipe.search.RecipeCandidate;
+import com.lw.modularmachine.machine.recipe.search.RecipePlanner;
+import com.lw.modularmachine.machine.recipe.search.RecipeResourceRequirements;
 import com.lw.modularmachine.machine.factory.UpgradeLifecyclePublisher;
 import com.lw.modularmachine.api.recipe.RecipeLifecycleEvents;
 import com.lw.modularmachine.ModularMachine;
@@ -87,7 +93,7 @@ public final class ItemRunEngine {
       fluidPlan = new FluidOutputLayout(ticket, level.registryAccess())
           .plan(run.fluidOutputClaims(level.registryAccess()), run.selectors().fluidOutput());
       chemicalPlan = new ChemicalOutputLayout(ticket).plan(run.chemicalOutputs());
-      planner = claims.isEmpty() ? null : RecipePlanner.prepareOutputs(layout.snapshot, candidate);
+      planner = claims.isEmpty() ? null : RecipePlanner.prepareOutputs(layout.snapshot(), candidate);
     }
   }
 

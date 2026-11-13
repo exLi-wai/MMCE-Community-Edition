@@ -28,13 +28,13 @@ import com.lw.modularmachine.machine.parallel.ParallelCapacity;
 import com.lw.modularmachine.machine.recipe.AtomicRecipeStarter.Result;
 import com.lw.modularmachine.machine.recipe.ControllerMetrics;
 import com.lw.modularmachine.machine.recipe.FrozenItemRun;
-import com.lw.modularmachine.machine.recipe.ItemRecipePlan;
-import com.lw.modularmachine.machine.recipe.ItemRecipeSearch;
+import com.lw.modularmachine.machine.recipe.RecipeStartPlan;
+import com.lw.modularmachine.machine.recipe.search.RecipeSearch;
 import com.lw.modularmachine.machine.recipe.ItemRunEngine;
-import com.lw.modularmachine.machine.recipe.RecipeResourceRequirements;
+import com.lw.modularmachine.machine.recipe.search.RecipeResourceRequirements;
 import com.lw.modularmachine.machine.recipe.MachineRecipeService;
 import com.lw.modularmachine.machine.recipe.RecipeLifecyclePublisher;
-import com.lw.modularmachine.machine.recipe.RecipePlanner.Status;
+import com.lw.modularmachine.machine.recipe.search.RecipePlanner.Status;
 import com.lw.modularmachine.machine.smart.SmartInterfaceEventPublisher;
 import com.lw.modularmachine.machine.structure.FullScanReference;
 import com.lw.modularmachine.machine.structure.MachineDefinition;
@@ -109,8 +109,8 @@ public final class MachineControllerBlockEntity extends BlockEntity implements M
       this::blueprintChanged);
   private final ControllerUpgrades upgrades = new ControllerUpgrades(this);
   private final FactoryUpgradeRuntimeWork runtimeUpgrades = new FactoryUpgradeRuntimeWork(this);
-  private ItemRecipeSearch recipeSearch;
-  private ItemRecipePlan preparedRecipe;
+  private RecipeSearch recipeSearch;
+  private RecipeStartPlan preparedRecipe;
   private long recipeRetryAfter;
   private int recipeRetryInterval = RECIPE_RETRY_INITIAL;
   private String lastRecipeFailure;
@@ -949,7 +949,7 @@ public final class MachineControllerBlockEntity extends BlockEntity implements M
         backoffRecipeRetry(server.getGameTime());
         return;
       }
-      recipeSearch = ItemRecipeSearch.begin(this, catalog).orElse(null);
+      recipeSearch = RecipeSearch.begin(this, catalog).orElse(null);
       if (recipeSearch == null) {
         idleAppearance = ControllerAppearanceState.PAUSED;
         backoffRecipeRetry(server.getGameTime());

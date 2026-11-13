@@ -1,5 +1,6 @@
 package com.lw.modularmachine.machine.recipe;
 
+import com.lw.modularmachine.machine.recipe.search.RecipeCandidate;
 import com.lw.modularmachine.api.recipe.RecipeSelectors;
 import com.lw.modularmachine.api.recipe.RecipeFailureAction;
 import com.lw.modularmachine.api.recipe.ChemicalRecipeData;

@@ -6,7 +6,7 @@ import com.lw.modularmachine.blockentity.MachinePortBlockEntity;
 import com.lw.modularmachine.api.orientation.MachineOrientation;
 import com.lw.modularmachine.machine.recipe.AtomicRecipeStarter;
 import com.lw.modularmachine.machine.recipe.FrozenItemRun;
-import com.lw.modularmachine.machine.recipe.ItemRecipeSearch;
+import com.lw.modularmachine.machine.recipe.search.RecipeSearch;
 import com.lw.modularmachine.machine.recipe.MachineRecipeService;
 import com.lw.modularmachine.machine.structure.StructureService;
 import com.lw.modularmachine.machine.structure.VerificationState;
@@ -99,7 +99,7 @@ public final class PaidRunRestartGameTests {
     energy.energy().receiveEnergy(1_000, false);
     fluid.fluidTank().fill(new FluidStack(Fluids.WATER, 2_000), FluidAction.EXECUTE);
     fluidB.fluidTank().fill(new FluidStack(Fluids.WATER, 2_000), FluidAction.EXECUTE);
-    var plan = ItemRecipeSearch.begin(controller).orElseThrow().advance(10_000).plan().orElseThrow();
+    var plan = RecipeSearch.begin(controller).orElseThrow().advance(10_000).plan().orElseThrow();
     helper.assertTrue(plan.start() == AtomicRecipeStarter.Result.STARTED, "Restart fixture did not start a paid run");
     var output = port(helper, ORIGIN.offset(new BlockPos(1, 0, 1)));
     for (int slot = 0; slot < output.inventory().getSlots(); slot++) {

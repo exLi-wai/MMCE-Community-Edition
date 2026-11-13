@@ -1,5 +1,6 @@
-package com.lw.modularmachine.machine.recipe;
+package com.lw.modularmachine.machine.recipe.search;
 
+import com.lw.modularmachine.machine.recipe.RecipeExecutionTicket;
 import com.lw.modularmachine.machine.PortKind;
 import java.util.ArrayList;
 import java.util.HashMap;
@@ -8,26 +9,28 @@ import java.util.List;
 import java.util.Map;
 import net.minecraft.core.HolderLookup;
 import net.neoforged.neoforge.fluids.FluidStack;
+import org.jetbrains.annotations.ApiStatus;
 
 /** Reuses the exact, resumable slot allocator for single-fluid output tanks. */
-final class FluidOutputLayout {
+@ApiStatus.Internal
+public final class FluidOutputLayout {
   private final List<String> parts;
-  private final ItemResourceSnapshot<FluidResourceKey> snapshot;
+  private final ResourceSnapshot<FluidResourceKey> snapshot;
   private final HolderLookup.Provider registries;
   private final List<String> selectors;
 
-  FluidOutputLayout(RecipeExecutionTicket ticket, HolderLookup.Provider registries) {
+  public FluidOutputLayout(RecipeExecutionTicket ticket, HolderLookup.Provider registries) {
     this.registries = registries;
     var ids = new ArrayList<String>();
     var labels = new ArrayList<String>();
-    var spaces = new ArrayList<ItemResourceSnapshot.OutputSlot<FluidResourceKey>>();
+    var spaces = new ArrayList<ResourceSnapshot.OutputSlot<FluidResourceKey>>();
     for (var port : ticket.ports()) {
       if (port.kind() == PortKind.FLUID_OUTPUT) {
         var stored = port.fluid();
         ids.add(port.partId());
         labels.add(port.selector());
         spaces.add(
-            new ItemResourceSnapshot.OutputSlot<>(
+            new ResourceSnapshot.OutputSlot<>(
                 stored.isEmpty() ? null : new FluidResourceKey(stored, registries).withSelector(port.selector()),
                 stored.getAmount(),
                 port.capacity()));
@@ -35,14 +38,14 @@ final class FluidOutputLayout {
     }
     parts = List.copyOf(ids);
     selectors = List.copyOf(labels);
-    snapshot = new ItemResourceSnapshot<>(ticket.structureRevision(), Map.of(), spaces);
+    snapshot = new ResourceSnapshot<>(ticket.structureRevision(), Map.of(), spaces);
   }
 
-  Planning plan(List<FluidStack> requirements) {
+  public Planning plan(List<FluidStack> requirements) {
     return plan(requirements, "");
   }
 
-  Planning plan(List<FluidStack> requirements, String selector) {
+  public Planning plan(List<FluidStack> requirements, String selector) {
     var claims = new ArrayList<RecipeCandidate.Output<FluidResourceKey>>();
     for (var fluid : requirements) {
       claims.add(
@@ -54,36 +57,36 @@ final class FluidOutputLayout {
     return planClaims(claims);
   }
 
-  Planning planClaims(List<RecipeCandidate.Output<FluidResourceKey>> claims) {
+  public Planning planClaims(List<RecipeCandidate.Output<FluidResourceKey>> claims) {
     return new Planning(claims);
   }
 
-  final class Planning {
+  public final class Planning {
     private final RecipePlanner.Session<FluidResourceKey> session;
     private RecipePlan<FluidResourceKey> selected;
     private RecipePlanner.Status status;
 
     private Planning(List<RecipeCandidate.Output<FluidResourceKey>> claims) {
-      var spaces = new ArrayList<ItemResourceSnapshot.OutputSlot<FluidResourceKey>>();
+      var spaces = new ArrayList<ResourceSnapshot.OutputSlot<FluidResourceKey>>();
       for (int index = 0; index < snapshot.outputs().size(); index++) {
         var slot = snapshot.outputs().get(index);
         var limits = new HashMap<FluidResourceKey, Long>();
         for (var claim : claims) {
           limits.put(claim.key(), selectors.get(index).equals(claim.key().selector()) ? slot.capacity() : 0L);
         }
-        spaces.add(new ItemResourceSnapshot.OutputSlot<>(slot.key(), slot.count(), slot.capacity(), limits));
+        spaces.add(new ResourceSnapshot.OutputSlot<>(slot.key(), slot.count(), slot.capacity(), limits));
       }
-      var selectedDomain = new ItemResourceSnapshot<FluidResourceKey>(snapshot.revision(), Map.of(), spaces);
+      var selectedDomain = new ResourceSnapshot<FluidResourceKey>(snapshot.revision(), Map.of(), spaces);
       session = claims.isEmpty() ? null : RecipePlanner
           .prepareOutputs(selectedDomain, RecipeCandidate.outputOnly("fluid_outputs", claims));
       status = session == null ? RecipePlanner.Status.SELECTED : RecipePlanner.Status.BUDGET_EXHAUSTED;
     }
 
-    RecipePlanner.Status status() {
+    public RecipePlanner.Status status() {
       return status;
     }
 
-    RecipePlanner.SearchResult<FluidResourceKey> advance(int budget) {
+    public RecipePlanner.SearchResult<FluidResourceKey> advance(int budget) {
       if (session == null) {
         throw new IllegalStateException("Empty fluid output needs no planning");
       }
@@ -94,7 +97,7 @@ final class FluidOutputLayout {
       return result;
     }
 
-    Map<String, FluidStack> additions() {
+    public Map<String, FluidStack> additions() {
       if (session == null) {
         return Map.of();
       }

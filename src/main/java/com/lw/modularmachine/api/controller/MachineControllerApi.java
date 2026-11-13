@@ -7,7 +7,7 @@ import com.lw.modularmachine.machine.PortKind;
 import com.lw.modularmachine.api.orientation.MachineOrientation;
 import com.lw.modularmachine.machine.recipe.FrozenItemRun;
 import com.lw.modularmachine.machine.recipe.ItemResourceKey;
-import com.lw.modularmachine.machine.recipe.ItemRecipePlan;
+import com.lw.modularmachine.machine.recipe.RecipeStartPlan;
 import com.lw.modularmachine.machine.recipe.ItemRunEngine;
 import com.lw.modularmachine.machine.recipe.MachineRecipeService;
 import com.lw.modularmachine.machine.recipe.RecipeExecutionTicket;
@@ -189,7 +189,7 @@ public final class MachineControllerApi {
           for (var stack : port.items()) {
             if (!stack.isEmpty()) {
               available.merge(
-                  ItemRecipePlan.inputKey(candidate, ItemResourceKey.of(stack).withSelector(port.selector())),
+                  RecipeStartPlan.inputKey(candidate, ItemResourceKey.of(stack).withSelector(port.selector())),
                   (long) stack.getCount(),
                   Math::addExact);
             }

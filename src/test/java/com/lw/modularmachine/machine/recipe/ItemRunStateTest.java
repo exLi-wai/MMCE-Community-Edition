@@ -1,5 +1,8 @@
 package com.lw.modularmachine.machine.recipe;
 
+import com.lw.modularmachine.machine.recipe.search.ResourceSnapshot;
+import com.lw.modularmachine.machine.recipe.search.RecipeCandidate;
+import com.lw.modularmachine.machine.recipe.search.RecipePlanner;
 import java.util.List;
 import java.util.Map;
 import net.minecraft.nbt.Tag;
@@ -81,19 +84,19 @@ class ItemRunStateTest {
   void outputOnlyPlacementSharesAllSpaceAndDoesNotConsumeInputs() {
     var candidate = RecipeCandidate
         .outputOnly("buffer", List.of(new RecipeCandidate.Output<>("a", 1), new RecipeCandidate.Output<>("b", 1)));
-    var blocked = new ItemResourceSnapshot<>(
+    var blocked = new ResourceSnapshot<>(
         0,
         Map.<String, Long>of(),
-        List.of(new ItemResourceSnapshot.OutputSlot<String>(null, 0, 64)));
+        List.of(new ResourceSnapshot.OutputSlot<String>(null, 0, 64)));
     assertEquals(
         RecipePlanner.Status.NO_MATCH,
         RecipePlanner.prepareOutputs(blocked, candidate).advance(1000).status());
-    var free = new ItemResourceSnapshot<>(
+    var free = new ResourceSnapshot<>(
         0,
         Map.<String, Long>of(),
         List.of(
-            new ItemResourceSnapshot.OutputSlot<String>(null, 0, 64),
-            new ItemResourceSnapshot.OutputSlot<String>(null, 0, 64)));
+            new ResourceSnapshot.OutputSlot<String>(null, 0, 64),
+            new ResourceSnapshot.OutputSlot<String>(null, 0, 64)));
     var plan = RecipePlanner.prepareOutputs(free, candidate).advance(1000).plan().orElseThrow();
     assertTrue(plan.consumed().isEmpty());
     assertEquals(2, plan.insertions().size());
@@ -102,10 +105,10 @@ class ItemRunStateTest {
   @Test
   void impossibleLongOutputIsRejectedWithoutExpandingStacksOrExponentialSearch() {
     var candidate = RecipeCandidate.outputOnly("large", List.of(new RecipeCandidate.Output<>("a", Long.MAX_VALUE)));
-    var view = new ItemResourceSnapshot<>(
+    var view = new ResourceSnapshot<>(
         0,
         Map.<String, Long>of(),
-        List.of(new ItemResourceSnapshot.OutputSlot<String>(null, 0, 64)));
+        List.of(new ResourceSnapshot.OutputSlot<String>(null, 0, 64)));
     var result = RecipePlanner.prepareOutputs(view, candidate).advance(100);
     assertEquals(RecipePlanner.Status.NO_MATCH, result.status());
     assertTrue(result.workUsed() < 100);

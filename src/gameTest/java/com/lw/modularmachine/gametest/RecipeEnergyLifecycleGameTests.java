@@ -5,9 +5,9 @@ import com.lw.modularmachine.blockentity.MachineControllerBlockEntity;
 import com.lw.modularmachine.blockentity.MachinePortBlockEntity;
 import com.lw.modularmachine.api.orientation.MachineOrientation;
 import com.lw.modularmachine.machine.recipe.AtomicRecipeStarter;
-import com.lw.modularmachine.machine.recipe.ItemRecipeSearch;
+import com.lw.modularmachine.machine.recipe.search.RecipeSearch;
 import com.lw.modularmachine.machine.recipe.ItemRunEngine;
-import com.lw.modularmachine.machine.recipe.RecipePlanner;
+import com.lw.modularmachine.machine.recipe.search.RecipePlanner;
 import com.lw.modularmachine.machine.structure.StructureService;
 import com.lw.modularmachine.registry.MachineRegistries;
 import net.minecraft.core.BlockPos;
@@ -123,7 +123,7 @@ public final class RecipeEnergyLifecycleGameTests {
     energy.energy().receiveEnergy(15, false);
     RecipeResourceTicketGameTests.port(helper, decrease, "item_in").inventory()
         .setStackInSlot(0, new ItemStack(Items.MAGMA_BLOCK));
-    var plan = ItemRecipeSearch.begin(decrease).orElseThrow().advance(10_000).plan().orElseThrow();
+    var plan = RecipeSearch.begin(decrease).orElseThrow().advance(10_000).plan().orElseThrow();
     helper.assertTrue(
         plan.recipe().id().endsWith("/test_energy_paid_sand_decrease"),
         "Decrease fixture selected unexpected recipe: " + plan.recipe().id());
@@ -205,10 +205,10 @@ public final class RecipeEnergyLifecycleGameTests {
         var input = port(helper, "item_in");
         var fluid = port(helper, "fluid_a");
         input.inventory().setStackInSlot(0, new ItemStack(Items.ENDER_PEARL));
-        var missing = ItemRecipeSearch.begin(controller).orElseThrow().advance(10_000);
+        var missing = RecipeSearch.begin(controller).orElseThrow().advance(10_000);
         helper.assertTrue(missing.plan().isEmpty(), "Fluid-input recipe was selectable without its required fluid");
         fluid.fluidTank().fill(new FluidStack(Fluids.WATER, 40), FluidAction.EXECUTE);
-        var plan = ItemRecipeSearch.begin(controller).orElseThrow().advance(10_000).plan().orElseThrow();
+        var plan = RecipeSearch.begin(controller).orElseThrow().advance(10_000).plan().orElseThrow();
         helper.assertTrue(plan.start() == AtomicRecipeStarter.Result.STARTED, "Fluid-input recipe did not start");
         helper.assertTrue(
             fluid.fluidTank().isEmpty() && input.inventory().getStackInSlot(0).isEmpty(),
@@ -241,7 +241,7 @@ public final class RecipeEnergyLifecycleGameTests {
         var controller = buildFluidOutput(helper);
         var input = port(helper, "item_in");
         input.inventory().setStackInSlot(0, new ItemStack(Items.CHORUS_FRUIT));
-        var plan = ItemRecipeSearch.begin(controller).orElseThrow().advance(10_000).plan().orElseThrow();
+        var plan = RecipeSearch.begin(controller).orElseThrow().advance(10_000).plan().orElseThrow();
         helper.assertTrue(plan.start() == AtomicRecipeStarter.Result.STARTED, "Fluid-output recipe did not start");
         var fluid = port(helper, "fluid_out");
         helper.assertTrue(fluid.fluidTank().isEmpty(), "Fluid output was committed during startup");
@@ -273,9 +273,9 @@ public final class RecipeEnergyLifecycleGameTests {
       var fluid = port(helper, "fluid_out");
       input.inventory().setStackInSlot(0, new ItemStack(Items.CHORUS_FRUIT));
       fluid.fluidTank().setFluid(new FluidStack(Fluids.WATER, 960));
-      var search = ItemRecipeSearch.begin(controller).orElseThrow();
+      var search = RecipeSearch.begin(controller).orElseThrow();
       helper.assertTrue(search.advance(0).status() == RecipePlanner.Status.BUDGET_EXHAUSTED, "Zero budget did work");
-      ItemRecipeSearch.Result result;
+      RecipeSearch.Result result;
       int calls = 0;
       do {
         result = search.advance(1);
@@ -287,16 +287,16 @@ public final class RecipeEnergyLifecycleGameTests {
       helper
           .assertTrue(stale.start() == AtomicRecipeStarter.Result.STALE, "Output mutation retained startup authority");
       helper.assertTrue(
-          ItemRecipeSearch.begin(controller).orElseThrow().advance(10_000).plan().isEmpty(),
+          RecipeSearch.begin(controller).orElseThrow().advance(10_000).plan().isEmpty(),
           "Insufficient fluid output capacity admitted a recipe");
       helper.assertTrue(input.inventory().getStackInSlot(0).getCount() == 1, "Failed admission consumed input");
       fluid.fluidTank().setFluid(new FluidStack(Fluids.LAVA, 960));
-      var fallback = ItemRecipeSearch.begin(controller).orElseThrow().advance(10_000).plan().orElseThrow();
+      var fallback = RecipeSearch.begin(controller).orElseThrow().advance(10_000).plan().orElseThrow();
       helper.assertTrue(
           fallback.recipe().id().endsWith("/test_fluid_output_fallback"),
           "Blocked water output did not fall through to the lower-priority lava recipe");
       fluid.fluidTank().setFluid(new FluidStack(Fluids.WATER, 960));
-      var plan = ItemRecipeSearch.begin(controller).orElseThrow().advance(10_000).plan().orElseThrow();
+      var plan = RecipeSearch.begin(controller).orElseThrow().advance(10_000).plan().orElseThrow();
       helper.assertTrue(plan.start() == AtomicRecipeStarter.Result.STARTED, "Water recipe failed to start");
       helper.runAfterDelay(2, () -> {
         controller.serverTick();
@@ -321,8 +321,8 @@ public final class RecipeEnergyLifecycleGameTests {
       var large = port(helper, "fluid_out");
       var small = (MachinePortBlockEntity) helper.getLevel().getBlockEntity(origin.offset(0, -1, 1));
       port(helper, "item_in").inventory().setStackInSlot(0, new ItemStack(Items.CHORUS_FRUIT));
-      var search = ItemRecipeSearch.begin(controller).orElseThrow();
-      ItemRecipeSearch.Result result;
+      var search = RecipeSearch.begin(controller).orElseThrow();
+      RecipeSearch.Result result;
       int calls = 0;
       do {
         result = search.advance(1);
@@ -353,7 +353,7 @@ public final class RecipeEnergyLifecycleGameTests {
     var output = port(helper, "item_out");
     var fluid = port(helper, "fluid_out");
     input.inventory().setStackInSlot(0, new ItemStack(Items.CHORUS_FRUIT));
-    var plan = ItemRecipeSearch.begin(controller).orElseThrow().advance(10_000).plan().orElseThrow();
+    var plan = RecipeSearch.begin(controller).orElseThrow().advance(10_000).plan().orElseThrow();
     helper.assertTrue(plan.start() == AtomicRecipeStarter.Result.STARTED, "Pending fixture failed to start");
     var runId = controller.runningRecipe().orElseThrow().runId();
     // Only occupancy introduced after startup may leave this run blocked.
@@ -602,7 +602,7 @@ public final class RecipeEnergyLifecycleGameTests {
   private static void start(GameTestHelper helper, MachineControllerBlockEntity controller, Item input) {
     RecipeResourceTicketGameTests.port(helper, controller, "item_in").inventory()
         .setStackInSlot(0, new ItemStack(input));
-    var search = ItemRecipeSearch.begin(controller).orElseThrow();
+    var search = RecipeSearch.begin(controller).orElseThrow();
     var plan = search.advance(10_000).plan().orElseThrow();
     helper.assertTrue(plan.start() == AtomicRecipeStarter.Result.STARTED, "FE recipe did not start");
   }

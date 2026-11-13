@@ -14,8 +14,8 @@ import com.lw.modularmachine.api.upgrade.FactoryUpgradeStartCost;
 import com.lw.modularmachine.machine.factory.FactoryUpgradeStartCosts;
 import com.lw.modularmachine.machine.recipe.FactoryParallelStarter;
 import com.lw.modularmachine.machine.recipe.FactoryRecipeStarter;
-import com.lw.modularmachine.machine.recipe.ItemRecipePlan;
-import com.lw.modularmachine.machine.recipe.ItemRecipeSearch;
+import com.lw.modularmachine.machine.recipe.RecipeStartPlan;
+import com.lw.modularmachine.machine.recipe.search.RecipeSearch;
 import com.lw.modularmachine.registry.MachineRegistries;
 import java.util.ArrayList;
 import java.util.Collections;
@@ -405,9 +405,8 @@ public final class UpgradeStartCostGameTests {
     }
   }
 
-  private static ItemRecipePlan plan(Fixture fixture) {
-    return ItemRecipeSearch.begin(fixture.factory(), (Set<String>) null).orElseThrow().advance(65_536).plan()
-        .orElseThrow();
+  private static RecipeStartPlan plan(Fixture fixture) {
+    return RecipeSearch.begin(fixture.factory(), (Set<String>) null).orElseThrow().advance(65_536).plan().orElseThrow();
   }
 
   private static ItemStack tool(int damage) {

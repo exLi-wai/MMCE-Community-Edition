@@ -1,5 +1,7 @@
-package com.lw.modularmachine.machine.recipe;
+package com.lw.modularmachine.machine.recipe.search;
 
+import com.lw.modularmachine.machine.recipe.ItemResourceKey;
+import com.lw.modularmachine.machine.recipe.RecipeExecutionTicket;
 import java.util.ArrayList;
 import java.util.HashMap;
 import java.util.HashSet;
@@ -8,22 +10,24 @@ import java.util.Map;
 import java.util.Set;
 import net.minecraft.core.NonNullList;
 import net.minecraft.world.item.ItemStack;
+import org.jetbrains.annotations.ApiStatus;
 
 /**
  * Detached output slot images and their shared capacity domain. Nothing is
  * inserted during planning.
  */
-final class ItemOutputLayout {
+@ApiStatus.Internal
+public final class ItemOutputLayout {
   private record Slot(String part, int index, ItemStack before, ItemSlotDomain domain) {
   }
 
   private final List<Slot> slots;
   private final Map<String, List<ItemStack>> images;
-  final ItemResourceSnapshot<ItemResourceKey> snapshot;
+  private final ResourceSnapshot<ItemResourceKey> snapshot;
 
-  ItemOutputLayout(RecipeExecutionTicket ticket, Set<ItemResourceKey> keys) {
+  public ItemOutputLayout(RecipeExecutionTicket ticket, Set<ItemResourceKey> keys) {
     var refs = new ArrayList<Slot>();
-    var spaces = new ArrayList<ItemResourceSnapshot.OutputSlot<ItemResourceKey>>();
+    var spaces = new ArrayList<ResourceSnapshot.OutputSlot<ItemResourceKey>>();
     var copied = new HashMap<String, List<ItemStack>>();
     var limitsBySize = new HashMap<ItemSlotDomain, Map<ItemResourceKey, Long>>();
     for (var port : ticket.ports()) {
@@ -36,7 +40,7 @@ final class ItemOutputLayout {
         var limits = limitsBySize.computeIfAbsent(domain, current -> current.limits(keys));
         refs.add(new Slot(port.partId(), i, stack, domain));
         spaces.add(
-            new ItemResourceSnapshot.OutputSlot<>(
+            new ResourceSnapshot.OutputSlot<>(
                 stack.isEmpty() ? null : ItemResourceKey.of(stack).withSelector(port.selector()),
                 stack.getCount(),
                 limit,
@@ -45,10 +49,14 @@ final class ItemOutputLayout {
     }
     slots = List.copyOf(refs);
     images = Map.copyOf(copied);
-    snapshot = new ItemResourceSnapshot<>(ticket.structureRevision(), Map.of(), spaces);
+    snapshot = new ResourceSnapshot<>(ticket.structureRevision(), Map.of(), spaces);
   }
 
-  Map<String, NonNullList<ItemStack>> prepare(RecipePlan<ItemResourceKey> placement) {
+  public ResourceSnapshot<ItemResourceKey> snapshot() {
+    return snapshot;
+  }
+
+  public Map<String, NonNullList<ItemStack>> prepare(RecipePlan<ItemResourceKey> placement) {
     var changed = new HashMap<String, NonNullList<ItemStack>>();
     var used = new HashSet<Integer>();
     for (var insertion : placement.insertions()) {

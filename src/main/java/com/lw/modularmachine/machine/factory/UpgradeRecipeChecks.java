@@ -2,7 +2,7 @@ package com.lw.modularmachine.machine.factory;
 
 import com.lw.modularmachine.ModularMachine;
 import com.lw.modularmachine.blockentity.UpgradeBusBlockEntity;
-import com.lw.modularmachine.machine.recipe.ItemRecipePlan;
+import com.lw.modularmachine.machine.recipe.RecipeStartPlan;
 import com.lw.modularmachine.machine.recipe.MachineRecipeService;
 import java.util.ArrayList;
 import java.util.List;
@@ -198,7 +198,7 @@ public final class UpgradeRecipeChecks {
       return true;
     }
 
-    public Session begin(ItemRecipePlan plan) {
+    public Session begin(RecipeStartPlan plan) {
       return new Session(this, plan);
     }
   }
@@ -209,7 +209,7 @@ public final class UpgradeRecipeChecks {
     private int cursor;
     private Status status;
 
-    private Session(Scope scope, ItemRecipePlan plan) {
+    private Session(Scope scope, RecipeStartPlan plan) {
       this.scope = scope;
       Context prepared = null;
       status = scope.invalid ? Status.ERROR : scope.calls.isEmpty() ? Status.ALLOWED : Status.PENDING;

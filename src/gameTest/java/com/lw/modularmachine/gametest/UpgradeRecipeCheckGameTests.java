@@ -11,9 +11,9 @@ import com.lw.modularmachine.api.upgrade.FactoryUpgradeRecipeChecks;
 import com.lw.modularmachine.machine.factory.FactoryUpgradeService;
 import com.lw.modularmachine.machine.recipe.FactoryParallelStarter;
 import com.lw.modularmachine.machine.recipe.FactoryRecipeStarter;
-import com.lw.modularmachine.machine.recipe.ItemRecipePlan;
-import com.lw.modularmachine.machine.recipe.ItemRecipeSearch;
-import com.lw.modularmachine.machine.recipe.RecipePlanner;
+import com.lw.modularmachine.machine.recipe.RecipeStartPlan;
+import com.lw.modularmachine.machine.recipe.search.RecipeSearch;
+import com.lw.modularmachine.machine.recipe.search.RecipePlanner;
 import com.lw.modularmachine.registry.MachineRegistries;
 import java.util.ArrayList;
 import java.util.Collections;
@@ -118,7 +118,7 @@ public final class UpgradeRecipeCheckGameTests {
     FactoryUpgradeRecipeChecks.register(HANDLER, checker);
     synchronizeUpgrades(helper, fixture);
     fixture.input().inventory().setStackInSlot(0, new ItemStack(Items.DIRT, 2));
-    var rejected = ItemRecipeSearch.beginFactory(fixture.factory(), THREAD).orElseThrow();
+    var rejected = RecipeSearch.beginFactory(fixture.factory(), THREAD).orElseThrow();
     helper.assertTrue(
         budgeted(helper, rejected, calls).status() == RecipePlanner.Status.NO_MATCH && calls.size() == 2,
         "A rejection did not continue to B or repeated the same slot");
@@ -139,7 +139,7 @@ public final class UpgradeRecipeCheckGameTests {
       fixture.output().inventory().setStackInSlot(slot, new ItemStack(Items.GOLD_INGOT, slot == 0 ? 63 : 64));
     }
     int beforeConstrained = calls.size();
-    var constrained = ItemRecipeSearch.beginFactory(fixture.factory(), THREAD).orElseThrow();
+    var constrained = RecipeSearch.beginFactory(fixture.factory(), THREAD).orElseThrow();
     helper.assertTrue(
         budgeted(helper, constrained, calls).plan().orElseThrow().recipe().id().equals(B.toString())
             && calls.subList(beforeConstrained, calls.size()).equals(List.of(B, B)),
@@ -148,7 +148,7 @@ public final class UpgradeRecipeCheckGameTests {
       fixture.output().inventory().setStackInSlot(slot, ItemStack.EMPTY);
     }
     int beforeAccepted = calls.size();
-    var search = ItemRecipeSearch.beginFactory(fixture.factory(), THREAD).orElseThrow();
+    var search = RecipeSearch.beginFactory(fixture.factory(), THREAD).orElseThrow();
     var accepted = budgeted(helper, search, calls).plan().orElseThrow();
     helper.assertTrue(
         accepted.recipe().id().equals(B.toString())
@@ -387,7 +387,7 @@ public final class UpgradeRecipeCheckGameTests {
     fixture.factory().finishRunStart(THREAD, false);
   }
 
-  private static ItemRecipeSearch.Result budgeted(GameTestHelper helper, ItemRecipeSearch search, List<ResourceLocation> calls) {
+  private static RecipeSearch.Result budgeted(GameTestHelper helper, RecipeSearch search, List<ResourceLocation> calls) {
     for (int attempt = 0; attempt < 600; attempt++) {
       var result = search.advance(1);
       int count = calls.size();
@@ -401,8 +401,8 @@ public final class UpgradeRecipeCheckGameTests {
     throw new IllegalStateException("Recipe checker search did not finish in bounded work");
   }
 
-  private static ItemRecipePlan rawPlan(Fixture fixture, ResourceLocation recipe) {
-    return ItemRecipeSearch.begin(fixture.factory(), Set.of(recipe.toString())).orElseThrow().advance(65_536).plan()
+  private static RecipeStartPlan rawPlan(Fixture fixture, ResourceLocation recipe) {
+    return RecipeSearch.begin(fixture.factory(), Set.of(recipe.toString())).orElseThrow().advance(65_536).plan()
         .orElseThrow();
   }
 

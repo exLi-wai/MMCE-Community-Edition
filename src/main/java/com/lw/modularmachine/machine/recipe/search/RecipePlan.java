@@ -1,5 +1,6 @@
-package com.lw.modularmachine.machine.recipe;
+package com.lw.modularmachine.machine.recipe.search;
 
+import org.jetbrains.annotations.ApiStatus;
 import java.util.List;
 import java.util.Map;
 import java.util.Objects;
@@ -8,6 +9,7 @@ import java.util.Objects;
  * Read-only reservation produced by a successful search; it has not changed
  * storage.
  */
+@ApiStatus.Internal
 public record RecipePlan<K>(
     long sourceRevision,
     RecipeCandidate<K> candidate,

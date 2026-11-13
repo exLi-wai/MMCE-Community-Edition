@@ -1,12 +1,14 @@
-package com.lw.modularmachine.machine.recipe;
+package com.lw.modularmachine.machine.recipe.search;
 
+import org.jetbrains.annotations.ApiStatus;
 import java.util.List;
 import java.util.Map;
 import java.util.Objects;
 
 /** Immutable resource view used by the pure recipe planner. */
-public record ItemResourceSnapshot<K>(long revision, Map<K, Long> inputs, List<OutputSlot<K>> outputs) {
-  public ItemResourceSnapshot {
+@ApiStatus.Internal
+public record ResourceSnapshot<K>(long revision, Map<K, Long> inputs, List<OutputSlot<K>> outputs) {
+  public ResourceSnapshot {
     if (revision < 0) {
       throw new IllegalArgumentException("revision must be non-negative");
     }
