@@ -4,9 +4,11 @@ import org.jetbrains.annotations.ApiStatus;
 import com.lw.modularmachine.machine.recipe.ItemResourceKey;
 import com.lw.modularmachine.machine.recipe.ItemSlotRef;
 import com.lw.modularmachine.machine.recipe.RecipeExecutionTicket;
+import com.lw.modularmachine.machine.recipe.search.index.fluid.FluidRecipeIndex;
 import com.lw.modularmachine.machine.PortKind;
 import java.util.ArrayList;
 import java.util.HashMap;
+import java.util.HashSet;
 import java.util.IdentityHashMap;
 import java.util.List;
 import java.util.Map;
@@ -23,6 +25,7 @@ final class RecipeSearchResources {
   private final RecipeCatalog catalog;
   private final Map<RecipeExecutionTicket.PortSnapshot, List<ItemSlot>> items = new IdentityHashMap<>();
   private final Map<RecipeExecutionTicket.PortSnapshot, StoredFluid> fluids = new IdentityHashMap<>();
+  private final Map<RecipeExecutionTicket.PortSnapshot, ChemicalResourceKey> chemicals = new IdentityHashMap<>();
   private final Map<ItemSlotDomain, Map<ItemResourceKey, Long>> limits = new HashMap<>();
 
   RecipeSearchResources(RecipeCatalog catalog) {
@@ -78,6 +81,24 @@ final class RecipeSearchResources {
     }
 
     return new Fluids(inputs, outputs);
+  }
+
+  Set<ChemicalResourceKey> chemicalInputKeys(RecipeExecutionTicket ticket) {
+    ticket.requireServerThread();
+    if (!catalog.hasChemicalInputAnchors()) {
+      return Set.of();
+    }
+    var keys = new HashSet<ChemicalResourceKey>();
+    for (var port : ticket.ports()) {
+      if (port.kind() == PortKind.CHEMICAL_INPUT && !port.chemical().isEmpty()) {
+        keys.add(
+            chemicals.computeIfAbsent(
+                port,
+                current -> new ChemicalResourceKey(current.chemical().chemical(), current.selector())));
+      }
+    }
+
+    return Set.copyOf(keys);
   }
 
   record ItemSlot(

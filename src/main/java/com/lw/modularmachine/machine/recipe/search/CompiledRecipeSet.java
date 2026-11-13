@@ -1,5 +1,6 @@
 package com.lw.modularmachine.machine.recipe.search;
 
+import com.lw.modularmachine.machine.recipe.search.index.RequiredInputIndex;
 import org.jetbrains.annotations.ApiStatus;
 import java.util.ArrayList;
 import java.util.BitSet;
@@ -26,8 +27,7 @@ public final class CompiledRecipeSet<K> {
   private final List<RecipeCandidate<K>> candidates;
   private final Set<K> outputKeys;
   private final Map<String, Entry<K>> byId;
-  private final Map<K, List<Entry<K>>> entriesByAnchor;
-  private final List<Entry<K>> entriesWithoutAnchor;
+  private final RequiredInputIndex<K> inputIndex;
 
   public CompiledRecipeSet(Collection<RecipeCandidate<K>> candidates) {
     if (candidates.size() > MAX_CANDIDATES) {
@@ -36,7 +36,6 @@ public final class CompiledRecipeSet<K> {
     var ids = new HashSet<String>();
     var pending = new ArrayList<Pending<K>>();
     var keys = new HashSet<K>();
-    var inputFrequency = new HashMap<K, Integer>();
     int requirements = 0;
     for (var recipe : candidates) {
       if (!ids.add(recipe.id())) {
@@ -61,35 +60,24 @@ public final class CompiledRecipeSet<K> {
       if (output.size() > MAX_DISTINCT_OUTPUTS) {
         throw new IllegalArgumentException("Too many distinct output keys");
       }
-      for (var key : input.keySet()) {
-        inputFrequency.merge(key, 1, Math::addExact);
-      }
       pending.add(new Pending<>(recipe, input, output));
       keys.addAll(output.keySet());
     }
     pending.sort(
         Comparator.<Pending<K>>comparingInt(entry -> entry.recipe().priority()).reversed()
             .thenComparing(entry -> entry.recipe().id()));
+    inputIndex = new RequiredInputIndex<>(
+        pending.stream().map(
+            entry -> new RequiredInputIndex.RecipeInputs<>(entry.recipe().id(), List.copyOf(entry.input().keySet())))
+            .toList());
     var compiled = new ArrayList<Entry<K>>(pending.size());
     for (var entry : pending) {
-      compiled.add(new Entry<>(compiled.size(), entry.recipe(), entry.input(), entry.output(), inputFrequency));
+      int rank = compiled.size();
+      compiled.add(new Entry<>(rank, entry.recipe(), entry.input(), entry.output(), inputIndex.anchorKey(rank)));
     }
     entries = List.copyOf(compiled);
     this.candidates = entries.stream().map(entry -> entry.recipe).toList();
     outputKeys = Set.copyOf(keys);
-    var anchored = new HashMap<K, List<Entry<K>>>();
-    var unanchored = new ArrayList<Entry<K>>();
-    for (var entry : entries) {
-      if (entry.anchorKey == null) {
-        unanchored.add(entry);
-      } else {
-        anchored.computeIfAbsent(entry.anchorKey, ignored -> new ArrayList<>()).add(entry);
-      }
-    }
-    var frozenAnchored = new HashMap<K, List<Entry<K>>>();
-    anchored.forEach((key, value) -> frozenAnchored.put(key, List.copyOf(value)));
-    entriesByAnchor = Map.copyOf(frozenAnchored);
-    entriesWithoutAnchor = List.copyOf(unanchored);
     var indexed = new HashMap<String, Entry<K>>();
     for (var entry : entries) {
       indexed.put(entry.recipe.id(), entry);
@@ -107,6 +95,11 @@ public final class CompiledRecipeSet<K> {
 
   public List<RecipeCandidate<K>> candidates() {
     return candidates;
+  }
+
+  /** Immutable necessary-key index shared with the matching resource adapter. */
+  public RequiredInputIndex<K> inputIndex() {
+    return inputIndex;
   }
 
   /**
@@ -132,24 +125,7 @@ public final class CompiledRecipeSet<K> {
       }
     }
 
-    return orderedCandidates(selected);
-  }
-
-  /**
-   * Necessary item-anchor filtering before resource-specific preparation. Logical
-   * input aliases must already be included; quantities still need full checking.
-   */
-  List<RecipeCandidate<K>> candidatesFor(Map<K, Long> inputs, Set<String> allowedIds) {
-    return orderedCandidates(selectInputs(inputs, allowedIds));
-  }
-
-  int inputCandidateCount(Map<K, Long> inputs) {
-    int count = entriesWithoutAnchor.size();
-    for (var key : inputs.keySet()) {
-      count += entriesByAnchor.getOrDefault(key, List.of()).size();
-    }
-
-    return count;
+    return candidatesAt(selected);
   }
 
   /** Only strict predecessors can improve an already complete group result. */
@@ -194,7 +170,7 @@ public final class CompiledRecipeSet<K> {
     if (outputOnly || entries.isEmpty()) {
       return entries;
     }
-    var selected = selectInputs(snapshot.inputs(), allowedIds);
+    var selected = inputIndex.select(snapshot.inputs().keySet(), allowedIds);
     var result = new ArrayList<Entry<K>>(selected.cardinality());
     for (int rank = selected.nextSetBit(0); rank >= 0; rank = selected.nextSetBit(rank + 1)) {
       result.add(entries.get(rank));
@@ -203,49 +179,10 @@ public final class CompiledRecipeSet<K> {
     return List.copyOf(result);
   }
 
-  private BitSet selectInputs(Map<K, Long> inputs, Set<String> allowedIds) {
-    var selected = new BitSet(entries.size());
-    if (allowedIds != null && preferIdLookup(inputs, allowedIds.size())) {
-      for (var id : allowedIds) {
-        var entry = byId.get(id);
-        if (entry != null && (entry.anchorKey == null || inputs.containsKey(entry.anchorKey))) {
-          selected.set(entry.rank);
-        }
-      }
-      return selected;
-    }
-    for (var entry : entriesWithoutAnchor) {
-      if (allowedIds == null || allowedIds.contains(entry.recipe.id())) {
-        selected.set(entry.rank);
-      }
-    }
-    for (var key : inputs.keySet()) {
-      for (var entry : entriesByAnchor.getOrDefault(key, List.of())) {
-        if (allowedIds == null || allowedIds.contains(entry.recipe.id())) {
-          selected.set(entry.rank);
-        }
-      }
-    }
-
-    return selected;
-  }
-
-  private boolean preferIdLookup(Map<K, Long> inputs, int allowedCount) {
-    if (allowedCount <= 1 || allowedCount <= entriesWithoutAnchor.size()) {
-      return true;
-    }
-    long indexedCount = entriesWithoutAnchor.size();
-    for (var key : inputs.keySet()) {
-      indexedCount += entriesByAnchor.getOrDefault(key, List.of()).size();
-      if (indexedCount >= allowedCount) {
-        return true;
-      }
-    }
-
-    return false;
-  }
-
-  private List<RecipeCandidate<K>> orderedCandidates(BitSet selected) {
+  /**
+   * Materializes query ranks from this catalog in its stable priority/ID order.
+   */
+  List<RecipeCandidate<K>> candidatesAt(BitSet selected) {
     var result = new ArrayList<RecipeCandidate<K>>(selected.cardinality());
     for (int rank = selected.nextSetBit(0); rank >= 0; rank = selected.nextSetBit(rank + 1)) {
       result.add(entries.get(rank).recipe);
@@ -265,15 +202,13 @@ public final class CompiledRecipeSet<K> {
     final long anchorAmount;
     private final long[] amounts;
 
-    Entry(int rank, RecipeCandidate<K> recipe, Map<K, Long> input, Map<K, Long> output, Map<K, Integer> inputFrequency) {
+    Entry(int rank, RecipeCandidate<K> recipe, Map<K, Long> input, Map<K, Long> output, K anchor) {
       this.rank = rank;
       this.recipe = recipe;
       this.input = Map.copyOf(input);
       inputEntries = input.entrySet().stream().map(entry -> Map.entry(entry.getKey(), entry.getValue())).toList();
-      var anchor = input.entrySet().stream().min(Comparator.comparingInt(entry -> inputFrequency.get(entry.getKey())))
-          .orElse(null);
-      anchorKey = anchor == null ? null : anchor.getKey();
-      anchorAmount = anchor == null ? 0 : anchor.getValue();
+      anchorKey = anchor;
+      anchorAmount = anchor == null ? 0 : input.get(anchor);
       outputKeys = List.copyOf(output.keySet());
       var indices = new LinkedHashMap<K, Integer>();
       for (int i = 0; i < outputKeys.size(); i++) {

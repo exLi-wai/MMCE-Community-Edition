@@ -113,10 +113,11 @@ public final class RecipeSearch {
     }
     inputs = List.copyOf(inputSlots);
     outputs = List.copyOf(outputSlots);
-    var fluidCandidates = new HashSet<String>();
+    var resourceCandidates = new HashSet<String>();
     var requirements = RecipeResourceRequirements.capture(ticket);
     var fluids = resources.fluids(ticket);
-    for (var candidate : catalog.candidatesForInputs(counts, fluids.inputKeys(), allowedIds)) {
+    var chemicals = resources.chemicalInputKeys(ticket);
+    for (var candidate : catalog.candidatesForInputs(counts, fluids.inputKeys(), chemicals, allowedIds)) {
       var definition = catalog.definition(candidate.id());
       var missing = definition == null ? Optional.<PortKind>empty() : requirements.missing(definition);
       if (missing.isPresent()) {
@@ -127,13 +128,13 @@ public final class RecipeSearch {
               || definition.chemicals().inputs().isEmpty()
               || ChemicalTransactions.inputsAvailable(ticket, definition.chemicals().inputs()))
           && catalog.fluidsAvailable(candidate.id(), fluids)) {
-        fluidCandidates.add(candidate.id());
+        resourceCandidates.add(candidate.id());
       }
     }
     // Logical aliases are counted once per physical slot and are needed only by
     // single-row item-only candidates. The ticket retains exact physical stamps.
     var snapshot = new ResourceSnapshot<>(ticket.structureRevision(), counts, spaces);
-    session = RecipePlanner.prepare(snapshot, catalog.recipes(), fluidCandidates);
+    session = RecipePlanner.prepare(snapshot, catalog.recipes(), resourceCandidates);
   }
 
   private static String startThread(RecipeExecutionTicket ticket, String threadId) {

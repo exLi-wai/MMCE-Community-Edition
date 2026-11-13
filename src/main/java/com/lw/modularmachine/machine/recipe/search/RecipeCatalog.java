@@ -2,11 +2,15 @@ package com.lw.modularmachine.machine.recipe.search;
 
 import com.lw.modularmachine.machine.recipe.ItemResourceKey;
 import com.lw.modularmachine.machine.recipe.MachineRecipe;
+import com.lw.modularmachine.machine.recipe.search.index.chemical.ChemicalRecipeIndex;
+import com.lw.modularmachine.machine.recipe.search.index.fluid.FluidRecipeIndex;
+import com.lw.modularmachine.machine.recipe.search.index.item.ItemRecipeIndex;
 import com.lw.modularmachine.api.recipe.RecipeModifier;
+import com.lw.modularmachine.api.recipe.ChemicalRequirement;
 import com.lw.modularmachine.api.recipe.RecipeSelectors;
 import java.util.Collection;
+import java.util.BitSet;
 import java.util.HashMap;
-import java.util.HashSet;
 import java.util.List;
 import java.util.Map;
 import java.util.Objects;
@@ -31,8 +35,9 @@ public final class RecipeCatalog {
   private final Map<String, MachineRecipe> definitions;
   private final List<RecipeModifier> contextRules;
   private final Map<String, RecipeSelectors> selectors;
-  private final Set<ItemResourceKey> itemInputAliases;
+  private final ItemRecipeIndex itemIndex;
   private final FluidRecipeIndex fluidIndex;
+  private final ChemicalRecipeIndex chemicalIndex;
 
   public RecipeCatalog(ResourceLocation machineId, Collection<RecipeCandidate<ItemResourceKey>> candidates) {
     this(machineId, new CompiledRecipeSet<>(candidates), Map.of(), Map.of(), () -> true);
@@ -68,38 +73,64 @@ public final class RecipeCatalog {
     this.definitions = Map.copyOf(definitions);
     this.contextRules = List.copyOf(contextRules);
     this.selectors = Map.copyOf(selectors);
-    var aliases = new HashSet<ItemResourceKey>();
-    for (var candidate : recipes.candidates()) {
-      for (var input : candidate.inputs()) {
-        if (input.key().ignoresComponents()) {
-          if (candidate.inputs().size() != 1) {
-            throw new IllegalArgumentException("Item-only matching requires a single item input row");
-          }
-          aliases.add(input.key());
-        }
+    itemIndex = new ItemRecipeIndex(recipes);
+    var recipeIds = recipes.candidates().stream().map(RecipeCandidate::id).toList();
+    fluidIndex = new FluidRecipeIndex(recipeIds, this.fluidInputs, this.selectors);
+    var chemicalInputs = new HashMap<String, List<ChemicalRequirement>>();
+    this.definitions.forEach((id, definition) -> {
+      if (!definition.chemicals().inputs().isEmpty()) {
+        chemicalInputs.put(id, definition.chemicals().inputs());
       }
-    }
-    itemInputAliases = Set.copyOf(aliases);
-    fluidIndex = new FluidRecipeIndex(recipes.candidates(), this.fluidInputs, this.selectors);
+    });
+    chemicalIndex = new ChemicalRecipeIndex(recipeIds, chemicalInputs);
   }
 
   Set<ItemResourceKey> itemInputAliases() {
-    return itemInputAliases;
+    return itemIndex.aliases();
   }
 
-  List<RecipeCandidate<ItemResourceKey>> candidatesForInputs(Map<ItemResourceKey, Long> items, Set<FluidRecipeIndex.Key> fluids, Set<String> allowedIds) {
-    int fluidCount = fluidIndex.candidateCount(fluids);
-    if (fluidCount == Integer.MAX_VALUE) {
-      return recipes.candidatesFor(items, allowedIds);
+  boolean hasChemicalInputAnchors() {
+    return chemicalIndex.inputs().hasAnchors();
+  }
+
+  List<RecipeCandidate<ItemResourceKey>> candidatesForInputs(Map<ItemResourceKey, Long> items, Set<FluidRecipeIndex.Key> fluids, Set<ChemicalResourceKey> chemicals, Set<String> allowedIds) {
+    var itemInputs = itemIndex.inputs();
+    var fluidInputs = fluidIndex.inputs();
+    var chemicalInputs = chemicalIndex.inputs();
+    var itemKeys = items.keySet();
+    if (!fluidInputs.hasAnchors() && !chemicalInputs.hasAnchors()) {
+      return recipes.candidatesAt(itemInputs.select(itemKeys, allowedIds));
     }
-    // Start with the narrower index. A few fluid recipes must not cause a copy of
-    // every unanchored item recipe, nor should pure-fluid searches scan them all.
-    if ((allowedIds == null || allowedIds.size() > 1) && fluidCount < recipes.inputCandidateCount(items)) {
-      return recipes.candidatesFor(items, fluidIndex.candidatesFor(fluids, allowedIds));
+    // Start with the narrowest active index, without materializing larger fallback
+    // sets. Empty/single ID restrictions use direct lookup without count scans.
+    int itemCount = recipes.size();
+    int fluidCount = Integer.MAX_VALUE;
+    int chemicalCount = Integer.MAX_VALUE;
+    if (allowedIds == null || allowedIds.size() > 1) {
+      itemCount = itemInputs.candidateCount(itemKeys);
+      if (fluidInputs.hasAnchors()) {
+        fluidCount = fluidInputs.candidateCount(fluids);
+      }
+      if (chemicalInputs.hasAnchors()) {
+        chemicalCount = chemicalInputs.candidateCount(chemicals);
+      }
+    }
+    BitSet selected;
+    if (fluidCount < itemCount && fluidCount <= chemicalCount) {
+      selected = fluidInputs.select(fluids, allowedIds);
+      itemInputs.retainMatches(selected, itemKeys);
+      chemicalInputs.retainMatches(selected, chemicals);
+    } else if (chemicalCount < itemCount) {
+      selected = chemicalInputs.select(chemicals, allowedIds);
+      itemInputs.retainMatches(selected, itemKeys);
+      fluidInputs.retainMatches(selected, fluids);
+    } else {
+      selected = itemInputs.select(itemKeys, allowedIds);
+      fluidInputs.retainMatches(selected, fluids);
+      chemicalInputs.retainMatches(selected, chemicals);
     }
 
-    return recipes.candidatesFor(items, allowedIds).stream()
-        .filter(candidate -> fluidIndex.matches(candidate.id(), fluids)).toList();
+    return recipes.candidatesAt(selected);
   }
 
   boolean fluidsAvailable(String recipeId, RecipeSearchResources.Fluids resources) {
