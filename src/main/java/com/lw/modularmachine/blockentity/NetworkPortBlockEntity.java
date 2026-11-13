@@ -17,6 +17,7 @@ import com.lw.modularmachine.storage.TransactionalChemicalTank;
 import com.lw.modularmachine.storage.TransactionalFluidTank;
 import java.util.ArrayList;
 import java.util.List;
+import java.util.Objects;
 import java.util.Optional;
 import net.minecraft.core.BlockPos;
 import net.minecraft.core.HolderLookup;
@@ -190,7 +191,7 @@ public final class NetworkPortBlockEntity extends MachinePortBlockEntity {
     externalCall = true;
     try {
       replacement = copyResource(resource);
-      same = java.util.Objects.equals(configured[slot], replacement) && targets[slot] == amount;
+      same = Objects.equals(configured[slot], replacement) && targets[slot] == amount;
     } finally {
       externalCall = false;
     }
@@ -293,7 +294,7 @@ public final class NetworkPortBlockEntity extends MachinePortBlockEntity {
     externalCall = true;
     try {
       row = row(index);
-      same = java.util.Objects.equals(row.buffered(), row.configured());
+      same = Objects.equals(row.buffered(), row.configured());
     } finally {
       externalCall = false;
     }

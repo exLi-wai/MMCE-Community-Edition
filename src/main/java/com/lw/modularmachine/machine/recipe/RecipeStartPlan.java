@@ -204,7 +204,7 @@ public final class RecipeStartPlan {
         }
         var key = ItemResourceKey.of(stack).withSelector(port.selector());
         var expected = inputKey(recipe, key);
-        int take = (int) Math.min(stack.getCount(), needed.getOrDefault(expected, 0L));
+        long take = Math.min(port.itemAmount(slot), needed.getOrDefault(expected, 0L));
         if (take > 0) {
           scaledDeductions.add(new Deduction(new ItemSlotRef(port.partId(), slot), key, take));
           needed.put(expected, needed.get(expected) - take);
@@ -218,6 +218,11 @@ public final class RecipeStartPlan {
     return new RecipeStartPlan(source, catalog, recipe, scaledDeductions, placements, inputChanceSeed, factoryScope);
   }
 
+  static boolean samePatternScope(RecipeExecutionTicket left, RecipeExecutionTicket right) {
+    return left.patternSource() == null ? right.patternSource() == null : left.patternSource()
+        .sameScope(right.patternSource());
+  }
+
   static RecipeStartPlan combineInputs(List<RecipeStartPlan> plans) {
     if (plans == null || plans.isEmpty()) {
       throw new IllegalArgumentException("No parallel recipe plans");
@@ -227,6 +232,8 @@ public final class RecipeStartPlan {
     for (int index = 0; index < plans.size(); index++) {
       var plan = plans.get(index);
       if (plan.source.owner() != first.source.owner()
+          || !samePatternScope(plan.source, first.source)
+          || plan.source.inputGroup() != first.source.inputGroup()
           || plan.catalog != first.catalog
           || !plan.recipe.id().equals(first.recipe.id())) {
         throw new IllegalArgumentException("Parallel plans do not share one recipe owner");
@@ -246,7 +253,7 @@ public final class RecipeStartPlan {
         }
         var key = ItemResourceKey.of(stack).withSelector(port.selector());
         var expected = inputKey(first.recipe, key);
-        int amount = (int) Math.min(needed.getOrDefault(expected, 0L), stack.getCount());
+        long amount = Math.min(needed.getOrDefault(expected, 0L), port.itemAmount(slot));
         if (amount > 0) {
           combined.add(new Deduction(new ItemSlotRef(port.partId(), slot), key, amount));
           needed.put(expected, needed.get(expected) - amount);
@@ -307,22 +314,23 @@ public final class RecipeStartPlan {
     }
     for (var port : source.ports()) {
       if (port.kind() == PortKind.ITEM_INPUT) {
-        for (var stack : port.items()) {
+        for (int slot = 0; slot < port.items().size(); slot++) {
+          var stack = port.items().get(slot);
           if (!stack.isEmpty()) {
             available.merge(
                 inputKey(recipe, ItemResourceKey.of(stack).withSelector(port.selector())),
-                (long) stack.getCount(),
+                port.itemAmount(slot),
                 Math::addExact);
           }
         }
       }
     }
-    long result = Integer.MAX_VALUE;
+    long result = source.patternSource() == null ? Integer.MAX_VALUE : source.patternSource().startLimit();
     for (var entry : required.entrySet()) {
       result = Math.min(result, available.getOrDefault(entry.getKey(), 0L) / entry.getValue());
     }
 
-    return required.isEmpty() ? Integer.MAX_VALUE : (int) result;
+    return (int) result;
   }
 
   /** Lookup identity only; deductions must keep the exact physical slot key. */
@@ -395,7 +403,7 @@ public final class RecipeStartPlan {
     return AtomicRecipeStarter.start(this);
   }
 
-  public record Deduction(ItemSlotRef slot, ItemResourceKey key, int count) {
+  public record Deduction(ItemSlotRef slot, ItemResourceKey key, long count) {
     public Deduction {
       if (slot == null || key == null || key.ignoresComponents() || count <= 0) {
         throw new IllegalArgumentException("Invalid slot deduction");

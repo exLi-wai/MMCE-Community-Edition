@@ -3,6 +3,7 @@ package com.lw.modularmachine.machine.factory;
 import com.lw.modularmachine.api.upgrade.FactoryUpgradeSnapshot;
 import com.lw.modularmachine.block.UpgradeBusBlock;
 import com.lw.modularmachine.blockentity.UpgradeBusBlockEntity;
+import com.lw.modularmachine.machine.recipe.PatternProductionService;
 import com.lw.modularmachine.machine.structure.StructureService;
 import com.lw.modularmachine.util.thread.ServerThreadGuard;
 import java.util.ArrayList;
@@ -63,8 +64,12 @@ public final class ControllerUpgrades {
 
   public void withdraw() {
     server();
+    boolean wasReady = ready;
     applied = null;
     ready = false;
+    if (wasReady) {
+      PatternProductionService.invalidate(owner);
+    }
   }
 
   private void prepareParts() {
@@ -119,6 +124,18 @@ public final class ControllerUpgrades {
     if (UpgradeLifecyclePublisher.isDispatching(owner)) {
       return;
     }
+    var previousSnapshot = snapshot;
+    boolean wasReady = ready;
+    try {
+      refreshSources(server);
+    } finally {
+      if (wasReady != ready || previousSnapshot != snapshot) {
+        PatternProductionService.invalidate(owner);
+      }
+    }
+  }
+
+  private void refreshSources(ServerLevel server) {
     if (!owner.canCommitStructure()) {
       invalidate();
       return;

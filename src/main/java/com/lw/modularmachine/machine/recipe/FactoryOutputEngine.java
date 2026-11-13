@@ -210,8 +210,15 @@ public final class FactoryOutputEngine {
     var itemLeases = new LinkedHashMap<String, MachinePortBlockEntity.ItemStartLease>();
     var fluidLeases = new LinkedHashMap<String, MachinePortBlockEntity.FluidStartLease>();
     var upgradeLeases = new ArrayList<UpgradeBusBlockEntity.StartCostLease>();
+    PatternInputTransaction patternRelease;
+    try {
+      patternRelease = PatternInputTransaction.release(factory, set.runs());
+    } catch (RuntimeException unavailable) {
+      return Result.STALE;
+    }
     boolean committed = false;
     try {
+      patternRelease.acquire();
       runtime.acquireInto(upgradeLeases);
       chemicals.acquire();
       for (var port : checked.orElseThrow().ports()) {
@@ -254,7 +261,9 @@ public final class FactoryOutputEngine {
         lease.resolve(committed);
       }
       chemicals.resolve(committed);
+      patternRelease.resolve(committed);
     }
+    patternRelease.publish();
     chemicals.publish();
     workByThread.remove(threadId);
     factory.upgradeRuntimeWork().clear(FactoryUpgradeRuntimeData.Phase.FINISHED, threadId);

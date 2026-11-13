@@ -2,6 +2,7 @@ package com.lw.modularmachine.integration.appmek;
 
 import appeng.api.stacks.AEKey;
 import com.lw.modularmachine.api.component.ChemicalStackData;
+import com.lw.modularmachine.machine.network.NetworkPortResource;
 import me.ramidzkh.mekae2.ae2.MekanismKey;
 import mekanism.api.MekanismAPI;
 import mekanism.api.chemical.ChemicalStack;
@@ -22,5 +23,14 @@ public final class AppMekanisticsIntegration {
         .orElseThrow(() -> new IllegalArgumentException("Unknown chemical: " + value.chemical()));
 
     return MekanismKey.of(new ChemicalStack(holder, 1));
+  }
+
+  public static NetworkPortResource resource(AEKey value) {
+    if (!(value instanceof MekanismKey chemical) || chemical.getStack().isEmpty()) {
+      return null;
+    }
+    var identity = new ChemicalStackData(chemical.getId(), 1);
+
+    return chemical.equals(key(identity)) ? new NetworkPortResource.Chemical(identity.chemical()) : null;
   }
 }

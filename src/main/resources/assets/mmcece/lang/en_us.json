@@ -836,5 +836,21 @@
   "tooltip.mmcece.ranged_construct_tool.second": "Second corner: %s",
   "tooltip.mmcece.registered_blueprint": "The registered item fixes the machine. Right-click to preview; insert into an ordinary or factory controller blueprint slot.",
   "tooltip.mmcece.smart_interface": "Configure typed numeric interfaces for a machine.",
-  "tooltip.mmcece.upgrade_bus": "Upgrade slots: %s"
+  "tooltip.mmcece.upgrade_bus": "Upgrade slots: %s",
+  "block.mmcece.me_pattern_provider": "ME Pattern Provider",
+  "block.mmcece.me_pattern_mirror": "ME Pattern Mirror",
+  "menu.mmcece.pattern.cached": "Cache",
+  "menu.mmcece.pattern.independent": "Storage",
+  "menu.mmcece.pattern.independent.description": "Two real item slots and one fluid tank for machine inputs. Returning the cache leaves this storage intact.",
+  "menu.mmcece.pattern.return": "Return all pattern caches",
+  "menu.mmcece.pattern.return.description": "Returns what the network accepts; remaining resources wait when the network is offline or full.",
+  "menu.mmcece.pattern.amount": "Amount: %s",
+  "menu.mmcece.pattern.slot": "Pattern slot: %s",
+  "menu.mmcece.pattern.retired": "Previous pattern cache, awaiting return",
+  "menu.mmcece.pattern.fluid": "%s / %s mB",
+  "menu.mmcece.pattern.fluid.description": "Click while carrying one fluid container to fill or empty it.",
+  "menu.mmcece.pattern.select": "Left-click to view the cache; right-click or shift-click to remove the pattern.",
+  "tooltip.mmcece.configuration_card.type.pattern_provider": "Pattern provider reference",
+  "tooltip.mmcece.configuration_card.pattern_target": "%s @ %s",
+  "message.mmcece.configuration_card.cross_dimension": "Mirrors can only bind to a provider in the same dimension."
 }

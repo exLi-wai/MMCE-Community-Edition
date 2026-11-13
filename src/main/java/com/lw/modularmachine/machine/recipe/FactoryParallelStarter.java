@@ -20,7 +20,6 @@ import java.util.ArrayList;
 import java.util.HashMap;
 import java.util.HashSet;
 import java.util.List;
-import java.util.Map;
 import java.util.Objects;
 import net.minecraft.core.NonNullList;
 import net.minecraft.resources.ResourceLocation;
@@ -56,6 +55,7 @@ public final class FactoryParallelStarter {
     var leases = new ArrayList<MachinePortBlockEntity.ItemStartLease>();
     var fluidLeases = new HashMap<String, MachinePortBlockEntity.FluidStartLease>();
     ChemicalTransactions.Batch chemicals = null;
+    var patterns = new PatternInputTransaction();
     var upgradeLeases = new ArrayList<StartCostLease>();
     try {
       var nativeRecipe = MachineRecipeService.definitionForStart(factory, plans.get(0));
@@ -105,6 +105,7 @@ public final class FactoryParallelStarter {
       for (var plan : uniquePlans) {
         if (!plan.validateForStart()
             || plan.source().inputGroup() != ticket.inputGroup()
+            || !RecipeStartPlan.samePatternScope(plan.source(), ticket)
             || plan.catalog() != plans.getFirst().catalog()
             || !plan.recipe().id().equals(plans.get(0).recipe().id())) {
           return Result.STALE;
@@ -115,6 +116,13 @@ public final class FactoryParallelStarter {
         var port = ports.get(deduction.slot().partId());
         if (port == null || port.kind() != PortKind.ITEM_INPUT) {
           return Result.STALE;
+        }
+        if (port.patternInput()) {
+          if (!deduction.key().matches(port.items().get(deduction.slot().slot()))) {
+            return Result.STALE;
+          }
+          patterns.consumeItem(port, deduction.slot().slot(), deduction.count());
+          continue;
         }
         var contents = replacements.computeIfAbsent(deduction.slot().partId(), ignored -> {
           var values = port.items();
@@ -129,7 +137,7 @@ public final class FactoryParallelStarter {
         if (!deduction.key().matches(before) || before.getCount() < deduction.count()) {
           return Result.STALE;
         }
-        contents.set(slot, before.copyWithCount(before.getCount() - deduction.count()));
+        contents.set(slot, before.copyWithCount(Math.toIntExact(before.getCount() - deduction.count())));
       }
       var upgrades = factory.scheduler().channels().stream().filter(thread -> thread.threadId().equals(threadId))
           .map(FactoryThreadState::upgradeSnapshot).findFirst().orElseThrow();
@@ -219,29 +227,38 @@ public final class FactoryParallelStarter {
       if (uniquePlans.stream().anyMatch(plan -> !plan.factoryAdmissionCurrent(factory, threadId))) {
         return Result.STALE;
       }
+      var fluidDebits = planFluidDebits(
+          ticket,
+          fluidRequirements,
+          plans.size(),
+          nativeRecipe.orElseThrow().selectors().fluidInput());
+      if (fluidDebits == null) {
+        return Result.STALE;
+      }
+      patterns.bindStart(ticket, runs);
+      for (var debit : fluidDebits) {
+        if (debit.port().patternInput()) {
+          patterns.consumeFluid(debit.port(), debit.amount());
+        }
+      }
+      chemicals.addPatterns(patterns);
+      patterns.acquire();
       startCosts.acquireInto(upgradeLeases);
       chemicals.acquire();
       for (var port : ticket.ports()) {
-        if (port.kind().resource() == PortKind.Resource.ITEM) {
+        if (!port.patternInput() && port.kind().resource() == PortKind.Resource.ITEM) {
           var lease = port.identity().acquireItemStart(port.revision());
           var replacement = replacements.get(port.partId());
           if (replacement != null) {
             lease.replacePrepared(replacement);
           }
           leases.add(lease);
-        } else if (port.kind() == PortKind.FLUID_INPUT && !fluidRequirements.isEmpty()) {
+        } else if (!port.patternInput() && port.kind() == PortKind.FLUID_INPUT && !fluidRequirements.isEmpty()) {
           fluidLeases.put(port.partId(), port.identity().acquireFluidStart(port.revision(), port.tankIndex()));
         }
       }
-      var reservedFluids = new HashMap<String, Integer>();
-      for (var requirement : fluidRequirements) {
-        if (!drainFluidRequirement(
-            ticket,
-            fluidLeases,
-            requirement,
-            plans.size(),
-            nativeRecipe.orElseThrow().selectors().fluidInput(),
-            reservedFluids)) {
+      for (var debit : fluidDebits) {
+        if (!debit.port().patternInput() && !fluidLeases.get(debit.port().partId()).drainExact(debit.amount())) {
           return Result.STALE;
         }
       }
@@ -253,6 +270,7 @@ public final class FactoryParallelStarter {
           .warn("Factory parallel start failed at {} for thread {}", factory.getBlockPos(), threadId, failure);
       return Result.FAILED;
     } finally {
+      patterns.resolve(committed);
       for (var lease : leases) {
         lease.resolve(committed);
       }
@@ -267,6 +285,7 @@ public final class FactoryParallelStarter {
       }
       factory.finishRunStart(threadId, committed);
       if (committed) {
+        patterns.publish();
         chemicals.publish();
         factory.setChanged();
         FactoryUpgradeStartCosts.publish(factory, upgradeLeases);
@@ -277,28 +296,39 @@ public final class FactoryParallelStarter {
     }
   }
 
-  private static boolean drainFluidRequirement(RecipeExecutionTicket ticket, Map<String, MachinePortBlockEntity.FluidStartLease> leases, FluidStack requirement, int instances, String selector, Map<String, Integer> reserved) {
-    long remaining = Math.multiplyExact((long) requirement.getAmount(), instances);
-    for (var port : ticket.ports()) {
-      if (port.kind() != PortKind.FLUID_INPUT
-          || !port.selector().equals(selector)
-          || !FluidStack.isSameFluidSameComponents(port.fluid(), requirement)) {
-        continue;
-      }
-      int used = reserved.getOrDefault(port.partId(), 0);
-      int amount = (int) Math.min(remaining, Math.max(0, port.fluid().getAmount() - used));
-      if (amount > 0) {
-        if (!leases.get(port.partId()).drainExact(requirement.copyWithAmount(amount))) {
-          return false;
+  private record FluidDebit(RecipeExecutionTicket.PortSnapshot port, FluidStack amount) {
+  }
+
+  private static List<FluidDebit> planFluidDebits(RecipeExecutionTicket ticket, List<FluidStack> requirements, int instances, String selector) {
+    var result = new ArrayList<FluidDebit>();
+    var reserved = new HashMap<String, Long>();
+    for (var requirement : requirements) {
+      long remaining = Math.multiplyExact((long) requirement.getAmount(), instances);
+      for (var port : ticket.ports()) {
+        if (port.kind() != PortKind.FLUID_INPUT
+            || !port.selector().equals(selector)
+            || !FluidStack.isSameFluidSameComponents(port.fluid(), requirement)) {
+          continue;
         }
-        reserved.put(port.partId(), used + amount);
-        remaining -= amount;
+        long used = reserved.getOrDefault(port.partId(), 0L);
+        long available = Math.max(0, port.fluidAmount() - used);
+        while (remaining > 0 && available > 0) {
+          int amount = (int) Math.min(Integer.MAX_VALUE, Math.min(remaining, available));
+          result.add(new FluidDebit(port, requirement.copyWithAmount(amount)));
+          used += amount;
+          reserved.put(port.partId(), used);
+          remaining -= amount;
+          available -= amount;
+        }
+        if (remaining == 0) {
+          break;
+        }
       }
-      if (remaining == 0) {
-        return true;
+      if (remaining > 0) {
+        return null;
       }
     }
-    return false;
+    return List.copyOf(result);
   }
 
   public record Admission(Result result, FactoryParallelBatch batch) {
@@ -331,7 +361,7 @@ public final class FactoryParallelStarter {
     if (definition == null) {
       return new Admission(Result.STALE, null);
     }
-    if (plans.size() > 1 && !definition.parallelized()) {
+    if (plans.size() > first.maxRepeatableInputs() || plans.size() > 1 && !definition.parallelized()) {
       return new Admission(Result.LIMIT_REACHED, null);
     }
     var recipeId = first.recipe().id();

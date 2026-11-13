@@ -30,6 +30,8 @@ import com.lw.modularmachine.machine.recipe.ControllerMetrics;
 import com.lw.modularmachine.machine.recipe.FrozenItemRun;
 import com.lw.modularmachine.machine.recipe.RecipeStartPlan;
 import com.lw.modularmachine.machine.recipe.search.RecipeSearch;
+import com.lw.modularmachine.machine.recipe.PatternRunSources;
+import com.lw.modularmachine.machine.recipe.PatternProductionService;
 import com.lw.modularmachine.machine.recipe.ItemRunEngine;
 import com.lw.modularmachine.machine.recipe.search.RecipeResourceRequirements;
 import com.lw.modularmachine.machine.recipe.MachineRecipeService;
@@ -96,6 +98,7 @@ public final class MachineControllerBlockEntity extends BlockEntity implements M
   private Tag unsupportedScriptData;
   private ControllerOwnershipState ownership = ControllerOwnershipState.empty();
   private ControllerCommandState commandState = new ControllerCommandState();
+  private PatternRunSources patternRunSources = new PatternRunSources();
   private FrozenItemRun runningRecipe;
   private RunStartLease recipeStart;
   private RunUpdateLease recipeUpdate;
@@ -129,6 +132,21 @@ public final class MachineControllerBlockEntity extends BlockEntity implements M
   @ApiStatus.Internal
   public ControllerOwnershipState ownershipState() {
     return ownership;
+  }
+
+  @ApiStatus.Internal
+  public PatternRunSources patternRunSources() {
+    return patternRunSources;
+  }
+
+  public void patternResourcesChanged() {
+    if (level instanceof ServerLevel server) {
+      if (!server.getServer().isSameThread()) {
+        throw new IllegalStateException("Pattern resource notification outside server thread");
+      }
+      resetRecipeRetry(server.getGameTime());
+      setChanged();
+    }
   }
 
   @Override
@@ -193,6 +211,7 @@ public final class MachineControllerBlockEntity extends BlockEntity implements M
 
   @Override
   public void setRemoved() {
+    PatternProductionService.invalidate(this);
     RecipeCommandService.unschedule(this);
     genericDiscovery.clear();
     runtimeUpgrades.clear();
@@ -206,6 +225,7 @@ public final class MachineControllerBlockEntity extends BlockEntity implements M
 
   @Override
   public void onChunkUnloaded() {
+    PatternProductionService.invalidate(this);
     RecipeCommandService.unschedule(this);
     genericDiscovery.clear();
     runtimeUpgrades.clear();
@@ -218,6 +238,7 @@ public final class MachineControllerBlockEntity extends BlockEntity implements M
   }
 
   public void attach(StructureService.Registration registration) {
+    PatternProductionService.invalidate(this);
     runtimeUpgrades.clear();
     upgrades.invalidate();
     recipeEngine.invalidate();
@@ -280,6 +301,7 @@ public final class MachineControllerBlockEntity extends BlockEntity implements M
   }
 
   private void blueprintChanged() {
+    PatternProductionService.invalidate(this);
     setChanged();
     if (level instanceof ServerLevel) {
       boolean formed = registration != null && registration.verifier.state() == VerificationState.CONFIRMED;
@@ -397,6 +419,7 @@ public final class MachineControllerBlockEntity extends BlockEntity implements M
         || replacement.revision() != expected.revision() + 1) {
       return false;
     }
+    PatternProductionService.invalidate(this);
     controllerScriptState = replacement;
     recipeSearch = null;
     preparedRecipe = null;
@@ -475,6 +498,7 @@ public final class MachineControllerBlockEntity extends BlockEntity implements M
     return level instanceof ServerLevel server
         && !UpgradeLifecyclePublisher.isDispatchingAny()
         && canCommitStructure()
+        && patternRunSources.valid()
         && server.getDirectSignalTo(worldPosition) == 0;
   }
 
@@ -1093,6 +1117,7 @@ public final class MachineControllerBlockEntity extends BlockEntity implements M
     super.saveAdditional(tag, registries);
     ownership.save(tag);
     tag.put(ControllerCommandState.NBT_KEY, commandState.save(false));
+    tag.put(PatternRunSources.NBT_KEY, patternRunSources.save());
     tag.put("controller_blueprint", blueprintInventory.save(registries));
     tag.put(
         ControllerScriptState.NBT_KEY,
@@ -1122,9 +1147,11 @@ public final class MachineControllerBlockEntity extends BlockEntity implements M
     runtimeUpgrades.clear();
     upgrades.invalidate();
     recipeEngine.invalidate();
+    PatternProductionService.invalidate(this);
     super.loadAdditional(tag, registries);
     ownership = ControllerOwnershipState.load(tag);
     commandState = ControllerCommandState.load(tag.get(ControllerCommandState.NBT_KEY));
+    patternRunSources = PatternRunSources.load(tag.get(PatternRunSources.NBT_KEY));
     controllerScriptState = ControllerScriptState.empty();
     unsupportedScriptData = null;
     try {
@@ -1166,6 +1193,7 @@ public final class MachineControllerBlockEntity extends BlockEntity implements M
     CompoundTag root = new CompoundTag();
     ownership.save(root);
     root.put(ControllerCommandState.NBT_KEY, commandState.save(true));
+    root.put(PatternRunSources.NBT_KEY, patternRunSources.save());
     root.put("controller_blueprint", blueprintInventory.save(registries));
     root.put(
         ControllerScriptState.NBT_KEY,

@@ -5,6 +5,8 @@
   "compatibilityLevel": "JAVA_21",
   "mixins": [
     "KubeJSRecipesEventMixin",
+    "Ae2CraftingCpuMixin",
+    "Ae2CraftingClusterMixin",
     "LevelChunkMixin"
   ],
   "client": [

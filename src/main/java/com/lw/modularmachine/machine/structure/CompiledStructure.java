@@ -1,6 +1,10 @@
 package com.lw.modularmachine.machine.structure;
 
 import com.lw.modularmachine.block.ParallelControllerBlock;
+import com.lw.modularmachine.block.PatternProviderBlock;
+import com.lw.modularmachine.block.PatternMirrorBlock;
+import com.lw.modularmachine.blockentity.PatternProviderBlockEntity;
+import com.lw.modularmachine.blockentity.PatternMirrorBlockEntity;
 import com.lw.modularmachine.blockentity.MachinePortBlockEntity;
 import com.lw.modularmachine.blockentity.ParallelControllerBlockEntity;
 import com.lw.modularmachine.blockentity.SmartInterfaceBlockEntity;
@@ -395,6 +399,22 @@ public final class CompiledStructure {
       }
     }
 
+    if (state.getBlock() instanceof PatternProviderBlock) {
+      if (!(level.getBlockEntity(pos) instanceof PatternProviderBlockEntity provider)) {
+        return CheckResult.UNAVAILABLE;
+      }
+      if (!provider.schemaSupported()) {
+        return CheckResult.UNSUPPORTED;
+      }
+    }
+    if (state.getBlock() instanceof PatternMirrorBlock) {
+      if (!(level.getBlockEntity(pos) instanceof PatternMirrorBlockEntity mirror)) {
+        return CheckResult.UNAVAILABLE;
+      }
+      if (!mirror.schemaSupported()) {
+        return CheckResult.UNSUPPORTED;
+      }
+    }
     return CheckResult.MATCH;
   }
 

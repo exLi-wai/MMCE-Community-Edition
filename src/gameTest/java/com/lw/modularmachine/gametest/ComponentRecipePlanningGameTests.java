@@ -119,7 +119,7 @@ public final class ComponentRecipePlanningGameTests {
     var ticket = RecipeExecutionTicket.capture(controller).orElseThrow();
     helper.assertTrue(
         plan.recipe().id().equals("b")
-            && plan.deductions().stream().mapToInt(RecipeStartPlan.Deduction::count).sum() == 5,
+            && plan.deductions().stream().mapToLong(RecipeStartPlan.Deduction::count).sum() == 5,
         "Duplicate inputs or priority/output rule failed");
     helper.assertTrue(
         plan.deductions().stream().allMatch(d -> logicalPartId(ticket, d.slot().partId()).equals("item_in"))

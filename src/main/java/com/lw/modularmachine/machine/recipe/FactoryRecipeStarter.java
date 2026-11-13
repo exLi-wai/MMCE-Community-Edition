@@ -43,6 +43,7 @@ public final class FactoryRecipeStarter {
     var leases = new ArrayList<MachinePortBlockEntity.ItemStartLease>();
     var fluidLeases = new HashMap<String, MachinePortBlockEntity.FluidStartLease>();
     ChemicalTransactions.Batch chemicals = null;
+    var patterns = new PatternInputTransaction();
     var upgradeLeases = new ArrayList<StartCostLease>();
     try {
       var nativeRecipe = MachineRecipeService.definitionForStart(factory, plan);
@@ -69,7 +70,7 @@ public final class FactoryRecipeStarter {
         }
       }
       var checked = plan.checkedTicket();
-      if (checked.isEmpty()) {
+      if (checked.isEmpty() || plan.maxRepeatableInputs() < 1) {
         return Result.STALE;
       }
       var ticket = checked.orElseThrow();
@@ -86,6 +87,13 @@ public final class FactoryRecipeStarter {
         if (port == null || port.kind() != PortKind.ITEM_INPUT) {
           return Result.STALE;
         }
+        if (port.patternInput()) {
+          if (!deduction.key().matches(port.items().get(deduction.slot().slot()))) {
+            return Result.STALE;
+          }
+          patterns.consumeItem(port, deduction.slot().slot(), deduction.count());
+          continue;
+        }
         var contents = replacements.computeIfAbsent(deduction.slot().partId(), ignored -> {
           var values = port.items();
           var copy = NonNullList.withSize(values.size(), ItemStack.EMPTY);
@@ -100,7 +108,9 @@ public final class FactoryRecipeStarter {
             || contents.get(slot).getCount() < deduction.count()) {
           return Result.STALE;
         }
-        contents.set(slot, contents.get(slot).copyWithCount(contents.get(slot).getCount() - deduction.count()));
+        contents.set(
+            slot,
+            contents.get(slot).copyWithCount(Math.toIntExact(contents.get(slot).getCount() - deduction.count())));
       }
       var fluidDebits = planFluidDebits(
           ticket,
@@ -150,22 +160,31 @@ public final class FactoryRecipeStarter {
       if (!plan.factoryAdmissionCurrent(factory, threadId)) {
         return Result.STALE;
       }
+      patterns.bindStart(ticket, List.of(run));
+      for (var debit : fluidDebits) {
+        var port = ports.get(debit.partId());
+        if (port.patternInput()) {
+          patterns.consumeFluid(port, debit.amount());
+        }
+      }
+      chemicals.addPatterns(patterns);
+      patterns.acquire();
       startCosts.acquireInto(upgradeLeases);
       chemicals.acquire();
       for (var port : ticket.ports()) {
-        if (port.kind().resource() == PortKind.Resource.ITEM) {
+        if (!port.patternInput() && port.kind().resource() == PortKind.Resource.ITEM) {
           var lease = port.identity().acquireItemStart(port.revision());
           var replacement = replacements.get(port.partId());
           if (replacement != null) {
             lease.replacePrepared(replacement);
           }
           leases.add(lease);
-        } else if (port.kind() == PortKind.FLUID_INPUT && !fluidDebits.isEmpty()) {
+        } else if (!port.patternInput() && port.kind() == PortKind.FLUID_INPUT && !fluidDebits.isEmpty()) {
           fluidLeases.put(port.partId(), port.identity().acquireFluidStart(port.revision(), port.tankIndex()));
         }
       }
       for (var debit : fluidDebits) {
-        if (!fluidLeases.get(debit.partId()).drainExact(debit.amount())) {
+        if (!ports.get(debit.partId()).patternInput() && !fluidLeases.get(debit.partId()).drainExact(debit.amount())) {
           return Result.STALE;
         }
       }
@@ -176,6 +195,7 @@ public final class FactoryRecipeStarter {
       ModularMachine.LOGGER.warn("Factory recipe start failed at {}", factory.getBlockPos(), failure);
       return Result.FAILED;
     } finally {
+      patterns.resolve(committed);
       for (var lease : leases) {
         lease.resolve(committed);
       }
@@ -190,6 +210,7 @@ public final class FactoryRecipeStarter {
       }
       factory.finishRunStart(threadId, committed);
       if (committed) {
+        patterns.publish();
         chemicals.publish();
         factory.setChanged();
         FactoryUpgradeStartCosts.publish(factory, upgradeLeases);
@@ -204,7 +225,7 @@ public final class FactoryRecipeStarter {
   }
 
   private static List<FluidDebit> planFluidDebits(RecipeExecutionTicket ticket, List<FluidStack> requirements, String selector) {
-    var reserved = new HashMap<String, Integer>();
+    var reserved = new HashMap<String, Long>();
     var result = new ArrayList<FluidDebit>();
     for (var requirement : requirements) {
       int remaining = requirement.getAmount();
@@ -214,8 +235,8 @@ public final class FactoryRecipeStarter {
             || !FluidStack.isSameFluidSameComponents(port.fluid(), requirement)) {
           continue;
         }
-        int already = reserved.getOrDefault(port.partId(), 0);
-        int amount = Math.min(remaining, Math.max(0, port.fluid().getAmount() - already));
+        long already = reserved.getOrDefault(port.partId(), 0L);
+        int amount = (int) Math.min(remaining, Math.max(0, port.fluidAmount() - already));
         if (amount > 0) {
           reserved.put(port.partId(), already + amount);
           result.add(new FluidDebit(port.partId(), requirement.copyWithAmount(amount)));

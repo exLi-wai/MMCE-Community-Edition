@@ -47,7 +47,7 @@ final class ParallelRecipeAdmission {
         if (port.kind() == PortKind.FLUID_INPUT
             && port.selector().equals(definition.selectors().fluidInput())
             && FluidStack.isSameFluidSameComponents(demand.getKey().amount(1), port.fluid())) {
-          available += port.fluid().getAmount();
+          available = Math.addExact(available, port.fluidAmount());
         }
       }
       high = (int) Math.min(high, available / demand.getValue());

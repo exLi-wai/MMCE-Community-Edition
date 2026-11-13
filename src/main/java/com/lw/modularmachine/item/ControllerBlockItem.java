@@ -2,6 +2,7 @@ package com.lw.modularmachine.item;
 
 import com.lw.modularmachine.machine.controller.ControllerOwnershipService;
 import com.lw.modularmachine.machine.recipe.command.ControllerCommandState;
+import com.lw.modularmachine.machine.recipe.PatternRunSources;
 import net.minecraft.core.BlockPos;
 import net.minecraft.core.component.DataComponents;
 import net.minecraft.world.entity.player.Player;
@@ -21,6 +22,12 @@ public class ControllerBlockItem extends BlockItem {
 
   @Override
   protected BlockState getPlacementState(BlockPlaceContext context) {
+    var data = context.getItemInHand().get(DataComponents.BLOCK_ENTITY_DATA);
+    if (data != null
+        && data.copyTag().contains(PatternRunSources.NBT_KEY)
+        && !PatternRunSources.load(data.copyTag().get(PatternRunSources.NBT_KEY)).valid()) {
+      return null;
+    }
     return ControllerOwnershipService.validatePlacement(context) ? super.getPlacementState(context) : null;
   }
 

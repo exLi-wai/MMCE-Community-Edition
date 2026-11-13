@@ -294,6 +294,10 @@ public final class MachineVisibilityClient {
     MachineRegistries.CASINGS.values().forEach(holder -> ids.add(holder.getId()));
     MachineRegistries.PORTS.values().forEach(holder -> ids.add(holder.getId()));
     MachineRegistries.NETWORK_PORTS.values().forEach(holder -> ids.add(holder.getId()));
+    if (MachineRegistries.ME_PATTERN_PROVIDER != null) {
+      ids.add(MachineRegistries.ME_PATTERN_PROVIDER.getId());
+      ids.add(MachineRegistries.ME_PATTERN_MIRROR.getId());
+    }
     MachineRegistries.PARALLEL_CONTROLLERS.values().forEach(holder -> ids.add(holder.getId()));
     MachineRegistries.UPGRADE_BUSES.values().forEach(holder -> ids.add(holder.getId()));
     ids.add(MachineRegistries.SMART_INTERFACE.getId());

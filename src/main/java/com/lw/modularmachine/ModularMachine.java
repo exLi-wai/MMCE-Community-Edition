@@ -20,6 +20,7 @@ import com.lw.modularmachine.machine.smart.SmartInterfaceEventPublisher;
 import com.lw.modularmachine.machine.structure.StructureService;
 import com.lw.modularmachine.network.GroupInputPayloads;
 import com.lw.modularmachine.network.NetworkPortPayloads;
+import com.lw.modularmachine.network.PatternProviderPayloads;
 import com.lw.modularmachine.network.BlueprintPreviewPayloads;
 import com.lw.modularmachine.network.RangedSelectionPayloads;
 import com.lw.modularmachine.machine.selection.RangedSelectionService;
@@ -112,6 +113,7 @@ public class ModularMachine {
     modEventBus.addListener(ParallelControllerPayloads::register);
     modEventBus.addListener(GroupInputPayloads::register);
     modEventBus.addListener(NetworkPortPayloads::register);
+    modEventBus.addListener(PatternProviderPayloads::register);
     modEventBus.addListener(MachineCapabilities::register);
   }
 

@@ -1,0 +1,26 @@
+{
+  "orientation": {
+    "policy": "all_24"
+  },
+  "color": "#38A6D2",
+  "parts": [
+    {
+      "part_id": "provider",
+      "offset": [
+        -1,
+        0,
+        1
+      ],
+      "block": "mmcece:me_pattern_provider"
+    },
+    {
+      "part_id": "mirror",
+      "offset": [
+        1,
+        0,
+        1
+      ],
+      "block": "mmcece:me_pattern_mirror"
+    }
+  ]
+}

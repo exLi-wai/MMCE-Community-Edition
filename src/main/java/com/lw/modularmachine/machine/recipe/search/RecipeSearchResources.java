@@ -54,7 +54,7 @@ final class RecipeSearchResources {
         var accepted = limits.computeIfAbsent(domain, current -> current.limits(catalog.recipes().outputKeys()));
         output = new ResourceSnapshot.OutputSlot<>(key, stack.getCount(), capacity, accepted);
       }
-      result.add(new ItemSlot(ref, key, stack.getCount(), output));
+      result.add(new ItemSlot(ref, key, port.itemAmount(slot), output));
     }
 
     return List.copyOf(result);
@@ -68,8 +68,9 @@ final class RecipeSearchResources {
       if (port.kind().resource() != PortKind.Resource.FLUID) {
         continue;
       }
-      var stored = fluids
-          .computeIfAbsent(port, current -> new StoredFluid(current.partId(), current.fluid(), current.capacity()));
+      var stored = fluids.computeIfAbsent(
+          port,
+          current -> new StoredFluid(current.partId(), current.fluid(), current.capacity(), current.fluidAmount()));
       if (port.kind() == PortKind.FLUID_INPUT) {
         if (!stored.stack.isEmpty()) {
           var key = new FluidRecipeIndex.Key(stored.stack.getFluid(), port.selector());
@@ -104,7 +105,7 @@ final class RecipeSearchResources {
   record ItemSlot(
       ItemSlotRef ref,
       ItemResourceKey key,
-      int count,
+      long count,
       ResourceSnapshot.OutputSlot<ItemResourceKey> output) {
   }
 
@@ -112,8 +113,10 @@ final class RecipeSearchResources {
     private final String partId;
     private final FluidStack stack;
     private final long capacity;
+    private final long amount;
 
-    private StoredFluid(String partId, FluidStack stack, long capacity) {
+    private StoredFluid(String partId, FluidStack stack, long capacity, long amount) {
+      this.amount = amount;
       this.partId = partId;
       this.stack = stack;
       this.capacity = capacity;
@@ -137,7 +140,7 @@ final class RecipeSearchResources {
       if (required.isEmpty()) {
         return true;
       }
-      var reserved = new HashMap<String, Integer>();
+      var reserved = new HashMap<String, Long>();
       for (var demand : required) {
         int remaining = demand.getAmount();
         var key = new FluidRecipeIndex.Key(demand.getFluid(), selector);
@@ -145,9 +148,9 @@ final class RecipeSearchResources {
           if (!FluidStack.isSameFluidSameComponents(stored.stack, demand)) {
             continue;
           }
-          int already = reserved.getOrDefault(stored.partId, 0);
-          int available = Math.max(0, stored.stack.getAmount() - already);
-          int amount = Math.min(remaining, available);
+          long already = reserved.getOrDefault(stored.partId, 0L);
+          long available = Math.max(0, stored.amount - already);
+          int amount = (int) Math.min(remaining, available);
           reserved.put(stored.partId, already + amount);
           remaining -= amount;
           if (remaining == 0) {

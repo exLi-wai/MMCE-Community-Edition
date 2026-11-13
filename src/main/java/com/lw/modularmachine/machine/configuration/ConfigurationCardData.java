@@ -1,6 +1,7 @@
 package com.lw.modularmachine.machine.configuration;
 
 import com.lw.modularmachine.machine.factory.FactoryThreadPreset;
+import com.lw.modularmachine.machine.network.pattern.PatternProviderReference;
 import com.lw.modularmachine.machine.factory.FactoryThreadStateCodec;
 import com.lw.modularmachine.machine.recipe.InputGroup;
 import com.lw.modularmachine.machine.recipe.ResourceSelector;
@@ -28,13 +29,15 @@ public record ConfigurationCardData(
     List<Channel> channels,
     int number,
     String interfaceType,
-    double interfaceValue) {
+    double interfaceValue,
+    Optional<PatternProviderReference> patternTarget) {
   public enum Kind implements StringRepresentable {
     FACTORY("factory"),
     PARALLEL("parallel"),
     ITEM_GROUP("item_group"),
     FLUID_GROUP("fluid_group"),
-    SMART("smart");
+    SMART("smart"),
+    PATTERN_PROVIDER("pattern_provider");
 
     private final String name;
 
@@ -76,16 +79,17 @@ public record ConfigurationCardData(
   }
 
   public static final Codec<ConfigurationCardData> CODEC = RecordCodecBuilder.create(
-      instance -> instance
-          .group(
-              Codec.intRange(1, 1).fieldOf("version").forGetter(ConfigurationCardData::version),
-              StringRepresentable.fromEnum(Kind::values).fieldOf("kind").forGetter(ConfigurationCardData::kind),
-              ResourceLocation.CODEC.optionalFieldOf("compatibility_machine")
-                  .forGetter(ConfigurationCardData::compatibilityMachine),
-              Channel.CODEC.listOf().fieldOf("channels").forGetter(ConfigurationCardData::channels),
-              Codec.INT.fieldOf("number").forGetter(ConfigurationCardData::number),
-              Codec.STRING.fieldOf("interface_type").forGetter(ConfigurationCardData::interfaceType),
-              Codec.DOUBLE.fieldOf("interface_value").forGetter(ConfigurationCardData::interfaceValue))
+      instance -> instance.group(
+          Codec.intRange(2, 2).fieldOf("version").forGetter(ConfigurationCardData::version),
+          StringRepresentable.fromEnum(Kind::values).fieldOf("kind").forGetter(ConfigurationCardData::kind),
+          ResourceLocation.CODEC.optionalFieldOf("compatibility_machine")
+              .forGetter(ConfigurationCardData::compatibilityMachine),
+          Channel.CODEC.listOf().fieldOf("channels").forGetter(ConfigurationCardData::channels),
+          Codec.INT.fieldOf("number").forGetter(ConfigurationCardData::number),
+          Codec.STRING.fieldOf("interface_type").forGetter(ConfigurationCardData::interfaceType),
+          Codec.DOUBLE.fieldOf("interface_value").forGetter(ConfigurationCardData::interfaceValue),
+          PatternProviderReference.CODEC.optionalFieldOf("pattern_target")
+              .forGetter(ConfigurationCardData::patternTarget))
           .apply(instance, ConfigurationCardData::new));
 
   public static final StreamCodec<RegistryFriendlyByteBuf, ConfigurationCardData> STREAM_CODEC = StreamCodec
@@ -96,7 +100,11 @@ public record ConfigurationCardData(
     Objects.requireNonNull(compatibilityMachine);
     channels = List.copyOf(channels);
     Objects.requireNonNull(interfaceType);
-    if (version != 1
+    Objects.requireNonNull(patternTarget);
+    if (patternTarget.isPresent() != (kind == Kind.PATTERN_PROVIDER) || kind == Kind.PATTERN_PROVIDER && number != 0) {
+      throw new IllegalArgumentException("Invalid pattern provider reference fields");
+    }
+    if (version != 2
         || channels.size() > FactoryThreadStateCodec.MAX_THREADS
         || interfaceType.length() > ResourceSelector.MAX_LENGTH
         || !Double.isFinite(interfaceValue)
@@ -140,15 +148,27 @@ public record ConfigurationCardData(
                 thread.priority(),
                 thread.parallelLimit()))
         .toList();
-    return new ConfigurationCardData(1, Kind.FACTORY, Optional.of(machine), channels, 0, "", 0);
+    return new ConfigurationCardData(2, Kind.FACTORY, Optional.of(machine), channels, 0, "", 0, Optional.empty());
   }
 
   public static ConfigurationCardData number(Kind kind, int number) {
-    return new ConfigurationCardData(1, kind, Optional.empty(), List.of(), number, "", 0);
+    return new ConfigurationCardData(2, kind, Optional.empty(), List.of(), number, "", 0, Optional.empty());
   }
 
   public static ConfigurationCardData smart(ResourceLocation machine, String type, double value) {
-    return new ConfigurationCardData(1, Kind.SMART, Optional.of(machine), List.of(), 0, type, value);
+    return new ConfigurationCardData(2, Kind.SMART, Optional.of(machine), List.of(), 0, type, value, Optional.empty());
+  }
+
+  public static ConfigurationCardData pattern(PatternProviderReference target) {
+    return new ConfigurationCardData(
+        2,
+        Kind.PATTERN_PROVIDER,
+        Optional.empty(),
+        List.of(),
+        0,
+        "",
+        0,
+        Optional.of(target));
   }
 
   public FactoryThreadPreset factoryPreset() {
@@ -175,6 +195,12 @@ public record ConfigurationCardData(
     buffer.writeInt(data.number());
     buffer.writeUtf(data.interfaceType(), ResourceSelector.MAX_LENGTH);
     buffer.writeDouble(data.interfaceValue());
+    buffer.writeBoolean(data.patternTarget().isPresent());
+    data.patternTarget().ifPresent(target -> {
+      buffer.writeResourceLocation(target.dimension());
+      buffer.writeBlockPos(target.position());
+      buffer.writeUUID(target.provider());
+    });
   }
 
   private static ConfigurationCardData read(RegistryFriendlyByteBuf buffer) {
@@ -200,6 +226,11 @@ public record ConfigurationCardData(
         channels,
         buffer.readInt(),
         buffer.readUtf(ResourceSelector.MAX_LENGTH),
-        buffer.readDouble());
+        buffer.readDouble(),
+        buffer.readBoolean() ? Optional.of(
+            new PatternProviderReference(
+                buffer.readResourceLocation(),
+                buffer.readBlockPos(),
+                buffer.readUUID())) : Optional.empty());
   }
 }

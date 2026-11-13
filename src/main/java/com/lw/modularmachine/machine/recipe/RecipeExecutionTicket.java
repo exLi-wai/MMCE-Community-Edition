@@ -1,5 +1,8 @@
 package com.lw.modularmachine.machine.recipe;
 
+import com.lw.modularmachine.machine.network.NetworkPortResource;
+import com.lw.modularmachine.machine.network.pattern.PatternContainerRef;
+import com.lw.modularmachine.machine.network.pattern.PatternResourceKey;
 import com.lw.modularmachine.blockentity.FactoryControllerBlockEntity;
 import com.lw.modularmachine.blockentity.MachineControllerBlockEntity;
 import com.lw.modularmachine.blockentity.MachinePortBlockEntity;
@@ -20,6 +23,7 @@ import java.util.HashSet;
 import java.util.List;
 import java.util.Map;
 import java.util.Optional;
+import java.util.UUID;
 import java.util.TreeSet;
 import net.minecraft.core.BlockPos;
 import net.minecraft.server.level.ServerLevel;
@@ -44,6 +48,8 @@ public final class RecipeExecutionTicket {
   private final List<SmartSnapshot> interfaces;
   private final int inputGroup;
   private final List<PortSnapshot> selectedPorts;
+  private final List<PatternInputSource> patternSources;
+  private final PatternInputSource patternSource;
   private final Snapshot parallel;
   private final FactoryUpgradeSnapshot ordinaryUpgrades;
 
@@ -61,10 +67,12 @@ public final class RecipeExecutionTicket {
     ordinaryUpgrades = mode == CaptureMode.ALL && controller != null ? controller.upgradeSnapshot() : null;
     parallel = mode == CaptureMode.ALL ? ParallelCapacity.capture(registration, level) : null;
     inputGroup = InputGroup.SHARED;
+    patternSource = null;
+    patternSources = mode == CaptureMode.ALL ? PatternProductionService.sources(owner) : List.of();
     selectedPorts = selectPorts(ports, inputGroup);
   }
 
-  private RecipeExecutionTicket(RecipeExecutionTicket source, int inputGroup) {
+  private RecipeExecutionTicket(RecipeExecutionTicket source, int inputGroup, PatternInputSource patternSource) {
     this.inputGroup = InputGroup.require(inputGroup);
     controller = source.controller;
     owner = source.owner;
@@ -78,7 +86,14 @@ public final class RecipeExecutionTicket {
     interfaces = source.interfaces;
     parallel = source.parallel;
     ordinaryUpgrades = source.ordinaryUpgrades;
-    selectedPorts = selectPorts(ports, inputGroup);
+    patternSources = source.patternSources;
+    this.patternSource = patternSource;
+    var selected = new ArrayList<PortSnapshot>();
+    if (patternSource != null) {
+      selected.addAll(patternPorts(patternSource));
+    }
+    selected.addAll(selectPorts(ports, inputGroup));
+    selectedPorts = List.copyOf(selected);
   }
 
   private static List<PortSnapshot> selectPorts(List<PortSnapshot> ports, int group) {
@@ -102,7 +117,32 @@ public final class RecipeExecutionTicket {
   public RecipeExecutionTicket withInputGroup(int group) {
     requireServerThread();
 
-    return inputGroup == group ? this : new RecipeExecutionTicket(this, group);
+    return inputGroup == group ? this : new RecipeExecutionTicket(this, group, patternSource);
+  }
+
+  public PatternInputSource patternSource() {
+    return patternSource;
+  }
+
+  public RecipeExecutionTicket withPatternSource(PatternInputSource source) {
+    return new RecipeExecutionTicket(this, inputGroup, source);
+  }
+
+  public Optional<RecipeExecutionTicket> forRun(FrozenItemRun run) {
+    return PatternRunSources.forRun(this, run);
+  }
+
+  public List<RecipeExecutionTicket> searchContexts() {
+    var result = new ArrayList<RecipeExecutionTicket>();
+    for (var source : patternSources) {
+      for (int group : inputGroups()) {
+        result.add(withInputGroup(group).withPatternSource(source));
+      }
+    }
+    for (int group : inputGroups()) {
+      result.add(withInputGroup(group));
+    }
+    return List.copyOf(result);
   }
 
   public int inputGroup() {
@@ -129,7 +169,9 @@ public final class RecipeExecutionTicket {
   }
 
   List<PortSnapshot> allPorts() {
-    return ports;
+    var result = new ArrayList<>(ports);
+    selectedPorts.stream().filter(PortSnapshot::patternInput).forEach(result::add);
+    return List.copyOf(result);
   }
 
   public List<Integer> inputGroups() {
@@ -344,8 +386,8 @@ public final class RecipeExecutionTicket {
    */
   public Optional<RecipeExecutionTicket> refreshIfUnchanged() {
     ServerThreadGuard.require(level, "Recipe resource access");
-    return matchesDependencies() ? capture(owner, mode).map(ticket -> ticket.withInputGroup(inputGroup)) : Optional
-        .empty();
+    return matchesDependencies() ? capture(owner, mode)
+        .map(ticket -> ticket.withInputGroup(inputGroup).withPatternSource(patternSource)) : Optional.empty();
   }
 
   @ApiStatus.Internal
@@ -355,6 +397,12 @@ public final class RecipeExecutionTicket {
   }
 
   private boolean matchesDependencies() {
+    if (patternSource != null && !patternSource.current()) {
+      return false;
+    }
+    if (patternSource == null && patternSources.stream().anyMatch(source -> !source.current())) {
+      return false;
+    }
     if (scriptRevision >= 0 && MachineControllerScriptDataService.revision(owner) != scriptRevision) {
       return false;
     }
@@ -425,6 +473,96 @@ public final class RecipeExecutionTicket {
             || factory.upgradeRestrictionsCurrent());
   }
 
+  private List<PortSnapshot> patternPorts(PatternInputSource source) {
+    var result = new ArrayList<PortSnapshot>();
+    var itemStacks = new ArrayList<ItemStack>();
+    var amounts = new ArrayList<Long>();
+    var itemKeys = new ArrayList<PatternResourceKey>();
+    int fluidIndex = 0;
+    int chemicalIndex = 0;
+    for (var entry : source.resources().entrySet()) {
+      var resource = entry.getKey().resource(level.registryAccess());
+      switch (resource) {
+        case NetworkPortResource.Item item -> {
+          itemStacks.add(item.stack());
+          amounts.add(entry.getValue());
+          itemKeys.add(entry.getKey());
+        }
+        case NetworkPortResource.Fluid fluid -> result.add(
+            new PortSnapshot(
+                source,
+                PortKind.FLUID_INPUT,
+                fluidIndex++,
+                false,
+                List.of(),
+                List.of(),
+                List.of(entry.getKey()),
+                fluid.stack().copyWithAmount((int) Math.min(Integer.MAX_VALUE, entry.getValue())),
+                ChemicalStackData.EMPTY));
+        case NetworkPortResource.Chemical chemical -> result.add(
+            new PortSnapshot(
+                source,
+                PortKind.CHEMICAL_INPUT,
+                chemicalIndex++,
+                false,
+                List.of(),
+                List.of(),
+                List.of(entry.getKey()),
+                FluidStack.EMPTY,
+                new ChemicalStackData(chemical.id(), entry.getValue())));
+      }
+    }
+    if (mode == CaptureMode.ALL) {
+      result.add(
+          new PortSnapshot(
+              source,
+              PortKind.ITEM_INPUT,
+              0,
+              false,
+              itemStacks,
+              amounts,
+              itemKeys,
+              FluidStack.EMPTY,
+              ChemicalStackData.EMPTY));
+      var stacks = new ArrayList<ItemStack>();
+      var counts = new ArrayList<Long>();
+      var inventory = source.provider().independentItems();
+      for (int slot = 0; slot < inventory.getSlots(); slot++) {
+        var stack = ItemStackSnapshots.detached(inventory.getStackInSlot(slot), level.registryAccess());
+        stacks.add(stack);
+        counts.add((long) stack.getCount());
+      }
+      result.add(
+          new PortSnapshot(
+              source,
+              PortKind.ITEM_INPUT,
+              0,
+              true,
+              stacks,
+              counts,
+              List.of(),
+              FluidStack.EMPTY,
+              ChemicalStackData.EMPTY));
+    }
+    result.add(
+        new PortSnapshot(
+            source,
+            PortKind.FLUID_INPUT,
+            0,
+            true,
+            List.of(),
+            List.of(),
+            List.of(),
+            source.provider().independentFluid().getFluid(),
+            ChemicalStackData.EMPTY));
+    return result.stream()
+        .filter(
+            port -> mode == CaptureMode.ALL
+                || mode == CaptureMode.FLUID_INPUTS && port.kind() == PortKind.FLUID_INPUT
+                || mode == CaptureMode.CHEMICAL_INPUTS && port.kind() == PortKind.CHEMICAL_INPUT)
+        .toList();
+  }
+
   public static final class PortSnapshot {
     private final String partId;
     private final String logicalPartId;
@@ -437,6 +575,10 @@ public final class RecipeExecutionTicket {
     private final PortKind kind;
     private final long revision;
     private final List<ItemStack> items;
+    private final List<Long> itemAmounts;
+    private final PatternInputSource pattern;
+    private final List<PatternResourceKey> patternKeys;
+    private final boolean independent;
     private final List<Integer> limits;
     private final FluidStack fluid;
     private final ChemicalStackData chemical;
@@ -449,6 +591,9 @@ public final class RecipeExecutionTicket {
 
     private PortSnapshot(String logicalPartId, BlockPos position, MachinePortBlockEntity port, ServerLevel level, String selector, int tankIndex, int tankCount) {
       this.logicalPartId = logicalPartId;
+      pattern = null;
+      patternKeys = List.of();
+      independent = false;
       // Encode every transient address, including single tanks and item buses.
       // Length framing makes arbitrary user IDs unambiguous; only logical IDs
       // persist.
@@ -472,6 +617,7 @@ public final class RecipeExecutionTicket {
         }
       }
       items = List.copyOf(stacks);
+      itemAmounts = stacks.stream().map(stack -> (long) stack.getCount()).toList();
       limits = List.copyOf(slotLimits);
       fluid = kind.resource() == PortKind.Resource.FLUID ? port.fluidTank(tankIndex).getFluid()
           .copy() : FluidStack.EMPTY;
@@ -486,6 +632,76 @@ public final class RecipeExecutionTicket {
         case ENERGY -> port.energy().capacity();
       };
       transferLimit = kind.resource() == PortKind.Resource.ENERGY ? port.energy().transferLimit() : 0;
+    }
+
+    private PortSnapshot(PatternInputSource source, PortKind kind, int index, boolean independent, List<ItemStack> items, List<Long> amounts, List<PatternResourceKey> keys, FluidStack fluid, ChemicalStackData chemical) {
+      pattern = source;
+      this.independent = independent;
+      patternKeys = List.copyOf(keys);
+      identity = null;
+      level = (ServerLevel) source.provider().getLevel();
+      position = source.provider().getBlockPos();
+      this.kind = kind;
+      selector = source.selector();
+      inputGroup = InputGroup.SHARED;
+      revision = source.revision();
+      logicalPartId = "pattern:" + source.provider().providerId();
+      String scope = independent ? "independent" : source.container() + ":" + source.job();
+      partId = logicalPartId + ":" + scope + ":" + kind + ":" + index;
+      tankIndex = index;
+      tankCount = 1;
+      bulkItems = true;
+      this.items = List.copyOf(items);
+      itemAmounts = List.copyOf(amounts);
+      limits = items.stream().map(stack -> Integer.MAX_VALUE).toList();
+      this.fluid = fluid.copy();
+      this.chemical = chemical;
+      energy = 0;
+      energyExtractable = 0;
+      capacity = kind == PortKind.CHEMICAL_INPUT ? Long.MAX_VALUE : Integer.MAX_VALUE;
+      transferLimit = 0;
+    }
+
+    public boolean patternInput() {
+      return pattern != null;
+    }
+    public PatternInputSource patternSource() {
+      return pattern;
+    }
+    public boolean independentPatternStorage() {
+      return independent;
+    }
+    public PatternResourceKey patternKey(int slot) {
+      return patternKeys.get(slot);
+    }
+    public long itemAmount(int slot) {
+      return itemAmounts.get(slot);
+    }
+    public long fluidAmount() {
+      return patternInput() && !independentPatternStorage() && kind == PortKind.FLUID_INPUT ? pattern.resources()
+          .getOrDefault(patternKey(0), 0L) : fluid.getAmount();
+    }
+    public Object physicalIdentity() {
+      if (!patternInput()) {
+        return new PhysicalTank(identity, tankIndex);
+      }
+
+      return new PatternPhysical(
+          pattern.providerId(),
+          independent ? null : pattern.container(),
+          independent ? null : pattern.job(),
+          kind,
+          independent ? null : patternKeys.isEmpty() ? null : patternKeys.getFirst());
+    }
+    private record PatternPhysical(
+        UUID provider,
+        PatternContainerRef container,
+        UUID job,
+        PortKind kind,
+        PatternResourceKey resource) {
+    }
+
+    private record PhysicalTank(MachinePortBlockEntity port, int tank) {
     }
 
     public String partId() {
@@ -562,6 +778,9 @@ public final class RecipeExecutionTicket {
     }
 
     private boolean sameLiveStamp(ServerLevel level) {
+      if (pattern != null) {
+        return pattern.current();
+      }
       return level.hasChunkAt(position)
           && !identity.isRemoved()
           && identity.getLevel() == level
@@ -574,6 +793,9 @@ public final class RecipeExecutionTicket {
     }
 
     private boolean matches(ServerLevel level) {
+      if (pattern != null) {
+        return pattern.current();
+      }
       if (!sameLiveStamp(level) || identity.resourceTransactionInProgress()) {
         return false;
       }

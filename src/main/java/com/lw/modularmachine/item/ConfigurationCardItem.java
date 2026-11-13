@@ -58,6 +58,12 @@ public final class ConfigurationCardItem extends Item {
                 "tooltip.mmcece.configuration_card.interface",
                 data.interfaceType(),
                 data.interfaceValue()).withStyle(ChatFormatting.GRAY));
+        case PATTERN_PROVIDER -> data.patternTarget().ifPresent(
+            target -> tooltip.add(
+                Component.translatable(
+                    "tooltip.mmcece.configuration_card.pattern_target",
+                    target.dimension().toString(),
+                    target.position().toShortString()).withStyle(ChatFormatting.GRAY)));
         default -> tooltip.add(
             Component.translatable("tooltip.mmcece.configuration_card.value", data.number())
                 .withStyle(ChatFormatting.GRAY));

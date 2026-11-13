@@ -46,6 +46,8 @@ import com.lw.modularmachine.machine.recipe.FactoryRunResourceCommitter;
 import com.lw.modularmachine.machine.recipe.FrozenItemRun;
 import com.lw.modularmachine.machine.recipe.RecipeStartPlan;
 import com.lw.modularmachine.machine.recipe.search.RecipeSearch;
+import com.lw.modularmachine.machine.recipe.PatternRunSources;
+import com.lw.modularmachine.machine.recipe.PatternProductionService;
 import com.lw.modularmachine.machine.recipe.MachineRecipeService;
 import com.lw.modularmachine.api.recipe.RecipeLifecycleEvents.Type;
 import com.lw.modularmachine.machine.recipe.RecipeLifecyclePublisher;
@@ -103,6 +105,7 @@ public final class FactoryControllerBlockEntity extends BlockEntity implements M
   private Tag unsupportedScriptData;
   private ControllerOwnershipState ownership = ControllerOwnershipState.empty();
   private ControllerCommandState commandState = new ControllerCommandState();
+  private PatternRunSources patternRunSources = new PatternRunSources();
   private final GenericControllerDiscovery genericDiscovery = new GenericControllerDiscovery();
   private ResourceLocation machineId = ControllerPlacementData.UNBOUND_MACHINE;
   private final ControllerBlueprintInventory blueprintInventory = new ControllerBlueprintInventory(
@@ -149,6 +152,7 @@ public final class FactoryControllerBlockEntity extends BlockEntity implements M
   }
 
   private void blueprintChanged() {
+    PatternProductionService.invalidate(this);
     setChanged();
     if (level instanceof ServerLevel) {
       boolean formed = registration != null && registration.verifier.state() == VerificationState.CONFIRMED;
@@ -176,6 +180,24 @@ public final class FactoryControllerBlockEntity extends BlockEntity implements M
   @ApiStatus.Internal
   public ControllerOwnershipState ownershipState() {
     return ownership;
+  }
+
+  @ApiStatus.Internal
+  public PatternRunSources patternRunSources() {
+    return patternRunSources;
+  }
+
+  public void patternResourcesChanged() {
+    if (level instanceof ServerLevel server) {
+      if (!server.getServer().isSameThread()) {
+        throw new IllegalStateException("Pattern resource notification outside server thread");
+      }
+      // Wake idle retries; in-flight searches retain their bounded progress and
+      // invalidate themselves only when their actual dependencies change.
+      searchRetryAfter.clear();
+      searchRetryInterval.clear();
+      setChanged();
+    }
   }
 
   @Override
@@ -243,6 +265,7 @@ public final class FactoryControllerBlockEntity extends BlockEntity implements M
 
   @Override
   public void setRemoved() {
+    PatternProductionService.invalidate(this);
     RecipeCommandService.unschedule(this);
     genericDiscovery.clear();
     runtimeUpgrades.clear();
@@ -261,6 +284,7 @@ public final class FactoryControllerBlockEntity extends BlockEntity implements M
 
   @Override
   public void onChunkUnloaded() {
+    PatternProductionService.invalidate(this);
     RecipeCommandService.unschedule(this);
     genericDiscovery.clear();
     runtimeUpgrades.clear();
@@ -372,6 +396,7 @@ public final class FactoryControllerBlockEntity extends BlockEntity implements M
         || replacement.revision() != expected.revision() + 1) {
       return false;
     }
+    PatternProductionService.invalidate(this);
     controllerScriptState = replacement;
     clearSearchState();
     MachineRecipeService.invalidateControllerScriptData(this);
@@ -442,7 +467,10 @@ public final class FactoryControllerBlockEntity extends BlockEntity implements M
   }
 
   public boolean canCommitStructure() {
-    return level instanceof ServerLevel server && registration != null && registration.canCommit(server);
+    return level instanceof ServerLevel server
+        && patternRunSources.valid()
+        && registration != null
+        && registration.canCommit(server);
   }
 
   public StructureService.Registration registration() {
@@ -482,6 +510,7 @@ public final class FactoryControllerBlockEntity extends BlockEntity implements M
 
   @Override
   public void attach(StructureService.Registration registration) {
+    PatternProductionService.invalidate(this);
     runtimeUpgrades.clear();
     clearUpgradeDiscovery();
     outputEngine.invalidate();
@@ -684,6 +713,7 @@ public final class FactoryControllerBlockEntity extends BlockEntity implements M
       highestRevision = Math.max(highestRevision, thread.revision());
     }
     long nextRevision = Math.incrementExact(highestRevision);
+    PatternProductionService.invalidate(this);
     scheduler = replacement;
     threadsInitialized = true;
     configurationRevision = nextRevision;
@@ -883,6 +913,7 @@ public final class FactoryControllerBlockEntity extends BlockEntity implements M
       return true;
     }
     scheduler = scheduler.replace(next);
+    PatternProductionService.invalidate(this);
     removeSearchState(threadId, server.getGameTime());
     setChanged();
     return true;
@@ -1291,6 +1322,7 @@ public final class FactoryControllerBlockEntity extends BlockEntity implements M
       return;
     }
     if (!sources.equals(appliedUpgradeSourceView)) {
+      PatternProductionService.invalidate(this);
       upgradeSourcesManaged = true;
       try {
         long maximumRevision = scheduler.channels().stream().mapToLong(FactoryThreadState::upgradeRevision).max()
@@ -1487,7 +1519,9 @@ public final class FactoryControllerBlockEntity extends BlockEntity implements M
           }
           continue;
         }
-        if (!canCommitStructure() || !run.matchesBindings(registration.pattern.definition)) {
+        if (!canCommitStructure()
+            || !run.matchesBindings(registration.pattern.definition)
+            || !PatternRunSources.available(this, run)) {
           threadState = FactoryThreadState.State.WAITING;
           threadReason = FactoryThreadState.Reason.STALE_RESOURCES;
           break;
@@ -1918,6 +1952,7 @@ public final class FactoryControllerBlockEntity extends BlockEntity implements M
     super.saveAdditional(tag, registries);
     ownership.save(tag);
     tag.put(ControllerCommandState.NBT_KEY, commandState.save(false));
+    tag.put(PatternRunSources.NBT_KEY, patternRunSources.save());
     tag.put("controller_blueprint", blueprintInventory.save(registries));
     tag.put(
         ControllerScriptState.NBT_KEY,
@@ -1962,9 +1997,11 @@ public final class FactoryControllerBlockEntity extends BlockEntity implements M
       }
     }
     runtimeUpgrades.clear();
+    PatternProductionService.invalidate(this);
     super.loadAdditional(tag, registries);
     ownership = ControllerOwnershipState.load(tag);
     commandState = ControllerCommandState.load(tag.get(ControllerCommandState.NBT_KEY));
+    patternRunSources = PatternRunSources.load(tag.get(PatternRunSources.NBT_KEY));
     controllerScriptState = ControllerScriptState.empty();
     unsupportedScriptData = null;
     try {
@@ -2107,6 +2144,7 @@ public final class FactoryControllerBlockEntity extends BlockEntity implements M
   public CompoundTag portableData(HolderLookup.Provider registries) {
     var root = saveWithoutMetadata(registries);
     root.put(ControllerCommandState.NBT_KEY, commandState.save(true));
+    root.put(PatternRunSources.NBT_KEY, patternRunSources.save());
 
     return root;
   }

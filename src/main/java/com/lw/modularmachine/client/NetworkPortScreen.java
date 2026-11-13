@@ -9,6 +9,7 @@ import java.util.Locale;
 import java.util.UUID;
 import net.minecraft.client.Minecraft;
 import net.minecraft.client.gui.GuiGraphics;
+import net.minecraft.client.gui.Font;
 import net.minecraft.client.gui.components.Button;
 import net.minecraft.client.gui.screens.inventory.AbstractContainerScreen;
 import net.minecraft.client.renderer.texture.TextureAtlasSprite;
@@ -219,10 +220,6 @@ public final class NetworkPortScreen extends AbstractContainerScreen<NetworkPort
         drawResource(graphics, row.buffered(), row.stored(), x, topPos + 24 + index / 9 * 18);
       }
     }
-    if (input) {
-      int x = leftPos + 7 + selected * 18;
-      graphics.renderOutline(x, topPos + 53, 18, 18, 0xFF4A70A0);
-    }
   }
 
   void drawResource(GuiGraphics graphics, NetworkPortResource resource, long count, int x, int y) {
@@ -230,6 +227,10 @@ public final class NetworkPortScreen extends AbstractContainerScreen<NetworkPort
   }
 
   void drawResource(GuiGraphics graphics, NetworkPortResource resource, long count, int x, int y, boolean showQuantity) {
+    drawResource(graphics, font, resource, count, x, y, showQuantity);
+  }
+
+  static void drawResource(GuiGraphics graphics, Font font, NetworkPortResource resource, long count, int x, int y, boolean showQuantity) {
     if (resource == null || count <= 0) {
       return;
     }
@@ -288,6 +289,11 @@ public final class NetworkPortScreen extends AbstractContainerScreen<NetworkPort
         String key = !status.snapshot().supported() ? "unsupported" : status.snapshot().active() ? "online" : "offline";
         graphics.drawString(font, Component.translatable("menu.mmcece.network." + key), 8, 97, 0x404040, false);
       }
+    }
+    int firstY = input ? 54 : 24;
+    int slot = slotAt(mouseX - leftPos, mouseY - topPos, firstY, input ? 2 : 4);
+    if (slot >= 0) {
+      renderSlotHighlight(graphics, 8 + slot % 9 * 18, firstY + slot / 9 * 18, 0);
     }
   }
 

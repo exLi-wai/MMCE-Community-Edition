@@ -1,0 +1,7 @@
+{
+  "textures": {
+    "casing": "mmcece:block/blockcasing_plain",
+    "overlay": "mmcece:block/overlay/overlay_mepatternprovider"
+  },
+  "parent": "mmcece:block/ported_shell"
+}

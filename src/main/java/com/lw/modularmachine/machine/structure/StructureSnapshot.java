@@ -1,6 +1,10 @@
 package com.lw.modularmachine.machine.structure;
 
 import com.lw.modularmachine.block.ParallelControllerBlock;
+import com.lw.modularmachine.block.PatternProviderBlock;
+import com.lw.modularmachine.block.PatternMirrorBlock;
+import com.lw.modularmachine.blockentity.PatternProviderBlockEntity;
+import com.lw.modularmachine.blockentity.PatternMirrorBlockEntity;
 import com.lw.modularmachine.blockentity.MachinePortBlockEntity;
 import com.lw.modularmachine.blockentity.ParallelControllerBlockEntity;
 import com.lw.modularmachine.blockentity.SmartInterfaceBlockEntity;
@@ -96,7 +100,9 @@ public final class StructureSnapshot {
       boolean needsEntity = part.rule().port() != null
           || part.field() != null
           || !part.interfaceType().isEmpty()
-          || state.getBlock() instanceof ParallelControllerBlock;
+          || state.getBlock() instanceof ParallelControllerBlock
+          || state.getBlock() instanceof PatternProviderBlock
+          || state.getBlock() instanceof PatternMirrorBlock;
       BlockEntity entity = needsEntity ? chunk.getBlockEntity(pos) : null;
       if (part.rule().port() != null) {
         if (!(entity instanceof MachinePortBlockEntity port)) {
@@ -126,6 +132,22 @@ public final class StructureSnapshot {
         }
       }
 
+      if (state.getBlock() instanceof PatternProviderBlock) {
+        if (!(entity instanceof PatternProviderBlockEntity provider)) {
+          return CheckResult.UNAVAILABLE;
+        }
+        if (!provider.schemaSupported()) {
+          return CheckResult.UNSUPPORTED;
+        }
+      }
+      if (state.getBlock() instanceof PatternMirrorBlock) {
+        if (!(entity instanceof PatternMirrorBlockEntity mirror)) {
+          return CheckResult.UNAVAILABLE;
+        }
+        if (!mirror.schemaSupported()) {
+          return CheckResult.UNSUPPORTED;
+        }
+      }
       return CheckResult.MATCH;
     }
 

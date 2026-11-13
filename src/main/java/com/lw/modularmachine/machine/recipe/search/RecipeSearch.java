@@ -1,6 +1,7 @@
 package com.lw.modularmachine.machine.recipe.search;
 
 import com.lw.modularmachine.machine.recipe.ChemicalTransactions;
+import com.lw.modularmachine.machine.recipe.PatternProductionService;
 import com.lw.modularmachine.machine.recipe.RecipeStartPlan;
 import com.lw.modularmachine.machine.recipe.ItemResourceKey;
 import com.lw.modularmachine.machine.recipe.ItemSlotRef;
@@ -45,7 +46,7 @@ public final class RecipeSearch {
   private final String factoryThread;
   private RecipeStartPlan pendingFactoryPlan;
   private long checkWork;
-  private List<Integer> groups;
+  private List<RecipeExecutionTicket> groups;
   private Set<String> allowedIds;
   private int groupCursor;
   private RecipeSearch groupSearch;
@@ -61,7 +62,7 @@ public final class RecipeSearch {
   private record OutputSlot(ItemSlotRef ref, ResourceSnapshot.OutputSlot<ItemResourceKey> snapshot) {
   }
 
-  private RecipeSearch(RecipeExecutionTicket ticket, RecipeCatalog catalog, Set<String> allowedIds, String factoryThread, List<Integer> groups) {
+  private RecipeSearch(RecipeExecutionTicket ticket, RecipeCatalog catalog, Set<String> allowedIds, String factoryThread, List<RecipeExecutionTicket> groups) {
     this.ticket = ticket;
     this.catalog = catalog;
     resources = new RecipeSearchResources(catalog);
@@ -120,7 +121,7 @@ public final class RecipeSearch {
     for (var candidate : catalog.candidatesForInputs(counts, fluids.inputKeys(), chemicals, allowedIds)) {
       var definition = catalog.definition(candidate.id());
       var missing = definition == null ? Optional.<PortKind>empty() : requirements.missing(definition);
-      if (missing.isPresent()) {
+      if (missing.isPresent() || !PatternProductionService.matches(ticket, definition, this.factoryThread)) {
         continue;
       }
       if (ticket.interfacesMatch(candidate.interfaceInputs())
@@ -166,7 +167,8 @@ public final class RecipeSearch {
       return Optional.empty();
     }
     var ticket = captured.orElseThrow();
-    var groups = ticket.inputGroups();
+    PatternProductionService.observe(owner, catalog, factoryThread);
+    var groups = ticket.searchContexts();
     var search = groups.size() == 1 ? new RecipeSearch(
         ticket,
         catalog,
@@ -281,7 +283,7 @@ public final class RecipeSearch {
           if (amount == 0) {
             continue;
           }
-          deductions.add(new RecipeStartPlan.Deduction(slot.ref(), slot.key(), Math.toIntExact(amount)));
+          deductions.add(new RecipeStartPlan.Deduction(slot.ref(), slot.key(), amount));
           needed.put(expected, needed.get(expected) - amount);
         }
         if (needed.values().stream().anyMatch(count -> count != 0)) {
@@ -354,12 +356,7 @@ public final class RecipeSearch {
         // Charge even an empty group, so a long list cannot bypass the tick budget.
         used++;
         completedGroupWork++;
-        groupSearch = new RecipeSearch(
-            ticket.withInputGroup(groups.get(groupCursor)),
-            catalog,
-            competitive,
-            factoryThread,
-            resources);
+        groupSearch = new RecipeSearch(groups.get(groupCursor), catalog, competitive, factoryThread, resources);
       }
       var result = groupSearch.advance(budget - used);
       used += result.workUsed();
@@ -406,8 +403,8 @@ public final class RecipeSearch {
       if (groups == null) {
         diagnoseResources(ticket, candidates);
       } else {
-        for (int group : groups) {
-          diagnoseResources(ticket.withInputGroup(group), candidates);
+        for (var group : groups) {
+          diagnoseResources(group, candidates);
         }
       }
       resourcesDiagnosed = true;
@@ -435,6 +432,6 @@ public final class RecipeSearch {
     }
   }
 
-  private record InputSlot(ItemSlotRef ref, ItemResourceKey key, int count) {
+  private record InputSlot(ItemSlotRef ref, ItemResourceKey key, long count) {
   }
 }

@@ -836,5 +836,21 @@
   "tooltip.mmcece.ranged_construct_tool.second": "终点：%s",
   "tooltip.mmcece.registered_blueprint": "机器由蓝图注册物品固定。右键打开机器预览；可放入普通或工厂控制器的蓝图槽。",
   "tooltip.mmcece.smart_interface": "为机器配置类型化数值接口",
-  "tooltip.mmcece.upgrade_bus": "升级槽位：%s"
+  "tooltip.mmcece.upgrade_bus": "升级槽位：%s",
+  "block.mmcece.me_pattern_provider": "ME样板供应器",
+  "block.mmcece.me_pattern_mirror": "ME样板镜像",
+  "menu.mmcece.pattern.cached": "缓存",
+  "menu.mmcece.pattern.independent": "独立存储",
+  "menu.mmcece.pattern.independent.description": "两个真实物品槽和一个流体槽，供机器使用；返还缓存不清空独立存储。",
+  "menu.mmcece.pattern.return": "返还所有样板缓存",
+  "menu.mmcece.pattern.return.description": "按网络实际接受量返还；网络离线或已满时保留余量。",
+  "menu.mmcece.pattern.amount": "数量：%s",
+  "menu.mmcece.pattern.slot": "样板槽：%s",
+  "menu.mmcece.pattern.retired": "旧样板缓存，等待返还",
+  "menu.mmcece.pattern.fluid": "%s / %s mB",
+  "menu.mmcece.pattern.fluid.description": "持单个流体容器点击以存入或取出。",
+  "menu.mmcece.pattern.select": "左键查看缓存；右键或Shift＋左键取出样板。",
+  "tooltip.mmcece.configuration_card.type.pattern_provider": "样板供应器引用",
+  "tooltip.mmcece.configuration_card.pattern_target": "%s @ %s",
+  "message.mmcece.configuration_card.cross_dimension": "镜像只能绑定同维度供应器。"
 }

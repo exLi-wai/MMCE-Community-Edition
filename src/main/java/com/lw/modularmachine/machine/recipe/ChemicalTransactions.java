@@ -50,7 +50,7 @@ public final class ChemicalTransactions {
   }
 
   static Batch inputs(List<InputClaim> claims) {
-    var changes = new LinkedHashMap<TankIdentity, Change>();
+    var changes = new LinkedHashMap<Object, Change>();
     for (var claim : claims) {
       for (var demand : claim.requirements()) {
         long remaining = demand.amount();
@@ -60,7 +60,7 @@ public final class ChemicalTransactions {
               || !port.chemical().chemical().equals(demand.chemical())) {
             continue;
           }
-          var tank = new TankIdentity(port.identity(), port.tankIndex());
+          var tank = port.physicalIdentity();
           var previous = changes.get(tank);
           if (previous != null && previous.port().revision() != port.revision()) {
             return null;
@@ -85,12 +85,11 @@ public final class ChemicalTransactions {
 
   static Batch outputs(RecipeExecutionTicket ticket, Map<String, ChemicalStackData> additions) {
     var changes = new ArrayList<Change>();
-    var found = new HashSet<TankIdentity>();
+    var found = new HashSet<Object>();
     for (var port : ticket.ports()) {
       var amount = additions.get(port.partId());
       if (amount != null) {
-        if (port.kind() != PortKind.CHEMICAL_OUTPUT
-            || !found.add(new TankIdentity(port.identity(), port.tankIndex()))) {
+        if (port.kind() != PortKind.CHEMICAL_OUTPUT || !found.add(port.physicalIdentity())) {
           throw new IllegalStateException("Invalid chemical output identity");
         }
         changes.add(new Change(port, amount));
@@ -128,7 +127,11 @@ public final class ChemicalTransactions {
     var claims = new ArrayList<InputClaim>();
     for (var run : runs) {
       if (!run.chemicalPerTick().isEmpty()) {
-        claims.add(new InputClaim(ticket.withInputGroup(run.inputGroup()), run.chemicalPerTick()));
+        var source = ticket.forRun(run).orElse(null);
+        if (source == null) {
+          return null;
+        }
+        claims.add(new InputClaim(source, run.chemicalPerTick()));
       }
     }
     return inputs(claims);
@@ -136,16 +139,14 @@ public final class ChemicalTransactions {
 
   static boolean stillUnavailable(StructureService.StructureSubject owner, List<FrozenItemRun> runs) {
     var ticket = RecipeExecutionTicket.captureChemicalInputs(owner).orElse(null);
-    if (ticket == null || runs.stream().anyMatch(run -> !run.matchesInputGroups(ticket))) {
+    if (ticket == null
+        || runs.stream().anyMatch(run -> !run.matchesInputGroups(ticket) || ticket.forRun(run).isEmpty())) {
       return false;
     }
     return fees(ticket, runs) == null;
   }
 
   private record Change(RecipeExecutionTicket.PortSnapshot port, ChemicalStackData amount) {
-  }
-
-  private record TankIdentity(MachinePortBlockEntity identity, int index) {
   }
 
   static final class Batch {
@@ -158,16 +159,28 @@ public final class ChemicalTransactions {
       this.output = output;
     }
 
+    void addPatterns(PatternInputTransaction patterns) {
+      for (var change : changes) {
+        if (change.port().patternInput()) {
+          if (output) {
+            throw new IllegalStateException("Pattern caches are not production outputs");
+          }
+          patterns.consumeChemical(change.port(), change.amount());
+        }
+      }
+    }
+
     void acquire() {
       for (var change : changes) {
         var port = change.port();
-        leases.add(
-            output ? port.identity().acquireChemicalOutputStart(port.revision(), port.tankIndex()) : port.identity()
-                .acquireChemicalStart(port.revision(), port.tankIndex()));
-      }
-      for (int index = 0; index < changes.size(); index++) {
-        var amount = changes.get(index).amount();
-        boolean accepted = output ? leases.get(index).fillExact(amount) : leases.get(index).drainExact(amount);
+        if (port.patternInput()) {
+          continue;
+        }
+        var lease = output ? port.identity().acquireChemicalOutputStart(port.revision(), port.tankIndex()) : port
+            .identity().acquireChemicalStart(port.revision(), port.tankIndex());
+        leases.add(lease);
+        var amount = change.amount();
+        boolean accepted = output ? lease.fillExact(amount) : lease.drainExact(amount);
         if (!accepted) {
           throw new IllegalStateException("Chemical contents changed during transaction");
         }

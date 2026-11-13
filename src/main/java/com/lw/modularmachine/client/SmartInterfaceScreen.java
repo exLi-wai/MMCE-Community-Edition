@@ -33,6 +33,12 @@ public final class SmartInterfaceScreen extends AbstractContainerScreen<SmartInt
   }
 
   @Override
+  public void render(GuiGraphics graphics, int mouseX, int mouseY, float partialTick) {
+    super.render(graphics, mouseX, mouseY, partialTick);
+    renderTooltip(graphics, mouseX, mouseY);
+  }
+
+  @Override
   protected void init() {
     super.init();
     input = addRenderableWidget(

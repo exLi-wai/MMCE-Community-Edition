@@ -11,6 +11,7 @@ import com.lw.modularmachine.api.upgrade.FactoryUpgradeSnapshot;
 import com.lw.modularmachine.machine.structure.MachineDefinition;
 import com.mojang.serialization.JsonOps;
 import java.util.ArrayList;
+import java.util.EnumSet;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
@@ -22,6 +23,7 @@ import net.minecraft.core.HolderLookup;
 import net.minecraft.nbt.CompoundTag;
 import net.minecraft.nbt.ListTag;
 import net.minecraft.nbt.NbtOps;
+import net.minecraft.nbt.StringTag;
 import net.minecraft.nbt.Tag;
 import net.minecraft.resources.ResourceLocation;
 import net.minecraft.world.item.ItemStack;
@@ -50,6 +52,7 @@ public final class FrozenItemRun {
       "definition_epoch",
       "definition",
       "ports",
+      "pattern_inputs",
       "dynamic_lengths",
       "input_group",
       "parallel_instances",
@@ -78,6 +81,8 @@ public final class FrozenItemRun {
   private final int parallelInstances;
   private final int parallelBase;
   private final Map<String, Integer> dynamicLengths;
+  private final PatternRunSources.Binding patternSource;
+  private final Set<PortKind> patternInputs;
 
   private FrozenItemRun(CompoundTag source, HolderLookup.Provider registries) {
     for (String key : source.getAllKeys()) {
@@ -149,11 +154,35 @@ public final class FrozenItemRun {
     if (!source.contains("random_seed", Tag.TAG_LONG) || source.getLong("random_seed") < 0) {
       throw new IllegalArgumentException("Missing or invalid run random seed");
     }
+    var patternKinds = EnumSet.noneOf(PortKind.class);
+    if (source.contains("pattern_inputs")) {
+      if (!source.contains("pattern_inputs", Tag.TAG_COMPOUND)) {
+        throw new IllegalArgumentException("Invalid frozen pattern inputs");
+      }
+      var pattern = source.getCompound("pattern_inputs");
+      patternSource = PatternRunSources.Binding.load(pattern);
+      if (!(pattern.get("kinds") instanceof ListTag kinds)
+          || kinds.isEmpty()
+          || kinds.getElementType() != Tag.TAG_STRING
+          || kinds.size() > 3) {
+        throw new IllegalArgumentException("Invalid frozen pattern input roles");
+      }
+      for (var value : kinds) {
+        var kind = PortKind.valueOf(value.getAsString());
+        if (kind != PortKind.ITEM_INPUT && kind != PortKind.FLUID_INPUT && kind != PortKind.CHEMICAL_INPUT
+            || !patternKinds.add(kind)) {
+          throw new IllegalArgumentException("Invalid or duplicate frozen pattern input role");
+        }
+      }
+    } else {
+      patternSource = null;
+    }
+    patternInputs = Set.copyOf(patternKinds);
     var ports = source.getList("ports", Tag.TAG_COMPOUND);
     var mapped = new LinkedHashMap<String, PortKind>();
     var mappedSelectors = new LinkedHashMap<String, String>();
     var mappedGroups = new LinkedHashMap<String, Integer>();
-    if (ports.isEmpty() || ports.size() > 4096) {
+    if (ports.isEmpty() && patternInputs.isEmpty() || ports.size() > 4096) {
       throw new IllegalArgumentException("Invalid run port map");
     }
     for (int i = 0; i < ports.size(); i++) {
@@ -258,6 +287,8 @@ public final class FrozenItemRun {
     parallelInstances = before.parallelInstances;
     parallelBase = before.parallelBase;
     dynamicLengths = before.dynamicLengths;
+    patternSource = before.patternSource;
+    patternInputs = before.patternInputs;
     schema = 3;
     this.progress = progress;
     this.state = state;
@@ -318,7 +349,18 @@ public final class FrozenItemRun {
     tag.put("definition", definition);
     var mapping = new ListTag();
     var logicalBindings = new LinkedHashMap<String, CompoundTag>();
+    PatternRunSources.Binding patternSource = null;
+    var patternKinds = EnumSet.noneOf(PortKind.class);
     for (var port : ports) {
+      if (port.patternInput()) {
+        var binding = PatternRunSources.Binding.capture(port.patternSource());
+        if (patternSource != null && !patternSource.equals(binding)) {
+          throw new IllegalArgumentException("Mixed frozen pattern sources");
+        }
+        patternSource = binding;
+        patternKinds.add(port.kind());
+        continue;
+      }
       var entry = new CompoundTag();
       entry.putString("id", port.logicalPartId());
       entry.putString("kind", port.kind().name());
@@ -333,6 +375,13 @@ public final class FrozenItemRun {
     }
     logicalBindings.values().forEach(mapping::add);
     tag.put("ports", mapping);
+    if (patternSource != null) {
+      var pattern = patternSource.save();
+      var kinds = new ListTag();
+      patternKinds.forEach(kind -> kinds.add(StringTag.valueOf(kind.name())));
+      pattern.put("kinds", kinds);
+      tag.put("pattern_inputs", pattern);
+    }
     if (!dynamicLengths.isEmpty()) {
       var lengths = new CompoundTag();
       dynamicLengths.forEach(lengths::putInt);
@@ -406,7 +455,9 @@ public final class FrozenItemRun {
   }
 
   private void validateResourceBindings(JsonObject declaration) {
-    if (!declaration.getAsJsonArray("inputs").isEmpty() && !logicalPorts.containsValue(PortKind.ITEM_INPUT)
+    if (!declaration.getAsJsonArray("inputs").isEmpty()
+        && !logicalPorts.containsValue(PortKind.ITEM_INPUT)
+        && !patternInputs.contains(PortKind.ITEM_INPUT)
         || !declaration.getAsJsonArray("outputs").isEmpty() && !logicalPorts.containsValue(PortKind.ITEM_OUTPUT)) {
       throw new IllegalArgumentException("Item requirements lack logical item ports");
     }
@@ -416,12 +467,13 @@ public final class FrozenItemRun {
   }
 
   private void requirePort(PortKind kind, String selector) {
-    boolean found = logicalPorts.entrySet().stream().anyMatch(
-        entry -> entry.getValue() == kind
-            && selector.equals(logicalSelectors.get(entry.getKey()))
-            && (!kind.isInput()
-                || logicalInputGroups.get(entry.getKey()) == InputGroup.SHARED
-                || logicalInputGroups.get(entry.getKey()) == inputGroup));
+    boolean found = patternInputs.contains(kind) && selector.equals(patternSource.selector())
+        || logicalPorts.entrySet().stream().anyMatch(
+            entry -> entry.getValue() == kind
+                && selector.equals(logicalSelectors.get(entry.getKey()))
+                && (!kind.isInput()
+                    || logicalInputGroups.get(entry.getKey()) == InputGroup.SHARED
+                    || logicalInputGroups.get(entry.getKey()) == inputGroup));
     if (!found) {
       throw new IllegalArgumentException("Frozen recipe lacks a matching " + kind.path() + " port");
     }
@@ -525,6 +577,10 @@ public final class FrozenItemRun {
         && logicalSelectors.equals(labels);
   }
 
+  boolean matchesPatternSource(PatternRunSources.Binding binding) {
+    return Objects.equals(patternSource, binding);
+  }
+
   public boolean pendingOutput() {
     return state == State.OUTPUT_PENDING;
   }
@@ -602,6 +658,8 @@ public final class FrozenItemRun {
         && dynamicLengths.equals(other.dynamicLengths)
         && logicalPorts.equals(other.logicalPorts)
         && logicalSelectors.equals(other.logicalSelectors)
+        && Objects.equals(patternSource, other.patternSource)
+        && patternInputs.equals(other.patternInputs)
         && (data == other.data || data.getCompound("definition").equals(other.data.getCompound("definition")));
   }
 

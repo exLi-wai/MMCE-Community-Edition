@@ -48,6 +48,9 @@ public final class FactoryRunResourceCommitter {
     if (run.lastProgressTick() == level.getGameTime()) {
       return Result.STALE;
     }
+    if (!PatternRunSources.available(factory, run)) {
+      return Result.STALE;
+    }
     var tickCosts = factory.upgradeRuntimeWork().prepare(threadId, List.of(run));
     if (tickCosts.status() == FactoryUpgradeTickCosts.Status.INSUFFICIENT) {
       return Result.WAITING_UPGRADE;
@@ -85,7 +88,10 @@ public final class FactoryRunResourceCommitter {
       if (!run.matchesInputGroups(fluidTicket)) {
         return Result.STALE;
       }
-      fluidTicket = fluidTicket.withInputGroup(run.inputGroup());
+      fluidTicket = fluidTicket.forRun(run).orElse(null);
+      if (fluidTicket == null) {
+        return Result.STALE;
+      }
       if (!RecipeResourceRequirements.has(fluidTicket, PortKind.FLUID_INPUT, run.selectors().fluidPerTick())) {
         return Result.MISSING_FLUID_INPUT;
       }
@@ -101,7 +107,10 @@ public final class FactoryRunResourceCommitter {
       if (captured == null || !run.matchesInputGroups(captured)) {
         return Result.STALE;
       }
-      chemicalTicket = captured.withInputGroup(run.inputGroup());
+      chemicalTicket = captured.forRun(run).orElse(null);
+      if (chemicalTicket == null) {
+        return Result.STALE;
+      }
       if (ChemicalTransactions.missingInputs(chemicalTicket, run.chemicalPerTick())) {
         return Result.MISSING_CHEMICAL_INPUT;
       }
@@ -114,6 +123,15 @@ public final class FactoryRunResourceCommitter {
       return Result.STALE;
     }
     var energyLeases = new ArrayList<MachinePortBlockEntity.EnergyStartLease>();
+    var patterns = new PatternInputTransaction();
+    for (var debit : fluidDebits) {
+      if (debit.port().patternInput()) {
+        patterns.consumeFluid(debit.port(), debit.amount());
+      }
+    }
+    if (chemicals != null) {
+      chemicals.addPatterns(patterns);
+    }
     var fluidLeases = new ArrayList<MachinePortBlockEntity.FluidStartLease>();
     var tickCostLeases = new ArrayList<StartCostLease>();
     boolean committed = false;
@@ -126,6 +144,7 @@ public final class FactoryRunResourceCommitter {
           || !tickCosts.versionsCurrent()) {
         return Result.STALE;
       }
+      patterns.acquire();
       tickCosts.acquireInto(tickCostLeases);
       if (chemicals != null) {
         chemicals.acquire();
@@ -140,6 +159,9 @@ public final class FactoryRunResourceCommitter {
         }
       }
       for (var debit : fluidDebits) {
+        if (debit.port().patternInput()) {
+          continue;
+        }
         var lease = debit.port().identity().acquireFluidStart(debit.port().revision(), debit.port().tankIndex());
         fluidLeases.add(lease);
         if (!lease.drainExact(debit.amount())) {
@@ -175,7 +197,9 @@ public final class FactoryRunResourceCommitter {
       if (chemicals != null) {
         chemicals.resolve(committed);
       }
+      patterns.resolve(committed);
       if (committed) {
+        patterns.publish();
         if (chemicals != null) {
           chemicals.publish();
         }
@@ -216,7 +240,21 @@ public final class FactoryRunResourceCommitter {
       return Result.STALE;
     }
     if (decision == RecipeLifecycleEvents.FailureDecision.DISCARD) {
-      if (factory.removeRunIfSame(threadId, run)) {
+      PatternInputTransaction patterns = null;
+      boolean removed = false;
+      try {
+        patterns = PatternInputTransaction.release(factory, List.of(run));
+        patterns.acquire();
+        removed = factory.removeRunIfSame(threadId, run);
+      } catch (RuntimeException unavailable) {
+        return Result.STALE;
+      } finally {
+        if (patterns != null) {
+          patterns.resolve(removed);
+        }
+      }
+      if (removed) {
+        patterns.publish();
         factory.setChanged();
         RecipeLifecyclePublisher.resourceDiscarded(factory, threadId, List.of(run), resource);
       }
@@ -243,10 +281,12 @@ public final class FactoryRunResourceCommitter {
       return false;
     }
 
-    return planFluidDebits(
-        ticket.withInputGroup(run.inputGroup()),
-        run.fluidPerTick(((ServerLevel) factory.getLevel()).registryAccess()),
-        run.selectors().fluidPerTick()) == null;
+    var source = ticket.forRun(run).orElse(null);
+    return source != null
+        && planFluidDebits(
+            source,
+            run.fluidPerTick(((ServerLevel) factory.getLevel()).registryAccess()),
+            run.selectors().fluidPerTick()) == null;
   }
 
   private record EnergyDebit(RecipeExecutionTicket.PortSnapshot port, long amount) {
@@ -284,7 +324,7 @@ public final class FactoryRunResourceCommitter {
           || !FluidStack.isSameFluidSameComponents(port.fluid(), requirement)) {
         continue;
       }
-      int take = Math.min(remaining, port.fluid().getAmount());
+      int take = (int) Math.min(remaining, port.fluidAmount());
       if (take > 0) {
         result.add(new FluidDebit(port, requirement.copyWithAmount(take)));
         remaining -= take;

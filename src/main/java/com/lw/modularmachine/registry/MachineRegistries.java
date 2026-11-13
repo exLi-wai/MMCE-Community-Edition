@@ -6,6 +6,8 @@ import com.lw.modularmachine.block.MachineControllerBlock;
 import com.lw.modularmachine.block.MachineCasingBlock;
 import com.lw.modularmachine.block.MachinePortBlock;
 import com.lw.modularmachine.block.NetworkPortBlock;
+import com.lw.modularmachine.block.PatternProviderBlock;
+import com.lw.modularmachine.block.PatternMirrorBlock;
 import com.lw.modularmachine.block.ParallelControllerBlock;
 import com.lw.modularmachine.block.SmartInterfaceBlock;
 import com.lw.modularmachine.block.UpgradeBusBlock;
@@ -14,6 +16,8 @@ import com.lw.modularmachine.blockentity.MachineControllerBlockEntity;
 import com.lw.modularmachine.blockentity.MachineCasingBlockEntity;
 import com.lw.modularmachine.blockentity.MachinePortBlockEntity;
 import com.lw.modularmachine.blockentity.NetworkPortBlockEntity;
+import com.lw.modularmachine.blockentity.PatternProviderBlockEntity;
+import com.lw.modularmachine.blockentity.PatternMirrorBlockEntity;
 import com.lw.modularmachine.blockentity.ParallelControllerBlockEntity;
 import com.lw.modularmachine.blockentity.SmartInterfaceBlockEntity;
 import com.lw.modularmachine.blockentity.UpgradeBusBlockEntity;
@@ -24,6 +28,9 @@ import com.lw.modularmachine.item.MachineControllerItem;
 import com.lw.modularmachine.item.ControllerBlockItem;
 import com.lw.modularmachine.item.MachineWrenchItem;
 import com.lw.modularmachine.item.NetworkPortBlockItem;
+import com.lw.modularmachine.item.PatternProviderBlockItem;
+import com.lw.modularmachine.item.PatternMirrorBlockItem;
+import com.lw.modularmachine.util.Mods;
 import com.lw.modularmachine.item.ConfigurationCardItem;
 import com.lw.modularmachine.item.RangedConstructToolItem;
 import com.lw.modularmachine.machine.HatchTier;
@@ -38,6 +45,7 @@ import com.lw.modularmachine.menu.GroupInputMenu;
 import com.lw.modularmachine.menu.MachineControllerMenu;
 import com.lw.modularmachine.menu.MachinePortMenu;
 import com.lw.modularmachine.menu.NetworkPortMenu;
+import com.lw.modularmachine.menu.PatternProviderMenu;
 import com.lw.modularmachine.menu.MachineResourceMenu;
 import com.lw.modularmachine.menu.ParallelControllerMenu;
 import com.lw.modularmachine.menu.SmartInterfaceMenu;
@@ -99,7 +107,20 @@ public final class MachineRegistries {
   public static final DeferredBlock<SmartInterfaceBlock> SMART_INTERFACE = BLOCKS
       .register("smart_interface", () -> new SmartInterfaceBlock(properties().strength(3F, 10F)));
 
+  public static final DeferredBlock<PatternProviderBlock> ME_PATTERN_PROVIDER = Mods.AE2.isLoaded() ? BLOCKS
+      .register("me_pattern_provider", () -> new PatternProviderBlock(properties().strength(3F, 10F))) : null;
+  public static final DeferredBlock<PatternMirrorBlock> ME_PATTERN_MIRROR = Mods.AE2.isLoaded() ? BLOCKS
+      .register("me_pattern_mirror", () -> new PatternMirrorBlock(properties().strength(3F, 10F))) : null;
+
   static {
+    if (ME_PATTERN_PROVIDER != null) {
+      ITEMS.register(
+          "me_pattern_provider",
+          () -> new PatternProviderBlockItem(ME_PATTERN_PROVIDER.get(), new Item.Properties()));
+      ITEMS.register(
+          "me_pattern_mirror",
+          () -> new PatternMirrorBlockItem(ME_PATTERN_MIRROR.get(), new Item.Properties()));
+    }
     for (var machine : DedicatedControllerCatalog.machines()) {
       String path = "blueprint/" + machine.id().getNamespace() + "/" + machine.id().getPath();
       var blueprint = ITEMS.register(path, () -> new MachineBlueprintItem(new Item.Properties().stacksTo(16), machine));
@@ -166,6 +187,21 @@ public final class MachineRegistries {
       }
     }
   }
+
+  public static final DeferredHolder<BlockEntityType<?>, BlockEntityType<PatternProviderBlockEntity>> PATTERN_PROVIDER_ENTITY = BLOCK_ENTITIES
+      .register(
+          "pattern_provider",
+          () -> BlockEntityType.Builder.of(
+              PatternProviderBlockEntity::new,
+              ME_PATTERN_PROVIDER == null ? new Block[0] : new Block[]{ME_PATTERN_PROVIDER.get()}).build(null));
+  public static final DeferredHolder<BlockEntityType<?>, BlockEntityType<PatternMirrorBlockEntity>> PATTERN_MIRROR_ENTITY = BLOCK_ENTITIES
+      .register(
+          "pattern_mirror",
+          () -> BlockEntityType.Builder.of(
+              PatternMirrorBlockEntity::new,
+              ME_PATTERN_MIRROR == null ? new Block[0] : new Block[]{ME_PATTERN_MIRROR.get()}).build(null));
+  public static final DeferredHolder<MenuType<?>, MenuType<PatternProviderMenu>> PATTERN_PROVIDER_MENU = MENUS
+      .register("pattern_provider", () -> IMenuTypeExtension.create(PatternProviderMenu::fromNetwork));
 
   public static final DeferredHolder<BlockEntityType<?>, BlockEntityType<MachinePortBlockEntity>> PORT_ENTITY = BLOCK_ENTITIES
       .register(
@@ -257,6 +293,10 @@ public final class MachineRegistries {
             DEDICATED_CONTROLLERS.values().forEach(block -> output.accept(block.get()));
             DEDICATED_FACTORIES.values().forEach(block -> output.accept(block.get()));
             output.accept(SMART_INTERFACE.get());
+            if (ME_PATTERN_PROVIDER != null) {
+              output.accept(ME_PATTERN_PROVIDER.get());
+              output.accept(ME_PATTERN_MIRROR.get());
+            }
             PARALLEL_CONTROLLERS.values().forEach(block -> output.accept(block.get()));
             UPGRADE_BUSES.values().forEach(block -> output.accept(block.get()));
             output.accept(WRENCH.get());

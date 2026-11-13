@@ -151,7 +151,7 @@ public final class ItemRunEngine {
       invalidate();
       return status = Result.IDLE;
     }
-    if (!qualified(controller, run)) {
+    if (!qualified(controller, run) || !PatternRunSources.available(controller, run)) {
       work = null;
       return status = controller.canCommitProduction() ? Result.BINDING_CHANGED : Result.PAUSED;
     }
@@ -197,7 +197,10 @@ public final class ItemRunEngine {
           if (!run.matchesInputGroups(captured.orElseThrow())) {
             return status = Result.PAUSED;
           }
-          fluidTicket = captured.orElseThrow().withInputGroup(run.inputGroup());
+          fluidTicket = captured.orElseThrow().forRun(run).orElse(null);
+          if (fluidTicket == null) {
+            return status = Result.PAUSED;
+          }
           if (!RecipeResourceRequirements.has(fluidTicket, PortKind.FLUID_INPUT, run.selectors().fluidPerTick())) {
             return status = Result.MISSING_FLUID_INPUT;
           }
@@ -214,7 +217,10 @@ public final class ItemRunEngine {
           if (captured.isEmpty() || !run.matchesInputGroups(captured.orElseThrow())) {
             return status = Result.PAUSED;
           }
-          chemicalTicket = captured.orElseThrow().withInputGroup(run.inputGroup());
+          chemicalTicket = captured.orElseThrow().forRun(run).orElse(null);
+          if (chemicalTicket == null) {
+            return status = Result.PAUSED;
+          }
           if (ChemicalTransactions.missingInputs(chemicalTicket, run.chemicalPerTick())) {
             return status = Result.MISSING_CHEMICAL_INPUT;
           }
@@ -222,6 +228,15 @@ public final class ItemRunEngine {
           if (chemicals == null) {
             return status = applyResourceFailure(controller, run, now, Result.WAITING_CHEMICAL);
           }
+        }
+        var patterns = new PatternInputTransaction();
+        for (var debit : fluidDebits) {
+          if (debit.port().patternInput()) {
+            patterns.consumeFluid(debit.port(), debit.amount());
+          }
+        }
+        if (chemicals != null) {
+          chemicals.addPatterns(patterns);
         }
         var owner = controller.acquireRunUpdate(run);
         var energyLeases = new ArrayList<MachinePortBlockEntity.EnergyStartLease>();
@@ -239,6 +254,7 @@ public final class ItemRunEngine {
               || !tickCosts.versionsCurrent()) {
             return status = Result.PAUSED;
           }
+          patterns.acquire();
           tickCosts.acquireInto(tickCostLeases);
           if (chemicals != null) {
             chemicals.acquire();
@@ -252,11 +268,12 @@ public final class ItemRunEngine {
             }
           }
           for (var debit : fluidDebits) {
-            fluidLeases
-                .add(debit.port().identity().acquireFluidStart(debit.port().revision(), debit.port().tankIndex()));
-          }
-          for (int index = 0; index < fluidDebits.size(); index++) {
-            if (!fluidLeases.get(index).drainExact(fluidDebits.get(index).amount())) {
+            if (debit.port().patternInput()) {
+              continue;
+            }
+            var lease = debit.port().identity().acquireFluidStart(debit.port().revision(), debit.port().tankIndex());
+            fluidLeases.add(lease);
+            if (!lease.drainExact(debit.amount())) {
               return status = Result.STALE;
             }
           }
@@ -284,7 +301,9 @@ public final class ItemRunEngine {
           if (chemicals != null) {
             chemicals.resolve(commit);
           }
+          patterns.resolve(commit);
         }
+        patterns.publish();
         if (chemicals != null) {
           chemicals.publish();
         }
@@ -338,15 +357,24 @@ public final class ItemRunEngine {
       return Result.PAUSED;
     }
     if (decision == RecipeLifecycleEvents.FailureDecision.DISCARD) {
+      PatternInputTransaction patternRelease;
+      try {
+        patternRelease = PatternInputTransaction.release(controller, List.of(run));
+      } catch (RuntimeException unavailable) {
+        return Result.PAUSED;
+      }
       var owner = controller.acquireRunUpdate(run);
       boolean commit = false;
       try {
+        patternRelease.acquire();
         owner.installDiscard();
         commit = true;
       } finally {
         owner.resolve(commit);
+        patternRelease.resolve(commit);
       }
       if (commit) {
+        patternRelease.publish();
         RecipeLifecyclePublisher.resourceDiscarded(controller, run, resource);
         publishController(controller);
       }
@@ -385,10 +413,12 @@ public final class ItemRunEngine {
       return false;
     }
 
-    return planFluidDebits(
-        ticket.withInputGroup(run.inputGroup()),
-        run.fluidPerTick(controller.getLevel().registryAccess()),
-        run.selectors().fluidPerTick()) == null;
+    var source = ticket.forRun(run).orElse(null);
+    return source != null
+        && planFluidDebits(
+            source,
+            run.fluidPerTick(controller.getLevel().registryAccess()),
+            run.selectors().fluidPerTick()) == null;
   }
 
   private static List<EnergyDebit> planEnergyDebits(RecipeExecutionTicket ticket, long amount, String selector) {
@@ -422,7 +452,7 @@ public final class ItemRunEngine {
       if (!FluidStack.isSameFluidSameComponents(stored, required)) {
         continue;
       }
-      int amount = Math.min(remaining, stored.getAmount());
+      int amount = (int) Math.min(remaining, port.fluidAmount());
       if (amount > 0) {
         debits.add(new FluidDebit(port, required.copyWithAmount(amount)));
         remaining -= amount;
@@ -532,9 +562,16 @@ public final class ItemRunEngine {
     var fluidLeases = new HashMap<String, MachinePortBlockEntity.FluidStartLease>();
     var upgradeLeases = new ArrayList<StartCostLease>();
     var chemicals = ChemicalTransactions.outputs(checked.orElseThrow(), active.chemicalPlan.additions());
+    PatternInputTransaction patternRelease;
+    try {
+      patternRelease = PatternInputTransaction.release(controller, List.of(run));
+    } catch (RuntimeException unavailable) {
+      return Result.PAUSED;
+    }
     var owner = controller.acquireRunUpdate(run);
     boolean commit = false;
     try {
+      patternRelease.acquire();
       runtime.acquireInto(upgradeLeases);
       chemicals.acquire();
       for (var port : checked.orElseThrow().ports()) {
@@ -568,11 +605,13 @@ public final class ItemRunEngine {
       }
       owner.resolve(commit);
       chemicals.resolve(commit);
+      patternRelease.resolve(commit);
       if (commit) {
         work = null;
       }
     }
     controller.upgradeRuntimeWork().clear(Phase.FINISHED, "main");
+    patternRelease.publish();
     chemicals.publish();
     FactoryUpgradeStartCosts.publish(controller, upgradeLeases);
     publishController(controller);

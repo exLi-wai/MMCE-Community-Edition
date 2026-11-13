@@ -94,13 +94,16 @@ public final class AtomicRecipeStarter {
       ports.put(port.partId(), port);
     }
     for (var port : ports.values()) {
-      if (port.kind().resource() == PortKind.Resource.ITEM && port.identity().itemStartInProgress()) {
+      if (!port.patternInput()
+          && port.kind().resource() == PortKind.Resource.ITEM
+          && port.identity().itemStartInProgress()) {
         return Result.BUSY;
       }
     }
     var leases = new ArrayList<MachinePortBlockEntity.ItemStartLease>();
     var fluidLeases = new HashMap<String, MachinePortBlockEntity.FluidStartLease>();
     ChemicalTransactions.Batch chemicals = null;
+    var patterns = new PatternInputTransaction();
     var upgradeLeases = new ArrayList<UpgradeBusBlockEntity.StartCostLease>();
     boolean committed = false;
     var owner = controller.acquireRecipeStart();
@@ -134,6 +137,13 @@ public final class AtomicRecipeStarter {
         if (port == null || port.kind() != PortKind.ITEM_INPUT || !deductions.add(ref)) {
           return Result.STALE;
         }
+        if (port.patternInput()) {
+          if (!deduction.key().matches(port.items().get(deduction.slot().slot()))) {
+            return Result.STALE;
+          }
+          patterns.consumeItem(port, deduction.slot().slot(), deduction.count());
+          continue;
+        }
         var contents = replacements.computeIfAbsent(ref.partId(), ignored -> {
           var values = port.items();
           var copy = NonNullList.withSize(values.size(), ItemStack.EMPTY);
@@ -149,7 +159,7 @@ public final class AtomicRecipeStarter {
         if (!deduction.key().matches(before) || before.getCount() < deduction.count()) {
           return Result.STALE;
         }
-        contents.set(ref.slot(), before.copyWithCount(before.getCount() - deduction.count()));
+        contents.set(ref.slot(), before.copyWithCount(Math.toIntExact(before.getCount() - deduction.count())));
       }
       var fluidDebits = planFluidDebits(
           checked.orElseThrow(),
@@ -171,18 +181,27 @@ public final class AtomicRecipeStarter {
       // No external callbacks, codecs, equality predicates or world writes inside
       // this critical
       // section.
+      patterns.bindStart(checked.orElseThrow(), List.of(run));
+      for (var debit : fluidDebits) {
+        var port = ports.get(debit.partId());
+        if (port.patternInput()) {
+          patterns.consumeFluid(port, debit.amount());
+        }
+      }
+      chemicals.addPatterns(patterns);
+      patterns.acquire();
       startup.acquireInto(upgradeLeases);
       chemicals.acquire();
       for (var port : checked.orElseThrow().ports()) {
-        if (port.kind().resource() == PortKind.Resource.ITEM) {
+        if (!port.patternInput() && port.kind().resource() == PortKind.Resource.ITEM) {
           leases.add(port.identity().acquireItemStart(port.revision()));
-        } else if (port.kind() == PortKind.FLUID_INPUT && !fluidDebits.isEmpty()) {
+        } else if (!port.patternInput() && port.kind() == PortKind.FLUID_INPUT && !fluidDebits.isEmpty()) {
           fluidLeases.put(port.partId(), port.identity().acquireFluidStart(port.revision(), port.tankIndex()));
         }
       }
       int index = 0;
       for (var port : checked.orElseThrow().ports()) {
-        if (port.kind().resource() == PortKind.Resource.ITEM) {
+        if (!port.patternInput() && port.kind().resource() == PortKind.Resource.ITEM) {
           var replacement = replacements.get(port.partId());
           if (replacement != null) {
             leases.get(index).replacePrepared(replacement);
@@ -191,7 +210,7 @@ public final class AtomicRecipeStarter {
         }
       }
       for (var debit : fluidDebits) {
-        if (!fluidLeases.get(debit.partId()).drainExact(debit.amount())) {
+        if (!ports.get(debit.partId()).patternInput() && !fluidLeases.get(debit.partId()).drainExact(debit.amount())) {
           return Result.STALE;
         }
       }
@@ -202,6 +221,7 @@ public final class AtomicRecipeStarter {
           .warn("Recipe start aborted before resource commit at {}", controller.getBlockPos(), failure);
       return Result.FAILED;
     } finally {
+      patterns.resolve(committed);
       // A single decision governs every participant. Uncommitted swaps restore their
       // old backing
       // lists.
@@ -219,6 +239,7 @@ public final class AtomicRecipeStarter {
         chemicals.resolve(committed);
       }
     }
+    patterns.publish();
     chemicals.publish();
     FactoryUpgradeStartCosts.publish(controller, upgradeLeases);
     boolean warning = false;
@@ -252,7 +273,7 @@ public final class AtomicRecipeStarter {
   }
 
   private static List<FluidDebit> planFluidDebits(RecipeExecutionTicket ticket, List<FluidStack> requirements, String selector) {
-    var reserved = new HashMap<String, Integer>();
+    var reserved = new HashMap<String, Long>();
     var result = new ArrayList<FluidDebit>();
     for (var requirement : requirements) {
       int remaining = requirement.getAmount();
@@ -262,9 +283,9 @@ public final class AtomicRecipeStarter {
             || !FluidStack.isSameFluidSameComponents(port.fluid(), requirement)) {
           continue;
         }
-        int already = reserved.getOrDefault(port.partId(), 0);
-        int available = Math.max(0, port.fluid().getAmount() - already);
-        int amount = Math.min(remaining, available);
+        long already = reserved.getOrDefault(port.partId(), 0L);
+        long available = Math.max(0, port.fluidAmount() - already);
+        int amount = (int) Math.min(remaining, available);
         if (amount > 0) {
           reserved.put(port.partId(), already + amount);
           result.add(new FluidDebit(port.partId(), requirement.copyWithAmount(amount)));

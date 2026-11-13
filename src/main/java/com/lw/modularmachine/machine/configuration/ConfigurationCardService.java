@@ -4,6 +4,9 @@ import com.lw.modularmachine.ModularMachine;
 import com.lw.modularmachine.blockentity.FactoryControllerBlockEntity;
 import com.lw.modularmachine.blockentity.MachinePortBlockEntity;
 import com.lw.modularmachine.blockentity.ParallelControllerBlockEntity;
+import com.lw.modularmachine.blockentity.PatternProviderBlockEntity;
+import com.lw.modularmachine.blockentity.PatternMirrorBlockEntity;
+import com.lw.modularmachine.machine.network.pattern.PatternProviderReference;
 import com.lw.modularmachine.blockentity.SmartInterfaceBlockEntity;
 import com.lw.modularmachine.item.ConfigurationCardItem;
 import com.lw.modularmachine.machine.PortKind;
@@ -141,6 +144,12 @@ public final class ConfigurationCardService {
         return;
       }
       copied = ConfigurationCardData.factory(factory.machineId(), preset.get());
+    } else if (target instanceof PatternProviderBlockEntity provider && provider.canMutate()) {
+      copied = ConfigurationCardData.pattern(
+          new PatternProviderReference(
+              player.serverLevel().dimension().location(),
+              provider.getBlockPos(),
+              provider.providerId()));
     } else if (target instanceof ParallelControllerBlockEntity parallel && parallel.schemaSupported()) {
       copied = ConfigurationCardData.number(Kind.PARALLEL, parallel.parallelism());
     } else if (target instanceof MachinePortBlockEntity port && port.schemaSupported() && port.canGroupInput()) {
@@ -181,6 +190,13 @@ public final class ConfigurationCardService {
       }
       applied = result == FactoryControllerBlockEntity.ConfigurationResult.SUCCESS
           || result == FactoryControllerBlockEntity.ConfigurationResult.NO_CHANGE;
+    } else if (saved.kind() == Kind.PATTERN_PROVIDER && target instanceof PatternMirrorBlockEntity mirror) {
+      var reference = saved.patternTarget().orElseThrow();
+      if (!reference.dimension().equals(player.serverLevel().dimension().location())) {
+        message(player, "cross_dimension");
+        return;
+      }
+      applied = mirror.bind(player, mirror.bindingRevision(), reference);
     } else if (saved.kind() == Kind.PARALLEL && target instanceof ParallelControllerBlockEntity parallel) {
       if (saved.number() > parallel.maximum()) {
         message(player, "out_of_range");

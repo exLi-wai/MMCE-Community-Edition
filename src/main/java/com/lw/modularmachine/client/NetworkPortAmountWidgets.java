@@ -22,6 +22,11 @@ final class NetworkPortAmountWidgets {
   private NetworkPortAmountWidgets() {
   }
 
+  /** AE 19.2's encoded-pattern slot background, before the actual slot item. */
+  static void patternSlotBackground(GuiGraphics graphics, int x, int y) {
+    graphics.blit(ICONS, x, y, 240, 112, 16, 16, 256, 256);
+  }
+
   static Button gear(int x, int y, Runnable action) {
     var button = new Button(
         x,

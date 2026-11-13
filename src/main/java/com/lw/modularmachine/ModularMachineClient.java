@@ -102,6 +102,10 @@ public class ModularMachineClient {
     MachineRegistries.DEDICATED_FACTORIES.values().forEach(holder -> blocks.add(holder.get()));
     MachineRegistries.PORTS.values().forEach(holder -> blocks.add(holder.get()));
     MachineRegistries.NETWORK_PORTS.values().forEach(holder -> blocks.add(holder.get()));
+    if (MachineRegistries.ME_PATTERN_PROVIDER != null) {
+      blocks.add(MachineRegistries.ME_PATTERN_PROVIDER.get());
+      blocks.add(MachineRegistries.ME_PATTERN_MIRROR.get());
+    }
     MachineRegistries.CASINGS.values().forEach(holder -> blocks.add(holder.get()));
     MachineRegistries.PARALLEL_CONTROLLERS.values().forEach(holder -> blocks.add(holder.get()));
     MachineRegistries.UPGRADE_BUSES.values().forEach(holder -> blocks.add(holder.get()));
@@ -118,6 +122,10 @@ public class ModularMachineClient {
     MachineRegistries.DEDICATED_FACTORIES.values().forEach(holder -> items.add(holder.get().asItem()));
     MachineRegistries.PORTS.values().forEach(holder -> items.add(holder.get().asItem()));
     MachineRegistries.NETWORK_PORTS.values().forEach(holder -> items.add(holder.get().asItem()));
+    if (MachineRegistries.ME_PATTERN_PROVIDER != null) {
+      items.add(MachineRegistries.ME_PATTERN_PROVIDER.get().asItem());
+      items.add(MachineRegistries.ME_PATTERN_MIRROR.get().asItem());
+    }
     MachineRegistries.CASINGS.values().forEach(holder -> items.add(holder.get().asItem()));
     MachineRegistries.PARALLEL_CONTROLLERS.values().forEach(holder -> items.add(holder.get().asItem()));
     MachineRegistries.UPGRADE_BUSES.values().forEach(holder -> items.add(holder.get().asItem()));
@@ -167,6 +175,8 @@ public class ModularMachineClient {
         || block instanceof ParallelControllerBlock
         || block instanceof UpgradeBusBlock
         || block instanceof SmartInterfaceBlock
+        || MachineRegistries.ME_PATTERN_PROVIDER != null && block == MachineRegistries.ME_PATTERN_PROVIDER.get()
+        || MachineRegistries.ME_PATTERN_MIRROR != null && block == MachineRegistries.ME_PATTERN_MIRROR.get()
         || block instanceof MachineControllerBlock
         || block instanceof FactoryControllerBlock;
   }
@@ -213,6 +223,7 @@ public class ModularMachineClient {
   static void registerScreens(RegisterMenuScreensEvent event) {
     event.register(MachineRegistries.PORT_MENU.get(), MachinePortScreen::new);
     event.register(MachineRegistries.NETWORK_PORT_MENU.get(), NetworkPortScreen::new);
+    event.register(MachineRegistries.PATTERN_PROVIDER_MENU.get(), PatternProviderScreen::new);
     event.register(MachineRegistries.CONTROLLER_MENU.get(), MachineControllerScreen::new);
     event.register(MachineRegistries.RESOURCE_MENU.get(), MachineResourceScreen::new);
     event.register(MachineRegistries.FACTORY_CONTROLLER_MENU.get(), FactoryControllerScreen::new);
@@ -224,6 +235,7 @@ public class ModularMachineClient {
 
   static void SetClientReceiver() {
     NetworkPortPayloads.setClientReceiver(NetworkPortScreen::receive);
+    PatternProviderPayloads.setClientReceiver(PatternProviderScreen::receive);
     RangedSelectionPayloads.setReceiver(RangedSelectionClient::receive);
     RangedSelectionPayloads.setPreviewReceiver(RangedSelectionClient::receivePreview);
     ParallelControllerPayloads.setClientReceiver(payload -> {
