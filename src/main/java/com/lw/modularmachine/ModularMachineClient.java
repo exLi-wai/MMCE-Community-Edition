@@ -244,7 +244,7 @@ public class ModularMachineClient {
     event.register(MachineRegistries.GROUP_INPUT_MENU.get(), GroupInputScreen::new);
   }
 
-  static void setReceiver(){
+  static void setReceiver() {
     MachineJeiPayloads.setReceiver(ClientMachineJeiCatalog::receive);
     ProjectionPayloads.setReceiver(WorldProjection::receive);
     BlueprintPreviewPayloads.setReceiver(packet -> {
