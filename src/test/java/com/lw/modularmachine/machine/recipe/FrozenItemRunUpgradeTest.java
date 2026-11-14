@@ -1,6 +1,7 @@
 package com.lw.modularmachine.machine.recipe;
 
 import com.lw.modularmachine.api.upgrade.FactoryUpgradeSnapshot;
+import com.lw.modularmachine.machine.PortKind;
 import net.minecraft.nbt.CompoundTag;
 import org.junit.jupiter.api.Test;
 import static org.junit.jupiter.api.Assertions.assertEquals;
@@ -16,6 +17,8 @@ class FrozenItemRunUpgradeTest {
     fluid.putString("id", "minecraft:water");
     fluid.putInt("amount", 125);
     definition.put("fluid_per_tick", fluid);
+    FrozenItemRunTest.addPort(source, PortKind.ENERGY_INPUT);
+    FrozenItemRunTest.addPort(source, PortKind.FLUID_INPUT);
     var before = definition.copy();
     var upgrades = new FactoryUpgradeSnapshot(8, Integer.MAX_VALUE, 3, 2, 3, 2, 1, 2);
     var frozen = FrozenItemRun.applyFactoryUpgrades(definition, upgrades);

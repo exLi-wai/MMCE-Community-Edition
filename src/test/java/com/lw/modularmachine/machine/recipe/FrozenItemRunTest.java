@@ -20,7 +20,7 @@ class FrozenItemRunTest {
     return requirement;
   }
 
-  private static void addPort(CompoundTag source, PortKind kind) {
+  static void addPort(CompoundTag source, PortKind kind) {
     var port = new CompoundTag();
     port.putString("id", kind.name().toLowerCase(java.util.Locale.ROOT));
     port.putString("kind", kind.name());
