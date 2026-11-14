@@ -129,6 +129,7 @@
 
   "config.jade.plugin_mmcece.controller_status": "显示 MMCE 机械控制器状态",
   "config.jade.plugin_mmcece.factory_status": "显示 MMCE 工厂控制器状态",
+  "config.jade.plugin_mmcece.network_device_status": "显示 MMCE ME 设备状态",
 
   "direction.mmcece.down": "下",
   "direction.mmcece.east": "东",
@@ -363,6 +364,16 @@
   "jade.mmcece.owner": "所有者：%s",
   "jade.mmcece.owner.self": "你",
   "jade.mmcece.owner.unknown": "未知(UUID: %s)",
+  "jade.mmcece.network.online": "设备：在线",
+  "jade.mmcece.network.offline": "设备：离线（ME 网络未就绪）",
+  "jade.mmcece.network.unavailable": "设备：不可用（资源适配或数据异常）",
+  "jade.mmcece.network.mirror_online": "镜像：在线",
+  "jade.mmcece.network.mirror_offline": "镜像：离线",
+  "jade.mmcece.network.mirror_unbound": "镜像：未绑定供应器",
+  "jade.mmcece.network.mirror_unloaded": "镜像：离线（目标区块未加载）",
+  "jade.mmcece.network.mirror_invalid": "镜像：离线（供应器绑定已失效）",
+  "jade.mmcece.network.mirror_unavailable": "镜像：不可用（绑定数据异常）",
+  "jade.mmcece.network.target": "目标供应器：%s",
 
   "jei.mmcece.candidates": "可选方块",
   "jei.mmcece.details.dimensions": "尺寸 %s×%s×%s · 总计 %s 个方块",

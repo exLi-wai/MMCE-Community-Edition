@@ -129,6 +129,7 @@
 
   "config.jade.plugin_mmcece.controller_status": "Show MMCE controller status",
   "config.jade.plugin_mmcece.factory_status": "Show MMCE factory controller status",
+  "config.jade.plugin_mmcece.network_device_status": "Show MMCE ME device status",
 
   "direction.mmcece.down": "Down",
   "direction.mmcece.east": "East",
@@ -363,6 +364,16 @@
   "jade.mmcece.owner": "Owner: %s",
   "jade.mmcece.owner.self": "You",
   "jade.mmcece.owner.unknown": "Unknown(UUID: %s)",
+  "jade.mmcece.network.online": "Device: online",
+  "jade.mmcece.network.offline": "Device: offline (ME network not ready)",
+  "jade.mmcece.network.unavailable": "Device: unavailable (resource adapter or data error)",
+  "jade.mmcece.network.mirror_online": "Mirror: online",
+  "jade.mmcece.network.mirror_offline": "Mirror: offline",
+  "jade.mmcece.network.mirror_unbound": "Mirror: no provider bound",
+  "jade.mmcece.network.mirror_unloaded": "Mirror: offline (target chunk not loaded)",
+  "jade.mmcece.network.mirror_invalid": "Mirror: offline (provider binding invalid)",
+  "jade.mmcece.network.mirror_unavailable": "Mirror: unavailable (invalid binding data)",
+  "jade.mmcece.network.target": "Target provider: %s",
 
   "jei.mmcece.candidates": "Allowed Blocks",
   "jei.mmcece.details.dimensions": "Size %s×%s×%s · %s blocks total",

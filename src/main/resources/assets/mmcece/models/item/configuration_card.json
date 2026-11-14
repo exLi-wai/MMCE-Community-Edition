@@ -1,6 +1,6 @@
 {
   "parent": "minecraft:item/generated",
   "textures": {
-    "layer0": "mmcece:item/blueprint"
+    "layer0": "mmcece:item/configuration_card"
   }
 }
