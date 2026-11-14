@@ -61,6 +61,9 @@ public final class RecipeResourceRequirements {
     if (recipe.energyPerTick() > 0 && !has(PortKind.ENERGY_INPUT, recipe.selectors().energyInput())) {
       return Optional.of(PortKind.ENERGY_INPUT);
     }
+    if (recipe.energyOutputPerTick() > 0 && !has(PortKind.ENERGY_OUTPUT, recipe.selectors().energyOutput())) {
+      return Optional.of(PortKind.ENERGY_OUTPUT);
+    }
     if (!recipe.fluidPerTick().isEmpty() && !has(PortKind.FLUID_INPUT, recipe.selectors().fluidPerTick())) {
       return Optional.of(PortKind.FLUID_INPUT);
     }
@@ -91,6 +94,7 @@ public final class RecipeResourceRequirements {
       case ITEM_INPUT -> ItemRunEngine.Result.MISSING_ITEM_INPUT;
       case ITEM_OUTPUT -> ItemRunEngine.Result.MISSING_ITEM_OUTPUT;
       case ENERGY_INPUT -> ItemRunEngine.Result.MISSING_ENERGY_INPUT;
+      case ENERGY_OUTPUT -> ItemRunEngine.Result.MISSING_ENERGY_OUTPUT;
       case FLUID_INPUT -> ItemRunEngine.Result.MISSING_FLUID_INPUT;
       case FLUID_OUTPUT -> ItemRunEngine.Result.MISSING_FLUID_OUTPUT;
       case CHEMICAL_INPUT -> ItemRunEngine.Result.MISSING_CHEMICAL_INPUT;
@@ -104,6 +108,7 @@ public final class RecipeResourceRequirements {
       case ITEM_INPUT -> FactoryThreadState.Reason.MISSING_ITEM_INPUT;
       case ITEM_OUTPUT -> FactoryThreadState.Reason.MISSING_ITEM_OUTPUT;
       case ENERGY_INPUT -> FactoryThreadState.Reason.MISSING_ENERGY_INPUT;
+      case ENERGY_OUTPUT -> FactoryThreadState.Reason.MISSING_ENERGY_OUTPUT;
       case FLUID_INPUT -> FactoryThreadState.Reason.MISSING_FLUID_INPUT;
       case FLUID_OUTPUT -> FactoryThreadState.Reason.MISSING_FLUID_OUTPUT;
       case CHEMICAL_INPUT -> FactoryThreadState.Reason.MISSING_CHEMICAL_INPUT;

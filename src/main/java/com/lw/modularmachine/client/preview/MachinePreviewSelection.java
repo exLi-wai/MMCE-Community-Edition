@@ -48,12 +48,24 @@ public final class MachinePreviewSelection {
   }
 
   public MachinePreviewSelection(MachinePreviewDefinition definition, int color) {
+    this(definition, color, definition.segments().stream().mapToInt(segment -> segment.minimum()).toArray());
+  }
+
+  /** Seeds all desired lengths before creating the first incremental layout. */
+  public MachinePreviewSelection(MachinePreviewDefinition definition, int color, int[] initialLengths) {
     this.definition = definition;
     this.color = color;
-    lengths = definition.segments().stream().mapToInt(segment -> segment.minimum()).toArray();
+    if (initialLengths.length != definition.segments().size()) {
+      throw new IllegalArgumentException("Missing initial display lengths");
+    }
+    lengths = initialLengths.clone();
     included = new boolean[lengths.length + 1];
     Arrays.fill(included, true);
-    pending = new Build(definition.layout(lengths), included.length);
+    try {
+      pending = new Build(definition.layout(lengths), included.length);
+    } catch (IllegalArgumentException | ArithmeticException invalid) {
+      failed = true;
+    }
   }
 
   public int length(int segment) {
@@ -76,7 +88,7 @@ public final class MachinePreviewSelection {
       pending = build;
       failed = false;
       return true;
-    } catch (IllegalArgumentException invalid) {
+    } catch (IllegalArgumentException | ArithmeticException invalid) {
       return false;
     }
   }

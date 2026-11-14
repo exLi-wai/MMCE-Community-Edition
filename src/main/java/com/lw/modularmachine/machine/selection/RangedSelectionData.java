@@ -1,6 +1,12 @@
 package com.lw.modularmachine.machine.selection;
 
+import com.lw.modularmachine.api.orientation.MachineOrientation;
+import java.util.ArrayList;
+import java.util.HashSet;
+import java.util.LinkedHashMap;
 import java.util.List;
+import java.util.Locale;
+import java.util.Map;
 import java.util.Objects;
 import java.util.UUID;
 import net.minecraft.core.BlockPos;
@@ -8,6 +14,7 @@ import net.minecraft.core.Direction;
 import net.minecraft.network.chat.Component;
 import net.minecraft.resources.ResourceLocation;
 import org.jetbrains.annotations.ApiStatus;
+import org.jetbrains.annotations.Nullable;
 
 /** Internal detached messages for the existing ranged tool's editor. */
 @ApiStatus.Internal
@@ -103,6 +110,311 @@ public final class RangedSelectionData {
   public record Segment(Settings settings, Box body, Box start, Box end) {
     public Segment {
       Objects.requireNonNull(settings);
+    }
+  }
+
+  /**
+   * Internal immutable design shared by preview and future export. File options
+   * are draft text, not a loaded source or permission to write a file. An empty
+   * color inherits the global default; explicit colors use six uppercase digits.
+   */
+  @ApiStatus.Internal
+  public record Design(
+      String fileName,
+      boolean append,
+      String targetFile,
+      boolean deduplicate,
+      boolean includeAir,
+      @Nullable Box main,
+      List<Segment> segments,
+      List<String> keys,
+      @Nullable BlockPos controller,
+      MachineOrientation orientation,
+      Map<BlockPos, PartEdit> partEdits,
+      boolean requiresBlueprint,
+      boolean hasFactory,
+      boolean factoryOnly,
+      String color) {
+    public Design {
+      Objects.requireNonNull(fileName);
+      Objects.requireNonNull(targetFile);
+      Objects.requireNonNull(orientation);
+      Objects.requireNonNull(color);
+      if (!color.isEmpty() && !color.matches("[0-9a-fA-F]{6}")) {
+        throw new IllegalArgumentException("Selection color must be empty or six hexadecimal digits");
+      }
+      color = color.toUpperCase(Locale.ROOT);
+      controller = controller == null ? null : controller.immutable();
+      segments = List.copyOf(segments);
+      keys = List.copyOf(keys);
+      Objects.requireNonNull(partEdits);
+      if (segments.isEmpty()
+          || segments.size() > MAX_SEGMENTS
+          || keys.size() != segments.size()
+          || partEdits.size() > MAX_PART_EDITS) {
+        throw new IllegalArgumentException("Invalid selection design size");
+      }
+      var uniqueKeys = new HashSet<String>();
+      var normalized = new ArrayList<Segment>(segments.size());
+      try {
+        long volume = volume(main);
+        for (int index = 0; index < segments.size(); index++) {
+          String key = keys.get(index);
+          if (!key.matches("[a-zA-Z0-9_.-]{1,64}") || !uniqueKeys.add(key)) {
+            throw new IllegalArgumentException("Invalid or duplicate selection key");
+          }
+          var segment = segments.get(index);
+          normalized
+              .add(new Segment(designSettings(segment.settings()), segment.body(), segment.start(), segment.end()));
+          volume = Math.addExact(volume, volume(segment.body()));
+          volume = Math.addExact(volume, volume(segment.start()));
+          volume = Math.addExact(volume, volume(segment.end()));
+        }
+        if (volume > MAX_CAPTURE) {
+          throw new IllegalArgumentException("Selection exceeds the capture limit");
+        }
+      } catch (ArithmeticException oversized) {
+        throw new IllegalArgumentException("Selection exceeds the capture limit", oversized);
+      }
+      segments = List.copyOf(normalized);
+      var frozen = new LinkedHashMap<BlockPos, PartEdit>();
+      partEdits.forEach((position, edit) -> frozen.put(position.immutable(), Objects.requireNonNull(edit)));
+      partEdits = Map.copyOf(frozen);
+    }
+
+    public static Design defaults() {
+      var settings = new Settings(
+          "",
+          1,
+          1,
+          Direction.SOUTH,
+          0,
+          false,
+          new BlockPos(0, 0, 1),
+          false,
+          BlockPos.ZERO,
+          1,
+          "",
+          "");
+
+      return new Design(
+          "",
+          false,
+          "",
+          true,
+          false,
+          null,
+          List.of(new Segment(settings, null, null, null)),
+          List.of("selection_1"),
+          null,
+          MachineOrientation.IDENTITY,
+          Map.of(),
+          false,
+          false,
+          false,
+          "");
+    }
+
+    public Design withMain(@Nullable Box value) {
+      return new Design(
+          fileName,
+          append,
+          targetFile,
+          deduplicate,
+          includeAir,
+          value,
+          segments,
+          keys,
+          controller,
+          orientation,
+          partEdits,
+          requiresBlueprint,
+          hasFactory,
+          factoryOnly,
+          color);
+    }
+
+    public Design withSegments(List<Segment> values, List<String> nextKeys) {
+      return new Design(
+          fileName,
+          append,
+          targetFile,
+          deduplicate,
+          includeAir,
+          main,
+          values,
+          nextKeys,
+          controller,
+          orientation,
+          partEdits,
+          requiresBlueprint,
+          hasFactory,
+          factoryOnly,
+          color);
+    }
+
+    public Design withSettings(int index, Settings value) {
+      if (index < 0 || index >= segments.size()) {
+        throw new IllegalArgumentException("Invalid selection segment index");
+      }
+      var next = new ArrayList<>(segments);
+      var previous = next.get(index);
+      next.set(index, new Segment(value, previous.body(), previous.start(), previous.end()));
+
+      return withSegments(next, keys);
+    }
+
+    public Design withOptions(String nextFileName, boolean nextAppend, String nextTargetFile, boolean nextDeduplicate, boolean nextIncludeAir) {
+      return new Design(
+          nextFileName,
+          nextAppend,
+          nextTargetFile,
+          nextDeduplicate,
+          nextIncludeAir,
+          main,
+          segments,
+          keys,
+          controller,
+          orientation,
+          partEdits,
+          requiresBlueprint,
+          hasFactory,
+          factoryOnly,
+          color);
+    }
+
+    public Design withMachineFlags(boolean nextRequiresBlueprint, boolean nextHasFactory, boolean nextFactoryOnly) {
+      return new Design(
+          fileName,
+          append,
+          targetFile,
+          deduplicate,
+          includeAir,
+          main,
+          segments,
+          keys,
+          controller,
+          orientation,
+          partEdits,
+          nextRequiresBlueprint,
+          nextHasFactory,
+          nextFactoryOnly,
+          color);
+    }
+
+    public Design withColor(String nextColor) {
+      return new Design(
+          fileName,
+          append,
+          targetFile,
+          deduplicate,
+          includeAir,
+          main,
+          segments,
+          keys,
+          controller,
+          orientation,
+          partEdits,
+          requiresBlueprint,
+          hasFactory,
+          factoryOnly,
+          nextColor);
+    }
+
+    public Design withBasis(@Nullable BlockPos position, MachineOrientation nextOrientation) {
+      return new Design(
+          fileName,
+          append,
+          targetFile,
+          deduplicate,
+          includeAir,
+          main,
+          segments,
+          keys,
+          position,
+          nextOrientation,
+          partEdits,
+          requiresBlueprint,
+          hasFactory,
+          factoryOnly,
+          color);
+    }
+
+    public Design withPartEdit(BlockPos position, @Nullable PartEdit edit) {
+      var next = new LinkedHashMap<>(partEdits);
+      var key = Objects.requireNonNull(position).immutable();
+      if (edit == null || edit.empty()) {
+        next.remove(key);
+      } else {
+        next.put(key, edit);
+      }
+
+      return new Design(
+          fileName,
+          append,
+          targetFile,
+          deduplicate,
+          includeAir,
+          main,
+          segments,
+          keys,
+          controller,
+          orientation,
+          next,
+          requiresBlueprint,
+          hasFactory,
+          factoryOnly,
+          color);
+    }
+
+    public Design withoutPartEdits() {
+      if (partEdits.isEmpty()) {
+        return this;
+      }
+
+      return new Design(
+          fileName,
+          append,
+          targetFile,
+          deduplicate,
+          includeAir,
+          main,
+          segments,
+          keys,
+          controller,
+          orientation,
+          Map.of(),
+          requiresBlueprint,
+          hasFactory,
+          factoryOnly,
+          color);
+    }
+
+    private static Settings designSettings(Settings value) {
+      if (value.maximum() < 1) {
+        throw new IllegalArgumentException("A selection design needs at least one dynamic layer");
+      }
+      if (value.minimum() == 1) {
+        return value;
+      }
+
+      return new Settings(
+          value.id(),
+          1,
+          value.maximum(),
+          value.direction(),
+          value.gap(),
+          value.customStep(),
+          value.step(),
+          value.customOrigin(),
+          value.origin(),
+          value.sampleLength(),
+          value.selector(),
+          value.interfaceType());
+    }
+
+    private static long volume(@Nullable Box box) {
+      return box == null ? 0 : box.volume();
     }
   }
 

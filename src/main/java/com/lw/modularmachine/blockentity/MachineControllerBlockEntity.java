@@ -36,6 +36,8 @@ import com.lw.modularmachine.machine.recipe.ItemRunEngine;
 import com.lw.modularmachine.machine.recipe.search.RecipeResourceRequirements;
 import com.lw.modularmachine.machine.recipe.MachineRecipeService;
 import com.lw.modularmachine.machine.recipe.RecipeLifecyclePublisher;
+import com.lw.modularmachine.machine.controller.MachineEventPublisher;
+import com.lw.modularmachine.api.controller.MachineEvents;
 import com.lw.modularmachine.machine.recipe.search.RecipePlanner.Status;
 import com.lw.modularmachine.machine.smart.SmartInterfaceEventPublisher;
 import com.lw.modularmachine.machine.structure.FullScanReference;
@@ -824,15 +826,18 @@ public final class MachineControllerBlockEntity extends BlockEntity implements M
       throw new IllegalStateException("Controller tick outside server thread");
     }
     RecipeCommandService.schedule(this);
-    if (recipeStartInProgress()) {
+    if (recipeStartInProgress() || RecipeLifecyclePublisher.isDispatching()) {
       return;
     }
     try {
+      MachineEventPublisher.tick(this, MachineEvents.Type.MACHINE_PRE_TICK);
       transferredThisTick = false;
       tickController(server);
     } finally {
       refreshAppearanceState();
       RecipeLifecyclePublisher.machineTick(this);
+      MachineEventPublisher.tick(this, MachineEvents.Type.MACHINE_POST_TICK);
+      MachineEventPublisher.tick(this, MachineEvents.Type.MACHINE_TICK);
     }
   }
 
@@ -1009,6 +1014,11 @@ public final class MachineControllerBlockEntity extends BlockEntity implements M
     if (result == Result.STARTED) {
       recipeEngine.started();
       resetRecipeRetry(server.getGameTime());
+    }
+    if (result == Result.CHECK_REJECTED && recipeSearch.rejectSelected(preparedRecipe)) {
+      preparedRecipe = null;
+      resetRecipeRetry(server.getGameTime());
+      return;
     }
     if (result != Result.BUSY) {
       recipeSearch = null;

@@ -7,6 +7,7 @@ public enum Mods {
   APPMEK("appmek"),
   MEKANISM("mekanism"),
   GTM("gtceu"),
+  GECKOLIB("geckolib"),
   JEC("jecharacters");
 
   public final String modid;

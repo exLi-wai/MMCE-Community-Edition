@@ -13,9 +13,15 @@ public record RecipeAdapterImport(
     boolean allRecipes,
     int duration,
     long energyPerTick,
-    int priority) {
+    int priority,
+    RecipeAdapterCustomization customization) {
+  public RecipeAdapterImport(String id, ResourceLocation adapter, List<ResourceLocation> recipes, boolean allRecipes, int duration, long energyPerTick, int priority) {
+    this(id, adapter, recipes, allRecipes, duration, energyPerTick, priority, RecipeAdapterCustomization.NONE);
+  }
+
   public RecipeAdapterImport {
     Objects.requireNonNull(adapter, "adapter");
+    Objects.requireNonNull(customization, "customization");
     recipes = List.copyOf(new LinkedHashSet<>(Objects.requireNonNull(recipes, "recipes")));
     if (id == null || !id.matches("[a-zA-Z0-9_.-]{1,64}") || duration < 0 || energyPerTick < 0) {
       throw new IllegalArgumentException("Invalid recipe adapter import");

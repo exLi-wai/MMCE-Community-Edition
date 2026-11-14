@@ -28,6 +28,7 @@ public final class MachineItemRecipeKubeJSSources {
   }
 
   public static synchronized void capture(Map<ResourceLocation, JsonElement> recipes) {
+    KubeJSRecipeItemCallbacks.begin();
     captured = recipes;
     var originals = new LinkedHashMap<ResourceLocation, JsonElement>();
     for (var entry : recipes.entrySet()) {
@@ -66,6 +67,7 @@ public final class MachineItemRecipeKubeJSSources {
   }
 
   public static synchronized void clear() {
+    KubeJSRecipeItemCallbacks.end();
     captured = Map.of();
     originalMachineRecipes = Map.of();
   }
@@ -100,21 +102,23 @@ public final class MachineItemRecipeKubeJSSources {
         if (!row.isJsonObject()) {
           continue;
         }
-        var stack = row.getAsJsonObject().get("stack");
-        if (stack == null || !stack.isJsonObject()) {
-          continue;
-        }
-        var prototype = stack.getAsJsonObject();
-        var count = prototype.get("count");
-        if (count == null || !count.isJsonPrimitive() || !count.getAsJsonPrimitive().isNumber()) {
-          continue;
-        }
-        try {
-          if (count.getAsBigDecimal().compareTo(BigDecimal.ONE) == 0) {
-            prototype.remove("count");
+        for (String prototypeField : List.of("stack", "preview_stack")) {
+          var stack = row.getAsJsonObject().get(prototypeField);
+          if (stack == null || !stack.isJsonObject()) {
+            continue;
           }
-        } catch (NumberFormatException ignored) {
-          // Leave the malformed value for MachineRecipeJson.validate to report.
+          var prototype = stack.getAsJsonObject();
+          var count = prototype.get("count");
+          if (count == null || !count.isJsonPrimitive() || !count.getAsJsonPrimitive().isNumber()) {
+            continue;
+          }
+          try {
+            if (count.getAsBigDecimal().compareTo(BigDecimal.ONE) == 0) {
+              prototype.remove("count");
+            }
+          } catch (NumberFormatException ignored) {
+            // Leave the malformed value for MachineRecipeJson.validate to report.
+          }
         }
       }
     }

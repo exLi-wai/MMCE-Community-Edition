@@ -1,5 +1,7 @@
 package com.lw.modularmachine;
 
+import com.lw.modularmachine.client.controller.ControllerClientPublisher;
+import com.lw.modularmachine.integration.kubejs.KubeJSControllerClientBridge;
 import com.lw.modularmachine.machine.orientation.ControllerPlacementData;
 import net.minecraft.world.level.block.state.BlockState;
 import net.minecraft.world.item.component.CustomData;
@@ -14,6 +16,7 @@ import com.lw.modularmachine.client.preview.BlueprintPreviewScreen;
 import com.lw.modularmachine.client.preview.PreviewBlockView;
 import com.lw.modularmachine.client.preview.WorldProjection;
 import com.lw.modularmachine.client.selection.RangedSelectionClient;
+import com.lw.modularmachine.machine.selection.RangedConstructToolActions;
 import com.lw.modularmachine.block.FactoryControllerBlock;
 import com.lw.modularmachine.block.MachineCasingBlock;
 import com.lw.modularmachine.block.MachineControllerBlock;
@@ -56,6 +59,11 @@ import net.neoforged.neoforge.client.event.ModelEvent;
 import net.neoforged.neoforge.client.gui.ConfigurationScreen;
 import net.neoforged.neoforge.client.gui.IConfigScreenFactory;
 import java.util.ArrayList;
+import com.lw.modularmachine.menu.MachineControllerMenu;
+import com.lw.modularmachine.menu.FactoryControllerMenu;
+import net.neoforged.neoforge.client.event.EntityRenderersEvent;
+import com.lw.modularmachine.util.Mods;
+import com.lw.modularmachine.client.controller.ControllerGeoRenderer;
 
 @Mod(value = ModularMachine.MODID, dist = Dist.CLIENT)
 @EventBusSubscriber(modid = ModularMachine.MODID, value = Dist.CLIENT)
@@ -63,16 +71,11 @@ public class ModularMachineClient {
   public ModularMachineClient(ModContainer container) {
     container.registerConfig(ModConfig.Type.CLIENT, MachineClientConfig.SPEC, "modularmachinery/mmcece-client.toml");
     container.registerExtensionPoint(IConfigScreenFactory.class, ConfigurationScreen::new);
-    MachineJeiPayloads.setReceiver(ClientMachineJeiCatalog::receive);
-    ProjectionPayloads.setReceiver(WorldProjection::receive);
-    MachineColorPayloads.setClientReceiver(ModularMachineClient::receiveMachineColor);
-    MachineVisibilityPayloads.setClientReceiver(MachineVisibilityClient::receive);
-    MachinePayloads.setClientReceiver(MachineControllerStatusClient::receive);
     MachinePayloads.setResourceClientReceiver(MachineControllerStatusClient::receiveResource);
     MachinePayloads.setFactoryClientReceiver(MachineControllerStatusClient::receiveFactory);
-    UpgradeBusPayloads.setClientReceiver(MachineControllerStatusClient::receiveUpgradeBus);
     ModularMachineClient.SetClientReceiver();
     ModularMachineClient.SetClientOpener();
+    ModularMachineClient.setReceiver();
   }
 
   @SubscribeEvent
@@ -81,11 +84,19 @@ public class ModularMachineClient {
       CachedPreviewRenderer.invalidateAll();
       WorldProjection.invalidateMeshes();
       MachineVisibilityClient.invalidateMeshes();
+      ControllerClientPublisher.invalidate();
     });
   }
   @SubscribeEvent
   static void onClientSetup(FMLClientSetupEvent event) {
     event.enqueueWork(MachineVisibilityClient::initializeModels);
+  }
+
+  @SubscribeEvent
+  static void registerControllerRenderers(EntityRenderersEvent.RegisterRenderers event) {
+    if (Mods.GECKOLIB.isLoaded()) {
+      ControllerGeoRenderer.register(event);
+    }
   }
 
   @SubscribeEvent
@@ -233,11 +244,24 @@ public class ModularMachineClient {
     event.register(MachineRegistries.GROUP_INPUT_MENU.get(), GroupInputScreen::new);
   }
 
+  static void setReceiver(){
+    MachineJeiPayloads.setReceiver(ClientMachineJeiCatalog::receive);
+    ProjectionPayloads.setReceiver(WorldProjection::receive);
+    BlueprintPreviewPayloads.setReceiver(packet -> {
+      if (Minecraft.getInstance().screen instanceof BlueprintPreviewScreen screen) {
+        screen.receive(packet);
+      }
+    });
+  }
+
   static void SetClientReceiver() {
+    MachineColorPayloads.setClientReceiver(ModularMachineClient::receiveMachineColor);
+    MachineVisibilityPayloads.setClientReceiver(MachineVisibilityClient::receive);
+    MachinePayloads.setClientReceiver(MachineControllerStatusClient::receive);
     NetworkPortPayloads.setClientReceiver(NetworkPortScreen::receive);
     PatternProviderPayloads.setClientReceiver(PatternProviderScreen::receive);
-    RangedSelectionPayloads.setReceiver(RangedSelectionClient::receive);
-    RangedSelectionPayloads.setPreviewReceiver(RangedSelectionClient::receivePreview);
+    KubeJSControllerClientBridge.setInstaller(ControllerClientPublisher::install);
+    UpgradeBusPayloads.setClientReceiver(MachineControllerStatusClient::receiveUpgradeBus);
     ParallelControllerPayloads.setClientReceiver(payload -> {
       var player = Minecraft.getInstance().player;
       if (player != null && player.containerMenu instanceof ParallelControllerMenu menu) {
@@ -256,14 +280,21 @@ public class ModularMachineClient {
         menu.acceptStatus(payload);
       }
     });
-    BlueprintPreviewPayloads.setReceiver(packet -> {
-      if (Minecraft.getInstance().screen instanceof BlueprintPreviewScreen screen) {
-        screen.receive(packet);
+    ControllerGuiDataPayloads.setClientReceiver(update -> {
+      var player = Minecraft.getInstance().player;
+      if (player == null) {
+        return;
+      }
+      if (player.containerMenu instanceof MachineControllerMenu menu) {
+        menu.acceptGuiData(update);
+      } else if (player.containerMenu instanceof FactoryControllerMenu menu) {
+        menu.acceptGuiData(update);
       }
     });
   }
 
   static void SetClientOpener() {
+    RangedConstructToolActions.setClientUse(RangedSelectionClient::use);
     BlueprintPreviewActions.setClientOpener(
         (machine, hand) -> Minecraft.getInstance().setScreen(new BlueprintPreviewScreen(machine, hand)));
   }

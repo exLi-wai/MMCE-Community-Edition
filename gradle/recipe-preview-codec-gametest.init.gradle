@@ -1,0 +1,33 @@
+// Isolated regression for optional preview stacks in the registered recipe codec.
+allprojects {
+    afterEvaluate {
+        if (extensions.findByName('neoForge') != null) {
+            def runtimeMods = [
+                'mezz.jei:jei-1.21.1-neoforge',
+                'dev.latvian.mods:rhino',
+                'curse.maven:applied-energistics-2-223794',
+                'curse.maven:guideme-1173950',
+                'curse.maven:mek-268560',
+                'curse.maven:appmek-574300'
+            ] as Set
+            configurations.named('localRuntime') {
+                withDependencies { dependencies ->
+                    dependencies.removeAll { dependency -> !runtimeMods.contains(dependency.group + ':' + dependency.name) }
+                }
+            }
+            neoForge.runs.named('gameTestServer') {
+                gameDirectory = project.file('build/gametest-recipe-preview-codec')
+                systemProperty 'neoforge.enabledGameTestNamespaces', 'mmcece_recipe_codec'
+                logLevel = org.slf4j.event.Level.INFO
+            }
+            def fixtures = tasks.register('prepareRecipePreviewCodecFixtures', Copy) {
+                from project.file('src/gameTest/resources/data/mmcece/mmcece/machines')
+                into project.file('build/gametest-recipe-preview-codec/config/modularmachinery/machinery')
+                include '**/*.json'
+            }
+            tasks.named('runGameTestServer') {
+                dependsOn fixtures
+            }
+        }
+    }
+}

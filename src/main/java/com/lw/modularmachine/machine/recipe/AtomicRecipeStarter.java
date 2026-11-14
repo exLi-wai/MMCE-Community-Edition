@@ -19,6 +19,7 @@ import net.minecraft.core.NonNullList;
 import net.minecraft.resources.ResourceLocation;
 import net.minecraft.world.item.ItemStack;
 import net.neoforged.neoforge.fluids.FluidStack;
+import java.util.Optional;
 
 /**
  * Main-thread in-memory atomicity for owned item buses plus the controller's
@@ -34,6 +35,7 @@ public final class AtomicRecipeStarter {
     ALREADY_RUNNING,
     BUSY,
     STALE,
+    CHECK_REJECTED,
     UNMANAGED_RECIPE,
     FAILED
   }
@@ -55,6 +57,9 @@ public final class AtomicRecipeStarter {
     if (nativeRecipe.isEmpty()) {
       return Result.UNMANAGED_RECIPE;
     }
+    if (!nativeRecipe.orElseThrow().executionOptions().threadName().isEmpty()) {
+      return Result.STALE;
+    }
     if (!plan.validateForStart()) {
       return Result.STALE;
     }
@@ -63,6 +68,7 @@ public final class AtomicRecipeStarter {
     }
     int budget = MachineConfig.RECIPE_OUTPUT_WORK.get();
     var checks = plan.advanceFactoryChecks(controller, "main", budget);
+    budget -= checks.workUsed();
     if (checks.status() == UpgradeRecipeChecks.Status.PENDING) {
       return Result.BUSY;
     }
@@ -73,12 +79,21 @@ public final class AtomicRecipeStarter {
     if (limit < 1) {
       return Result.STALE;
     }
-    int instances = plan.prepareParallel(nativeRecipe.orElseThrow(), limit, budget);
+    int instances;
+    try {
+      instances = plan.prepareParallel(nativeRecipe.orElseThrow(), limit, budget);
+      budget = plan.parallelBudgetRemaining();
+    } catch (UpgradeRecipeChecks.StaleException stale) {
+      return Result.STALE;
+    } catch (RuntimeException failed) {
+      ModularMachine.LOGGER.warn("Recipe output preparation failed at {}", controller.getBlockPos(), failed);
+      return Result.FAILED;
+    }
     if (instances < 0) {
       return Result.BUSY;
     }
     if (instances == 0) {
-      return Result.STALE;
+      return plan.modifiedOutputsRejected() ? Result.CHECK_REJECTED : Result.STALE;
     }
     var startup = plan.prepareFactoryStartup(controller, "main", instances);
     var startupResult = startup.advance(budget);
@@ -117,17 +132,36 @@ public final class AtomicRecipeStarter {
       // Payload codecs/allocations, predicates and potentially reentrant work precede
       // inventory
       // leases.
-      var run = FrozenItemRun.freeze(
-          ResourceLocation.parse(plan.recipe().id()),
-          nativeRecipe.orElseThrow(),
-          plan.source().definitionEpoch(),
-          controller.getLevel().registryAccess(),
-          effectivePlan.source().allPorts(),
-          controller.getLevel().getGameTime(),
-          plan.source().ordinaryUpgrades(),
-          effectivePlan.source().inputGroup(),
-          instances,
-          effectivePlan.source().dynamicLengths());
+      var preparedRuns = plan.preparedOutputRuns(instances);
+      var run = !preparedRuns.isEmpty() ? preparedRuns.getFirst()
+          .atStartTick(controller.getLevel().getGameTime()) : FrozenItemRun.freeze(
+              ResourceLocation.parse(plan.recipe().id()),
+              nativeRecipe.orElseThrow(),
+              plan.source().definitionEpoch(),
+              controller.getLevel().registryAccess(),
+              effectivePlan.source().allPorts(),
+              controller.getLevel().getGameTime(),
+              plan.source().ordinaryUpgrades(),
+              effectivePlan.source().inputGroup(),
+              instances,
+              effectivePlan.source().dynamicLengths(),
+              RecipeItemPreparation.context(
+                  checked.orElseThrow(),
+                  ResourceLocation.parse(plan.recipe().id()),
+                  Optional.empty(),
+                  instances));
+      var inputCheck = RecipeItemPreparation
+          .checkInputs(nativeRecipe.orElseThrow(), checked.orElseThrow(), Optional.empty(), instances, run);
+      if (inputCheck != RecipeItemCallbackService.InputCheck.ALLOWED) {
+        if (!plan.factoryAdmissionCurrent(controller, "main") || !startup.current() || !plan.catalog().isCurrent()) {
+          return Result.STALE;
+        }
+        return switch (inputCheck) {
+          case REJECTED -> Result.CHECK_REJECTED;
+          case ERROR -> Result.FAILED;
+          default -> Result.STALE;
+        };
+      }
       startedRun = run;
       Map<String, NonNullList<ItemStack>> replacements = new HashMap<>();
       var deductions = new HashSet<ItemSlotRef>();
@@ -163,8 +197,19 @@ public final class AtomicRecipeStarter {
       }
       var fluidDebits = planFluidDebits(
           checked.orElseThrow(),
-          nativeRecipe.orElseThrow().fluidInputs().stream()
-              .map(fluid -> fluid.copyWithAmount(Math.multiplyExact(fluid.getAmount(), instances))).toList(),
+          nativeRecipe.orElseThrow().fluidInputRequirements().stream()
+              .map(
+                  requirement -> requirement.stack().copyWithAmount(
+                      requirement.parallelUnaffected() ? requirement.stack().getAmount() : Math
+                          .multiplyExact(requirement.stack().getAmount(), instances)))
+              .toList(),
+          nativeRecipe.orElseThrow().selectors().fluidInput());
+      if (fluidDebits == null) {
+        return Result.STALE;
+      }
+      fluidDebits = planFluidDebits(
+          checked.orElseThrow(),
+          run.fluidInputClaims(controller.getLevel().registryAccess()),
           nativeRecipe.orElseThrow().selectors().fluidInput());
       if (fluidDebits == null) {
         return Result.STALE;
@@ -175,7 +220,10 @@ public final class AtomicRecipeStarter {
       if (chemicals == null) {
         return Result.STALE;
       }
-      if (!plan.factoryAdmissionCurrent(controller, "main") || !startup.current()) {
+      if (!plan.factoryAdmissionCurrent(controller, "main")
+          || !startup.current()
+          || !plan.preparedOutputsCurrent(instances)
+          || !run.preparedItemCallbacksCurrent()) {
         return Result.STALE;
       }
       // No external callbacks, codecs, equality predicates or world writes inside
@@ -192,6 +240,9 @@ public final class AtomicRecipeStarter {
       patterns.acquire();
       startup.acquireInto(upgradeLeases);
       chemicals.acquire();
+      if (!run.preparedItemCallbacksCurrent()) {
+        return Result.STALE;
+      }
       for (var port : checked.orElseThrow().ports()) {
         if (!port.patternInput() && port.kind().resource() == PortKind.Resource.ITEM) {
           leases.add(port.identity().acquireItemStart(port.revision()));

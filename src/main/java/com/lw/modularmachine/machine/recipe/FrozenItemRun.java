@@ -5,6 +5,8 @@ import com.lw.modularmachine.api.recipe.RecipeSelectors;
 import com.lw.modularmachine.api.recipe.RecipeFailureAction;
 import com.lw.modularmachine.api.recipe.ChemicalRecipeData;
 import com.lw.modularmachine.api.recipe.ChemicalRequirement;
+import com.lw.modularmachine.api.recipe.RecipeExecutionOptions;
+import com.lw.modularmachine.api.recipe.RecipeItemCallbacks;
 import com.google.gson.JsonObject;
 import com.lw.modularmachine.machine.PortKind;
 import com.lw.modularmachine.api.upgrade.FactoryUpgradeSnapshot;
@@ -60,12 +62,18 @@ public final class FrozenItemRun {
       "outputs",
       "fluid_outputs",
       "last_progress_tick",
-      "random_seed");
+      "random_seed",
+      "item_callback_epoch",
+      "energy_output_progress");
   private final CompoundTag data;
   private final UUID runId;
   private final ResourceLocation machineId, recipeId;
   private final int schema, duration, progress;
   private final long energyPerTick;
+  private final long energyOutputPerTick;
+  private final int energyOutputProgress;
+  private final RecipeExecutionOptions executionOptions;
+  private final long itemCallbackEpoch;
   private final RecipeFailureAction failureAction;
   private final long randomSeed;
   private final CompoundTag fluidPerTickData;
@@ -107,6 +115,11 @@ public final class FrozenItemRun {
       throw new IllegalArgumentException("Invalid or future run header");
     }
     schema = source.getInt("schema");
+    if (source.contains("item_callback_epoch")
+        && (!source.contains("item_callback_epoch", Tag.TAG_LONG) || source.getLong("item_callback_epoch") < 0)) {
+      throw new IllegalArgumentException("Invalid prepared item callback epoch");
+    }
+    itemCallbackEpoch = source.contains("item_callback_epoch") ? source.getLong("item_callback_epoch") : -1;
     if (source.contains("dynamic_lengths") && !source.contains("dynamic_lengths", Tag.TAG_COMPOUND)) {
       throw new IllegalArgumentException("Invalid frozen dynamic lengths");
     }
@@ -222,10 +235,11 @@ public final class FrozenItemRun {
         || definition.getByte("parallelized") > 1) {
       throw new IllegalArgumentException("Frozen recipe is missing resolved defaults");
     }
-    if (definition.contains("modifiers")) {
+    if (definition.contains("modifiers") || definition.contains("item_callbacks")) {
       throw new IllegalArgumentException("Frozen recipe contains unresolved modifiers");
     }
     var declaration = NbtOps.INSTANCE.convertTo(JsonOps.INSTANCE, definition).getAsJsonObject();
+    MachineRecipeJson.restoreRowBooleans(declaration, definition);
     declaration.addProperty("parallelized", definition.getBoolean("parallelized"));
     var header = MachineRecipeJson.validate(declaration);
     selectors = header.selectors();
@@ -238,6 +252,19 @@ public final class FrozenItemRun {
       throw new IllegalArgumentException("Run/definition mismatch");
     }
     energyPerTick = header.energyPerTick();
+    energyOutputPerTick = header.energyOutputPerTick();
+    if (energyOutputPerTick > 0 && !source.contains("energy_output_progress", Tag.TAG_INT)
+        || source.contains("energy_output_progress") && !source.contains("energy_output_progress", Tag.TAG_INT)) {
+      throw new IllegalArgumentException("Missing or invalid energy output progress");
+    }
+    energyOutputProgress = source.getInt("energy_output_progress");
+    if (energyOutputProgress < 0
+        || energyOutputProgress > duration
+        || energyOutputPerTick > 0 && energyOutputProgress < progress
+        || energyOutputPerTick == 0 && energyOutputProgress != 0) {
+      throw new IllegalArgumentException("Invalid energy output progress");
+    }
+    executionOptions = RecipeExecutionOptions.CODEC.parse(JsonOps.INSTANCE, declaration).getOrThrow();
     failureAction = RecipeFailureAction.parse(header.failureAction());
     randomSeed = source.getLong("random_seed");
     if (header.hasFluidPerTick()) {
@@ -254,8 +281,11 @@ public final class FrozenItemRun {
               .equals(source.getList("outputs", Tag.TAG_COMPOUND))
           || definition.contains("fluid_outputs")
               && (!source.contains("fluid_outputs", Tag.TAG_LIST)
-                  || !definition.getList("fluid_outputs", Tag.TAG_COMPOUND)
-                      .equals(source.getList("fluid_outputs", Tag.TAG_COMPOUND)))
+                  || !sampledFluids(
+                      definition.getList("fluid_outputs", Tag.TAG_COMPOUND),
+                      randomSeed,
+                      parallelInstances,
+                      false).equals(source.getList("fluid_outputs", Tag.TAG_COMPOUND)))
           || !definition.contains("fluid_outputs") && source.contains("fluid_outputs")) {
         throw new IllegalArgumentException("Pending output is not the frozen recipe result");
       }
@@ -274,6 +304,10 @@ public final class FrozenItemRun {
     recipeId = before.recipeId;
     duration = before.duration;
     energyPerTick = before.energyPerTick;
+    energyOutputPerTick = before.energyOutputPerTick;
+    energyOutputProgress = energyOutputPerTick > 0 ? Math.max(before.energyOutputProgress, progress) : 0;
+    executionOptions = before.executionOptions;
+    itemCallbackEpoch = before.itemCallbackEpoch;
     failureAction = before.failureAction;
     randomSeed = before.randomSeed;
     fluidPerTickData = before.fluidPerTickData;
@@ -320,6 +354,21 @@ public final class FrozenItemRun {
   }
 
   static FrozenItemRun freeze(ResourceLocation recipeId, MachineRecipe recipe, long epoch, HolderLookup.Provider registries, List<RecipeExecutionTicket.PortSnapshot> ports, long tick, FactoryUpgradeSnapshot upgrades, int inputGroup, int parallelInstances, Map<String, Integer> dynamicLengths) {
+    return freeze(
+        recipeId,
+        recipe,
+        epoch,
+        registries,
+        ports,
+        tick,
+        upgrades,
+        inputGroup,
+        parallelInstances,
+        dynamicLengths,
+        null);
+  }
+
+  static FrozenItemRun freeze(ResourceLocation recipeId, MachineRecipe recipe, long epoch, HolderLookup.Provider registries, List<RecipeExecutionTicket.PortSnapshot> ports, long tick, FactoryUpgradeSnapshot upgrades, int inputGroup, int parallelInstances, Map<String, Integer> dynamicLengths, RecipeItemCallbacks.Context callbackContext) {
     var encodedDefinition = Recipe.CODEC.encodeStart(registries.createSerializationContext(NbtOps.INSTANCE), recipe)
         .getOrThrow();
     if (!(encodedDefinition instanceof CompoundTag)) {
@@ -327,6 +376,23 @@ public final class FrozenItemRun {
     }
     var definition = applyFactoryUpgrades((CompoundTag) encodedDefinition, upgrades);
     scaleDefinition(definition, parallelInstances);
+    long callbackEpoch = -1;
+    if (!recipe.scriptOptions().itemCallbacks().isEmpty()) {
+      if (callbackContext == null) {
+        throw new IllegalArgumentException("Item callback recipes require a prepared controller context");
+      }
+      var declaration = NbtOps.INSTANCE.convertTo(JsonOps.INSTANCE, definition).getAsJsonObject();
+      MachineRecipeJson.restoreRowBooleans(declaration, definition);
+      declaration.addProperty("parallelized", definition.getBoolean("parallelized"));
+      var prepared = RecipeItemCallbackService
+          .prepareOutputs(declaration, recipe.scriptOptions(), callbackContext, registries)
+          .orElseThrow(() -> new IllegalStateException("Item callback preparation rejected the recipe"));
+      var parsed = MachineRecipe.CODEC.codec()
+          .parse(registries.createSerializationContext(JsonOps.INSTANCE), prepared.declaration()).getOrThrow();
+      definition = (CompoundTag) Recipe.CODEC
+          .encodeStart(registries.createSerializationContext(NbtOps.INSTANCE), parsed).getOrThrow();
+      callbackEpoch = prepared.epoch();
+    }
     int duration = definition.getInt("duration");
     var tag = new CompoundTag();
     UUID runId = UUID.randomUUID();
@@ -339,10 +405,16 @@ public final class FrozenItemRun {
     tag.putString("recipe", recipeId.toString());
     tag.putInt("duration", duration);
     tag.putInt("progress", 0);
+    if (recipe.energyOutputPerTick() > 0) {
+      tag.putInt("energy_output_progress", 0);
+    }
     tag.putString("state", "RUNNING");
     tag.putLong("last_progress_tick", tick);
     tag.putBoolean("inputs_committed", true);
     tag.putLong("definition_epoch", epoch);
+    if (callbackEpoch >= 0) {
+      tag.putLong("item_callback_epoch", callbackEpoch);
+    }
     long seed = recipe.randomSeed() == 0 ? (runId.getMostSignificantBits() ^ runId
         .getLeastSignificantBits()) & Long.MAX_VALUE : recipe.randomSeed();
     tag.putLong("random_seed", seed);
@@ -426,6 +498,27 @@ public final class FrozenItemRun {
     return energyPerTick;
   }
 
+  public long energyOutputPerTick() {
+    return energyOutputPerTick;
+  }
+
+  /** Already emitted positions remain paid through RESET/DECREASE and reload. */
+  long nextEnergyOutput() {
+    return state == State.RUNNING && progress < duration && progress >= energyOutputProgress ? energyOutputPerTick : 0;
+  }
+
+  public RecipeExecutionOptions executionOptions() {
+    return executionOptions;
+  }
+
+  long preparedItemCallbackEpoch() {
+    return itemCallbackEpoch;
+  }
+
+  boolean preparedItemCallbacksCurrent() {
+    return itemCallbackEpoch < 0 || RecipeItemCallbackService.isCurrent(itemCallbackEpoch);
+  }
+
   public RecipeFailureAction failureAction() {
     return failureAction;
   }
@@ -464,6 +557,21 @@ public final class FrozenItemRun {
     chemicals.inputs().forEach(value -> requirePort(PortKind.CHEMICAL_INPUT, value.selector()));
     chemicals.perTick().forEach(value -> requirePort(PortKind.CHEMICAL_INPUT, value.selector()));
     chemicals.outputs().forEach(value -> requirePort(PortKind.CHEMICAL_OUTPUT, value.selector()));
+    if (declaration.has("fluid_inputs")) {
+      requirePort(PortKind.FLUID_INPUT, selectors.fluidInput());
+    }
+    if (declaration.has("fluid_outputs")) {
+      requirePort(PortKind.FLUID_OUTPUT, selectors.fluidOutput());
+    }
+    if (declaration.has("fluid_per_tick")) {
+      requirePort(PortKind.FLUID_INPUT, selectors.fluidPerTick());
+    }
+    if (declaration.has("energy_per_tick") && declaration.get("energy_per_tick").getAsLong() > 0) {
+      requirePort(PortKind.ENERGY_INPUT, selectors.energyInput());
+    }
+    if (declaration.has("energy_output_per_tick") && declaration.get("energy_output_per_tick").getAsLong() > 0) {
+      requirePort(PortKind.ENERGY_OUTPUT, selectors.energyOutput());
+    }
   }
 
   private void requirePort(PortKind kind, String selector) {
@@ -525,6 +633,11 @@ public final class FrozenItemRun {
     if (definition.contains("energy_per_tick", Tag.TAG_ANY_NUMERIC)) {
       definition.putLong("energy_per_tick", Math.multiplyExact(definition.getLong("energy_per_tick"), instances));
     }
+    if (definition.contains("energy_output_per_tick", Tag.TAG_ANY_NUMERIC)) {
+      definition.putLong(
+          "energy_output_per_tick",
+          Math.multiplyExact(definition.getLong("energy_output_per_tick"), instances));
+    }
     scaleRows(definition, "inputs", instances);
     scaleRows(definition, "fluid_inputs", instances);
     scaleRows(definition, "fluid_outputs", instances);
@@ -547,6 +660,9 @@ public final class FrozenItemRun {
     var rows = definition.getList(field, Tag.TAG_COMPOUND);
     for (int index = 0; index < rows.size(); index++) {
       var row = rows.getCompound(index);
+      if (row.getBoolean("parallel_unaffected")) {
+        continue;
+      }
       long amount = Math.multiplyExact(row.getLong("amount"), instances);
       if (field.startsWith("fluid_")) {
         row.putInt("amount", Math.toIntExact(amount));
@@ -642,9 +758,18 @@ public final class FrozenItemRun {
             parallelInstances));
     pending.putString("state", State.OUTPUT_PENDING.name());
     pending.putInt("progress", progress);
+    if (energyOutputPerTick > 0) {
+      pending.putInt("energy_output_progress", energyOutputProgress);
+    }
     pending.putLong("last_progress_tick", lastProgressTick);
     if (data.getCompound("definition").contains("fluid_outputs")) {
-      pending.put("fluid_outputs", data.getCompound("definition").getList("fluid_outputs", Tag.TAG_COMPOUND).copy());
+      pending.put(
+          "fluid_outputs",
+          sampledFluids(
+              data.getCompound("definition").getList("fluid_outputs", Tag.TAG_COMPOUND),
+              randomSeed,
+              parallelInstances,
+              false));
     }
     return read(pending);
   }
@@ -687,11 +812,57 @@ public final class FrozenItemRun {
     return List.copyOf(result);
   }
 
+  /**
+   * Capacity checks use prepared guaranteed outputs; probabilistic rows stay
+   * completion-only.
+   */
+  List<RecipeCandidate.Output<ItemResourceKey>> startOutputClaims(HolderLookup.Provider registries) {
+    var result = new ArrayList<RecipeCandidate.Output<ItemResourceKey>>();
+    for (var entry : startOutputRows()) {
+      var row = (CompoundTag) entry;
+      var stack = ItemStack.SINGLE_ITEM_CODEC
+          .parse(registries.createSerializationContext(NbtOps.INSTANCE), row.getCompound("stack")).getOrThrow();
+      result.add(
+          new RecipeCandidate.Output<>(
+              ItemResourceKey.of(stack, registries).withSelector(row.getString("selector")),
+              row.getLong("amount")));
+    }
+    return List.copyOf(result);
+  }
+
+  ListTag startOutputRows() {
+    var result = new ListTag();
+    for (var entry : data.getCompound("definition").getList("outputs", Tag.TAG_COMPOUND)) {
+      var row = (CompoundTag) entry;
+      if (row.contains("chance") && row.getDouble("chance") != 1) {
+        continue;
+      }
+      var claim = row.copy();
+      claim.putLong(
+          "amount",
+          Math.multiplyExact(row.getLong("amount"), row.getBoolean("parallel_unaffected") ? 1 : parallelInstances));
+      claim.remove("chance");
+      claim.remove("parallel_unaffected");
+      result.add(claim);
+    }
+    return result;
+  }
+
+  /**
+   * Final unpaid tick stamp; output callbacks and random identity are not rerun.
+   */
+  FrozenItemRun atStartTick(long tick) {
+    if (progress != 0 || pendingOutput()) {
+      throw new IllegalStateException("Only an unpaid prepared run can be stamped for start");
+    }
+    return new FrozenItemRun(this, 0, State.RUNNING, tick);
+  }
+
   public List<FluidStack> fluidOutputClaims(HolderLookup.Provider registries) {
     if (!pendingOutput()) {
       throw new IllegalStateException("Outputs have not been generated");
     }
-    var rows = data.getCompound("definition").getList("fluid_outputs", Tag.TAG_COMPOUND);
+    var rows = data.getList("fluid_outputs", Tag.TAG_COMPOUND);
     var result = new ArrayList<FluidStack>();
     for (int i = 0; i < rows.size(); i++) {
       result.add(
@@ -701,10 +872,32 @@ public final class FrozenItemRun {
     return List.copyOf(result);
   }
 
+  /**
+   * The original full demand remains frozen; only the one-time consumed quantity
+   * is sampled.
+   */
+  List<FluidStack> fluidInputClaims(HolderLookup.Provider registries) {
+    var rows = sampledFluids(
+        data.getCompound("definition").getList("fluid_inputs", Tag.TAG_COMPOUND),
+        randomSeed,
+        parallelInstances,
+        true);
+    var result = new ArrayList<FluidStack>();
+    for (int index = 0; index < rows.size(); index++) {
+      result.add(
+          FluidStack.CODEC.parse(registries.createSerializationContext(NbtOps.INSTANCE), rows.getCompound(index))
+              .getOrThrow());
+    }
+    return List.copyOf(result);
+  }
+
   public CompoundTag save() {
     var saved = data.copy();
     saved.putInt("schema", schema);
     saved.putInt("progress", progress);
+    if (energyOutputPerTick > 0) {
+      saved.putInt("energy_output_progress", energyOutputProgress);
+    }
     saved.putString("state", state.name());
     saved.putLong("last_progress_tick", lastProgressTick);
     if (pendingOutput()) {
@@ -713,7 +906,13 @@ public final class FrozenItemRun {
           data.contains("outputs") ? data.getList("outputs", Tag.TAG_COMPOUND).copy() : data.getCompound("definition")
               .getList("outputs", Tag.TAG_COMPOUND).copy());
       if (data.getCompound("definition").contains("fluid_outputs")) {
-        saved.put("fluid_outputs", data.getCompound("definition").getList("fluid_outputs", Tag.TAG_COMPOUND).copy());
+        saved.put(
+            "fluid_outputs",
+            sampledFluids(
+                data.getCompound("definition").getList("fluid_outputs", Tag.TAG_COMPOUND),
+                randomSeed,
+                parallelInstances,
+                false));
       }
     } else {
       saved.remove("outputs");
@@ -732,9 +931,10 @@ public final class FrozenItemRun {
     for (int i = 0; i < source.size(); i++) {
       var row = source.getCompound(i);
       double chance = row.contains("chance", Tag.TAG_DOUBLE) ? row.getDouble("chance") : 1.0D;
-      long successes = chance >= 1 ? instances : 0;
+      int attempts = row.getBoolean("parallel_unaffected") ? 1 : instances;
+      long successes = chance >= 1 ? attempts : 0;
       if (chance > 0 && chance < 1) {
-        for (int attempt = 0; attempt < instances; attempt++) {
+        for (int attempt = 0; attempt < attempts; attempt++) {
           if (random.nextDouble() < chance) {
             successes++;
           }
@@ -746,6 +946,38 @@ public final class FrozenItemRun {
       var copy = row.copy();
       copy.putLong("amount", Math.multiplyExact(row.getLong("amount"), successes));
       copy.remove("chance");
+      copy.remove("parallel_unaffected");
+      result.add(copy);
+    }
+    return result;
+  }
+
+  private static ListTag sampledFluids(ListTag source, long seed, int instances, boolean input) {
+    var random = new Random(seed ^ (input ? 0x52AA06AB184ECB22L : 0x73BFE15FD01F13B7L));
+    var result = new ListTag();
+    for (int index = 0; index < source.size(); index++) {
+      var row = source.getCompound(index);
+      double chance = row.contains("chance", Tag.TAG_ANY_NUMERIC) ? row.getDouble("chance") : 1;
+      int attempts = row.getBoolean("parallel_unaffected") ? 1 : instances;
+      int successes = chance >= 1 ? attempts : 0;
+      if (chance > 0 && chance < 1) {
+        for (int attempt = 0; attempt < attempts; attempt++) {
+          if (random.nextDouble() < chance) {
+            successes++;
+          }
+        }
+      }
+      if (successes == 0) {
+        continue;
+      }
+      int fullAmount = row.getInt("amount");
+      if (fullAmount % attempts != 0) {
+        throw new IllegalArgumentException("Frozen fluid quantity is not an exact per-instance demand");
+      }
+      var copy = row.copy();
+      copy.putInt("amount", Math.multiplyExact(fullAmount / attempts, successes));
+      copy.remove("chance");
+      copy.remove("parallel_unaffected");
       result.add(copy);
     }
     return result;

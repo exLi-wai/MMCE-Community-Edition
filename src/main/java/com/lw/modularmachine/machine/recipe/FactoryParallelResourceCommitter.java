@@ -35,6 +35,8 @@ public final class FactoryParallelResourceCommitter {
     STALE,
     UPGRADE_PENDING,
     MISSING_ENERGY_INPUT,
+    MISSING_ENERGY_OUTPUT,
+    OUTPUT_BLOCKED,
     MISSING_FLUID_INPUT,
     MISSING_CHEMICAL_INPUT
   }
@@ -85,6 +87,14 @@ public final class FactoryParallelResourceCommitter {
     }
     if (tickCosts.status() != FactoryUpgradeTickCosts.Status.READY) {
       return Result.UPGRADE_ERROR;
+    }
+    var energyOutputs = EnergyOutputTransactions.prepare(factory, activeRuns);
+    if (energyOutputs.status() != EnergyOutputTransactions.Status.READY) {
+      return switch (energyOutputs.status()) {
+        case MISSING_PORT -> Result.MISSING_ENERGY_OUTPUT;
+        case BLOCKED -> Result.OUTPUT_BLOCKED;
+        default -> Result.STALE;
+      };
     }
     var energyRequirements = new LinkedHashMap<String, Long>();
     var fluidRequirements = new LinkedHashMap<FrozenItemRun, FluidStack>();
@@ -172,6 +182,7 @@ public final class FactoryParallelResourceCommitter {
       }
     }
     if (!tickCosts.current()
+        || !energyOutputs.current()
         || energyTicket == null && fluidTicket == null && !factory.revalidateStructure(factory.registration())
         || energyTicket != null && !RecipeCommitGuard.validate(energyTicket)
         || fluidTicket != null && !RecipeCommitGuard.validate(fluidTicket)
@@ -207,6 +218,7 @@ public final class FactoryParallelResourceCommitter {
           return Result.STALE;
         }
       }
+      energyOutputs.acquire();
       for (var debit : fluidDebits) {
         if (debit.port().patternInput()) {
           continue;
@@ -241,6 +253,7 @@ public final class FactoryParallelResourceCommitter {
       ModularMachine.LOGGER.warn("Parallel factory fee commit failed at {}", factory.getBlockPos(), failure);
       return Result.STALE;
     } finally {
+      energyOutputs.resolve(committed);
       for (var lease : energyLeases) {
         lease.resolve(committed);
       }
@@ -255,6 +268,7 @@ public final class FactoryParallelResourceCommitter {
       }
       patterns.resolve(committed);
       if (committed) {
+        energyOutputs.publish();
         patterns.publish();
         if (chemicals != null) {
           chemicals.publish();

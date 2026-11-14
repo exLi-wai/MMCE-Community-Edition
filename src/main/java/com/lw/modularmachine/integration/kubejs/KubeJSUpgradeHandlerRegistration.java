@@ -16,8 +16,8 @@ import dev.latvian.mods.kubejs.event.KubeEvent;
 public final class KubeJSUpgradeHandlerRegistration implements KubeEvent {
   private final FactoryUpgradeKubeJSHandlers.Registration handlers = FactoryUpgradeKubeJSHandlers.registration();
 
-  public FactoryUpgradeKubeJSHandlers.FixedUpgradeBuilder fixedUpgrade(String id, String item) {
-    return handlers.fixedUpgrade(id, item);
+  public FactoryUpgradeKubeJSHandlers.FixedUpgradeBuilder fixedUpgrade(String item, String id) {
+    return handlers.fixedUpgrade(item, id);
   }
 
   public void runtimeData(String id, FactoryUpgradeRuntimeData.Preparer handler) {

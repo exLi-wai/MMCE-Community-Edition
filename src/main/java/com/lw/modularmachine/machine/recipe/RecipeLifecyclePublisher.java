@@ -6,6 +6,7 @@ import com.lw.modularmachine.blockentity.FactoryControllerBlockEntity;
 import com.lw.modularmachine.blockentity.MachineControllerBlockEntity;
 import com.lw.modularmachine.machine.controller.ControllerOwnershipService;
 import com.lw.modularmachine.machine.controller.ControllerOwnershipSubject;
+import com.lw.modularmachine.machine.controller.MachineEventPublisher;
 import com.lw.modularmachine.machine.recipe.command.RecipeCommandService;
 import com.lw.modularmachine.machine.structure.StructureService;
 import com.lw.modularmachine.machine.structure.VerificationFailure;
@@ -13,6 +14,8 @@ import com.lw.modularmachine.machine.structure.VerificationState;
 import com.lw.modularmachine.util.callback.ServerCallbackRegistry;
 import com.lw.modularmachine.util.thread.ServerThreadGuard;
 import java.util.EnumMap;
+import java.util.ArrayList;
+import java.util.Comparator;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
@@ -49,6 +52,9 @@ public final class RecipeLifecyclePublisher {
 
   private static final ServerCallbackRegistry<Handler> HANDLERS = new ServerCallbackRegistry<>(() -> {
   });
+  private static final ResourceLocation DECLARED_OBSERVER_ID = ResourceLocation
+      .fromNamespaceAndPath("mmcece", "internal/declared_recipe_observer");
+  private static Handler declaredObserver;
   private static final ServerCallbackRegistry<FailurePolicy> FAILURE_POLICIES = new ServerCallbackRegistry<>(() -> {
   });
   private static final Map<Type, List<Map.Entry<ResourceLocation, Handler>>> DELIVERIES = new EnumMap<>(Type.class);
@@ -66,6 +72,9 @@ public final class RecipeLifecyclePublisher {
 
   public static void register(ResourceLocation id, Set<Type> types, Listener listener) {
     ServerCallbackRegistry.requireServer();
+    if (DECLARED_OBSERVER_ID.equals(id)) {
+      throw new IllegalArgumentException("Reserved internal recipe observer identity");
+    }
     var replacement = new Handler(types, listener);
     var previous = HANDLERS.find(id);
     if (previous != null && previous.listener() == listener && previous.types().equals(replacement.types())) {
@@ -107,10 +116,29 @@ public final class RecipeLifecyclePublisher {
 
   private static void rebuildDeliveries() {
     for (var type : Type.values()) {
-      DELIVERIES.put(
-          type,
+      var deliveries = new ArrayList<>(
           HANDLERS.orderedSnapshot().stream().filter(entry -> entry.getValue().types().contains(type)).toList());
+      if (declaredObserver != null && declaredObserver.types().contains(type)) {
+        deliveries.add(Map.entry(DECLARED_OBSERVER_ID, declaredObserver));
+      }
+      deliveries.sort(Comparator.comparing(entry -> entry.getKey().toString()));
+      DELIVERIES.put(type, List.copyOf(deliveries));
     }
+  }
+
+  /**
+   * Internal reserved slot, installed with a validated recipe declaration
+   * generation.
+   */
+  public static void installDeclaredObserver(Set<Type> types, Listener listener) {
+    ServerCallbackRegistry.requireServer();
+    declaredObserver = listener == null ? null : new Handler(types, listener);
+    REPORTED_FAILURES.remove(DECLARED_OBSERVER_ID);
+    rebuildDeliveries();
+  }
+
+  private static Handler handler(ResourceLocation id) {
+    return DECLARED_OBSERVER_ID.equals(id) ? declaredObserver : HANDLERS.find(id);
   }
 
   public static boolean hasListeners(Type type) {
@@ -125,11 +153,13 @@ public final class RecipeLifecyclePublisher {
   }
 
   public static boolean isDispatching() {
-    return activeOwner != null;
+    return activeOwner != null || MachineEventPublisher.isDispatching() || RecipeItemCallbackService.isPreparing();
   }
 
   public static boolean isDispatching(StructureService.StructureSubject controller) {
-    return activeOwner != null && activeOwner == controller;
+    return activeOwner != null && activeOwner == controller
+        || MachineEventPublisher.isDispatching(controller)
+        || RecipeItemCallbackService.isPreparing();
   }
 
   public static void started(MachineControllerBlockEntity owner, FrozenItemRun run) {
@@ -305,7 +335,7 @@ public final class RecipeLifecyclePublisher {
             delivery.getValue().listener().onEvent(context);
           } catch (RuntimeException error) {
             var listener = delivery.getValue().listener();
-            if (HANDLERS.find(delivery.getKey()) == delivery.getValue()
+            if (handler(delivery.getKey()) == delivery.getValue()
                 && REPORTED_FAILURES.get(delivery.getKey()) != listener) {
               REPORTED_FAILURES.put(delivery.getKey(), listener);
               ModularMachine.LOGGER.warn(
@@ -339,7 +369,10 @@ public final class RecipeLifecyclePublisher {
 
   @SubscribeEvent
   public static void stopped(ServerStoppedEvent event) {
+    MachineEventPublisher.clear();
+    RecipeItemCallbackService.clear();
     HANDLERS.clear();
+    declaredObserver = null;
     FAILURE_POLICIES.clear();
     DELIVERIES.clear();
     REPORTED_FAILURES.clear();

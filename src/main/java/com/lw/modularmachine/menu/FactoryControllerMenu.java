@@ -2,6 +2,7 @@ package com.lw.modularmachine.menu;
 
 import com.lw.modularmachine.blockentity.FactoryControllerBlockEntity;
 import com.lw.modularmachine.network.MachinePayloads;
+import com.lw.modularmachine.network.ControllerGuiDataPayloads;
 import com.lw.modularmachine.registry.MachineRegistries;
 import net.minecraft.network.FriendlyByteBuf;
 import net.minecraft.resources.ResourceLocation;
@@ -15,6 +16,22 @@ public final class FactoryControllerMenu extends ControllerBlueprintMenu {
   private final Player viewer;
   private MachinePayloads.FactoryStatusPayload status;
   private MachinePayloads.FactoryStatusPayload lastSentStatus;
+  private String guiCustomData = "{}";
+  private String lastSentGuiData;
+
+  public String guiCustomData() {
+    return guiCustomData;
+  }
+
+  public void acceptGuiData(ControllerGuiDataPayloads.Update update) {
+    if (update.containerId() == containerId
+        && factory.getLevel() != null
+        && update.dimension().equals(factory.getLevel().dimension().location())
+        && update.position().equals(factory.getBlockPos())
+        && update.machine().equals(factory.machineId())) {
+      guiCustomData = update.customData();
+    }
+  }
 
   public FactoryControllerMenu(int id, Inventory inventory, FriendlyByteBuf data) {
     this(id, inventory, requireFactory(inventory, data));
@@ -121,6 +138,18 @@ public final class FactoryControllerMenu extends ControllerBlueprintMenu {
     if (!current.equals(lastSentStatus)) {
       lastSentStatus = current;
       PacketDistributor.sendToPlayer(serverPlayer, current);
+    }
+    String data = factory.scriptStateAvailable() ? factory.scriptState().snapshot().customData() : "{}";
+    if (!data.equals(lastSentGuiData)) {
+      lastSentGuiData = data;
+      PacketDistributor.sendToPlayer(
+          serverPlayer,
+          new ControllerGuiDataPayloads.Update(
+              containerId,
+              factory.getLevel().dimension().location(),
+              factory.getBlockPos(),
+              factory.machineId(),
+              data));
     }
   }
 }

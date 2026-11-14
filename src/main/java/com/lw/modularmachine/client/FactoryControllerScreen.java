@@ -27,6 +27,7 @@ import net.minecraft.world.entity.player.Inventory;
 import net.minecraft.world.item.ItemStack;
 import net.minecraft.world.item.crafting.RecipeHolder;
 import org.lwjgl.glfw.GLFW;
+import com.lw.modularmachine.client.controller.ControllerClientPublisher;
 
 public final class FactoryControllerScreen extends AbstractContainerScreen<FactoryControllerMenu> {
   private static final ResourceLocation FACTORY_TEXTURE = ResourceLocation
@@ -608,6 +609,8 @@ public final class FactoryControllerScreen extends AbstractContainerScreen<Facto
     }
     ControllerStatusLabels
         .drawPerformance(graphics, font, infoX, infoY, status.averageTickMicros(), status.averageSearchMicros());
+    ControllerClientPublisher
+        .drawGui(menu.factory(), menu.guiCustomData(), graphics, font, infoX, infoY + 25, 187, (int) (247 / .72F));
     graphics.pose().popPose();
   }
 

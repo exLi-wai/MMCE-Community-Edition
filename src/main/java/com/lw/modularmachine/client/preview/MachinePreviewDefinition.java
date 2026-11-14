@@ -5,11 +5,13 @@ import com.lw.modularmachine.network.MachineJeiPayloads;
 import com.lw.modularmachine.network.MachineJeiPayloads.Part;
 import com.lw.modularmachine.network.MachineJeiPayloads.Segment;
 import java.util.AbstractList;
+import java.util.ArrayList;
 import java.util.HashSet;
 import java.util.List;
 import java.util.Objects;
 import java.util.RandomAccess;
 import org.jetbrains.annotations.ApiStatus;
+import net.minecraft.core.BlockPos;
 
 /**
  * Internal immutable display templates. They confer no world or production
@@ -24,10 +26,34 @@ public final class MachinePreviewDefinition {
   private final Layout minimum;
 
   public MachinePreviewDefinition(List<Part> declarations, int fixed, List<Segment> segments) {
+    this(declarations, fixed, segments, false);
+  }
+
+  /**
+   * Read-only world captures may contain only a dynamic group or no solid blocks.
+   */
+  public static MachinePreviewDefinition captured(List<Part> main, List<Part> dynamic) {
+    var parts = new ArrayList<Part>(main.size() + dynamic.size());
+    parts.addAll(main);
+    parts.addAll(dynamic);
+    var segments = dynamic.isEmpty() ? List.<Segment>of() : List
+        .of(new Segment("selection", 1, 1, BlockPos.ZERO, new BlockPos(0, 0, 1), 0, dynamic.size(), 0));
+
+    return new MachinePreviewDefinition(parts, main.size(), segments, true);
+  }
+
+  /**
+   * Captured drafts may have no controller/fixed parts and multiple templates.
+   */
+  public static MachinePreviewDefinition captured(List<Part> declarations, int fixed, List<Segment> segments) {
+    return new MachinePreviewDefinition(declarations, fixed, segments, true);
+  }
+
+  private MachinePreviewDefinition(List<Part> declarations, int fixed, List<Segment> segments, boolean captured) {
     this.declarations = List.copyOf(declarations);
     this.segments = List.copyOf(segments);
     this.fixed = fixed;
-    if (fixed < 1 || fixed > declarations.size() || segments.size() > 64) {
+    if (fixed < (captured ? 0 : 1) || fixed > declarations.size() || segments.size() > 64) {
       throw new IllegalArgumentException("Invalid display template size");
     }
     templateStarts = new int[segments.size()];

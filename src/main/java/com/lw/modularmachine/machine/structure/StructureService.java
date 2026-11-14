@@ -13,6 +13,7 @@ import com.lw.modularmachine.blockentity.SmartInterfaceBlockEntity;
 import com.lw.modularmachine.config.MachineConfig;
 import com.lw.modularmachine.api.orientation.MachineOrientation;
 import com.lw.modularmachine.machine.recipe.RecipeLifecyclePublisher;
+import com.lw.modularmachine.machine.controller.MachineEventPublisher;
 import com.lw.modularmachine.api.recipe.RecipeModifier;
 import com.lw.modularmachine.machine.smart.SmartInterfaceAssignment;
 import com.lw.modularmachine.machine.smart.SmartInterfaceEventPublisher;
@@ -775,6 +776,7 @@ public final class StructureService {
       registration.visibility.active(registration.canCommit(level));
     }
     refreshAppearance(anchor.controller);
+    MachineEventPublisher.observeStructure(anchor.controller);
     return used;
   }
 

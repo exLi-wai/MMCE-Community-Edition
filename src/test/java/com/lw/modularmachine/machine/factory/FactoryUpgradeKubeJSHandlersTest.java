@@ -9,7 +9,7 @@ class FactoryUpgradeKubeJSHandlersTest {
   @Test
   void fixedUpgradeBuilderIsCapturedInTheScriptSnapshot() {
     var registration = FactoryUpgradeKubeJSHandlers.registration();
-    registration.fixedUpgrade("kubejs:test_parallel", "minecraft:amethyst_shard").parallelAdd(2)
+    registration.fixedUpgrade("minecraft:amethyst_shard", "kubejs:test_parallel").parallelAdd(2)
         .component("minecraft:custom_name", "Test upgrade").componentNumber("minecraft:damage", 4)
         .componentBoolean("minecraft:unbreakable", true);
 
@@ -21,7 +21,7 @@ class FactoryUpgradeKubeJSHandlersTest {
   @Test
   void fixedUpgradeRejectsNonKubeJsIdentifiers() {
     var registration = FactoryUpgradeKubeJSHandlers.registration();
-    registration.fixedUpgrade("example:test_parallel", "minecraft:amethyst_shard");
+    registration.fixedUpgrade("minecraft:amethyst_shard", "example:test_parallel");
 
     assertFalse(registration.valid());
     assertTrue(registration.snapshot().definitions().isEmpty());

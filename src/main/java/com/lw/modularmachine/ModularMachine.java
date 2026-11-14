@@ -22,8 +22,6 @@ import com.lw.modularmachine.network.GroupInputPayloads;
 import com.lw.modularmachine.network.NetworkPortPayloads;
 import com.lw.modularmachine.network.PatternProviderPayloads;
 import com.lw.modularmachine.network.BlueprintPreviewPayloads;
-import com.lw.modularmachine.network.RangedSelectionPayloads;
-import com.lw.modularmachine.machine.selection.RangedSelectionService;
 import com.lw.modularmachine.network.MachineJeiPayloads;
 import com.lw.modularmachine.network.MachineColorPayloads;
 import com.lw.modularmachine.network.MachineVisibilityPayloads;
@@ -49,6 +47,7 @@ import net.neoforged.neoforge.common.NeoForge;
 import net.neoforged.neoforge.event.server.ServerStartingEvent;
 import net.neoforged.neoforge.registries.DeferredRegister;
 import org.slf4j.Logger;
+import com.lw.modularmachine.network.ControllerGuiDataPayloads;
 
 @Mod(ModularMachine.MODID)
 public class ModularMachine {
@@ -74,7 +73,6 @@ public class ModularMachine {
     MachineRecipeRegistries.register(modEventBus);
     modContainer.registerConfig(ModConfig.Type.COMMON, MachineConfig.SPEC, "modularmachinery/mmcece-common.toml");
     NeoForge.EVENT_BUS.register(AssemblyService.class);
-    NeoForge.EVENT_BUS.register(RangedSelectionService.class);
     NeoForge.EVENT_BUS.register(StructureService.class);
     NeoForge.EVENT_BUS.register(MachineComponentVisibility.class);
     NeoForge.EVENT_BUS.register(MachineRecipeService.class);
@@ -103,8 +101,8 @@ public class ModularMachine {
     modEventBus.addListener(ProjectionPayloads::register);
     modEventBus.addListener(ProjectionLengthPayloads::register);
     modEventBus.addListener(BlueprintPreviewPayloads::register);
-    modEventBus.addListener(RangedSelectionPayloads::register);
     modEventBus.addListener(MachinePayloads::register);
+    modEventBus.addListener(ControllerGuiDataPayloads::register);
     modEventBus.addListener(UpgradeBusPayloads::register);
     modEventBus.addListener(SmartInterfacePayloads::register);
     modEventBus.addListener(MachineJeiPayloads::register);

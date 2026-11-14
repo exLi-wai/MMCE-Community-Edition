@@ -14,6 +14,7 @@ import java.util.ArrayList;
 import java.util.List;
 import net.minecraft.client.Minecraft;
 import net.minecraft.client.gui.GuiGraphics;
+import net.minecraft.client.gui.screens.inventory.tooltip.ClientTooltipComponent;
 import net.minecraft.network.chat.Component;
 import net.minecraft.resources.ResourceLocation;
 import net.minecraft.world.inventory.InventoryMenu;
@@ -92,7 +93,7 @@ final class MachineEmiItemRecipe extends BasicEmiRecipe {
   }
 
   private static EmiStack item(MachineRecipe.ItemAmount amount) {
-    return EmiStack.of(amount.displayStack(), amount.amount()).setChance((float) amount.chance());
+    return EmiStack.of(amount.ingredientStack(), amount.amount()).setChance((float) amount.chance());
   }
 
   private abstract static class RecipeSlot extends SlotWidget {
@@ -121,6 +122,17 @@ final class MachineEmiItemRecipe extends BasicEmiRecipe {
     @Override
     public void drawStack(GuiGraphics graphics, int mouseX, int mouseY, float delta) {
       MachineRecipeDisplay.drawItem(graphics, display, amount, x + 1, y + 1);
+    }
+
+    @Override
+    public List<ClientTooltipComponent> getTooltip(int mouseX, int mouseY) {
+      if (display.isEmpty()) {
+        return List.of();
+      }
+      var result = new ArrayList<>(EmiStack.of(display, amount).getTooltip());
+      addSlotTooltip(result);
+
+      return result;
     }
   }
 

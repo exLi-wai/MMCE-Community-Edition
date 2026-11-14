@@ -27,8 +27,8 @@ public final class MachineRecipeBuilder {
   private final int duration;
   private final List<ItemRow> inputs = new ArrayList<>();
   private final List<ItemRow> outputs = new ArrayList<>();
-  private final List<FluidStack> fluidInputs = new ArrayList<>();
-  private final List<FluidStack> fluidOutputs = new ArrayList<>();
+  private final List<FluidRequirement> fluidInputs = new ArrayList<>();
+  private final List<FluidRequirement> fluidOutputs = new ArrayList<>();
   private final List<ChemicalRequirement> chemicalInputs = new ArrayList<>();
   private final List<ChemicalRequirement> chemicalOutputs = new ArrayList<>();
   private final List<ChemicalRequirement> chemicalPerTick = new ArrayList<>();
@@ -38,7 +38,8 @@ public final class MachineRecipeBuilder {
   private RecipeFailureAction failureAction;
   private Boolean parallelized;
   private int priority;
-  private long energyPerTick, randomSeed;
+  private long energyPerTick, energyOutputPerTick, randomSeed;
+  private RecipeExecutionOptions executionOptions = RecipeExecutionOptions.NONE;
   private FluidStack fluidPerTick = FluidStack.EMPTY;
 
   private MachineRecipeBuilder(ResourceLocation id, ResourceLocation machine, int duration) {
@@ -80,12 +81,33 @@ public final class MachineRecipeBuilder {
   }
 
   public MachineRecipeBuilder fluidInput(FluidStack fluid) {
-    fluidInputs.add(requireFluid(fluid));
+    return fluidInput(fluid, 1);
+  }
+
+  public MachineRecipeBuilder fluidInput(FluidStack fluid, double chance) {
+    fluidInputs.add(new FluidRequirement(requireFluid(fluid), chance));
     return this;
   }
 
   public MachineRecipeBuilder fluidOutput(FluidStack fluid) {
-    fluidOutputs.add(requireFluid(fluid));
+    return fluidOutput(fluid, 1);
+  }
+
+  public MachineRecipeBuilder fluidOutput(FluidStack fluid, double chance) {
+    fluidOutputs.add(new FluidRequirement(requireFluid(fluid), chance));
+    return this;
+  }
+
+  public MachineRecipeBuilder energyOutputPerTick(long amount) {
+    if (amount < 0) {
+      throw new IllegalArgumentException("Energy output per tick cannot be negative");
+    }
+    energyOutputPerTick = amount;
+    return this;
+  }
+
+  public MachineRecipeBuilder executionOptions(RecipeExecutionOptions options) {
+    executionOptions = Objects.requireNonNull(options, "options");
     return this;
   }
 
@@ -196,6 +218,15 @@ public final class MachineRecipeBuilder {
     if (energyPerTick > 0) {
       json.addProperty("energy_per_tick", energyPerTick);
     }
+    if (energyOutputPerTick > 0) {
+      json.addProperty("energy_output_per_tick", energyOutputPerTick);
+    }
+    if (!executionOptions.threadName().isEmpty()) {
+      json.addProperty("thread_name", executionOptions.threadName());
+    }
+    if (executionOptions.maxThreads() > 0) {
+      json.addProperty("max_threads", executionOptions.maxThreads());
+    }
     if (!fluidPerTick.isEmpty()) {
       json.add("fluid_per_tick", encode(FluidStack.CODEC, fluidPerTick, registries));
     }
@@ -271,9 +302,9 @@ public final class MachineRecipeBuilder {
     target.add(field, entries);
   }
 
-  private static void addFluids(JsonObject target, String field, List<FluidStack> fluids, HolderLookup.Provider registries) {
+  private static void addFluids(JsonObject target, String field, List<FluidRequirement> fluids, HolderLookup.Provider registries) {
     if (!fluids.isEmpty()) {
-      target.add(field, encode(Codec.list(FluidStack.CODEC), fluids, registries));
+      target.add(field, encode(Codec.list(FluidRequirement.CODEC), fluids, registries));
     }
   }
 

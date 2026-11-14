@@ -36,9 +36,13 @@ public record RecipeCandidate<K>(
     return new RecipeCandidate<>(id, 0, List.of(), outputs);
   }
 
-  public record Input<K>(K key, long count, double chance) {
+  public record Input<K>(K key, long count, double chance, boolean parallelUnaffected) {
     public Input(K key, long count) {
-      this(key, count, 1.0D);
+      this(key, count, 1.0D, false);
+    }
+
+    public Input(K key, long count, double chance) {
+      this(key, count, chance, false);
     }
 
     public Input {
@@ -53,7 +57,10 @@ public record RecipeCandidate<K>(
     }
   }
 
-  public record Output<K>(K key, long count) {
+  public record Output<K>(K key, long count, boolean parallelUnaffected) {
+    public Output(K key, long count) {
+      this(key, count, false);
+    }
     public Output {
       Objects.requireNonNull(key, "key");
       if (key instanceof String text && text.isBlank() || count <= 0) {

@@ -5,6 +5,7 @@ import com.lw.modularmachine.ModularMachine;
 import com.lw.modularmachine.api.recipe.adapter.RecipeAdapterContext;
 import com.lw.modularmachine.api.recipe.adapter.RecipeAdapterTags;
 import com.lw.modularmachine.machine.recipe.MachineRecipe;
+import com.lw.modularmachine.machine.recipe.MachineRecipeJson;
 import com.lw.modularmachine.machine.structure.MachineDefinition;
 import com.mojang.serialization.JsonOps;
 import java.util.ArrayList;
@@ -86,7 +87,8 @@ public final class RecipeAdapterImports {
             throw new IllegalArgumentException(
                 id + ": Recipe adapter ID is outside its directory or collides with an existing recipe");
           }
-          var declaration = builder.toJson(registries);
+          var declaration = RecipeAdapterCustomizations.apply(builder.toJson(registries), settings.customization());
+          MachineRecipeJson.validate(declaration);
           var recipe = MachineRecipe.CODEC.codec()
               .parse(registries.createSerializationContext(JsonOps.INSTANCE), declaration).getOrThrow();
           if (!recipe.machineId().equals(machine.id())) {

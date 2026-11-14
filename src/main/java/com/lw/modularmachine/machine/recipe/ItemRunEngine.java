@@ -56,6 +56,7 @@ public final class ItemRunEngine {
     MISSING_ITEM_INPUT,
     MISSING_ITEM_OUTPUT,
     MISSING_ENERGY_INPUT,
+    MISSING_ENERGY_OUTPUT,
     MISSING_FLUID_INPUT,
     MISSING_FLUID_OUTPUT,
     MISSING_CHEMICAL_INPUT,
@@ -170,6 +171,14 @@ public final class ItemRunEngine {
         if (tickCosts.status() != Status.READY) {
           return status = Result.UPGRADE_ERROR;
         }
+        var energyOutputs = EnergyOutputTransactions.prepare(controller, List.of(run));
+        if (energyOutputs.status() != EnergyOutputTransactions.Status.READY) {
+          return status = switch (energyOutputs.status()) {
+            case MISSING_PORT -> Result.MISSING_ENERGY_OUTPUT;
+            case BLOCKED -> Result.OUTPUT_BLOCKED;
+            default -> Result.PAUSED;
+          };
+        }
         RecipeExecutionTicket energyTicket = null;
         RecipeExecutionTicket fluidTicket = null;
         var debits = List.<EnergyDebit>of();
@@ -246,6 +255,7 @@ public final class ItemRunEngine {
         try {
           var proof = controller.registration();
           if (!tickCosts.current()
+              || !energyOutputs.current()
               || !controller.revalidateProduction(proof)
               || !qualified(controller, run)
               || energyTicket != null && !RecipeCommitGuard.validate(energyTicket)
@@ -267,6 +277,7 @@ public final class ItemRunEngine {
               return status = Result.STALE;
             }
           }
+          energyOutputs.acquire();
           for (var debit : fluidDebits) {
             if (debit.port().patternInput()) {
               continue;
@@ -288,6 +299,7 @@ public final class ItemRunEngine {
           commit = true;
           run = advanced;
         } finally {
+          energyOutputs.resolve(commit);
           for (var lease : fluidLeases) {
             lease.resolve(commit);
           }
@@ -304,6 +316,7 @@ public final class ItemRunEngine {
           patterns.resolve(commit);
         }
         patterns.publish();
+        energyOutputs.publish();
         if (chemicals != null) {
           chemicals.publish();
         }

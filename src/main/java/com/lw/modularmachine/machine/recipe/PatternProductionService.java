@@ -71,6 +71,7 @@ public final class PatternProductionService {
       PatternRecipeDefinition pattern,
       String selector,
       String lockedRecipe,
+      String thread,
       FactoryUpgradeSnapshot upgrades) {
   }
 
@@ -298,7 +299,8 @@ public final class PatternProductionService {
                 locked = thread.lockedRecipe().toString();
               }
             }
-            var key = new Compatibility(pattern, gateway.selector(), locked, upgrades);
+            String thread = owner instanceof FactoryControllerBlockEntity ? observed.getKey() : "";
+            var key = new Compatibility(pattern, gateway.selector(), locked, thread, upgrades);
             var cache = COMPATIBILITY.computeIfAbsent(catalog, ignored -> new HashMap<>());
             if (cache.size() >= 1024 && !cache.containsKey(key)) {
               cache.clear();
@@ -309,7 +311,9 @@ public final class PatternProductionService {
                     return false;
                   }
                   var recipe = catalog.definition(candidate.id());
-                  return recipe != null && matches(pattern, gateway.selector(), recipe, upgrades, level);
+                  return recipe != null
+                      && recipe.executionOptions().accepts(key.thread())
+                      && matches(pattern, gateway.selector(), recipe, upgrades, level);
                 }));
             if (matches) {
               return true;
@@ -389,6 +393,24 @@ public final class PatternProductionService {
     return upgrades != null && matches(source.definition(), source.selector(), recipe, upgrades, ticket.level());
   }
 
+  /**
+   * Each pattern delivery promises one complete native execution. Fixed rows are
+   * paid/produced once per run, so combining deliveries into an ordinary
+   * aggregate run would not preserve that promise. Factory runs stay separate.
+   */
+  static int parallelLimit(RecipeExecutionTicket ticket, MachineRecipe recipe, int limit) {
+    var source = ticket.patternSource();
+    if (!(ticket.owner() instanceof MachineControllerBlockEntity) || source == null || source.container() == null) {
+      return limit;
+    }
+    boolean fixed = recipe.inputs().stream().anyMatch(MachineRecipe.ItemAmount::parallelUnaffected)
+        || recipe.outputs().stream().anyMatch(MachineRecipe.ItemAmount::parallelUnaffected)
+        || recipe.fluidInputRequirements().stream().anyMatch(value -> value.parallelUnaffected())
+        || recipe.fluidOutputRequirements().stream().anyMatch(value -> value.parallelUnaffected());
+
+    return fixed ? Math.min(limit, 1) : limit;
+  }
+
   private static boolean matches(PatternRecipeDefinition pattern, String selector, MachineRecipe recipe, FactoryUpgradeSnapshot upgrades, ServerLevel level) {
     ExecutionCosts costs;
     try {
@@ -413,6 +435,11 @@ public final class PatternProductionService {
     var inputs = new HashMap<String, Map<PatternResourceKey, Long>>();
     var outputs = new HashMap<PatternResourceKey, Long>();
     try {
+      if (recipe.fluidInputRequirements().stream().anyMatch(value -> value.chance() != 1)
+          || recipe.fluidOutputRequirements().stream().anyMatch(value -> value.chance() != 1)
+          || recipe.scriptOptions().itemCallbacks().stream().anyMatch(value -> !value.modifiers().isEmpty())) {
+        return Declaration.INVALID;
+      }
       for (var item : recipe.inputs()) {
         if (item.chance() != 1 || item.ignoresComponents()) {
           return Declaration.INVALID;

@@ -1,5 +1,6 @@
 package com.lw.modularmachine.integration.kubejs;
 
+import com.lw.modularmachine.ModularMachine;
 import com.lw.modularmachine.api.recipe.RecipeLifecycleEvents;
 import com.lw.modularmachine.api.recipe.RecipeCommandActions;
 import dev.latvian.mods.kubejs.event.KubeEvent;
@@ -38,6 +39,111 @@ public final class KubeJSRecipeLifecycleRegistration implements KubeEvent {
     add(text, type == null ? Set.of() : Set.of(type), listener);
   }
 
+  public void onEvent(String id, String machine, RecipeLifecycleEvents.Listener listener) {
+    addFiltered(id, machine, null, DEFAULT_TYPES, false, listener);
+  }
+
+  public void onType(String id, String machine, RecipeLifecycleEvents.Type type, RecipeLifecycleEvents.Listener listener) {
+    onType(id, machine, null, type, listener);
+  }
+
+  public void onType(String id, String machine, String recipe, RecipeLifecycleEvents.Type type, RecipeLifecycleEvents.Listener listener) {
+    addFiltered(id, machine, recipe, type == null ? Set.of() : Set.of(type), false, listener);
+  }
+
+  public void onRecipeStart(String id, String machine, RecipeLifecycleEvents.Listener listener) {
+    onRecipeStart(id, machine, null, listener);
+  }
+
+  public void onRecipeStart(String id, String machine, String recipe, RecipeLifecycleEvents.Listener listener) {
+    onType(id, machine, recipe, RecipeLifecycleEvents.Type.STARTED, listener);
+  }
+
+  public void onRecipeTick(String id, String machine, RecipeLifecycleEvents.Listener listener) {
+    onRecipeTick(id, machine, null, listener);
+  }
+
+  public void onRecipeTick(String id, String machine, String recipe, RecipeLifecycleEvents.Listener listener) {
+    onType(id, machine, recipe, RecipeLifecycleEvents.Type.TICK, listener);
+  }
+
+  public void onRecipeFinish(String id, String machine, RecipeLifecycleEvents.Listener listener) {
+    onRecipeFinish(id, machine, null, listener);
+  }
+
+  public void onRecipeFinish(String id, String machine, String recipe, RecipeLifecycleEvents.Listener listener) {
+    onType(id, machine, recipe, RecipeLifecycleEvents.Type.FINISHED, listener);
+  }
+
+  public void onRecipeDiscarded(String id, String machine, RecipeLifecycleEvents.Listener listener) {
+    onRecipeDiscarded(id, machine, null, listener);
+  }
+
+  public void onRecipeDiscarded(String id, String machine, String recipe, RecipeLifecycleEvents.Listener listener) {
+    onType(id, machine, recipe, RecipeLifecycleEvents.Type.DISCARDED, listener);
+  }
+
+  public void onResourceFailureEvent(String id, String machine, RecipeLifecycleEvents.Listener listener) {
+    onResourceFailureEvent(id, machine, null, listener);
+  }
+
+  public void onResourceFailureEvent(String id, String machine, String recipe, RecipeLifecycleEvents.Listener listener) {
+    onType(id, machine, recipe, RecipeLifecycleEvents.Type.RESOURCE_FAILURE, listener);
+  }
+
+  public void onMachineTick(String id, String machine, RecipeLifecycleEvents.Listener listener) {
+    onType(id, machine, RecipeLifecycleEvents.Type.MACHINE_TICK, listener);
+  }
+
+  public void onFactoryRecipeStart(String id, String machine, RecipeLifecycleEvents.Listener listener) {
+    onFactoryRecipeStart(id, machine, null, listener);
+  }
+
+  public void onFactoryRecipeStart(String id, String machine, String recipe, RecipeLifecycleEvents.Listener listener) {
+    addFiltered(id, machine, recipe, Set.of(RecipeLifecycleEvents.Type.STARTED), true, listener);
+  }
+
+  public void onFactoryRecipeFinish(String id, String machine, RecipeLifecycleEvents.Listener listener) {
+    onFactoryRecipeFinish(id, machine, null, listener);
+  }
+
+  public void onFactoryRecipeFinish(String id, String machine, String recipe, RecipeLifecycleEvents.Listener listener) {
+    addFiltered(id, machine, recipe, Set.of(RecipeLifecycleEvents.Type.FINISHED), true, listener);
+  }
+
+  private void addFiltered(String id, String machineText, String recipeText, Set<RecipeLifecycleEvents.Type> types, boolean factoryOnly, RecipeLifecycleEvents.Listener listener) {
+    requireOpen();
+    var machine = identifier(machineText, "machine", false);
+    var recipe = recipeText == null ? null : identifier(recipeText, "recipe", true);
+    if (listener == null || types.contains(RecipeLifecycleEvents.Type.MACHINE_TICK) && recipe != null) {
+      valid = false;
+      throw new IllegalArgumentException("Invalid filtered recipe lifecycle observer");
+    }
+    add(id, types, context -> {
+      if (!context.machine().equals(machine) || factoryOnly && !context.factory()) {
+        return;
+      }
+      if (recipe != null
+          && context.before().stream().noneMatch(run -> run.recipeId().equals(recipe))
+          && context.after().stream().noneMatch(run -> run.recipeId().equals(recipe))) {
+        return;
+      }
+      listener.onEvent(context);
+    });
+  }
+
+  private ResourceLocation identifier(String text, String field, boolean recipe) {
+    var id = text == null ? null : ResourceLocation.tryParse(text);
+    if (id == null) {
+      valid = false;
+      throw new IllegalArgumentException("Invalid recipe lifecycle " + field + " ID");
+    }
+    if (recipe && text.indexOf(':') < 0) {
+      return ResourceLocation.fromNamespaceAndPath(ModularMachine.MODID, id.getPath());
+    }
+    return id;
+  }
+
   public void onResourceFailure(String text, RecipeLifecycleEvents.FailurePolicy policy) {
     requireOpen();
     ResourceLocation id = KubeJSRegistrationIds.parse(text);
@@ -48,6 +154,26 @@ public final class KubeJSRecipeLifecycleRegistration implements KubeEvent {
       return;
     }
     failurePolicies.put(id, policy);
+  }
+
+  public void onResourceFailure(String id, String machine, RecipeLifecycleEvents.FailurePolicy policy) {
+    onResourceFailure(id, machine, null, policy);
+  }
+
+  public void onResourceFailure(String id, String machineText, String recipeText, RecipeLifecycleEvents.FailurePolicy policy) {
+    requireOpen();
+    var machine = identifier(machineText, "machine", false);
+    var recipe = recipeText == null ? null : identifier(recipeText, "recipe", true);
+    if (policy == null) {
+      valid = false;
+      throw new IllegalArgumentException("Missing recipe failure policy");
+    }
+    onResourceFailure(id, context -> {
+      if (!context.machine().equals(machine) || recipe != null && !context.run().recipeId().equals(recipe)) {
+        return RecipeLifecycleEvents.FailureDecision.DEFAULT;
+      }
+      return policy.decide(context);
+    });
   }
 
   private void add(String text, Set<RecipeLifecycleEvents.Type> types, RecipeLifecycleEvents.Listener listener) {

@@ -14,6 +14,7 @@ import com.lw.modularmachine.blockentity.MachineControllerBlockEntity;
 import com.lw.modularmachine.config.MachineConfig;
 import com.lw.modularmachine.machine.controller.MachineControllerScriptDataService;
 import com.lw.modularmachine.integration.kubejs.MachineItemRecipeKubeJSSources;
+import com.lw.modularmachine.integration.kubejs.KubeJSRecipeItemCallbacks;
 import com.lw.modularmachine.machine.structure.MachineDefinition;
 import com.lw.modularmachine.machine.structure.StructureService;
 import com.lw.modularmachine.machine.recipe.adapter.RecipeAdapterImports;
@@ -58,7 +59,8 @@ public final class MachineRecipeService {
       Map<ResourceLocation, MachineRecipe> definitions,
       Map<ResourceLocation, RecipeModifierTemplate> templates,
       MachineRecipeJson.Defaults defaults,
-      long recipeAdapterScriptRevision) {
+      long recipeAdapterScriptRevision,
+      KubeJSRecipeItemCallbacks.Snapshot itemCallbacks) {
   }
 
   private MachineRecipeService() {
@@ -170,7 +172,8 @@ public final class MachineRecipeService {
         Map.copyOf(effective),
         Map.copyOf(templates),
         defaults,
-        imports.scriptRevision());
+        imports.scriptRevision(),
+        KubeJSRecipeItemCallbacks.snapshot());
     PREPARED.entrySet().removeIf(
         entry -> entry.getKey() != manager
             && ACTIVE.values().stream().noneMatch(active -> active.manager == entry.getKey()));
@@ -350,7 +353,8 @@ public final class MachineRecipeService {
         || id == null
         || published.catalogs.get(owner.structureMachineId()) != plan.catalog().root()
         || !plan.catalog().isCurrent()
-        || plan.catalog().recipes().candidate(plan.recipe().id()).orElse(null) != plan.recipe()) {
+        || !plan.inputPreparationCurrent()
+        || plan.catalog().recipes().candidate(plan.recipe().id()).orElse(null) != plan.catalogCandidate()) {
       return Optional.empty();
     }
     var registration = owner.structureRegistration();
@@ -379,7 +383,7 @@ public final class MachineRecipeService {
         return Optional.empty();
       }
     }
-    var definition = plan.catalog().definition(id.toString());
+    var definition = plan.preparedInputDefinition().orElseGet(() -> plan.catalog().definition(id.toString()));
     if (definition == null && plan.catalog().root() == plan.catalog()) {
       definition = published.prepared.definitions().get(id);
     }
@@ -400,7 +404,9 @@ public final class MachineRecipeService {
     boolean alreadyPublished = published != null && published.manager == manager && published.prepared == prepared;
     // Declaration revisions guard new publication, not the authority of a catalog
     // already installed before a later script generation failed validation.
-    if (!alreadyPublished && !RecipeAdapterScriptSources.isCurrent(prepared.recipeAdapterScriptRevision())) {
+    if (!alreadyPublished
+        && (!RecipeAdapterScriptSources.isCurrent(prepared.recipeAdapterScriptRevision())
+            || !KubeJSRecipeItemCallbacks.isCurrent(prepared.itemCallbacks()))) {
       return null;
     }
     boolean durationMultiplier = MachineConfig.durationMultiplierEnabled();
@@ -409,6 +415,9 @@ public final class MachineRecipeService {
       return published;
     }
     var next = new Published(server, manager, prepared, durationMultiplier, defaults);
+    if (!alreadyPublished) {
+      KubeJSRecipeItemCallbacks.install(prepared.itemCallbacks());
+    }
     ACTIVE.put(server, next);
     return next;
   }
@@ -441,7 +450,7 @@ public final class MachineRecipeService {
         prepared.definitions().forEach((id, definition) -> {
           if (definition.machineId().equals(machine)) {
             fluids.put(id.toString(), definition.fluidInputs());
-            outputs.put(id.toString(), definition.fluidOutputs());
+            outputs.put(id.toString(), definition.guaranteedFluidOutputs());
             definitions.put(id.toString(), definition);
             selectors.put(id.toString(), definition.selectors());
           }
@@ -494,6 +503,7 @@ public final class MachineRecipeService {
     ACTIVE.remove(event.getServer());
     PREPARED.clear();
     MachineItemRecipeKubeJSSources.clear();
+    KubeJSRecipeItemCallbacks.reset();
     RecipeAdapterScriptSources.clear();
   }
 }

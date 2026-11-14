@@ -86,7 +86,7 @@ final class ModifiedRecipeCatalogCompiler {
         var selectors = new HashMap<String, RecipeSelectors>();
         definitions.forEach((id, recipe) -> {
           inputs.put(id, recipe.fluidInputs());
-          outputs.put(id, recipe.fluidOutputs());
+          outputs.put(id, recipe.guaranteedFluidOutputs());
           selectors.put(id, recipe.selectors());
         });
         result = new RecipeCatalog(

@@ -38,6 +38,7 @@ public final class RecipeCatalog {
   private final ItemRecipeIndex itemIndex;
   private final FluidRecipeIndex fluidIndex;
   private final ChemicalRecipeIndex chemicalIndex;
+  private final BitSet dynamicInputRanks;
 
   public RecipeCatalog(ResourceLocation machineId, Collection<RecipeCandidate<ItemResourceKey>> candidates) {
     this(machineId, new CompiledRecipeSet<>(candidates), Map.of(), Map.of(), () -> true);
@@ -83,6 +84,33 @@ public final class RecipeCatalog {
       }
     });
     chemicalIndex = new ChemicalRecipeIndex(recipeIds, chemicalInputs);
+    dynamicInputRanks = new BitSet(recipes.size());
+    for (int rank = 0; rank < recipes.candidates().size(); rank++) {
+      var definition = this.definitions.get(recipes.candidates().get(rank).id());
+      if (definition != null
+          && definition.scriptOptions().itemCallbacks().stream()
+              .anyMatch(binding -> binding.io() == RecipeModifier.Io.INPUT && !binding.modifiers().isEmpty())) {
+        dynamicInputRanks.set(rank);
+      }
+    }
+  }
+
+  boolean hasDynamicInputRecipes() {
+    return !dynamicInputRanks.isEmpty();
+  }
+
+  List<RecipeCandidate<ItemResourceKey>> candidatesForPreparation(Map<ItemResourceKey, Long> items, Set<FluidRecipeIndex.Key> fluids, Set<ChemicalResourceKey> chemicals, Set<String> allowedIds) {
+    var indexed = candidatesForInputs(items, fluids, chemicals, allowedIds);
+    if (dynamicInputRanks.isEmpty()) {
+      return indexed;
+    }
+    var selected = recipes.ranksOf(indexed);
+    for (int rank = dynamicInputRanks.nextSetBit(0); rank >= 0; rank = dynamicInputRanks.nextSetBit(rank + 1)) {
+      if (allowedIds == null || allowedIds.contains(recipes.candidates().get(rank).id())) {
+        selected.set(rank);
+      }
+    }
+    return recipes.candidatesAt(selected);
   }
 
   Set<ItemResourceKey> itemInputAliases() {

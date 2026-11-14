@@ -22,8 +22,8 @@ import net.neoforged.neoforge.network.event.RegisterPayloadHandlersEvent;
 import org.jetbrains.annotations.ApiStatus;
 
 /**
- * Internal bounded editor messages; world selection comes from server
- * interactions.
+ * Internal bounded editor messages retained for reuse. The old protocol is not
+ * registered while the ranged tool's GUI and interactions are being rewritten.
  */
 @ApiStatus.Internal
 public final class RangedSelectionPayloads {

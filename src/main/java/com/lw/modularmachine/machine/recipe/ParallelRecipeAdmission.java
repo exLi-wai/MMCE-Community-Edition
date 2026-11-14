@@ -19,63 +19,83 @@ final class ParallelRecipeAdmission {
   private final MachineRecipe definition;
   private final ItemOutputLayout layout;
   private final FluidOutputLayout fluids;
+  private final boolean aggregateDefinition;
   private int low = 1, high, probe;
   private RecipePlanner.Session<ItemResourceKey> items;
   private FluidOutputLayout.Planning fluidPlan;
   private ChemicalOutputLayout.Planning chemicalPlan;
+  private int remainingBudget;
 
   ParallelRecipeAdmission(RecipeStartPlan plan, MachineRecipe definition, int limit, boolean aggregateDefinition) {
     this.plan = plan;
     this.definition = definition;
+    this.aggregateDefinition = aggregateDefinition;
     high = Math.min(
         definition.parallelized() ? limit : Math.min(limit, 1),
         Math.min(plan.maxRepeatableInputs(), plan.maxRepeatableOutputs()));
     high = ChemicalTransactions.arithmeticLimit(definition, high);
     var requiredFluids = new HashMap<FluidResourceKey, Long>();
-    for (var fluid : definition.fluidInputs()) {
-      requiredFluids.merge(
+    var fixedFluids = new HashMap<FluidResourceKey, Long>();
+    for (var requirement : definition.fluidInputRequirements()) {
+      var fluid = requirement.stack();
+      (aggregateDefinition && requirement.parallelUnaffected() ? fixedFluids : requiredFluids).merge(
           new FluidResourceKey(fluid, plan.source().level().registryAccess()),
           (long) fluid.getAmount(),
           Math::addExact);
-      if (aggregateDefinition) {
+      if (aggregateDefinition && !requirement.parallelUnaffected()) {
         high = Math.min(high, Integer.MAX_VALUE / fluid.getAmount());
       }
     }
-    for (var demand : requiredFluids.entrySet()) {
+    var fluidKeys = new HashSet<>(requiredFluids.keySet());
+    fluidKeys.addAll(fixedFluids.keySet());
+    for (var key : fluidKeys) {
       long available = 0;
       for (var port : plan.source().ports()) {
         if (port.kind() == PortKind.FLUID_INPUT
             && port.selector().equals(definition.selectors().fluidInput())
-            && FluidStack.isSameFluidSameComponents(demand.getKey().amount(1), port.fluid())) {
+            && FluidStack.isSameFluidSameComponents(key.amount(1), port.fluid())) {
           available = Math.addExact(available, port.fluidAmount());
         }
       }
-      high = (int) Math.min(high, available / demand.getValue());
+      long fixed = fixedFluids.getOrDefault(key, 0L);
+      if (available < fixed) {
+        high = 0;
+      } else if (requiredFluids.containsKey(key)) {
+        high = (int) Math.min(high, (available - fixed) / requiredFluids.get(key));
+      }
     }
     if (definition.energyPerTick() > 0) {
       high = (int) Math.min(high, Long.MAX_VALUE / definition.energyPerTick());
+    }
+    if (definition.energyOutputPerTick() > 0) {
+      high = (int) Math.min(high, Long.MAX_VALUE / definition.energyOutputPerTick());
     }
     if (aggregateDefinition) {
       var fee = definition.fluidPerTick();
       if (!fee.isEmpty()) {
         high = Math.min(high, Integer.MAX_VALUE / fee.getAmount());
       }
-      for (var output : definition.fluidOutputs()) {
-        high = Math.min(high, Integer.MAX_VALUE / output.getAmount());
+      for (var output : definition.fluidOutputRequirements()) {
+        if (!output.parallelUnaffected()) {
+          high = Math.min(high, Integer.MAX_VALUE / output.stack().getAmount());
+        }
       }
       for (var output : definition.outputs()) {
-        if (output.chance() > 0) {
+        if (output.chance() > 0 && !output.parallelUnaffected()) {
           high = (int) Math.min(high, Long.MAX_VALUE / output.amount());
         }
       }
     }
     var keys = new HashSet<ItemResourceKey>();
-    plan.recipe().outputs().forEach(output -> keys.add(output.key()));
+    if (!RecipeItemPreparation.transformsOutputs(definition)) {
+      plan.recipe().outputs().forEach(output -> keys.add(output.key()));
+    }
     layout = new ItemOutputLayout(plan.source(), keys);
     fluids = new FluidOutputLayout(plan.source(), plan.source().level().registryAccess());
   }
 
   int advance(int budget) {
+    remainingBudget = budget;
     if (high < 1) {
       return 0;
     }
@@ -86,18 +106,23 @@ final class ParallelRecipeAdmission {
       if (fluidPlan == null) {
         budget--;
         probe = low + (int) (((long) high - low + 1) / 2);
-        var claims = plan.recipe().outputs().stream()
-            .map(output -> new RecipeCandidate.Output<>(output.key(), Math.multiplyExact(output.count(), probe)))
+        var claims = RecipeItemPreparation.inputCandidate(plan.recipe(), definition).outputs().stream()
+            .map(
+                output -> new RecipeCandidate.Output<>(
+                    output.key(),
+                    output.parallelUnaffected() && aggregateDefinition ? output.count() : Math
+                        .multiplyExact(output.count(), probe)))
             .toList();
         items = claims.isEmpty() ? null : RecipePlanner.prepareOutputs(
             layout.snapshot(),
             RecipeCandidate.outputOnly(plan.recipe().id() + "/parallel_admission", claims));
-        var fluidClaims = definition.fluidOutputs().stream()
+        var fluidClaims = definition.fluidOutputRequirements().stream().filter(output -> output.chance() == 1)
             .map(
-                fluid -> new RecipeCandidate.Output<>(
-                    new FluidResourceKey(fluid, plan.source().level().registryAccess())
+                requirement -> new RecipeCandidate.Output<>(
+                    new FluidResourceKey(requirement.stack(), plan.source().level().registryAccess())
                         .withSelector(definition.selectors().fluidOutput()),
-                    Math.multiplyExact((long) fluid.getAmount(), probe)))
+                    requirement.parallelUnaffected() && aggregateDefinition ? requirement.stack().getAmount() : Math
+                        .multiplyExact((long) requirement.stack().getAmount(), probe)))
             .toList();
         fluidPlan = fluids.planClaims(fluidClaims);
         chemicalPlan = new ChemicalOutputLayout(plan.source())
@@ -140,6 +165,11 @@ final class ParallelRecipeAdmission {
       items = null;
     }
 
+    remainingBudget = budget;
     return low;
+  }
+
+  int remainingBudget() {
+    return remainingBudget;
   }
 }

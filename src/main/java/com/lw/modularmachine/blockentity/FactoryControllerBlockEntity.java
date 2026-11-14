@@ -51,6 +51,9 @@ import com.lw.modularmachine.machine.recipe.PatternProductionService;
 import com.lw.modularmachine.machine.recipe.MachineRecipeService;
 import com.lw.modularmachine.api.recipe.RecipeLifecycleEvents.Type;
 import com.lw.modularmachine.machine.recipe.RecipeLifecyclePublisher;
+import com.lw.modularmachine.machine.controller.MachineEventPublisher;
+import com.lw.modularmachine.api.controller.MachineEvents;
+import com.lw.modularmachine.api.recipe.RecipeExecutionOptions;
 import com.lw.modularmachine.machine.smart.SmartInterfaceEventPublisher;
 import com.lw.modularmachine.machine.structure.MachineDefinition;
 import com.lw.modularmachine.machine.structure.StructureService;
@@ -344,6 +347,33 @@ public final class FactoryControllerBlockEntity extends BlockEntity implements M
     }
 
     return occupied < limit;
+  }
+
+  /** Internal start admission; existing paid runs keep their admitted thread. */
+  @ApiStatus.Internal
+  public boolean recipeThreadAllowed(String threadId, ResourceLocation recipeId, RecipeExecutionOptions options) {
+    requireUpgradeThread();
+    var thread = threadId == null ? null : scheduler.channel(threadId);
+    if (threadId == null
+        || recipeId == null
+        || options == null
+        || thread == null
+        || !thread.enabled()
+        || !options.accepts(threadId)
+        || thread.lockedRecipe() != null && !thread.lockedRecipe().equals(recipeId)) {
+      return false;
+    }
+    if (options.maxThreads() == 0) {
+      return true;
+    }
+    int occupied = 0;
+    for (var entry : runSets.entrySet()) {
+      if (!entry.getKey().equals(threadId)
+          && entry.getValue().runs().stream().anyMatch(run -> run.recipeId().equals(recipeId))) {
+        occupied++;
+      }
+    }
+    return occupied < options.maxThreads();
   }
 
   public boolean persistentStateValid() {
@@ -1053,6 +1083,9 @@ public final class FactoryControllerBlockEntity extends BlockEntity implements M
     if (!startingThreads.contains(threadId) || !threadStartAllowed(threadId) || runs == null || runs.isEmpty()) {
       throw new IllegalStateException("Invalid factory run installation");
     }
+    if (runs.stream().anyMatch(run -> !recipeThreadAllowed(threadId, run.recipeId(), run.executionOptions()))) {
+      throw new IllegalStateException("Recipe factory thread admission changed before installation");
+    }
     var thread = scheduler.channels().stream().filter(candidate -> candidate.threadId().equals(threadId)).findFirst()
         .orElseThrow();
     if (runs.size() > parallelAdmissionLimits.getOrDefault(threadId, thread.parallelLimit())) {
@@ -1146,10 +1179,13 @@ public final class FactoryControllerBlockEntity extends BlockEntity implements M
       return;
     }
     try {
+      MachineEventPublisher.tick(this, MachineEvents.Type.MACHINE_PRE_TICK);
       tickController(server);
     } finally {
       refreshAppearanceState();
       RecipeLifecyclePublisher.machineTick(this);
+      MachineEventPublisher.tick(this, MachineEvents.Type.MACHINE_POST_TICK);
+      MachineEventPublisher.tick(this, MachineEvents.Type.MACHINE_TICK);
     }
   }
 
@@ -1441,6 +1477,7 @@ public final class FactoryControllerBlockEntity extends BlockEntity implements M
       if (entry.getValue().runs().size() > 1
           && entry.getValue().runs().stream().anyMatch(
               run -> run.energyPerTick() > 0
+                  || run.energyOutputPerTick() > 0
                   || !run.fluidPerTick(server.registryAccess()).isEmpty()
                   || !run.chemicalPerTick().isEmpty())
           || FactoryUpgradeService.snapshot().hasTickWork()) {
@@ -1458,6 +1495,12 @@ public final class FactoryControllerBlockEntity extends BlockEntity implements M
             updateThreadState(thread, FactoryThreadState.State.WAITING, FactoryThreadState.Reason.WAITING_FLUID);
           case MISSING_ENERGY_INPUT ->
             updateThreadState(thread, FactoryThreadState.State.WAITING, FactoryThreadState.Reason.MISSING_ENERGY_INPUT);
+          case MISSING_ENERGY_OUTPUT -> updateThreadState(
+              thread,
+              FactoryThreadState.State.WAITING,
+              FactoryThreadState.Reason.MISSING_ENERGY_OUTPUT);
+          case OUTPUT_BLOCKED ->
+            updateThreadState(thread, FactoryThreadState.State.BLOCKED, FactoryThreadState.Reason.OUTPUT_BLOCKED);
           case MISSING_FLUID_INPUT ->
             updateThreadState(thread, FactoryThreadState.State.WAITING, FactoryThreadState.Reason.MISSING_FLUID_INPUT);
           case WAITING_UPGRADE ->
@@ -1483,6 +1526,7 @@ public final class FactoryControllerBlockEntity extends BlockEntity implements M
           continue;
         }
         if (run.energyPerTick() > 0
+            || run.energyOutputPerTick() > 0
             || !run.fluidPerTick(server.registryAccess()).isEmpty()
             || !run.chemicalPerTick().isEmpty()) {
           var result = FactoryRunResourceCommitter.tick(this, threadId, run);
@@ -1492,6 +1536,12 @@ public final class FactoryControllerBlockEntity extends BlockEntity implements M
           } else if (result == FactoryRunResourceCommitter.Result.MISSING_ENERGY_INPUT) {
             threadState = FactoryThreadState.State.WAITING;
             threadReason = FactoryThreadState.Reason.MISSING_ENERGY_INPUT;
+          } else if (result == FactoryRunResourceCommitter.Result.MISSING_ENERGY_OUTPUT) {
+            threadState = FactoryThreadState.State.WAITING;
+            threadReason = FactoryThreadState.Reason.MISSING_ENERGY_OUTPUT;
+          } else if (result == FactoryRunResourceCommitter.Result.OUTPUT_BLOCKED) {
+            threadState = FactoryThreadState.State.BLOCKED;
+            threadReason = FactoryThreadState.Reason.OUTPUT_BLOCKED;
           } else if (result == FactoryRunResourceCommitter.Result.MISSING_FLUID_INPUT) {
             threadState = FactoryThreadState.State.WAITING;
             threadReason = FactoryThreadState.Reason.MISSING_FLUID_INPUT;
@@ -1602,6 +1652,14 @@ public final class FactoryControllerBlockEntity extends BlockEntity implements M
       case ADVANCED -> updateThreadState(thread, FactoryThreadState.State.RUNNING, FactoryThreadState.Reason.NONE);
       case WAITING_ENERGY ->
         updateThreadState(thread, FactoryThreadState.State.WAITING, FactoryThreadState.Reason.WAITING_ENERGY);
+      case MISSING_ENERGY_INPUT ->
+        updateThreadState(thread, FactoryThreadState.State.WAITING, FactoryThreadState.Reason.MISSING_ENERGY_INPUT);
+      case MISSING_ENERGY_OUTPUT ->
+        updateThreadState(thread, FactoryThreadState.State.WAITING, FactoryThreadState.Reason.MISSING_ENERGY_OUTPUT);
+      case OUTPUT_BLOCKED ->
+        updateThreadState(thread, FactoryThreadState.State.BLOCKED, FactoryThreadState.Reason.OUTPUT_BLOCKED);
+      case MISSING_FLUID_INPUT ->
+        updateThreadState(thread, FactoryThreadState.State.WAITING, FactoryThreadState.Reason.MISSING_FLUID_INPUT);
       case WAITING_CHEMICAL ->
         updateThreadState(thread, FactoryThreadState.State.WAITING, FactoryThreadState.Reason.WAITING_CHEMICAL);
       case MISSING_CHEMICAL_INPUT ->
@@ -1679,6 +1737,7 @@ public final class FactoryControllerBlockEntity extends BlockEntity implements M
         searches.put(thread.threadId(), search);
       }
       try {
+        var activeSearch = search;
         var result = search.advance(MachineConfig.FACTORY_SEARCH_WORK.get());
         switch (result.status()) {
           case SELECTED -> {
@@ -1700,8 +1759,12 @@ public final class FactoryControllerBlockEntity extends BlockEntity implements M
                 updateThreadState(thread, FactoryThreadState.State.WAITING, FactoryThreadState.Reason.SEARCH_BUDGET);
                 return;
               }
-              var startResult = maxInstances == 0
-                  && resourceLimit > 0 ? FactoryRecipeStarter.Result.UPGRADE_COST_MISSING : FactoryRecipeStarter.Result.STALE;
+              var startResult = FactoryRecipeStarter.Result.STALE;
+              if (maxInstances == 0 && plan.modifiedOutputsRejected()) {
+                startResult = FactoryRecipeStarter.Result.CHECK_REJECTED;
+              } else if (maxInstances == 0 && resourceLimit > 0) {
+                startResult = FactoryRecipeStarter.Result.UPGRADE_COST_MISSING;
+              }
               if (maxInstances > 1) {
                 var batch = Collections.nCopies(maxInstances, plan);
                 var parallelResult = FactoryParallelStarter.commit(this, thread.threadId(), batch);
@@ -1728,6 +1791,11 @@ public final class FactoryControllerBlockEntity extends BlockEntity implements M
                   default -> FactoryThreadState.Reason.STALE_RESOURCES;
                 };
                 updateThreadState(thread, FactoryThreadState.State.WAITING, reason);
+                if (startResult == FactoryRecipeStarter.Result.CHECK_REJECTED && activeSearch.rejectSelected(plan)) {
+                  plans.remove(thread.threadId());
+                  resetSearchRetry(thread.threadId(), now);
+                  return;
+                }
                 if (startResult != FactoryRecipeStarter.Result.CHECK_PENDING) {
                   removeSearchState(thread.threadId(), now);
                   backoffSearch(thread.threadId(), now);

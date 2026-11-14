@@ -24,10 +24,12 @@ import java.util.Objects;
 import java.util.Set;
 import java.util.concurrent.CancellationException;
 import net.minecraft.core.BlockPos;
-import net.minecraft.core.Direction;
 import net.minecraft.resources.ResourceLocation;
 import net.minecraft.world.level.block.state.BlockState;
 import org.jetbrains.annotations.ApiStatus;
+import static com.lw.modularmachine.machine.selection.SelectionGeometry.local;
+import static com.lw.modularmachine.machine.selection.SelectionGeometry.relative;
+import static com.lw.modularmachine.machine.selection.SelectionGeometry.step;
 
 /**
  * Internal pure editor; registry descriptors and world values are captured on
@@ -97,9 +99,6 @@ public final class DynamicDefinitionEditor {
   }
 
   private record Existing(JsonObject raw, MachineDefinition.Part part, MachineDefinition.Rule rule) {
-  }
-
-  private record Bounds(BlockPos min, BlockPos max) {
   }
 
   private static final Comparator<Captured> ORDER = Comparator
@@ -361,7 +360,7 @@ public final class DynamicDefinitionEditor {
 
   private JsonObject pattern(Segment segment, String id) {
     var settings = segment.settings();
-    var bounds = bounds(segment.body());
+    var bounds = SelectionGeometry.bounds(segment.body(), input.controller(), input.orientation());
     BlockPos step = step(settings, bounds);
     var result = new JsonObject();
     result.addProperty("id", id);
@@ -488,44 +487,6 @@ public final class DynamicDefinitionEditor {
     return result;
   }
 
-  private Bounds bounds(Box box) {
-    BlockPos min = null;
-    BlockPos max = null;
-    for (int x : new int[]{box.first().getX(), box.second().getX()}) {
-      for (int y : new int[]{box.first().getY(), box.second().getY()}) {
-        for (int z : new int[]{box.first().getZ(), box.second().getZ()}) {
-          var corner = local(new BlockPos(x, y, z), input.controller(), input.orientation());
-          min = min == null ? corner : new BlockPos(
-              Math.min(min.getX(), corner.getX()),
-              Math.min(min.getY(), corner.getY()),
-              Math.min(min.getZ(), corner.getZ()));
-          max = max == null ? corner : new BlockPos(
-              Math.max(max.getX(), corner.getX()),
-              Math.max(max.getY(), corner.getY()),
-              Math.max(max.getZ(), corner.getZ()));
-        }
-      }
-    }
-    return new Bounds(min, max);
-  }
-
-  private static BlockPos step(Settings settings, Bounds bounds) {
-    if (settings.customStep()) {
-      return settings.step();
-    }
-    Direction direction = settings.direction();
-    long length = switch (direction.getAxis()) {
-      case X -> (long) bounds.max().getX() - bounds.min().getX() + 1;
-      case Y -> (long) bounds.max().getY() - bounds.min().getY() + 1;
-      case Z -> (long) bounds.max().getZ() - bounds.min().getZ() + 1;
-    };
-    length = Math.addExact(length, settings.gap());
-    return new BlockPos(
-        Math.toIntExact(length * direction.getStepX()),
-        Math.toIntExact(length * direction.getStepY()),
-        Math.toIntExact(length * direction.getStepZ()));
-  }
-
   private static boolean contains(Box box, BlockPos position) {
     return position.getX() >= Math.min(box.first().getX(), box.second().getX())
         && position.getX() <= Math.max(box.first().getX(), box.second().getX())
@@ -533,27 +494,6 @@ public final class DynamicDefinitionEditor {
         && position.getY() <= Math.max(box.first().getY(), box.second().getY())
         && position.getZ() >= Math.min(box.first().getZ(), box.second().getZ())
         && position.getZ() <= Math.max(box.first().getZ(), box.second().getZ());
-  }
-
-  private static BlockPos local(BlockPos world, BlockPos controller, MachineOrientation orientation) {
-    long x = (long) world.getX() - controller.getX();
-    long y = (long) world.getY() - controller.getY();
-    long z = (long) world.getZ() - controller.getZ();
-    return new BlockPos(
-        dot(x, y, z, orientation.right()),
-        dot(x, y, z, orientation.up()),
-        dot(x, y, z, orientation.back()));
-  }
-
-  private static int dot(long x, long y, long z, Direction axis) {
-    return Math.toIntExact(x * axis.getStepX() + y * axis.getStepY() + z * axis.getStepZ());
-  }
-
-  private static BlockPos relative(BlockPos value, BlockPos base, BlockPos step, int repetition) {
-    return new BlockPos(
-        Math.toIntExact((long) value.getX() - base.getX() - (long) step.getX() * repetition),
-        Math.toIntExact((long) value.getY() - base.getY() - (long) step.getY() * repetition),
-        Math.toIntExact((long) value.getZ() - base.getZ() - (long) step.getZ() * repetition));
   }
 
   private static BlockPos vector(JsonElement value) {

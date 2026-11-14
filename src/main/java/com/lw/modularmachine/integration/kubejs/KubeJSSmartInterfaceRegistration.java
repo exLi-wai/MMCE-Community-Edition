@@ -15,9 +15,12 @@ import net.minecraft.resources.ResourceLocation;
 public final class KubeJSSmartInterfaceRegistration implements KubeEvent {
   private final Map<ResourceLocation, SmartInterfaceEvents.Listener> handlers = new LinkedHashMap<>();
   private final Set<ResourceLocation> identifiers = new LinkedHashSet<>();
+  private final Thread registrationThread = Thread.currentThread();
   private boolean valid = true;
+  private boolean open = true;
 
   public void onSmartInterfaceUpdate(String text, SmartInterfaceEvents.Listener listener) {
+    requireOpen();
     ResourceLocation id = KubeJSRegistrationIds.parse(text);
     if (id == null
         || listener == null
@@ -28,11 +31,72 @@ public final class KubeJSSmartInterfaceRegistration implements KubeEvent {
     handlers.put(id, listener);
   }
 
+  public void onSmartInterfaceUpdate(String id, String machine, SmartInterfaceEvents.Listener listener) {
+    addFiltered(id, machine, null, listener);
+  }
+
+  public void onBound(String id, SmartInterfaceEvents.Listener listener) {
+    addFiltered(id, null, SmartInterfaceEvents.Reason.BOUND, listener);
+  }
+
+  public void onBound(String id, String machine, SmartInterfaceEvents.Listener listener) {
+    addFiltered(id, machine, SmartInterfaceEvents.Reason.BOUND, listener);
+  }
+
+  public void onRebound(String id, SmartInterfaceEvents.Listener listener) {
+    addFiltered(id, null, SmartInterfaceEvents.Reason.REBOUND, listener);
+  }
+
+  public void onRebound(String id, String machine, SmartInterfaceEvents.Listener listener) {
+    addFiltered(id, machine, SmartInterfaceEvents.Reason.REBOUND, listener);
+  }
+
+  public void onValueChanged(String id, SmartInterfaceEvents.Listener listener) {
+    addFiltered(id, null, SmartInterfaceEvents.Reason.VALUE_CHANGED, listener);
+  }
+
+  public void onValueChanged(String id, String machine, SmartInterfaceEvents.Listener listener) {
+    addFiltered(id, machine, SmartInterfaceEvents.Reason.VALUE_CHANGED, listener);
+  }
+
+  private void addFiltered(String id, String machineText, SmartInterfaceEvents.Reason reason, SmartInterfaceEvents.Listener listener) {
+    requireOpen();
+    var machine = machineText == null ? null : ResourceLocation.tryParse(machineText);
+    if (listener == null || machineText != null && machine == null) {
+      valid = false;
+      throw new IllegalArgumentException("Invalid filtered smart interface observer");
+    }
+    onSmartInterfaceUpdate(id, context -> {
+      if (machine != null && !context.machine().equals(machine)
+          || reason != null && context.change().reason() != reason) {
+        return;
+      }
+      listener.onUpdate(context);
+    });
+  }
+
+  private void requireOpen() {
+    if (Thread.currentThread() != registrationThread) {
+      throw new IllegalStateException("Smart interface registration used outside its creating thread");
+    }
+    if (!open) {
+      throw new IllegalStateException("Smart interface registration is closed");
+    }
+  }
+
+  void seal() {
+    requireOpen();
+    open = false;
+  }
+
   boolean valid() {
     return valid;
   }
 
   List<Handler> snapshot() {
+    if (open) {
+      throw new IllegalStateException("Smart interface registration must be sealed before snapshot");
+    }
     if (!valid) {
       return List.of();
     }

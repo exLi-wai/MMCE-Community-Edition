@@ -11,11 +11,11 @@ import org.jetbrains.annotations.ApiStatus;
  * block-entity data.
  */
 @ApiStatus.Internal
-final class PartOverrides {
+public final class PartOverrides {
   private PartOverrides() {
   }
 
-  static JsonObject apply(JsonObject original, PartEdit edit) {
+  public static JsonObject apply(JsonObject original, PartEdit edit) {
     var result = original.deepCopy();
     if (edit == null) {
       return result;

@@ -3,6 +3,7 @@ package com.lw.modularmachine.menu;
 import com.lw.modularmachine.api.controller.MachineControllerApi;
 import com.lw.modularmachine.blockentity.MachineControllerBlockEntity;
 import com.lw.modularmachine.network.MachinePayloads;
+import com.lw.modularmachine.network.ControllerGuiDataPayloads;
 import com.lw.modularmachine.registry.MachineRegistries;
 import net.minecraft.network.FriendlyByteBuf;
 import net.minecraft.server.level.ServerPlayer;
@@ -15,6 +16,22 @@ public final class MachineControllerMenu extends ControllerBlueprintMenu {
   private final Player viewer;
   private MachinePayloads.ControllerStatusPayload status;
   private MachinePayloads.ControllerStatusPayload lastSentStatus;
+  private String guiCustomData = "{}";
+  private String lastSentGuiData;
+
+  public String guiCustomData() {
+    return guiCustomData;
+  }
+
+  public void acceptGuiData(ControllerGuiDataPayloads.Update update) {
+    if (update.containerId() == containerId
+        && controller.getLevel() != null
+        && update.dimension().equals(controller.getLevel().dimension().location())
+        && update.position().equals(controller.getBlockPos())
+        && update.machine().equals(controller.machineId())) {
+      guiCustomData = update.customData();
+    }
+  }
 
   public MachineControllerMenu(int id, Inventory inventory, FriendlyByteBuf data) {
     this(id, inventory, requireController(inventory, data));
@@ -71,6 +88,18 @@ public final class MachineControllerMenu extends ControllerBlueprintMenu {
     if (current != null && !current.equals(lastSentStatus)) {
       lastSentStatus = current;
       PacketDistributor.sendToPlayer(serverPlayer, current);
+    }
+    String data = controller.scriptStateAvailable() ? controller.scriptState().snapshot().customData() : "{}";
+    if (!data.equals(lastSentGuiData)) {
+      lastSentGuiData = data;
+      PacketDistributor.sendToPlayer(
+          serverPlayer,
+          new ControllerGuiDataPayloads.Update(
+              containerId,
+              controller.getLevel().dimension().location(),
+              controller.getBlockPos(),
+              controller.machineId(),
+              data));
     }
   }
 }

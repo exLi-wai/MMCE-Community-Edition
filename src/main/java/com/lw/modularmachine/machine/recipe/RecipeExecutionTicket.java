@@ -221,6 +221,10 @@ public final class RecipeExecutionTicket {
     return capture(owner, CaptureMode.ENERGY_INPUTS);
   }
 
+  public static Optional<RecipeExecutionTicket> captureEnergyOutputs(StructureService.StructureSubject owner) {
+    return capture(owner, CaptureMode.ENERGY_OUTPUTS);
+  }
+
   static Optional<RecipeExecutionTicket> captureFluidInputs(MachineControllerBlockEntity controller) {
     return capture(controller, CaptureMode.FLUID_INPUTS);
   }
@@ -276,6 +280,7 @@ public final class RecipeExecutionTicket {
           && part.rule().port() != PortKind.FLUID_OUTPUT
           && part.rule().port() != PortKind.CHEMICAL_OUTPUT
           || mode == CaptureMode.ENERGY_INPUTS && part.rule().port() != PortKind.ENERGY_INPUT
+          || mode == CaptureMode.ENERGY_OUTPUTS && part.rule().port() != PortKind.ENERGY_OUTPUT
           || mode == CaptureMode.FLUID_INPUTS && part.rule().port() != PortKind.FLUID_INPUT
           || mode == CaptureMode.CHEMICAL_INPUTS && part.rule().port() != PortKind.CHEMICAL_INPUT) {
         continue;
@@ -334,6 +339,7 @@ public final class RecipeExecutionTicket {
     ALL,
     OUTPUTS,
     ENERGY_INPUTS,
+    ENERGY_OUTPUTS,
     FLUID_INPUTS,
     CHEMICAL_INPUTS
   }
@@ -584,6 +590,7 @@ public final class RecipeExecutionTicket {
     private final ChemicalStackData chemical;
     private final long energy;
     private final long energyExtractable;
+    private final long energyReceivable;
     private final long capacity;
     private final long transferLimit;
     private final String selector;
@@ -625,6 +632,7 @@ public final class RecipeExecutionTicket {
           .getStack() : ChemicalStackData.EMPTY;
       energy = kind.resource() == PortKind.Resource.ENERGY ? port.energy().stored() : 0;
       energyExtractable = kind == PortKind.ENERGY_INPUT ? port.energy().extractableNow() : 0;
+      energyReceivable = kind == PortKind.ENERGY_OUTPUT ? port.energy().receivableNow() : 0;
       capacity = switch (kind.resource()) {
         case ITEM -> 0;
         case FLUID -> port.fluidTank(tankIndex).getCapacity();
@@ -658,6 +666,7 @@ public final class RecipeExecutionTicket {
       this.chemical = chemical;
       energy = 0;
       energyExtractable = 0;
+      energyReceivable = 0;
       capacity = kind == PortKind.CHEMICAL_INPUT ? Long.MAX_VALUE : Integer.MAX_VALUE;
       transferLimit = 0;
     }
@@ -763,6 +772,10 @@ public final class RecipeExecutionTicket {
 
     public long energyExtractable() {
       return energyExtractable;
+    }
+
+    public long energyReceivable() {
+      return energyReceivable;
     }
 
     public long capacity() {

@@ -47,6 +47,7 @@ final class ControllerStatusLabels {
       case "MISSING_ITEM_INPUT" -> tr(STATE + "missing_item_input");
       case "MISSING_ITEM_OUTPUT" -> tr(STATE + "missing_item_output");
       case "MISSING_ENERGY_INPUT" -> tr(STATE + "missing_energy_input");
+      case "MISSING_ENERGY_OUTPUT" -> tr(STATE + "missing_energy_output");
       case "MISSING_FLUID_INPUT" -> tr(STATE + "missing_fluid_input");
       case "MISSING_FLUID_OUTPUT" -> tr(STATE + "missing_fluid_output");
       case "MISSING_CHEMICAL_INPUT" -> tr(STATE + "missing_chemical_input");

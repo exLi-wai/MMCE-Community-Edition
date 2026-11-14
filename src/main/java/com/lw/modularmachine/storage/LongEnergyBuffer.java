@@ -144,6 +144,11 @@ public final class LongEnergyBuffer implements IEnergyStorage {
     return Math.min(stored, Math.max(0, extractAllowance()));
   }
 
+  public long receivableNow() {
+    readAllowed();
+    return Math.min(capacity - stored, Math.max(0, receiveAllowance()));
+  }
+
   private void readAllowed() {
     if (active != null) {
       throw new IllegalStateException("Energy buffer is in an atomic recipe transaction");
@@ -184,6 +189,26 @@ public final class LongEnergyBuffer implements IEnergyStorage {
       stored -= amount;
       extracted += amount;
 
+      return true;
+    }
+
+    /**
+     * Machine production fills an output hatch with its long per-tick allowance.
+     */
+    public boolean insertExact(long amount) {
+      check();
+      long now = clock.getAsLong();
+      long available = Math.min(capacity - stored, now == budgetTick ? transferLimit - received : transferLimit);
+      if (input || amount <= 0 || amount > available) {
+        return false;
+      }
+      if (now != budgetTick) {
+        budgetTick = now;
+        received = 0;
+        extracted = 0;
+      }
+      stored += amount;
+      received += amount;
       return true;
     }
 

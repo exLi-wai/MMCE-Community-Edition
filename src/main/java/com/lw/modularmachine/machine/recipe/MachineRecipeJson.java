@@ -9,7 +9,11 @@ import com.lw.modularmachine.config.MachineConfig;
 import com.google.gson.JsonElement;
 import com.google.gson.JsonObject;
 import com.google.gson.JsonParseException;
+import net.minecraft.nbt.CompoundTag;
+import net.minecraft.nbt.Tag;
 import com.lw.modularmachine.api.smart.SmartNumberRequirement;
+import com.lw.modularmachine.api.recipe.RecipeExecutionOptions;
+import com.lw.modularmachine.api.recipe.RecipeScriptOptions;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Set;
@@ -32,6 +36,11 @@ public final class MachineRecipeJson {
       "priority",
       "duration",
       "energy_per_tick",
+      "energy_output_per_tick",
+      "thread_name",
+      "max_threads",
+      "recipe_tooltips",
+      "item_callbacks",
       "fluid_per_tick",
       "fluid_inputs",
       "fluid_outputs",
@@ -54,6 +63,7 @@ public final class MachineRecipeJson {
       int priority,
       int duration,
       long energyPerTick,
+      long energyOutputPerTick,
       boolean hasFluidPerTick,
       boolean hasFluidInputs,
       boolean hasFluidOutputs,
@@ -83,6 +93,18 @@ public final class MachineRecipeJson {
     if (energyPerTick < 0) {
       throw error("$.energy_per_tick", "Expected a non-negative FE/t value in schema 2");
     }
+    long energyOutputPerTick = object
+        .has("energy_output_per_tick") ? integer(object.get("energy_output_per_tick"), "$.energy_output_per_tick") : 0;
+    if (energyOutputPerTick < 0) {
+      throw error("$.energy_output_per_tick", "Expected a non-negative FE/t output value");
+    }
+    RecipeExecutionOptions.CODEC.parse(JsonOps.INSTANCE, object).getOrThrow();
+    if (object.has("max_threads")) {
+      long maximumThreads = integer(object.get("max_threads"), "$.max_threads");
+      if (maximumThreads < 0 || maximumThreads > RecipeExecutionOptions.MAX_THREADS) {
+        throw error("$.max_threads", "Outside the factory thread range");
+      }
+    }
     if (object.has("fluid_per_tick")) {
       var fluid = object(object.get("fluid_per_tick"), "$.fluid_per_tick");
       fields(fluid, Set.of("id", "amount", "components"), "$.fluid_per_tick");
@@ -106,7 +128,8 @@ public final class MachineRecipeJson {
       for (int i = 0; i < inputs.size(); i++) {
         String path = "$.fluid_inputs[" + i + "]";
         var fluid = object(inputs.get(i), path);
-        fields(fluid, Set.of("id", "amount", "components"), path);
+        fields(fluid, Set.of("id", "amount", "components", "chance", "parallel_unaffected"), path);
+        fixedFlag(fluid, path);
         identifier(fluid.get("id"), path + ".id");
         long amount = integer(fluid.get("amount"), path + ".amount");
         if (amount <= 0 || amount > Integer.MAX_VALUE) {
@@ -115,6 +138,7 @@ public final class MachineRecipeJson {
         if (fluid.has("components") && !fluid.get("components").isJsonObject()) {
           throw error(path + ".components", "Expected component map");
         }
+        probability(fluid, path);
       }
     }
     validateFluidList(object, "fluid_outputs", "Fluid outputs require an array");
@@ -142,6 +166,7 @@ public final class MachineRecipeJson {
     }
     demands(object.get("inputs"), "$.inputs", true);
     demands(object.get("outputs"), "$.outputs", false);
+    validateScriptOptions(object);
     var chemicals = validateChemicals(object);
     if (object.getAsJsonArray("inputs").isEmpty()
         && !object.has("fluid_inputs")
@@ -151,7 +176,8 @@ public final class MachineRecipeJson {
         && chemicals.perTick().isEmpty()
         || object.getAsJsonArray("outputs").isEmpty()
             && !object.has("fluid_outputs")
-            && chemicals.outputs().isEmpty()) {
+            && chemicals.outputs().isEmpty()
+            && energyOutputPerTick == 0) {
       throw error("$", "A machine recipe requires resource input and output");
     }
     if (object.has("interface_inputs")) {
@@ -167,6 +193,7 @@ public final class MachineRecipeJson {
         (int) priority,
         (int) duration,
         energyPerTick,
+        energyOutputPerTick,
         object.has("fluid_per_tick"),
         object.has("fluid_inputs"),
         object.has("fluid_outputs"),
@@ -252,6 +279,13 @@ public final class MachineRecipeJson {
       if (energy > 0 || source.has("energy_per_tick")) {
         result.addProperty("energy_per_tick", energy);
       }
+      long baseOutputEnergy = source.has(
+          "energy_output_per_tick") ? integer(source.get("energy_output_per_tick"), "$.energy_output_per_tick") : 0;
+      long outputEnergy = modifiers
+          .amount(RecipeModifier.Target.ENERGY, RecipeModifier.Io.OUTPUT, baseOutputEnergy, 0, Long.MAX_VALUE);
+      if (outputEnergy > 0 || source.has("energy_output_per_tick")) {
+        result.addProperty("energy_output_per_tick", outputEnergy);
+      }
       modifyItems(result, "inputs", RecipeModifier.Io.INPUT, modifiers);
       modifyItems(result, "outputs", RecipeModifier.Io.OUTPUT, modifiers);
       modifyFluids(result, "fluid_inputs", RecipeModifier.Io.INPUT, modifiers);
@@ -319,6 +353,10 @@ public final class MachineRecipeJson {
               integer(entry.get("amount"), "$." + field + "[" + index + "].amount"),
               1,
               Integer.MAX_VALUE));
+      if (io == RecipeModifier.Io.OUTPUT) {
+        double chance = entry.has("chance") ? decimal(entry.get("chance"), "$." + field + "[" + index + "].chance") : 1;
+        entry.addProperty("chance", modifiers.chance(RecipeModifier.Target.FLUID, io, chance));
+      }
     }
   }
 
@@ -336,7 +374,8 @@ public final class MachineRecipeJson {
     for (int i = 0; i < values.size(); i++) {
       String path = "$." + field + "[" + i + "]";
       var fluid = object(values.get(i), path);
-      fields(fluid, Set.of("id", "amount", "components"), path);
+      fields(fluid, Set.of("id", "amount", "components", "chance", "parallel_unaffected"), path);
+      fixedFlag(fluid, path);
       identifier(fluid.get("id"), path + ".id");
       long amount = integer(fluid.get("amount"), path + ".amount");
       if (amount <= 0 || amount > Integer.MAX_VALUE) {
@@ -345,6 +384,7 @@ public final class MachineRecipeJson {
       if (fluid.has("components") && !fluid.get("components").isJsonObject()) {
         throw error(path + ".components", "Expected component map");
       }
+      probability(fluid, path);
     }
   }
 
@@ -412,7 +452,11 @@ public final class MachineRecipeJson {
     for (int i = 0; i < array.size(); i++) {
       String at = path + "[" + i + "]";
       var demand = object(array.get(i), at);
-      fields(demand, Set.of("stack", "amount", "chance", "selector", "match"), at);
+      fields(
+          demand,
+          Set.of("stack", "amount", "chance", "selector", "match", "preview_stack", "parallel_unaffected"),
+          at);
+      fixedFlag(demand, at);
       String match = demand.has("match") ? string(demand.get("match"), at + ".match") : "exact";
       if (!match.equals("exact") && !match.equals("item")) {
         throw error(at + ".match", "Expected exact or item");
@@ -438,6 +482,14 @@ public final class MachineRecipeJson {
       identifier(stack.get("id"), at + ".stack.id");
       if (stack.has("components") && !stack.get("components").isJsonObject()) {
         throw error(at + ".stack.components", "Expected component map");
+      }
+      if (demand.has("preview_stack")) {
+        var preview = object(demand.get("preview_stack"), at + ".preview_stack");
+        fields(preview, Set.of("id", "components"), at + ".preview_stack");
+        identifier(preview.get("id"), at + ".preview_stack.id");
+        if (preview.has("components") && !preview.get("components").isJsonObject()) {
+          throw error(at + ".preview_stack.components", "Expected component map");
+        }
       }
     }
   }
@@ -468,6 +520,34 @@ public final class MachineRecipeJson {
     }
   }
 
+  private static void probability(JsonObject row, String path) {
+    if (row.has("chance")) {
+      double chance = decimal(row.get("chance"), path + ".chance");
+      if (chance < 0 || chance > 1) {
+        throw error(path + ".chance", "Expected a probability within 0..1");
+      }
+    }
+  }
+
+  private static void validateScriptOptions(JsonObject source) {
+    if (source.has("item_callbacks")) {
+      var callbacks = source.get("item_callbacks");
+      if (!callbacks.isJsonArray()) {
+        throw error("$.item_callbacks", "Expected a bounded callback array");
+      }
+      for (var entry : callbacks.getAsJsonArray()) {
+        var binding = object(entry, "$.item_callbacks[]");
+        fields(binding, Set.of("io", "row", "checker", "modifiers"), "$.item_callbacks[]");
+        long row = integer(binding.get("row"), "$.item_callbacks[].row");
+        if (row < 0 || row >= MachineRecipeJson.MAX_DEMANDS) {
+          throw error("$.item_callbacks[].row", "Outside the item row range");
+        }
+      }
+    }
+    var options = RecipeScriptOptions.CODEC.codec().parse(JsonOps.INSTANCE, source).getOrThrow();
+    options.validateRows(source.getAsJsonArray("inputs").size(), source.getAsJsonArray("outputs").size());
+  }
+
   private static String identifier(JsonElement value, String path) {
     String text = string(value, path);
     if (!text.matches("[a-z0-9_.-]+:[a-z0-9/._-]+")) {
@@ -494,6 +574,36 @@ public final class MachineRecipeJson {
     for (String field : object.keySet()) {
       if (!allowed.contains(field)) {
         throw error(path + "." + field, "Unsupported field");
+      }
+    }
+  }
+
+  private static void fixedFlag(JsonObject row, String path) {
+    var value = row.get("parallel_unaffected");
+    if (value != null && (!value.isJsonPrimitive() || !value.getAsJsonPrimitive().isBoolean())) {
+      throw error(path + ".parallel_unaffected", "Expected boolean");
+    }
+  }
+
+  /** Native NBT booleans are bytes; restore only declared row flag fields. */
+  static void restoreRowBooleans(JsonObject json, CompoundTag source) {
+    for (String field : List.of("inputs", "outputs", "fluid_inputs", "fluid_outputs")) {
+      if (!json.has(field)) {
+        continue;
+      }
+      var rows = source.getList(field, Tag.TAG_COMPOUND);
+      var encoded = json.getAsJsonArray(field);
+      for (int index = 0; index < rows.size() && index < encoded.size(); index++) {
+        var row = rows.getCompound(index);
+        if (row.contains("parallel_unaffected")) {
+          if (!row.contains("parallel_unaffected", Tag.TAG_BYTE)
+              || row.getByte("parallel_unaffected") < 0
+              || row.getByte("parallel_unaffected") > 1) {
+            throw new IllegalArgumentException("Invalid frozen parallel-unaffected flag");
+          }
+          encoded.get(index).getAsJsonObject()
+              .addProperty("parallel_unaffected", row.getBoolean("parallel_unaffected"));
+        }
       }
     }
   }

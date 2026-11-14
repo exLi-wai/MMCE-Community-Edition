@@ -7,6 +7,12 @@ import com.lw.modularmachine.machine.recipe.ItemResourceKey;
 import com.lw.modularmachine.machine.recipe.ItemSlotRef;
 import com.lw.modularmachine.machine.recipe.MachineRecipeService;
 import com.lw.modularmachine.machine.recipe.RecipeExecutionTicket;
+import com.lw.modularmachine.machine.recipe.MachineRecipe;
+import com.lw.modularmachine.machine.recipe.RecipeItemCallbackService;
+import com.lw.modularmachine.machine.recipe.RecipeItemPreparation;
+import com.lw.modularmachine.api.recipe.RecipeModifier;
+import com.mojang.serialization.JsonOps;
+import net.minecraft.resources.ResourceLocation;
 import com.lw.modularmachine.machine.factory.UpgradeRecipeChecks;
 import com.lw.modularmachine.blockentity.FactoryControllerBlockEntity;
 import com.lw.modularmachine.blockentity.MachineControllerBlockEntity;
@@ -23,6 +29,7 @@ import java.util.Objects;
 import java.util.Optional;
 import java.util.Set;
 import org.jetbrains.annotations.ApiStatus;
+import net.minecraft.resources.ResourceLocation;
 
 /**
  * Server-owned multi-resource search with resumable candidate and output
@@ -33,9 +40,21 @@ public final class RecipeSearch {
   private final RecipeExecutionTicket ticket;
   private final RecipeCatalog catalog;
   private final RecipeSearchResources resources;
+  private final long itemCallbackEpoch = RecipeItemCallbackService.epoch();
   private final List<InputSlot> inputs;
   private final List<OutputSlot> outputs;
-  private final RecipePlanner.Session<ItemResourceKey> session;
+  private RecipePlanner.Session<ItemResourceKey> session;
+  private ResourceSnapshot<ItemResourceKey> preparationSnapshot;
+  private List<RecipeCandidate<ItemResourceKey>> inputPreparationCandidates = List.of();
+  private final List<RecipeCandidate<ItemResourceKey>> preparedCandidates = new ArrayList<>();
+  private final Map<String, PreparedInputs> preparedDefinitions = new HashMap<>();
+  private int inputPreparationCursor;
+  private RecipeItemCallbackService.InputPreparation inputPreparation;
+  private long inputPreparationEpoch = -1;
+  private long inputPreparationWork;
+
+  private record PreparedInputs(MachineRecipe definition, RecipeCandidate<ItemResourceKey> original, long epoch) {
+  }
   private RecipeStartPlan selected;
   private FluidOutputLayout fluidLayout;
   private FluidOutputLayout.Planning fluidPlan;
@@ -51,6 +70,8 @@ public final class RecipeSearch {
   private int groupCursor;
   private RecipeSearch groupSearch;
   private RecipeStartPlan groupBest;
+  private int groupBestIndex = -1;
+  private final Map<Integer, Set<String>> rejectedGroupRecipes = new HashMap<>();
   private long completedGroupWork;
   private final Map<String, MissingResource> missingResources = new HashMap<>();
   private final Set<String> componentReady = new HashSet<>();
@@ -99,9 +120,9 @@ public final class RecipeSearch {
           if (key != null) {
             counts.merge(key, (long) slot.count(), Math::addExact);
             inputSlots.add(new InputSlot(slot.ref(), key, slot.count()));
-            if (!catalog.itemInputAliases().isEmpty()) {
+            if (!catalog.itemInputAliases().isEmpty() || catalog.hasDynamicInputRecipes()) {
               var alias = key.ignoringComponents();
-              if (catalog.itemInputAliases().contains(alias)) {
+              if (catalog.itemInputAliases().contains(alias) || catalog.hasDynamicInputRecipes()) {
                 counts.merge(alias, (long) slot.count(), Math::addExact);
               }
             }
@@ -115,13 +136,27 @@ public final class RecipeSearch {
     inputs = List.copyOf(inputSlots);
     outputs = List.copyOf(outputSlots);
     var resourceCandidates = new HashSet<String>();
+    var preparingCandidates = new ArrayList<RecipeCandidate<ItemResourceKey>>();
     var requirements = RecipeResourceRequirements.capture(ticket);
     var fluids = resources.fluids(ticket);
     var chemicals = resources.chemicalInputKeys(ticket);
-    for (var candidate : catalog.candidatesForInputs(counts, fluids.inputKeys(), chemicals, allowedIds)) {
+    for (var candidate : catalog.candidatesForPreparation(counts, fluids.inputKeys(), chemicals, allowedIds)) {
       var definition = catalog.definition(candidate.id());
+      boolean transformsInput = definition != null
+          && definition.scriptOptions().itemCallbacks().stream()
+              .anyMatch(binding -> binding.io() == RecipeModifier.Io.INPUT && !binding.modifiers().isEmpty());
       var missing = definition == null ? Optional.<PortKind>empty() : requirements.missing(definition);
-      if (missing.isPresent() || !PatternProductionService.matches(ticket, definition, this.factoryThread)) {
+      if (missing.isPresent()
+          || !transformsInput && !PatternProductionService.matches(ticket, definition, this.factoryThread)
+          || definition != null
+              && ticket.owner() instanceof FactoryControllerBlockEntity controller
+              && !controller.recipeThreadAllowed(
+                  this.factoryThread,
+                  ResourceLocation.parse(candidate.id()),
+                  definition.executionOptions())
+          || definition != null
+              && ticket.owner() instanceof MachineControllerBlockEntity
+              && !definition.executionOptions().threadName().isEmpty()) {
         continue;
       }
       if (ticket.interfacesMatch(candidate.interfaceInputs())
@@ -129,13 +164,67 @@ public final class RecipeSearch {
               || definition.chemicals().inputs().isEmpty()
               || ChemicalTransactions.inputsAvailable(ticket, definition.chemicals().inputs()))
           && catalog.fluidsAvailable(candidate.id(), fluids)) {
-        resourceCandidates.add(candidate.id());
+        if (transformsInput) {
+          preparingCandidates.add(candidate);
+        } else {
+          resourceCandidates.add(candidate.id());
+          preparedCandidates.add(RecipeItemPreparation.inputCandidate(candidate, definition));
+        }
       }
     }
     // Logical aliases are counted once per physical slot and are needed only by
     // single-row item-only candidates. The ticket retains exact physical stamps.
     var snapshot = new ResourceSnapshot<>(ticket.structureRevision(), counts, spaces);
-    session = RecipePlanner.prepare(snapshot, catalog.recipes(), resourceCandidates);
+    if (preparingCandidates.isEmpty()) {
+      session = RecipePlanner.prepare(snapshot, new CompiledRecipeSet<>(preparedCandidates), resourceCandidates);
+    } else {
+      preparationSnapshot = snapshot;
+      inputPreparationCandidates = List.copyOf(preparingCandidates);
+      inputPreparationEpoch = RecipeItemCallbackService.epoch();
+    }
+  }
+
+  private int advanceInputPreparations(int budget) {
+    int used = 0;
+    while (inputPreparationCursor < inputPreparationCandidates.size() && used < budget) {
+      var original = inputPreparationCandidates.get(inputPreparationCursor);
+      var definition = catalog.definition(original.id());
+      if (inputPreparation == null) {
+        var ops = ticket.level().registryAccess().createSerializationContext(JsonOps.INSTANCE);
+        var json = MachineRecipe.CODEC.codec().encodeStart(ops, definition).getOrThrow().getAsJsonObject();
+        var thread = ticket.owner() instanceof FactoryControllerBlockEntity ? Optional.of(factoryThread) : Optional
+            .<String>empty();
+        inputPreparation = RecipeItemCallbackService.beginInputs(
+            json,
+            definition.scriptOptions(),
+            RecipeItemPreparation.context(ticket, ResourceLocation.parse(original.id()), thread, 1),
+            ticket.level().registryAccess());
+      }
+      inputPreparation.advance(budget - used);
+      used += inputPreparation.workUsed();
+      inputPreparationWork += inputPreparation.workUsed();
+      if (!inputPreparation.rejected() && inputPreparation.prepared().isEmpty()) {
+        return used;
+      }
+      var prepared = inputPreparation.prepared();
+      if (prepared.isPresent()) {
+        var value = prepared.orElseThrow();
+        var ops = ticket.level().registryAccess().createSerializationContext(JsonOps.INSTANCE);
+        var nativeRecipe = MachineRecipe.CODEC.codec().parse(ops, value.declaration()).getOrThrow();
+        if (PatternProductionService.matches(ticket, nativeRecipe, factoryThread)) {
+          var candidate = RecipeItemCallbackService
+              .compilePrepared(nativeRecipe, ResourceLocation.parse(original.id()), ticket.level().registryAccess());
+          preparedCandidates.add(RecipeItemPreparation.inputCandidate(candidate, nativeRecipe));
+          preparedDefinitions.put(original.id(), new PreparedInputs(nativeRecipe, original, value.epoch()));
+        }
+      }
+      inputPreparation = null;
+      inputPreparationCursor++;
+    }
+    if (inputPreparationCursor == inputPreparationCandidates.size() && session == null) {
+      session = RecipePlanner.prepare(preparationSnapshot, new CompiledRecipeSet<>(preparedCandidates), null);
+    }
+    return used;
   }
 
   private static String startThread(RecipeExecutionTicket ticket, String threadId) {
@@ -219,6 +308,12 @@ public final class RecipeSearch {
     if (factoryScope != null && !factoryScope.current()) {
       throw new UpgradeRecipeChecks.StaleException();
     }
+    if (inputPreparationEpoch >= 0 && !RecipeItemCallbackService.isCurrent(inputPreparationEpoch)) {
+      throw new UpgradeRecipeChecks.StaleException();
+    }
+    if (!RecipeItemCallbackService.isCurrent(itemCallbackEpoch)) {
+      throw new UpgradeRecipeChecks.StaleException();
+    }
     if (groups != null) {
       return advanceGroups(budget);
     }
@@ -226,6 +321,12 @@ public final class RecipeSearch {
       return new Result(RecipePlanner.Status.SELECTED, Optional.of(selected), 0);
     }
     int used = 0;
+    if (session == null) {
+      used += advanceInputPreparations(budget);
+      if (session == null) {
+        return new Result(RecipePlanner.Status.BUDGET_EXHAUSTED, Optional.empty(), used);
+      }
+    }
     while (true) {
       var result = session.advance(budget - used);
       used += result.workUsed();
@@ -297,8 +398,18 @@ public final class RecipeSearch {
                     insertion.key(),
                     Math.toIntExact(insertion.count())))
             .toList();
+        var prepared = preparedDefinitions.get(generic.candidate().id());
+        var candidate = prepared == null ? catalog.recipes().candidate(generic.candidate().id())
+            .orElseThrow() : RecipeItemCallbackService.compilePrepared(
+                prepared.definition(),
+                ResourceLocation.parse(generic.candidate().id()),
+                ticket.level().registryAccess());
         pendingFactoryPlan = RecipeStartPlan
-            .prepared(ticket, catalog, generic.candidate(), deductions, placements, inputChanceSeed, factoryScope);
+            .prepared(ticket, catalog, candidate, deductions, placements, inputChanceSeed, factoryScope)
+            .withOutputPreparationContext(factoryThread);
+        if (prepared != null) {
+          pendingFactoryPlan.withPreparedInputs(prepared.definition(), prepared.original(), prepared.epoch());
+        }
       }
       if (factoryScope != null) {
         var checked = pendingFactoryPlan.advanceFactoryChecks(factory, factoryThread, budget - used);
@@ -331,7 +442,33 @@ public final class RecipeSearch {
     if (groups != null) {
       return completedGroupWork + (groupSearch == null ? 0 : groupSearch.totalWork());
     }
-    return session.totalWork() + fluidWork + checkWork;
+    return (session == null ? 0 : session.totalWork()) + inputPreparationWork + fluidWork + checkWork;
+  }
+
+  /**
+   * A current checker's rejection advances this snapshot, never a fresh search.
+   */
+  public boolean rejectSelected(RecipeStartPlan plan) {
+    ticket.requireServerThread();
+    if (selected != plan || !dependenciesCurrent()) {
+      return false;
+    }
+    if (groups == null) {
+      session.rejectSelected();
+      pendingFactoryPlan = null;
+      fluidPlan = null;
+      chemicalPlan = null;
+    } else {
+      // At most one rejection per captured context/catalog ID pair. A rejection
+      // in one numeric or pattern group must not suppress another group's input.
+      rejectedGroupRecipes.computeIfAbsent(groupBestIndex, ignored -> new HashSet<>()).add(plan.recipe().id());
+      groupCursor = 0;
+      groupSearch = null;
+      groupBest = null;
+      groupBestIndex = -1;
+    }
+    selected = null;
+    return true;
   }
 
   private Result advanceGroups(int budget) {
@@ -353,6 +490,16 @@ public final class RecipeSearch {
             break;
           }
         }
+        var rejected = rejectedGroupRecipes.get(groupCursor);
+        if (rejected != null) {
+          var remaining = new HashSet<String>();
+          for (var candidate : catalog.recipes().candidatesFor(competitive)) {
+            if (!rejected.contains(candidate.id())) {
+              remaining.add(candidate.id());
+            }
+          }
+          competitive = remaining;
+        }
         // Charge even an empty group, so a long list cannot bypass the tick budget.
         used++;
         completedGroupWork++;
@@ -367,6 +514,7 @@ public final class RecipeSearch {
         var candidate = result.plan().orElseThrow();
         if (groupBest == null || precedes(candidate.recipe(), groupBest.recipe())) {
           groupBest = candidate;
+          groupBestIndex = groupCursor;
         }
       }
       completedGroupWork += groupSearch.totalWork();
@@ -387,7 +535,11 @@ public final class RecipeSearch {
   }
 
   public boolean dependenciesCurrent() {
-    return ticket.dependenciesCurrent() && catalog.isCurrent() && (factoryScope == null || factoryScope.current());
+    return ticket.dependenciesCurrent()
+        && catalog.isCurrent()
+        && RecipeItemCallbackService.isCurrent(itemCallbackEpoch)
+        && (factoryScope == null || factoryScope.current())
+        && (inputPreparationEpoch < 0 || RecipeItemCallbackService.isCurrent(inputPreparationEpoch));
   }
 
   /** Known absent roles after a complete search, never inventory shortages. */
@@ -423,6 +575,15 @@ public final class RecipeSearch {
     var requirements = RecipeResourceRequirements.capture(source);
     for (var candidate : candidates) {
       var definition = catalog.definition(candidate.id());
+      if (definition != null
+          && source.owner() instanceof FactoryControllerBlockEntity controller
+          && !controller
+              .recipeThreadAllowed(factoryThread, ResourceLocation.parse(candidate.id()), definition.executionOptions())
+          || definition != null
+              && source.owner() instanceof MachineControllerBlockEntity
+              && !definition.executionOptions().threadName().isEmpty()) {
+        continue;
+      }
       var missing = definition == null ? Optional.<PortKind>empty() : requirements.missing(definition);
       if (missing.isPresent()) {
         missingResources.put(candidate.id(), new MissingResource(candidate, missing.orElseThrow()));

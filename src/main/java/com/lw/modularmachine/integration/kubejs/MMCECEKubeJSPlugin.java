@@ -3,6 +3,11 @@ package com.lw.modularmachine.integration.kubejs;
 import com.lw.modularmachine.api.smart.SmartInterfaceBinding;
 import com.lw.modularmachine.api.controller.ControllerOwnership;
 import com.lw.modularmachine.api.controller.ControllerOwnershipApi;
+import com.lw.modularmachine.api.controller.ControllerScriptData;
+import com.lw.modularmachine.api.controller.ControllerScriptDataApi;
+import com.lw.modularmachine.api.controller.MachineEvents;
+import com.lw.modularmachine.api.client.controller.ControllerClientEvents;
+import com.lw.modularmachine.api.recipe.RecipeItemCallbacks;
 import com.google.gson.JsonElement;
 import com.lw.modularmachine.ModularMachine;
 import com.lw.modularmachine.api.smart.SmartInterfaceApi;
@@ -20,7 +25,7 @@ import com.lw.modularmachine.machine.recipe.MachineRecipeRegistries;
 import com.lw.modularmachine.machine.recipe.adapter.RecipeAdapterScriptSources;
 import com.lw.modularmachine.api.recipe.RecipeLifecycleEvents;
 import com.lw.modularmachine.api.recipe.RecipeCommandActions;
-import com.lw.modularmachine.machine.recipe.command.RecipeCommandService;
+import com.lw.modularmachine.api.recipe.RecipeModifier;
 import com.lw.modularmachine.api.smart.SmartInterfaceEvents;
 import dev.latvian.mods.kubejs.core.RecipeManagerKJS;
 import dev.latvian.mods.kubejs.event.EventGroup;
@@ -38,9 +43,8 @@ import dev.latvian.mods.kubejs.script.ScriptType;
 import java.util.List;
 import java.util.LinkedHashMap;
 import java.util.Map;
-import java.util.concurrent.atomic.AtomicLong;
 import net.minecraft.resources.ResourceLocation;
-import net.neoforged.neoforge.server.ServerLifecycleHooks;
+import java.util.ArrayList;
 
 /**
  * KubeJS-only bridge for fixed upgrade definitions and runtime upgrade
@@ -51,6 +55,9 @@ public final class MMCECEKubeJSPlugin implements KubeJSPlugin {
   public static final EventGroup SMART_INTERFACE_EVENTS = EventGroup.of("MMCECESmartInterfaceEvents");
   public static final EventGroup RECIPE_LIFECYCLE_EVENTS = EventGroup.of("MMCECERecipeEvents");
   public static final EventGroup RECIPE_ADAPTER_EVENTS = EventGroup.of("MMCECERecipeAdapterEvents");
+  public static final EventGroup MACHINE_EVENTS = EventGroup.of("MMEvents");
+  private static final EventHandler REGISTER_MACHINE_HANDLERS = MACHINE_EVENTS
+      .common("register", () -> KubeJSMachineRegistration.class);
   private static final EventHandler REGISTER_HANDLERS = EVENTS
       .server("register", () -> KubeJSUpgradeHandlerRegistration.class);
   private static final EventHandler REGISTER_SMART_INTERFACE_HANDLERS = SMART_INTERFACE_EVENTS
@@ -59,12 +66,17 @@ public final class MMCECEKubeJSPlugin implements KubeJSPlugin {
       .server("register", () -> KubeJSRecipeLifecycleRegistration.class);
   private static final EventHandler REGISTER_RECIPE_ADAPTERS = RECIPE_ADAPTER_EVENTS
       .server("register", () -> KubeJSRecipeAdapterRegistration.class);
-  private static final AtomicLong SCRIPT_GENERATION = new AtomicLong();
+
+  @Override
+  public void init() {
+    KubeJSServerHandlers.register();
+  }
 
   @Override
   public void registerBindings(BindingRegistry registry) {
     if (registry.type() == ScriptType.SERVER) {
       registry.add("RecipeBuilder", KubeJSRecipeBuilder.class);
+      registry.add("RecipeModifierBuilder", KubeJSRecipeModifierBuilder.class);
     }
   }
 
@@ -101,10 +113,31 @@ public final class MMCECEKubeJSPlugin implements KubeJSPlugin {
     registry.register(SMART_INTERFACE_EVENTS);
     registry.register(RECIPE_LIFECYCLE_EVENTS);
     registry.register(RECIPE_ADAPTER_EVENTS);
+    registry.register(MACHINE_EVENTS);
   }
 
   @Override
   public void registerClasses(ClassFilter filter) {
+    filter.allow(KubeJSMachineRegistration.class);
+    filter.allow(MachineEvents.Context.class);
+    filter.allow(MachineEvents.Type.class);
+    filter.allow(MachineEvents.Structure.class);
+    filter.allow(MachineEvents.Listener.class);
+    filter.allow(MachineEvents.ScriptAction.class);
+    filter.allow(MachineEvents.ScriptProposal.class);
+    filter.allow(RecipeItemCallbacks.Context.class);
+    filter.allow(RecipeItemCallbacks.Checker.class);
+    filter.allow(RecipeItemCallbacks.Modifier.class);
+    filter.allow(RecipeItemCallbacks.InputModifier.class);
+    filter.allow(RecipeItemCallbacks.ItemRequirement.class);
+    filter.allow(ControllerClientEvents.Context.class);
+    filter.allow(ControllerClientEvents.GuiListener.class);
+    filter.allow(ControllerClientEvents.GuiEvent.class);
+    filter.allow(ControllerClientEvents.ModelListener.class);
+    filter.allow(ControllerClientEvents.ModelEvent.class);
+    filter.allow(ControllerClientEvents.AnimationListener.class);
+    filter.allow(ControllerClientEvents.AnimationEvent.class);
+    filter.allow(ControllerClientEvents.Animation.class);
     filter.allow(KubeJSUpgradeHandlerRegistration.class);
     filter.allow(FactoryUpgradeKubeJSHandlers.FixedUpgradeBuilder.class);
     filter.allow(KubeJSSmartInterfaceRegistration.class);
@@ -116,10 +149,19 @@ public final class MMCECEKubeJSPlugin implements KubeJSPlugin {
     filter.allow(KubeJSRecipeAdapterRegistration.class);
     filter.allow(KubeJSRecipeBuilder.class);
     filter.allow(KubeJSRecipeBuilder.RecipeBuilder.class);
+    filter.allow(KubeJSRecipeModifierBuilder.class);
+    filter.allow(KubeJSRecipeModifierBuilder.Builder.class);
+    filter.allow(RecipeModifier.class);
+    filter.allow(RecipeModifier.Target.class);
+    filter.allow(RecipeModifier.Io.class);
+    filter.allow(RecipeModifier.Operation.class);
     filter.allow(KubeJSRecipeAdapterRegistration.RecipeAdapterBuilder.class);
     filter.allow(SmartInterfaceApi.class);
     filter.allow(ControllerOwnershipApi.class);
     filter.allow(ControllerOwnership.class);
+    filter.allow(ControllerScriptDataApi.class);
+    filter.allow(ControllerScriptDataApi.Result.class);
+    filter.allow(ControllerScriptData.class);
     filter.allow(SmartInterfaceApi.Snapshot.class);
     filter.allow(SmartInterfaceApi.Value.class);
     filter.allow(SmartInterfaceEvents.Listener.class);
@@ -165,18 +207,42 @@ public final class MMCECEKubeJSPlugin implements KubeJSPlugin {
 
   @Override
   public void afterScriptsLoaded(ScriptManager manager) {
+    if (manager.scriptType == ScriptType.CLIENT) {
+      var clientRegistration = new KubeJSMachineRegistration(true);
+      var clientResult = REGISTER_MACHINE_HANDLERS.post(manager.scriptType, clientRegistration);
+      var clientNext = clientRegistration.clientSnapshot();
+      KubeJSControllerClientBridge
+          .install(clientResult.pass() ? clientNext : KubeJSControllerClientRegistration.Snapshot.EMPTY);
+      return;
+    }
     if (!manager.scriptType.isServer()) {
       return;
     }
-    long generation = SCRIPT_GENERATION.incrementAndGet();
+    long generation = KubeJSServerHandlers.begin();
+    var machineRegistration = new KubeJSMachineRegistration(false);
+    var machineResult = REGISTER_MACHINE_HANDLERS.post(manager.scriptType, machineRegistration);
+    var machineHandlers = machineRegistration.serverSnapshot();
+    var machineNext = machineResult.pass() ? machineHandlers : List.<KubeJSMachineEventRegistration.Handler>of();
+    var machineSmartHandlers = machineRegistration.smartSnapshot();
     var registrations = new KubeJSUpgradeHandlerRegistration();
     var result = REGISTER_HANDLERS.post(manager.scriptType, registrations);
     var next = registrations.valid() && result.pass() ? registrations
         .snapshot() : FactoryUpgradeKubeJSHandlers.Snapshot.EMPTY;
     var smartRegistrations = new KubeJSSmartInterfaceRegistration();
     var smartResult = REGISTER_SMART_INTERFACE_HANDLERS.post(manager.scriptType, smartRegistrations);
-    var smartNext = smartRegistrations.valid() && smartResult.pass() ? smartRegistrations
-        .snapshot() : List.<KubeJSSmartInterfaceRegistration.Handler>of();
+    smartRegistrations.seal();
+    var smartNext = new ArrayList<KubeJSSmartInterfaceRegistration.Handler>();
+    if (smartRegistrations.valid() && smartResult.pass()) {
+      smartNext.addAll(smartRegistrations.snapshot());
+    }
+    if (machineResult.pass()) {
+      smartNext.addAll(machineSmartHandlers);
+    }
+    if (smartNext.stream().map(KubeJSSmartInterfaceRegistration.Handler::id).distinct().count() != smartNext.size()) {
+      ModularMachine.LOGGER
+          .warn("Duplicate smart interface handler IDs across MMEvents and MMCECESmartInterfaceEvents");
+      smartNext.clear();
+    }
     var recipeRegistrations = new KubeJSRecipeLifecycleRegistration();
     var recipeResult = REGISTER_RECIPE_LIFECYCLE_HANDLERS.post(manager.scriptType, recipeRegistrations);
     recipeRegistrations.seal();
@@ -186,50 +252,24 @@ public final class MMCECEKubeJSPlugin implements KubeJSPlugin {
         .failurePolicies() : List.<KubeJSRecipeLifecycleRegistration.FailurePolicy>of();
     var recipeCommands = recipeRegistrations.valid() && recipeResult.pass() ? recipeRegistrations
         .commands() : List.<RecipeCommandActions.Action>of();
-    var adapterRegistrations = new KubeJSRecipeAdapterRegistration();
+    var adapterRegistrations = new KubeJSRecipeAdapterRegistration(manager.getRegistries().access());
+    KubeJSRecipeItemCallbacks.beginAdapters();
     var adapterResult = REGISTER_RECIPE_ADAPTERS.post(manager.scriptType, adapterRegistrations);
     adapterRegistrations.seal();
     boolean adaptersValid = adapterRegistrations.valid() && adapterResult.pass();
+    if (!adaptersValid) {
+      KubeJSRecipeItemCallbacks.beginAdapters();
+    }
     RecipeAdapterScriptSources
         .install(generation, adaptersValid ? adapterRegistrations.snapshot() : Map.of(), adaptersValid);
-    var server = ServerLifecycleHooks.getCurrentServer();
-    if (server == null) {
-      ModularMachine.LOGGER.warn("KubeJS server handlers were not installed without a running server");
-      return;
-    }
-    Runnable install = () -> {
-      if (ServerLifecycleHooks.getCurrentServer() != server || SCRIPT_GENERATION.get() != generation) {
-        return;
-      }
-      try {
-        FactoryUpgradeKubeJSHandlers.install(next);
-      } catch (RuntimeException failure) {
-        FactoryUpgradeKubeJSHandlers.install(FactoryUpgradeKubeJSHandlers.Snapshot.EMPTY);
-        ModularMachine.LOGGER.warn("KubeJS runtime upgrade handler registration failed", failure);
-      }
-      try {
-        KubeJSSmartInterfaceHandlers.install(smartNext);
-      } catch (RuntimeException failure) {
-        KubeJSSmartInterfaceHandlers.install(List.of());
-        ModularMachine.LOGGER.warn("KubeJS smart interface handler registration failed", failure);
-      }
-      try {
-        KubeJSRecipeLifecycleHandlers.install(recipeNext, failurePolicies);
-      } catch (RuntimeException failure) {
-        KubeJSRecipeLifecycleHandlers.install(List.of(), List.of());
-        ModularMachine.LOGGER.warn("KubeJS recipe lifecycle handler registration failed", failure);
-      }
-      try {
-        RecipeCommandService.installKubeJS(recipeCommands);
-      } catch (RuntimeException failure) {
-        RecipeCommandService.installKubeJS(List.of());
-        ModularMachine.LOGGER.warn("KubeJS recipe command registration failed", failure);
-      }
-    };
-    if (server.isSameThread()) {
-      install.run();
-    } else {
-      server.execute(install);
-    }
+    KubeJSServerHandlers.stage(
+        new KubeJSServerHandlers.Snapshot(
+            generation,
+            machineNext,
+            next,
+            smartNext,
+            recipeNext,
+            failurePolicies,
+            recipeCommands));
   }
 }

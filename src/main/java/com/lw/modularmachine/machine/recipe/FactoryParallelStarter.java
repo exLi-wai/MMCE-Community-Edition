@@ -25,6 +25,8 @@ import net.minecraft.core.NonNullList;
 import net.minecraft.resources.ResourceLocation;
 import net.minecraft.world.item.ItemStack;
 import net.neoforged.neoforge.fluids.FluidStack;
+import com.lw.modularmachine.api.recipe.FluidRequirement;
+import java.util.Optional;
 
 /** Preflight boundary for a future atomic multi-run factory start. */
 public final class FactoryParallelStarter {
@@ -91,6 +93,17 @@ public final class FactoryParallelStarter {
       if (RecipeResourceRequirements.missing(ticket, nativeRecipe.orElseThrow()).isPresent()) {
         return Result.STALE;
       }
+      if (RecipeItemPreparation.transformsOutputs(nativeRecipe.orElseThrow())) {
+        plans.getFirst().withOutputPreparationContext(threadId);
+        int preparedOutputs = plans.getFirst().prepareParallel(nativeRecipe.orElseThrow(), plans.size(), checkBudget);
+        checkBudget = plans.getFirst().parallelBudgetRemaining();
+        if (preparedOutputs < 0) {
+          return Result.CHECK_PENDING;
+        }
+        if (preparedOutputs != plans.size()) {
+          return Result.CHECK_REJECTED;
+        }
+      }
       var ports = new HashMap<String, RecipeExecutionTicket.PortSnapshot>();
       for (var port : ticket.ports()) {
         ports.put(port.partId(), port);
@@ -144,11 +157,12 @@ public final class FactoryParallelStarter {
       var outputKeys = new HashSet<ItemResourceKey>();
       var compiled = nativeRecipe.orElseThrow()
           .compile(ResourceLocation.parse(plans.get(0).recipe().id()), factory.getLevel().registryAccess());
-      var outputClaims = compiled.outputs().stream()
+      var outputClaims = RecipeItemPreparation.inputCandidate(compiled, nativeRecipe.orElseThrow()).outputs().stream()
           .map(claim -> new RecipeCandidate.Output<>(claim.key(), Math.multiplyExact(claim.count(), plans.size())))
           .toList();
       outputClaims.forEach(claim -> outputKeys.add(claim.key()));
-      var fluidOutputClaims = nativeRecipe.orElseThrow().fluidOutputs().stream()
+      var fluidOutputClaims = nativeRecipe.orElseThrow().fluidOutputRequirements().stream()
+          .filter(output -> output.chance() == 1).map(FluidRequirement::stack)
           .map(
               fluid -> new RecipeCandidate.Output<>(
                   new FluidResourceKey(fluid, factory.getLevel().registryAccess())
@@ -210,27 +224,62 @@ public final class FactoryParallelStarter {
         }
       }
       var runs = new ArrayList<FrozenItemRun>();
+      var preparedRuns = plans.getFirst().preparedOutputRuns(plans.size());
       for (int index = 0; index < plans.size(); index++) {
         runs.add(
-            FrozenItemRun.freeze(
-                ResourceLocation.parse(plans.get(index).recipe().id()),
-                nativeRecipe.orElseThrow(),
-                ticket.definitionEpoch(),
-                factory.getLevel().registryAccess(),
-                ticket.allPorts(),
-                factory.getLevel().getGameTime(),
-                upgrades,
-                ticket.inputGroup(),
-                1,
-                ticket.dynamicLengths()));
+            !preparedRuns.isEmpty() ? preparedRuns.get(index)
+                .atStartTick(factory.getLevel().getGameTime()) : FrozenItemRun.freeze(
+                    ResourceLocation.parse(plans.get(index).recipe().id()),
+                    nativeRecipe.orElseThrow(),
+                    ticket.definitionEpoch(),
+                    factory.getLevel().registryAccess(),
+                    ticket.allPorts(),
+                    factory.getLevel().getGameTime(),
+                    upgrades,
+                    ticket.inputGroup(),
+                    1,
+                    ticket.dynamicLengths(),
+                    RecipeItemPreparation.context(
+                        ticket,
+                        ResourceLocation.parse(plans.get(index).recipe().id()),
+                        Optional.of(threadId),
+                        1)));
       }
       if (uniquePlans.stream().anyMatch(plan -> !plan.factoryAdmissionCurrent(factory, threadId))) {
+        return Result.STALE;
+      }
+      var inputCheck = RecipeItemPreparation
+          .checkInputs(nativeRecipe.orElseThrow(), ticket, Optional.of(threadId), plans.size(), runs.getFirst());
+      if (runs.stream().anyMatch(run -> !run.preparedItemCallbacksCurrent())
+          || !plans.getFirst().preparedOutputsCurrent(plans.size())
+          || uniquePlans.stream()
+              .anyMatch(plan -> !plan.factoryAdmissionCurrent(factory, threadId) || !plan.catalog().isCurrent())
+          || !startCosts.current()) {
+        return Result.STALE;
+      }
+      if (inputCheck != RecipeItemCallbackService.InputCheck.ALLOWED) {
+        return switch (inputCheck) {
+          case REJECTED -> Result.CHECK_REJECTED;
+          case ERROR -> Result.CHECK_ERROR;
+          default -> Result.STALE;
+        };
+      }
+      if (!factory
+          .recipeThreadAllowed(threadId, runs.getFirst().recipeId(), nativeRecipe.orElseThrow().executionOptions())) {
         return Result.STALE;
       }
       var fluidDebits = planFluidDebits(
           ticket,
           fluidRequirements,
           plans.size(),
+          nativeRecipe.orElseThrow().selectors().fluidInput());
+      if (fluidDebits == null) {
+        return Result.STALE;
+      }
+      fluidDebits = planFluidDebits(
+          ticket,
+          runs.stream().flatMap(run -> run.fluidInputClaims(factory.getLevel().registryAccess()).stream()).toList(),
+          1,
           nativeRecipe.orElseThrow().selectors().fluidInput());
       if (fluidDebits == null) {
         return Result.STALE;
@@ -245,6 +294,9 @@ public final class FactoryParallelStarter {
       patterns.acquire();
       startCosts.acquireInto(upgradeLeases);
       chemicals.acquire();
+      if (runs.stream().anyMatch(run -> !run.preparedItemCallbacksCurrent())) {
+        return Result.STALE;
+      }
       for (var port : ticket.ports()) {
         if (!port.patternInput() && port.kind().resource() == PortKind.Resource.ITEM) {
           var lease = port.identity().acquireItemStart(port.revision());
@@ -265,6 +317,8 @@ public final class FactoryParallelStarter {
       factory.installRuns(threadId, runs);
       committed = true;
       return Result.STARTED;
+    } catch (com.lw.modularmachine.machine.factory.UpgradeRecipeChecks.StaleException stale) {
+      return Result.STALE;
     } catch (RuntimeException failure) {
       ModularMachine.LOGGER
           .warn("Factory parallel start failed at {} for thread {}", factory.getBlockPos(), threadId, failure);

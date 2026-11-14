@@ -79,8 +79,9 @@ final class MachineItemRecipeJeiCategory implements IRecipeCategory<MachineRecip
         var items = part.input() ? recipe.inputs() : recipe.outputs();
         if (part.index() < items.size()) {
           var amount = items.get(part.index());
-          slot.addItemStack(amount.displayStack())
-              .setCustomRenderer(VanillaTypes.ITEM_STACK, new LegacyJeiItemRenderer(amount.amount()));
+          slot.addItemStack(amount.ingredientStack()).setCustomRenderer(
+              VanillaTypes.ITEM_STACK,
+              new LegacyJeiItemRenderer(amount.amount(), amount.displayStack()));
           slot.addRichTooltipCallback(
               (view, tooltip) -> MachineRecipeDisplay.itemTooltip(amount, part.input()).forEach(tooltip::add));
         }

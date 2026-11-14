@@ -39,6 +39,7 @@ import net.neoforged.neoforge.client.model.data.ModelProperty;
 import net.neoforged.neoforge.event.level.ChunkEvent;
 import net.neoforged.neoforge.event.level.LevelEvent;
 import org.jetbrains.annotations.ApiStatus;
+import com.lw.modularmachine.client.controller.ControllerClientPublisher;
 
 /**
  * Internal client display membership; world block states and component data
@@ -48,6 +49,7 @@ import org.jetbrains.annotations.ApiStatus;
 @EventBusSubscriber(modid = ModularMachine.MODID, value = Dist.CLIENT)
 public final class MachineVisibilityClient {
   private static final ModelProperty<List<Member>> MEMBERS = new ModelProperty<>();
+  private static final ModelProperty<Boolean> CONTROLLER_MODEL = new ModelProperty<>();
   private static final ConcurrentHashMap<Long, List<Member>> MEMBERS_BY_POSITION = new ConcurrentHashMap<>();
   private static final Map<Long, Owner> OWNERS = new HashMap<>();
   private static final Map<Long, Chunk> CHUNKS = new HashMap<>();
@@ -182,6 +184,7 @@ public final class MachineVisibilityClient {
 
   @SubscribeEvent
   static void onTick(ClientTickEvent.Post event) {
+    ControllerClientPublisher.tick();
     var mc = Minecraft.getInstance();
     if (mc.level == null) {
       clear();
@@ -291,6 +294,10 @@ public final class MachineVisibilityClient {
 
   public static void initializeModels() {
     var ids = new HashSet<ResourceLocation>();
+    ids.add(MachineRegistries.CONTROLLER.getId());
+    ids.add(MachineRegistries.FACTORY_CONTROLLER.getId());
+    MachineRegistries.DEDICATED_CONTROLLERS.values().forEach(holder -> ids.add(holder.getId()));
+    MachineRegistries.DEDICATED_FACTORIES.values().forEach(holder -> ids.add(holder.getId()));
     MachineRegistries.CASINGS.values().forEach(holder -> ids.add(holder.getId()));
     MachineRegistries.PORTS.values().forEach(holder -> ids.add(holder.getId()));
     MachineRegistries.NETWORK_PORTS.values().forEach(holder -> ids.add(holder.getId()));
@@ -318,7 +325,15 @@ public final class MachineVisibilityClient {
     });
   }
 
+  public static boolean isComponentHidden(BlockPos position) {
+    var members = MEMBERS_BY_POSITION.get(position.asLong());
+    return members != null && members.stream().anyMatch(Member::active);
+  }
+
   private static boolean hidden(ModelData data) {
+    if (Boolean.TRUE.equals(data.get(CONTROLLER_MODEL))) {
+      return true;
+    }
     List<Member> members = data.get(MEMBERS);
     if (members != null) {
       for (var member : members) {
@@ -343,8 +358,11 @@ public final class MachineVisibilityClient {
         return resolved;
       }
       var members = MEMBERS_BY_POSITION.get(position.asLong());
-
-      return members == null ? resolved : resolved.derive().with(MEMBERS, members).build();
+      var builder = resolved.derive().with(CONTROLLER_MODEL, ControllerClientPublisher.usesModel(position));
+      if (members != null) {
+        builder.with(MEMBERS, members);
+      }
+      return builder.build();
     }
 
     @Override

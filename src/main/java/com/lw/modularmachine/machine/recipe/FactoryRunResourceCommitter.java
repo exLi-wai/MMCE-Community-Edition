@@ -29,6 +29,8 @@ public final class FactoryRunResourceCommitter {
     STALE,
     UPGRADE_PENDING,
     MISSING_ENERGY_INPUT,
+    MISSING_ENERGY_OUTPUT,
+    OUTPUT_BLOCKED,
     MISSING_FLUID_INPUT,
     MISSING_CHEMICAL_INPUT
   }
@@ -60,6 +62,14 @@ public final class FactoryRunResourceCommitter {
     }
     if (tickCosts.status() != FactoryUpgradeTickCosts.Status.READY) {
       return Result.UPGRADE_ERROR;
+    }
+    var energyOutputs = EnergyOutputTransactions.prepare(factory, List.of(run));
+    if (energyOutputs.status() != EnergyOutputTransactions.Status.READY) {
+      return switch (energyOutputs.status()) {
+        case MISSING_PORT -> Result.MISSING_ENERGY_OUTPUT;
+        case BLOCKED -> Result.OUTPUT_BLOCKED;
+        default -> Result.STALE;
+      };
     }
     var beforeTick = run;
     RecipeExecutionTicket energyTicket = null;
@@ -119,7 +129,11 @@ public final class FactoryRunResourceCommitter {
         return applyResourceFailure(factory, threadId, run, level.getGameTime(), Result.WAITING_CHEMICAL);
       }
     }
-    if (energyTicket == null && fluidTicket == null && chemicalTicket == null && !tickCosts.hasRuntimeWork()) {
+    if (energyTicket == null
+        && fluidTicket == null
+        && chemicalTicket == null
+        && !tickCosts.hasRuntimeWork()
+        && run.energyOutputPerTick() == 0) {
       return Result.STALE;
     }
     var energyLeases = new ArrayList<MachinePortBlockEntity.EnergyStartLease>();
@@ -137,6 +151,7 @@ public final class FactoryRunResourceCommitter {
     boolean committed = false;
     try {
       if (!tickCosts.current()
+          || !energyOutputs.current()
           || energyTicket == null && fluidTicket == null && !factory.revalidateStructure(factory.registration())
           || energyTicket != null && !RecipeCommitGuard.validate(energyTicket)
           || fluidTicket != null && !RecipeCommitGuard.validate(fluidTicket)
@@ -158,6 +173,7 @@ public final class FactoryRunResourceCommitter {
           return Result.STALE;
         }
       }
+      energyOutputs.acquire();
       for (var debit : fluidDebits) {
         if (debit.port().patternInput()) {
           continue;
@@ -185,6 +201,7 @@ public final class FactoryRunResourceCommitter {
       ModularMachine.LOGGER.warn("Factory run resource commit failed at {}", factory.getBlockPos(), failure);
       return Result.STALE;
     } finally {
+      energyOutputs.resolve(committed);
       for (var lease : energyLeases) {
         lease.resolve(committed);
       }
@@ -199,6 +216,7 @@ public final class FactoryRunResourceCommitter {
       }
       patterns.resolve(committed);
       if (committed) {
+        energyOutputs.publish();
         patterns.publish();
         if (chemicals != null) {
           chemicals.publish();

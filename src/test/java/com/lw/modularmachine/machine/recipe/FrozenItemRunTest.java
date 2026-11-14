@@ -20,6 +20,13 @@ class FrozenItemRunTest {
     return requirement;
   }
 
+  private static void addPort(CompoundTag source, PortKind kind) {
+    var port = new CompoundTag();
+    port.putString("id", kind.name().toLowerCase(java.util.Locale.ROOT));
+    port.putString("kind", kind.name());
+    source.getList("ports", Tag.TAG_COMPOUND).add(port);
+  }
+
   static CompoundTag valid() {
     var definition = new CompoundTag();
     definition.putString("type", MachineRecipeJson.TYPE);
@@ -74,6 +81,7 @@ class FrozenItemRunTest {
     source.putInt("schema", 3);
     source.putLong("last_progress_tick", 40);
     source.getCompound("definition").putLong("energy_per_tick", 128);
+    addPort(source, PortKind.ENERGY_INPUT);
     var run = FrozenItemRun.read(source);
     var restored = FrozenItemRun.read(run.save());
     assertEquals(128, restored.energyPerTick());
@@ -108,6 +116,7 @@ class FrozenItemRunTest {
     definition.put("fluid_per_tick", new CompoundTag());
     definition.getCompound("fluid_per_tick").putString("id", "minecraft:water");
     definition.getCompound("fluid_per_tick").putInt("amount", 125);
+    addPort(source, PortKind.FLUID_INPUT);
     var restored = FrozenItemRun.read(FrozenItemRun.read(source).save());
     var fee = restored.definition().getCompound("fluid_per_tick");
     assertEquals("minecraft:water", fee.getString("id"));
@@ -135,6 +144,7 @@ class FrozenItemRunTest {
     var fluids = new ListTag();
     fluids.add(fluid);
     source.getCompound("definition").put("fluid_outputs", fluids);
+    addPort(source, PortKind.FLUID_OUTPUT);
     source.putInt("progress", 19);
     var pending = FrozenItemRun.read(source).advanced(41).finished();
     var saved = pending.save();
@@ -296,6 +306,7 @@ class FrozenItemRunTest {
     assertThrows(IllegalArgumentException.class, () -> FrozenItemRun.read(uuid));
     var requirement = valid();
     requirement.getCompound("definition").putLong("energy_per_tick", 1);
+    addPort(requirement, PortKind.ENERGY_INPUT);
     assertEquals(1L, FrozenItemRun.read(requirement).save().getCompound("definition").getLong("energy_per_tick"));
   }
 

@@ -191,6 +191,17 @@ public final class CompiledRecipeSet<K> {
     return List.copyOf(result);
   }
 
+  BitSet ranksOf(List<RecipeCandidate<K>> selected) {
+    var ranks = new BitSet(entries.size());
+    for (var candidate : selected) {
+      var entry = byId.get(candidate.id());
+      if (entry != null) {
+        ranks.set(entry.rank);
+      }
+    }
+    return ranks;
+  }
+
   static final class Entry<K> {
     final int rank;
     final RecipeCandidate<K> recipe;

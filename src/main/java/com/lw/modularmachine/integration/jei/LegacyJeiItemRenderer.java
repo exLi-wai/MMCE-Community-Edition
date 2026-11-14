@@ -16,23 +16,29 @@ import net.minecraft.world.item.TooltipFlag;
  */
 final class LegacyJeiItemRenderer implements IIngredientRenderer<ItemStack> {
   private final long amount;
+  private final ItemStack display;
   LegacyJeiItemRenderer(long amount) {
+    this(amount, ItemStack.EMPTY);
+  }
+
+  LegacyJeiItemRenderer(long amount, ItemStack display) {
     this.amount = amount;
+    this.display = display.copy();
   }
 
   @Override
   public void render(GuiGraphics graphics, ItemStack stack) {
-    MachineRecipeDisplay.drawItem(graphics, stack, amount, 0, 0);
+    MachineRecipeDisplay.drawItem(graphics, display.isEmpty() ? stack : display, amount, 0, 0);
   }
 
   @Override
   public List<Component> getTooltip(ItemStack stack, Item.TooltipContext context, Player player, TooltipFlag flag) {
-    return stack.getTooltipLines(context, player, flag);
+    return (display.isEmpty() ? stack : display).getTooltipLines(context, player, flag);
   }
   @SuppressWarnings("removal")
   @Override
   public List<Component> getTooltip(ItemStack stack, TooltipFlag flag) {
     var mc = Minecraft.getInstance();
-    return stack.getTooltipLines(Item.TooltipContext.of(mc.level), mc.player, flag);
+    return (display.isEmpty() ? stack : display).getTooltipLines(Item.TooltipContext.of(mc.level), mc.player, flag);
   }
 }

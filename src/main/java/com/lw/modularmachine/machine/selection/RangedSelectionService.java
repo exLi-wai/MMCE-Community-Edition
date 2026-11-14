@@ -48,8 +48,9 @@ import net.neoforged.neoforge.network.PacketDistributor;
 import org.jetbrains.annotations.ApiStatus;
 
 /**
- * Internal server-owned editor, interactions and fair task scheduling for the
- * existing ranged tool.
+ * Internal server-owned editor, interactions and fair task scheduling retained
+ * for reuse. No item, network or event entry point is installed during the GUI
+ * rewrite.
  */
 @ApiStatus.Internal
 public final class RangedSelectionService {

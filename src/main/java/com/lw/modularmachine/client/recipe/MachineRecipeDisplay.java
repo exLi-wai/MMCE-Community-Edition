@@ -140,9 +140,12 @@ public final class MachineRecipeDisplay {
   }
 
   public static List<Component> details(MachineRecipe recipe) {
-    return List.of(
-        Component.translatable("jei.mmcece.machine_item.priority", recipe.priority()),
-        Component.translatable("jei.mmcece.machine_item.input_groups"));
+    var result = new ArrayList<Component>();
+    result.add(Component.translatable("jei.mmcece.machine_item.priority", recipe.priority()));
+    result.add(Component.translatable("jei.mmcece.machine_item.input_groups"));
+    recipe.scriptOptions().tooltips().forEach(line -> result.add(Component.literal(line)));
+
+    return List.copyOf(result);
   }
 
   public static Component duration(MachineRecipe recipe) {

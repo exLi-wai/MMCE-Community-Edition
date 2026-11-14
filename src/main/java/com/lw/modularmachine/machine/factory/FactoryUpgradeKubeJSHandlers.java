@@ -1,5 +1,8 @@
 package com.lw.modularmachine.machine.factory;
 
+import com.lw.modularmachine.api.recipe.RecipeModifier;
+import com.lw.modularmachine.machine.recipe.RecipeModifiers;
+import com.mojang.serialization.JsonOps;
 import com.lw.modularmachine.api.upgrade.FactoryUpgradeRuntimeData;
 import com.lw.modularmachine.api.upgrade.FactoryUpgradeBusData;
 import com.lw.modularmachine.api.upgrade.FactoryUpgradeItemData;
@@ -160,14 +163,42 @@ public final class FactoryUpgradeKubeJSHandlers {
     }
 
     public FixedUpgradeBuilder recipeModifier(String target, String io, String operation, double value) {
+      return recipeModifier(target, io, operation, value, false);
+    }
+
+    public FixedUpgradeBuilder recipeModifier(String target, String io, String operation, double value, boolean affectChance) {
+      try {
+        return addModifier(
+            new RecipeModifier(
+                RecipeModifier.Target.parse(target),
+                RecipeModifier.Io.parse(io),
+                RecipeModifier.Operation.parse(operation),
+                value,
+                affectChance));
+      } catch (RuntimeException invalid) {
+        valid = false;
+        throw invalid;
+      }
+    }
+
+    public FixedUpgradeBuilder addModifier(RecipeModifier modifier) {
       var modifiers = source.has("recipe_modifiers") ? source.getAsJsonArray("recipe_modifiers") : new JsonArray();
-      var modifier = new JsonObject();
-      modifier.addProperty("target", target);
-      modifier.addProperty("io", io);
-      modifier.addProperty("operation", operation);
-      modifier.addProperty("value", value);
-      modifiers.add(modifier);
+      if (modifier == null || modifiers.size() >= RecipeModifiers.MAX_RULES) {
+        valid = false;
+        throw new IllegalArgumentException("Missing or excessive fixed upgrade recipe modifiers");
+      }
+      modifiers.add(
+          RecipeModifier.CODEC.encodeStart(JsonOps.INSTANCE, Objects.requireNonNull(modifier, "modifier"))
+              .getOrThrow());
       source.add("recipe_modifiers", modifiers);
+      return this;
+    }
+
+    public FixedUpgradeBuilder addModifiers(List<RecipeModifier> modifiers) {
+      Objects.requireNonNull(modifiers, "modifiers");
+      for (var modifier : modifiers) {
+        addModifier(modifier);
+      }
       return this;
     }
 
@@ -220,7 +251,7 @@ public final class FactoryUpgradeKubeJSHandlers {
     private boolean valid = true;
 
     /** Starts one fixed item upgrade definition in the KubeJS server script. */
-    public FixedUpgradeBuilder fixedUpgrade(String id, String item) {
+    public FixedUpgradeBuilder fixedUpgrade(String item, String id) {
       ResourceLocation identifier = ResourceLocation.tryParse(id);
       if (identifier == null
           || !identifier.getNamespace().equals("kubejs")

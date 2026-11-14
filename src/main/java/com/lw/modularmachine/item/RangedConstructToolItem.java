@@ -1,11 +1,9 @@
 package com.lw.modularmachine.item;
 
-import com.lw.modularmachine.machine.selection.RangedSelectionService;
-import com.lw.modularmachine.registry.MachineDataComponents;
+import com.lw.modularmachine.machine.selection.RangedConstructToolActions;
 import java.util.List;
 import net.minecraft.core.BlockPos;
 import net.minecraft.network.chat.Component;
-import net.minecraft.server.level.ServerPlayer;
 import net.minecraft.world.InteractionHand;
 import net.minecraft.world.InteractionResult;
 import net.minecraft.world.InteractionResultHolder;
@@ -17,8 +15,8 @@ import net.minecraft.world.item.context.UseOnContext;
 import net.minecraft.world.level.Level;
 
 /**
- * Existing ranged tool: open the editor, pick corners, then use a controller to
- * export.
+ * Main-hand selection interactions. Preview is client-only; export remains
+ * disconnected.
  */
 public final class RangedConstructToolItem extends Item {
   public RangedConstructToolItem(Properties properties) {
@@ -27,54 +25,32 @@ public final class RangedConstructToolItem extends Item {
 
   @Override
   public InteractionResultHolder<ItemStack> use(Level level, Player player, InteractionHand hand) {
-    var stack = player.getItemInHand(hand);
-    if (hand != InteractionHand.MAIN_HAND) {
-      return InteractionResultHolder.pass(stack);
-    }
-    if (player instanceof ServerPlayer server) {
-      RangedSelectionService.open(server);
-    }
-    return InteractionResultHolder.sidedSuccess(stack, level.isClientSide);
+    return new InteractionResultHolder<>(interact(player, hand, null), player.getItemInHand(hand));
+  }
+
+  @Override
+  public InteractionResult onItemUseFirst(ItemStack stack, UseOnContext context) {
+    return useOn(context);
   }
 
   @Override
   public InteractionResult useOn(UseOnContext context) {
-    var player = context.getPlayer();
-    if (player == null) {
-      return InteractionResult.PASS;
-    }
-    return interact(context.getLevel(), player, context.getItemInHand(), context.getClickedPos(), context.getHand());
+    return interact(context.getPlayer(), context.getHand(), context.getClickedPos());
   }
 
-  /**
-   * Block events intercept controller GUIs before useOn; both routes share this
-   * dispatcher.
-   */
-  public static InteractionResult interact(Level level, Player player, ItemStack stack, BlockPos pos, InteractionHand hand) {
-    if (hand != InteractionHand.MAIN_HAND || !(stack.getItem() instanceof RangedConstructToolItem)) {
+  private static InteractionResult interact(Player player, InteractionHand hand, BlockPos position) {
+    if (player == null || hand != InteractionHand.MAIN_HAND) {
       return InteractionResult.PASS;
     }
-    if (level.isClientSide) {
-      return InteractionResult.SUCCESS;
+    if (player.level().isClientSide) {
+      RangedConstructToolActions.useClient(position);
     }
-    return player instanceof ServerPlayer server ? RangedSelectionService
-        .interact(server, pos.immutable()) : InteractionResult.PASS;
+
+    return InteractionResult.sidedSuccess(player.level().isClientSide);
   }
 
   @Override
   public void appendHoverText(ItemStack stack, TooltipContext context, List<Component> lines, TooltipFlag flag) {
     lines.add(Component.translatable("tooltip.mmcece.ranged_construct_tool"));
-    var first = stack.get(MachineDataComponents.SELECTION_FIRST.get());
-    if (first != null) {
-      lines.add(Component.translatable("tooltip.mmcece.ranged_construct_tool.first", coordinates(first)));
-    }
-    var second = stack.get(MachineDataComponents.SELECTION_SECOND.get());
-    if (second != null) {
-      lines.add(Component.translatable("tooltip.mmcece.ranged_construct_tool.second", coordinates(second)));
-    }
-  }
-
-  private static Component coordinates(BlockPos pos) {
-    return Component.literal(pos.getX() + ", " + pos.getY() + ", " + pos.getZ());
   }
 }

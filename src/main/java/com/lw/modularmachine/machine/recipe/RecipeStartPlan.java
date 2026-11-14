@@ -20,6 +20,7 @@ import java.util.Optional;
 import net.minecraft.resources.ResourceLocation;
 import net.minecraft.util.RandomSource;
 import org.jetbrains.annotations.ApiStatus;
+import java.util.HashSet;
 
 /**
  * Read-only start admission: deductions are not applied and placements do not
@@ -41,6 +42,12 @@ public final class RecipeStartPlan {
   private int parallelRequest;
   private ChemicalOutputLayout.Planning chemicalOutputAdmission;
   private int chemicalOutputInstances;
+  private MachineRecipe inputPreparedDefinition;
+  private RecipeCandidate<ItemResourceKey> originalCandidate;
+  private long inputPreparedEpoch = -1;
+  private String outputPreparationThread;
+  private PreparedRecipeOutputs outputPreparation;
+  private int parallelBudgetRemaining;
 
   RecipeStartPlan(RecipeExecutionTicket source, RecipeCatalog catalog, RecipeCandidate<ItemResourceKey> recipe, List<Deduction> deductions, List<Placement> placements, long inputChanceSeed, UpgradeRecipeChecks.Scope factoryScope) {
     this.source = source;
@@ -59,9 +66,48 @@ public final class RecipeStartPlan {
     return inputChanceSeed;
   }
 
+  public RecipeStartPlan withOutputPreparationContext(String thread) {
+    outputPreparationThread = thread;
+    return this;
+  }
+
   /** Internal read-only admission assembled by the resource search. */
   public static RecipeStartPlan prepared(RecipeExecutionTicket source, RecipeCatalog catalog, RecipeCandidate<ItemResourceKey> recipe, List<Deduction> deductions, List<Placement> placements, long inputChanceSeed, UpgradeRecipeChecks.Scope factoryScope) {
     return new RecipeStartPlan(source, catalog, recipe, deductions, placements, inputChanceSeed, factoryScope);
+  }
+
+  /**
+   * Internal search result: transformed inputs are planned once against one
+   * callback generation.
+   */
+  public RecipeStartPlan withPreparedInputs(MachineRecipe definition, RecipeCandidate<ItemResourceKey> original, long epoch) {
+    source.requireServerThread();
+    if (inputPreparedDefinition != null
+        || definition == null
+        || original == null
+        || !original.id().equals(recipe.id())
+        || !definition.machineId().equals(catalog.machineId())
+        || catalog.recipes().candidate(original.id()).orElse(null) != original
+        || !definition.compile(ResourceLocation.parse(recipe.id()), source.level().registryAccess()).equals(recipe)
+        || !RecipeItemCallbackService.isCurrent(epoch)) {
+      throw new IllegalArgumentException("Invalid prepared input recipe override");
+    }
+    inputPreparedDefinition = definition;
+    originalCandidate = original;
+    inputPreparedEpoch = epoch;
+    return this;
+  }
+
+  RecipeCandidate<ItemResourceKey> catalogCandidate() {
+    return originalCandidate == null ? recipe : originalCandidate;
+  }
+
+  public boolean inputPreparationCurrent() {
+    return inputPreparedEpoch < 0 || RecipeItemCallbackService.isCurrent(inputPreparedEpoch);
+  }
+
+  Optional<MachineRecipe> preparedInputDefinition() {
+    return inputPreparationCurrent() ? Optional.ofNullable(inputPreparedDefinition) : Optional.empty();
   }
 
   public static long newInputChanceSeed() {
@@ -80,6 +126,9 @@ public final class RecipeStartPlan {
     for (int instance = 0; instance < instances; instance++) {
       var random = RandomSource.create(inputChanceSeedForInstance(seed, instance));
       for (var input : recipe.inputs()) {
+        if (input.parallelUnaffected() && instance != 0) {
+          continue;
+        }
         if (input.chance() >= 1.0D || input.chance() > 0.0D && random.nextDouble() < input.chance()) {
           result.merge(input.key(), input.count(), Math::addExact);
         }
@@ -107,6 +156,7 @@ public final class RecipeStartPlan {
     if (source.owner() != factory
         || !source.dependenciesCurrent()
         || !catalog.isCurrent()
+        || !inputPreparationCurrent()
         || !modifierContextCurrent(factory, threadId)) {
       return new UpgradeRecipeChecks.Result(UpgradeRecipeChecks.Status.STALE, 0);
     }
@@ -134,6 +184,7 @@ public final class RecipeStartPlan {
         && factoryChecks.admitted(factory, threadId)
         && source.dependenciesCurrent()
         && catalog.isCurrent()
+        && inputPreparationCurrent()
         && modifierContextCurrent(factory, threadId);
   }
 
@@ -215,7 +266,15 @@ public final class RecipeStartPlan {
       throw new IllegalStateException("Parallel input allocation exceeds physical resources");
     }
 
-    return new RecipeStartPlan(source, catalog, recipe, scaledDeductions, placements, inputChanceSeed, factoryScope);
+    return copyInputPreparationTo(
+        new RecipeStartPlan(source, catalog, recipe, scaledDeductions, placements, inputChanceSeed, factoryScope));
+  }
+
+  private RecipeStartPlan copyInputPreparationTo(RecipeStartPlan target) {
+    target.inputPreparedDefinition = inputPreparedDefinition;
+    target.originalCandidate = originalCandidate;
+    target.inputPreparedEpoch = inputPreparedEpoch;
+    return target;
   }
 
   static boolean samePatternScope(RecipeExecutionTicket left, RecipeExecutionTicket right) {
@@ -235,7 +294,8 @@ public final class RecipeStartPlan {
           || !samePatternScope(plan.source, first.source)
           || plan.source.inputGroup() != first.source.inputGroup()
           || plan.catalog != first.catalog
-          || !plan.recipe.id().equals(first.recipe.id())) {
+          || !plan.recipe.equals(first.recipe)
+          || plan.inputPreparedEpoch != first.inputPreparedEpoch) {
         throw new IllegalArgumentException("Parallel plans do not share one recipe owner");
       }
       sampledInputs(plan.recipe, inputChanceSeedForInstance(plan.inputChanceSeed, index), 1)
@@ -264,19 +324,24 @@ public final class RecipeStartPlan {
       throw new IllegalStateException("Parallel input chance allocation exceeds physical resources");
     }
 
-    return new RecipeStartPlan(
-        first.source,
-        first.catalog,
-        first.recipe,
-        combined,
-        first.placements,
-        first.inputChanceSeed,
-        first.factoryScope);
+    return first.copyInputPreparationTo(
+        new RecipeStartPlan(
+            first.source,
+            first.catalog,
+            first.recipe,
+            combined,
+            first.placements,
+            first.inputChanceSeed,
+            first.factoryScope));
   }
 
   public int prepareParallel(MachineRecipe definition, int limit, int budget) {
     limit = definition.parallelized() ? limit : Math.min(limit, 1);
+    limit = PatternProductionService.parallelLimit(source, definition, limit);
     if (parallelAdmission == null || parallelRequest != limit) {
+      if (outputPreparation != null && !outputPreparation.admittedWithin(limit)) {
+        outputPreparation = null;
+      }
       parallelAdmission = new ParallelRecipeAdmission(
           this,
           definition,
@@ -285,7 +350,33 @@ public final class RecipeStartPlan {
       parallelRequest = limit;
     }
 
-    return parallelAdmission.advance(budget);
+    int admitted = parallelAdmission.advance(budget);
+    parallelBudgetRemaining = parallelAdmission.remainingBudget();
+    if (admitted <= 0 || !RecipeItemPreparation.transformsOutputs(definition)) {
+      return admitted;
+    }
+    if (outputPreparation == null) {
+      outputPreparation = new PreparedRecipeOutputs(this, definition, outputPreparationThread, admitted);
+    }
+    int result = outputPreparation.advance(parallelBudgetRemaining);
+    parallelBudgetRemaining = outputPreparation.remainingBudget();
+    return result;
+  }
+
+  int parallelBudgetRemaining() {
+    return parallelBudgetRemaining;
+  }
+
+  List<FrozenItemRun> preparedOutputRuns(int instances) {
+    return outputPreparation == null ? List.of() : outputPreparation.runs(instances);
+  }
+
+  boolean preparedOutputsCurrent(int instances) {
+    return outputPreparation == null || outputPreparation.current(instances);
+  }
+
+  public boolean modifiedOutputsRejected() {
+    return outputPreparation != null && outputPreparation.rejected();
   }
 
   record ChemicalOutputCheck(RecipePlanner.Status status, int workUsed) {
@@ -307,10 +398,10 @@ public final class RecipeStartPlan {
   public int maxRepeatableInputs() {
     var available = new HashMap<ItemResourceKey, Long>();
     var required = new HashMap<ItemResourceKey, Long>();
+    var fixed = new HashMap<ItemResourceKey, Long>();
+    boolean aggregate = source.owner() instanceof MachineControllerBlockEntity;
     for (var input : recipe.inputs()) {
-      if (input.chance() > 0) {
-        required.merge(input.key(), input.count(), Math::addExact);
-      }
+      (aggregate && input.parallelUnaffected() ? fixed : required).merge(input.key(), input.count(), Math::addExact);
     }
     for (var port : source.ports()) {
       if (port.kind() == PortKind.ITEM_INPUT) {
@@ -326,8 +417,16 @@ public final class RecipeStartPlan {
       }
     }
     long result = source.patternSource() == null ? Integer.MAX_VALUE : source.patternSource().startLimit();
+    for (var entry : fixed.entrySet()) {
+      if (available.getOrDefault(entry.getKey(), 0L) < entry.getValue()) {
+        return 0;
+      }
+    }
     for (var entry : required.entrySet()) {
-      result = Math.min(result, available.getOrDefault(entry.getKey(), 0L) / entry.getValue());
+      result = Math.min(
+          result,
+          Math.max(0, available.getOrDefault(entry.getKey(), 0L) - fixed.getOrDefault(entry.getKey(), 0L)) / entry
+              .getValue());
     }
 
     return (int) result;
@@ -343,27 +442,41 @@ public final class RecipeStartPlan {
   }
 
   public int maxRepeatableOutputs() {
+    var definition = preparedInputDefinition().orElseGet(() -> catalog.definition(recipe.id()));
+    if (RecipeItemPreparation.transformsOutputs(definition)) {
+      return Integer.MAX_VALUE;
+    }
     var required = new HashMap<ItemResourceKey, Long>();
+    var fixed = new HashMap<ItemResourceKey, Long>();
+    boolean aggregate = source.owner() instanceof MachineControllerBlockEntity;
     for (var output : recipe.outputs()) {
-      required.merge(output.key(), output.count(), Math::addExact);
+      (aggregate && output.parallelUnaffected() ? fixed : required).merge(output.key(), output.count(), Math::addExact);
     }
     long result = Integer.MAX_VALUE;
-    for (var entry : required.entrySet()) {
+    var keys = new HashSet<>(required.keySet());
+    keys.addAll(fixed.keySet());
+    for (var key : keys) {
       long capacity = 0;
       for (var port : source.ports()) {
-        if (port.kind() != PortKind.ITEM_OUTPUT || !port.selector().equals(entry.getKey().selector())) {
+        if (port.kind() != PortKind.ITEM_OUTPUT || !port.selector().equals(key.selector())) {
           continue;
         }
         var stacks = port.items();
         for (int slot = 0; slot < stacks.size(); slot++) {
           var stack = stacks.get(slot);
-          if (stack.isEmpty() || entry.getKey().matches(stack)) {
+          if (stack.isEmpty() || key.matches(stack)) {
             var domain = new ItemSlotDomain(port.slotLimits().get(slot), port.selector(), port.bulkItems());
-            capacity += Math.max(0, domain.capacityFor(entry.getKey()) - stack.getCount());
+            capacity = Math.addExact(capacity, Math.max(0, domain.capacityFor(key) - port.itemAmount(slot)));
           }
         }
       }
-      result = Math.min(result, capacity / entry.getValue());
+      long base = fixed.getOrDefault(key, 0L);
+      if (capacity < base) {
+        return 0;
+      }
+      if (required.containsKey(key)) {
+        result = Math.min(result, (capacity - base) / required.get(key));
+      }
     }
 
     return (int) result;
@@ -384,11 +497,11 @@ public final class RecipeStartPlan {
 
   Optional<RecipeExecutionTicket> checkedTicket() {
     source.requireServerThread();
-    if (!catalog.isCurrent()) {
+    if (!catalog.isCurrent() || !inputPreparationCurrent()) {
       return Optional.empty();
     }
     var fresh = source.refreshIfUnchanged().filter(RecipeCommitGuard::validate);
-    return catalog.isCurrent() ? fresh : Optional.empty();
+    return catalog.isCurrent() && inputPreparationCurrent() ? fresh : Optional.empty();
   }
 
   RecipeExecutionTicket source() {

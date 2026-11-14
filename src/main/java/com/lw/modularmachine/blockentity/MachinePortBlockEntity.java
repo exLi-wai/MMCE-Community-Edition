@@ -244,10 +244,10 @@ public class MachinePortBlockEntity extends BlockEntity implements MenuProvider,
     if (!(level instanceof ServerLevel)
         || isRemoved()
         || !schemaSupported()
-        || kind != PortKind.ENERGY_INPUT
+        || kind != PortKind.ENERGY_INPUT && kind != PortKind.ENERGY_OUTPUT
         || resourceRevision != expectedRevision
         || resourceRevision == Long.MAX_VALUE) {
-      throw new IllegalStateException("Stale or unavailable energy input hatch");
+      throw new IllegalStateException("Stale or unavailable energy hatch");
     }
 
     return new EnergyStartLease(energy.acquire());
@@ -398,6 +398,16 @@ public class MachinePortBlockEntity extends BlockEntity implements MenuProvider,
       modified |= extracted;
 
       return extracted;
+    }
+
+    public boolean insertExact(long amount) {
+      assertMutationThread();
+      if (resolved) {
+        throw new IllegalStateException("Resolved energy lease");
+      }
+      boolean inserted = storage.insertExact(amount);
+      modified |= inserted;
+      return inserted;
     }
 
     public void resolve(boolean commit) {

@@ -1,6 +1,7 @@
 package com.lw.modularmachine.client;
 
 import com.lw.modularmachine.menu.MachineControllerMenu;
+import com.lw.modularmachine.client.controller.ControllerClientPublisher;
 import net.minecraft.client.gui.GuiGraphics;
 import net.minecraft.client.gui.screens.inventory.AbstractContainerScreen;
 import net.minecraft.network.chat.Component;
@@ -95,6 +96,8 @@ public final class MachineControllerScreen extends AbstractContainerScreen<Machi
     }
     ControllerStatusLabels
         .drawPerformance(graphics, font, x, y, status.averageTickMicros(), status.averageSearchMicros());
+    ControllerClientPublisher
+        .drawGui(menu.controller(), menu.guiCustomData(), graphics, font, x, y + 25, TEXT_WIDTH, (int) (146 / .72F));
     graphics.pose().popPose();
   }
 

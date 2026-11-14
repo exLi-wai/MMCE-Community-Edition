@@ -101,7 +101,9 @@ public final class MachineRegistries {
       .register("configuration_card", () -> new ConfigurationCardItem(new Item.Properties().stacksTo(1)));
   public static final DeferredItem<MachineConstructionTool> PROJECTOR = ITEMS
       .register("machine_projector", () -> new MachineConstructionTool(new Item.Properties().stacksTo(1)));
-  /** Ranged structure selection that exports a schema 2 machine definition. */
+  /**
+   * Ranged tool identity with local selection previews; export is not connected.
+   */
   public static final DeferredItem<RangedConstructToolItem> RANGED_CONSTRUCT_TOOL = ITEMS
       .register("ranged_construct_tool", () -> new RangedConstructToolItem(new Item.Properties().stacksTo(1)));
   public static final DeferredBlock<SmartInterfaceBlock> SMART_INTERFACE = BLOCKS
