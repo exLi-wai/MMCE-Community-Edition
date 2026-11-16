@@ -1,9 +1,9 @@
 package com.lw.modularmachine.integration.jade;
 
+import com.lw.modularmachine.api.component.ResourceType;
 import com.lw.modularmachine.blockentity.NetworkPortBlockEntity;
 import com.lw.modularmachine.blockentity.PatternMirrorBlockEntity;
 import com.lw.modularmachine.blockentity.PatternProviderBlockEntity;
-import com.lw.modularmachine.machine.PortKind;
 import com.lw.modularmachine.machine.network.MachineNetworkPlatform;
 import com.lw.modularmachine.util.thread.ServerThreadGuard;
 import java.util.Locale;
@@ -77,7 +77,7 @@ final class NetworkDeviceTooltipProvider implements IBlockComponentProvider, ISe
     if (entity instanceof NetworkPortBlockEntity port) {
       if (!port.schemaSupported()
           || !MachineNetworkPlatform.available()
-          || port.kind().resource() == PortKind.Resource.CHEMICAL && !MachineNetworkPlatform.chemicalAvailable()) {
+          || port.kind().resource() == ResourceType.CHEMICAL && !MachineNetworkPlatform.chemicalAvailable()) {
         status = Status.UNAVAILABLE;
       } else {
         status = port.connection().active() ? Status.ONLINE : Status.OFFLINE;

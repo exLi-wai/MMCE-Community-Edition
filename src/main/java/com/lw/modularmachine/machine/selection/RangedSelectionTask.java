@@ -360,7 +360,7 @@ public final class RangedSelectionTask {
    */
   public static void blockChanged(ServerLevel level, BlockPos pos) {
     for (var task : ACTIVE) {
-      if (task.level == level && (task.origin.equals(pos) || task.boxes.stream().anyMatch(box -> contains(box, pos)))) {
+      if (task.level == level && (task.origin.equals(pos) || task.boxes.stream().anyMatch(box -> box.contains(pos)))) {
         task.active.set(false);
       }
     }
@@ -402,12 +402,4 @@ public final class RangedSelectionTask {
     }
   }
 
-  private static boolean contains(Box box, BlockPos pos) {
-    return pos.getX() >= Math.min(box.first().getX(), box.second().getX())
-        && pos.getX() <= Math.max(box.first().getX(), box.second().getX())
-        && pos.getY() >= Math.min(box.first().getY(), box.second().getY())
-        && pos.getY() <= Math.max(box.first().getY(), box.second().getY())
-        && pos.getZ() >= Math.min(box.first().getZ(), box.second().getZ())
-        && pos.getZ() <= Math.max(box.first().getZ(), box.second().getZ());
-  }
 }

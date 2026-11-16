@@ -1,10 +1,12 @@
 package com.lw.modularmachine.machine.recipe;
 
 import com.lw.modularmachine.machine.recipe.search.RecipeCandidate;
+import com.lw.modularmachine.api.recipe.resource.RecipeResources;
+import com.lw.modularmachine.machine.recipe.resource.RecipeResourceDefinitions;
+import net.minecraft.nbt.NbtOps;
 import com.lw.modularmachine.api.recipe.RecipeSelectors;
 import com.lw.modularmachine.api.recipe.RecipeFailureAction;
 import com.lw.modularmachine.api.recipe.ChemicalRecipeData;
-import com.lw.modularmachine.api.recipe.ChemicalRequirement;
 import com.lw.modularmachine.api.recipe.FluidRequirement;
 import com.lw.modularmachine.api.recipe.RecipeExecutionOptions;
 import com.lw.modularmachine.api.recipe.RecipeScriptOptions;
@@ -19,7 +21,6 @@ import com.mojang.serialization.MapLike;
 import com.mojang.serialization.RecordBuilder;
 import com.mojang.serialization.codecs.RecordCodecBuilder;
 import io.netty.handler.codec.DecoderException;
-import java.util.ArrayList;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Objects;
@@ -37,33 +38,25 @@ import net.minecraft.world.item.crafting.RecipeType;
 import net.minecraft.world.level.Level;
 import net.neoforged.neoforge.fluids.FluidStack;
 import net.minecraft.nbt.CompoundTag;
-import com.google.gson.JsonParser;
 
 /**
  * Native data definition. This recipe cannot assemble through a crafting grid
  * or bypass machine admission.
  */
 public final class MachineRecipe implements Recipe<RecipeInput> {
-  private record Extras(
-      long energyOutputPerTick,
-      RecipeExecutionOptions executionOptions,
-      RecipeScriptOptions scriptOptions) {
+  private record Extras(RecipeExecutionOptions executionOptions, RecipeScriptOptions scriptOptions) {
     private static final MapCodec<Extras> CODEC = RecordCodecBuilder.mapCodec(
         instance -> instance.group(
-            Codec.LONG.optionalFieldOf("energy_output_per_tick", 0L).forGetter(Extras::energyOutputPerTick),
             RecipeExecutionOptions.MAP_CODEC.forGetter(Extras::executionOptions),
             RecipeScriptOptions.CODEC.forGetter(Extras::scriptOptions)).apply(instance, Extras::new));
 
     private Extras {
-      if (energyOutputPerTick < 0) {
-        throw new IllegalArgumentException("Energy output per tick cannot be negative");
-      }
       Objects.requireNonNull(executionOptions, "executionOptions");
       Objects.requireNonNull(scriptOptions, "scriptOptions");
     }
   }
   public static final class ItemAmount {
-    private static final Codec<ItemAmount> CODEC = RecordCodecBuilder.create(
+    public static final Codec<ItemAmount> CODEC = RecordCodecBuilder.create(
         instance -> instance
             .group(
                 ItemStack.SINGLE_ITEM_CODEC.fieldOf("stack").forGetter((ItemAmount value) -> value.prototype),
@@ -94,7 +87,7 @@ public final class MachineRecipe implements Recipe<RecipeInput> {
           || !preview.isEmpty() && preview.getCount() != 1) {
         throw new IllegalArgumentException("Expected one prototype and positive long amount");
       }
-      this.prototype = prototype;
+      this.prototype = prototype.copy();
       this.amount = amount;
       this.chance = chance;
       this.selector = ResourceSelector.require(selector);
@@ -142,6 +135,34 @@ public final class MachineRecipe implements Recipe<RecipeInput> {
     public ItemStack ingredientStack() {
       return prototype.copy();
     }
+
+    @Override
+    public boolean equals(Object other) {
+      return this == other
+          || other instanceof ItemAmount value
+              && amount == value.amount
+              && chance == value.chance
+              && parallelUnaffected == value.parallelUnaffected
+              && selector.equals(value.selector)
+              && match.equals(value.match)
+              && ItemStack.matches(prototype, value.prototype)
+              && ItemStack.matches(preview, value.preview);
+    }
+
+    @Override
+    public int hashCode() {
+      return Objects.hash(
+          prototype.getItem(),
+          prototype.getComponents(),
+          amount,
+          chance == 0 ? 0.0D : chance,
+          selector,
+          match,
+          preview.getItem(),
+          preview.getComponents(),
+          preview.getCount(),
+          parallelUnaffected);
+    }
   }
 
   private static final MapCodec<MachineRecipe> BASE = RecordCodecBuilder.mapCodec(
@@ -149,27 +170,18 @@ public final class MachineRecipe implements Recipe<RecipeInput> {
           ResourceLocation.CODEC.fieldOf("machine").forGetter(MachineRecipe::machineId),
           Codec.INT.optionalFieldOf("priority", 0).forGetter(MachineRecipe::priority),
           Codec.INT.fieldOf("duration").forGetter(MachineRecipe::duration),
-          Codec.LONG.optionalFieldOf("energy_per_tick", 0L).forGetter(MachineRecipe::energyPerTick),
-          FluidStack.CODEC.optionalFieldOf("fluid_per_tick", FluidStack.EMPTY).forGetter(MachineRecipe::fluidPerTick),
-          FluidRequirement.CODEC.listOf().optionalFieldOf("fluid_inputs", List.of())
-              .forGetter(MachineRecipe::fluidInputRequirements),
-          FluidRequirement.CODEC.listOf().optionalFieldOf("fluid_outputs", List.of())
-              .forGetter(MachineRecipe::fluidOutputRequirements),
+          RecipeResourceDefinitions.CODEC.forGetter(MachineRecipe::resourceData),
           Codec.STRING.fieldOf("failure_action").forGetter(value -> value.failureAction().serialized()),
           Codec.BOOL.fieldOf("parallelized").forGetter(MachineRecipe::parallelized),
           Codec.LONG.optionalFieldOf("random_seed", 0L).forGetter(MachineRecipe::randomSeed),
-          ItemAmount.CODEC.listOf().fieldOf("inputs").forGetter(MachineRecipe::inputs),
-          ItemAmount.CODEC.listOf().fieldOf("outputs").forGetter(MachineRecipe::outputs),
           SmartNumberRequirement.CODEC.listOf().optionalFieldOf("interface_inputs", List.of())
               .forGetter(MachineRecipe::interfaceInputs),
           RecipeSelectors.CODEC.optionalFieldOf("selectors", RecipeSelectors.NONE).forGetter(MachineRecipe::selectors),
-          ChemicalRecipeData.CODEC.optionalFieldOf("chemicals", ChemicalRecipeData.NONE)
-              .forGetter(MachineRecipe::chemicals),
           Extras.CODEC.forGetter(value -> value.extras)).apply(instance, MachineRecipe::new));
   public static final MapCodec<MachineRecipe> CODEC = new MapCodec<>() {
     @Override
     public <T> Stream<T> keys(DynamicOps<T> ops) {
-      return MachineRecipeJson.FIELDS.stream().map(ops::createString);
+      return MachineRecipeJson.fields().stream().map(ops::createString);
     }
 
     @Override
@@ -210,33 +222,22 @@ public final class MachineRecipe implements Recipe<RecipeInput> {
       .of(MachineRecipe::write, MachineRecipe::read);
   private final ResourceLocation machineId;
   private final int priority, duration;
-  private final long energyPerTick;
-  private final FluidStack fluidPerTick;
-  private final List<FluidStack> fluidInputs;
-  private final List<FluidStack> fluidOutputs;
-  private final List<FluidRequirement> fluidInputRequirements, fluidOutputRequirements;
+  private final RecipeResources resourceData;
   private final Extras extras;
   private final RecipeFailureAction failureAction;
   private final boolean parallelized;
   private final long randomSeed;
-  private final List<ItemAmount> inputs, outputs;
   private final List<SmartNumberRequirement> interfaceInputs;
   private final RecipeSelectors selectors;
-  private final ChemicalRecipeData chemicals;
 
-  private MachineRecipe(ResourceLocation machineId, int priority, int duration, long energyPerTick, FluidStack fluidPerTick, List<FluidRequirement> fluidInputs, List<FluidRequirement> fluidOutputs, String failureAction, boolean parallelized, long randomSeed, List<ItemAmount> inputs, List<ItemAmount> outputs, List<SmartNumberRequirement> interfaceInputs, RecipeSelectors selectors, ChemicalRecipeData chemicals, Extras extras) {
-    if (duration <= 0 || energyPerTick < 0) {
+  private MachineRecipe(ResourceLocation machineId, int priority, int duration, RecipeResources resourceData, String failureAction, boolean parallelized, long randomSeed, List<SmartNumberRequirement> interfaceInputs, RecipeSelectors selectors, Extras extras) {
+    if (duration <= 0) {
       throw new IllegalArgumentException("Nonpositive duration");
     }
     this.machineId = Objects.requireNonNull(machineId, "machine");
     this.priority = priority;
     this.duration = duration;
-    this.energyPerTick = energyPerTick;
-    this.fluidPerTick = fluidPerTick.copy();
-    this.fluidInputRequirements = List.copyOf(fluidInputs);
-    this.fluidOutputRequirements = List.copyOf(fluidOutputs);
-    this.fluidInputs = fluidInputs.stream().map(FluidRequirement::stack).toList();
-    this.fluidOutputs = fluidOutputs.stream().map(FluidRequirement::stack).toList();
+    this.resourceData = Objects.requireNonNull(resourceData, "resourceData");
     this.extras = Objects.requireNonNull(extras, "extras");
     this.failureAction = RecipeFailureAction.parse(failureAction);
     this.parallelized = parallelized;
@@ -244,33 +245,25 @@ public final class MachineRecipe implements Recipe<RecipeInput> {
       throw new IllegalArgumentException("Invalid random seed");
     }
     this.randomSeed = randomSeed;
-    this.inputs = List.copyOf(inputs);
-    this.outputs = List.copyOf(outputs);
     this.interfaceInputs = List.copyOf(interfaceInputs);
     this.selectors = Objects.requireNonNull(selectors, "selectors");
-    this.chemicals = Objects.requireNonNull(chemicals, "chemicals");
-    extras.scriptOptions().validateRows(inputs.size(), outputs.size());
+    extras.scriptOptions().validateRows(inputs().size(), outputs().size());
     if (interfaceInputs.size() > SmartInterfaceType.MAX_TYPES) {
       throw new IllegalArgumentException("Unsupported interface requirements/selectors for recipe schema");
     }
-    validateAmounts(this.inputs);
-    validateAmounts(this.outputs);
-    if (this.inputs.isEmpty()
-        && this.fluidInputs.isEmpty()
-        && this.fluidPerTick.isEmpty()
-        && energyPerTick == 0
-        && chemicals.inputs().isEmpty()
-        && chemicals.perTick().isEmpty()
-        || this.outputs.isEmpty()
-            && this.fluidOutputs.isEmpty()
-            && chemicals.outputs().isEmpty()
-            && extras.energyOutputPerTick() == 0) {
+    validateAmounts(inputs());
+    validateAmounts(outputs());
+    if (!resourceData.hasInputs() || !resourceData.hasOutputs()) {
       throw new IllegalArgumentException("A machine recipe requires resource input and output");
     }
-    if (this.inputs.size() != 1 && this.inputs.stream().anyMatch(ItemAmount::ignoresComponents)
-        || this.outputs.stream().anyMatch(ItemAmount::ignoresComponents)) {
+    if (inputs().size() != 1 && inputs().stream().anyMatch(ItemAmount::ignoresComponents)
+        || outputs().stream().anyMatch(ItemAmount::ignoresComponents)) {
       throw new IllegalArgumentException("Item-only matching requires one item input and exact outputs");
     }
+  }
+
+  public RecipeResources resourceData() {
+    return resourceData;
   }
 
   private static void validateAmounts(List<ItemAmount> values) {
@@ -311,11 +304,11 @@ public final class MachineRecipe implements Recipe<RecipeInput> {
   }
 
   public long energyPerTick() {
-    return energyPerTick;
+    return resourceData.get(RecipeResourceDefinitions.ENERGY).inputPerTick();
   }
 
   public long energyOutputPerTick() {
-    return extras.energyOutputPerTick();
+    return resourceData.get(RecipeResourceDefinitions.ENERGY).outputPerTick();
   }
 
   public RecipeExecutionOptions executionOptions() {
@@ -327,15 +320,15 @@ public final class MachineRecipe implements Recipe<RecipeInput> {
   }
 
   public FluidStack fluidPerTick() {
-    return fluidPerTick.copy();
+    return resourceData.get(RecipeResourceDefinitions.FLUID).perTick();
   }
 
   public List<FluidStack> fluidInputs() {
-    return fluidInputs.stream().map(FluidStack::copy).toList();
+    return fluidInputRequirements().stream().map(FluidRequirement::stack).toList();
   }
 
   public List<FluidStack> fluidOutputs() {
-    return fluidOutputs.stream().map(FluidStack::copy).toList();
+    return fluidOutputRequirements().stream().map(FluidRequirement::stack).toList();
   }
 
   /**
@@ -343,16 +336,16 @@ public final class MachineRecipe implements Recipe<RecipeInput> {
    * completion.
    */
   List<FluidStack> guaranteedFluidOutputs() {
-    return fluidOutputRequirements.stream().filter(output -> output.chance() == 1.0D).map(FluidRequirement::stack)
+    return fluidOutputRequirements().stream().filter(output -> output.chance() == 1.0D).map(FluidRequirement::stack)
         .toList();
   }
 
   public List<FluidRequirement> fluidInputRequirements() {
-    return fluidInputRequirements;
+    return resourceData.get(RecipeResourceDefinitions.FLUID).inputs();
   }
 
   public List<FluidRequirement> fluidOutputRequirements() {
-    return fluidOutputRequirements;
+    return resourceData.get(RecipeResourceDefinitions.FLUID).outputs();
   }
 
   public RecipeFailureAction failureAction() {
@@ -368,11 +361,11 @@ public final class MachineRecipe implements Recipe<RecipeInput> {
   }
 
   public List<ItemAmount> inputs() {
-    return inputs;
+    return resourceData.get(RecipeResourceDefinitions.ITEM).inputs();
   }
 
   public List<ItemAmount> outputs() {
-    return outputs;
+    return resourceData.get(RecipeResourceDefinitions.ITEM).outputs();
   }
 
   public List<SmartNumberRequirement> interfaceInputs() {
@@ -384,14 +377,14 @@ public final class MachineRecipe implements Recipe<RecipeInput> {
   }
 
   public ChemicalRecipeData chemicals() {
-    return chemicals;
+    return resourceData.get(RecipeResourceDefinitions.CHEMICAL);
   }
 
   RecipeCandidate<ItemResourceKey> compile(ResourceLocation id, HolderLookup.Provider registries) {
     return new RecipeCandidate<>(
         id.toString(),
         priority,
-        inputs.stream()
+        inputs().stream()
             .map(
                 value -> new RecipeCandidate.Input<>(
                     inputKey(value, registries),
@@ -399,7 +392,7 @@ public final class MachineRecipe implements Recipe<RecipeInput> {
                     value.chance,
                     value.parallelUnaffected))
             .toList(),
-        outputs.stream().filter(value -> value.chance == 1.0D)
+        outputs().stream().filter(value -> value.chance == 1.0D)
             .map(
                 value -> new RecipeCandidate.Output<>(
                     ItemResourceKey.of(value.prototype, registries).withSelector(value.selector),
@@ -419,242 +412,40 @@ public final class MachineRecipe implements Recipe<RecipeInput> {
     return machineId.equals(other.machineId)
         && priority == other.priority
         && duration == other.duration
-        && energyPerTick == other.energyPerTick
+        && resourceData.equals(other.resourceData)
         && extras.equals(other.extras)
-        && FluidStack.matches(fluidPerTick, other.fluidPerTick)
-        && sameFluids(fluidInputs, other.fluidInputs)
-        && sameFluids(fluidOutputs, other.fluidOutputs)
-        && fluidInputRequirements.equals(other.fluidInputRequirements)
-        && fluidOutputRequirements.equals(other.fluidOutputRequirements)
         && failureAction == other.failureAction
         && parallelized == other.parallelized
         && randomSeed == other.randomSeed
         && interfaceInputs.equals(other.interfaceInputs)
-        && selectors.equals(other.selectors)
-        && chemicals.equals(other.chemicals)
-        && sameAmounts(inputs, other.inputs)
-        && sameAmounts(outputs, other.outputs);
-  }
-
-  private static boolean sameAmounts(List<ItemAmount> a, List<ItemAmount> b) {
-    if (a.size() != b.size()) {
-      return false;
-    }
-    for (int i = 0; i < a.size(); i++) {
-      if (a.get(i).amount != b.get(i).amount
-          || a.get(i).chance != b.get(i).chance
-          || a.get(i).parallelUnaffected != b.get(i).parallelUnaffected
-          || !a.get(i).selector.equals(b.get(i).selector)
-          || !a.get(i).match.equals(b.get(i).match)
-          || !ItemStack.matches(a.get(i).preview, b.get(i).preview)
-          || !ItemStack.matches(a.get(i).prototype, b.get(i).prototype)) {
-        return false;
-      }
-    }
-    return true;
-  }
-
-  private static boolean sameFluids(List<FluidStack> a, List<FluidStack> b) {
-    if (a.size() != b.size()) {
-      return false;
-    }
-    for (int i = 0; i < a.size(); i++) {
-      if (!FluidStack.matches(a.get(i), b.get(i))) {
-        return false;
-      }
-    }
-    return true;
+        && selectors.equals(other.selectors);
   }
 
   private static void write(RegistryFriendlyByteBuf buffer, MachineRecipe value) {
-    buffer.writeVarInt(14);
-    buffer.writeResourceLocation(value.machineId);
-    buffer.writeVarInt(value.priority);
-    buffer.writeVarInt(value.duration);
-    buffer.writeVarLong(value.energyPerTick);
-    buffer.writeVarLong(value.energyOutputPerTick());
-    FluidStack.OPTIONAL_STREAM_CODEC.encode(buffer, value.fluidPerTick);
-    buffer.writeVarInt(value.fluidInputs.size());
-    for (var fluid : value.fluidInputRequirements) {
-      FluidStack.OPTIONAL_STREAM_CODEC.encode(buffer, fluid.stack());
-      buffer.writeDouble(fluid.chance());
-      buffer.writeBoolean(fluid.parallelUnaffected());
+    var ops = buffer.registryAccess().createSerializationContext(NbtOps.INSTANCE);
+    var encoded = CODEC.codec().encodeStart(ops, value).getOrThrow();
+    if (!(encoded instanceof CompoundTag tag)) {
+      throw new IllegalArgumentException("Machine recipe codec did not produce a compound");
     }
-    buffer.writeVarInt(value.fluidOutputs.size());
-    for (var fluid : value.fluidOutputRequirements) {
-      FluidStack.OPTIONAL_STREAM_CODEC.encode(buffer, fluid.stack());
-      buffer.writeDouble(fluid.chance());
-      buffer.writeBoolean(fluid.parallelUnaffected());
-    }
-    buffer.writeVarInt(value.failureAction.ordinal());
-    buffer.writeBoolean(value.parallelized);
-    buffer.writeVarLong(value.randomSeed);
-    writeAmounts(buffer, value.inputs);
-    writeAmounts(buffer, value.outputs);
-    buffer.writeVarInt(value.interfaceInputs.size());
-    for (var requirement : value.interfaceInputs) {
-      buffer.writeUtf(requirement.type(), ResourceSelector.MAX_LENGTH);
-      buffer.writeDouble(requirement.minimum());
-      buffer.writeDouble(requirement.maximum());
-    }
-    buffer.writeUtf(value.selectors.fluidInput(), ResourceSelector.MAX_LENGTH);
-    buffer.writeUtf(value.selectors.fluidOutput(), ResourceSelector.MAX_LENGTH);
-    buffer.writeUtf(value.selectors.energyInput(), ResourceSelector.MAX_LENGTH);
-    buffer.writeUtf(value.selectors.fluidPerTick(), ResourceSelector.MAX_LENGTH);
-    buffer.writeUtf(value.selectors.energyOutput(), ResourceSelector.MAX_LENGTH);
-    writeChemicals(buffer, value.chemicals.inputs());
-    writeChemicals(buffer, value.chemicals.outputs());
-    writeChemicals(buffer, value.chemicals.perTick());
-    buffer.writeUtf(value.executionOptions().threadName(), 64);
-    buffer.writeVarInt(value.executionOptions().maxThreads());
-    buffer.writeUtf(
-        RecipeScriptOptions.CODEC.codec().encodeStart(JsonOps.INSTANCE, value.scriptOptions()).getOrThrow().toString(),
-        2_097_152);
-  }
-
-  private static void writeChemicals(RegistryFriendlyByteBuf buffer, List<ChemicalRequirement> values) {
-    buffer.writeVarInt(values.size());
-    for (var value : values) {
-      buffer.writeResourceLocation(value.chemical());
-      buffer.writeVarLong(value.amount());
-      buffer.writeUtf(value.selector(), ResourceSelector.MAX_LENGTH);
-    }
-  }
-
-  private static List<ChemicalRequirement> readChemicals(RegistryFriendlyByteBuf buffer) {
-    int count = buffer.readVarInt();
-    if (count < 0 || count > ChemicalRecipeData.MAX_REQUIREMENTS) {
-      throw new DecoderException("Invalid chemical requirement count");
-    }
-    var values = new ArrayList<ChemicalRequirement>(count);
-    for (int index = 0; index < count; index++) {
-      values.add(
-          new ChemicalRequirement(
-              buffer.readResourceLocation(),
-              buffer.readVarLong(),
-              buffer.readUtf(ResourceSelector.MAX_LENGTH)));
-    }
-
-    return List.copyOf(values);
-  }
-
-  private static void writeAmounts(RegistryFriendlyByteBuf buffer, List<ItemAmount> values) {
-    buffer.writeVarInt(values.size());
-    for (var value : values) {
-      ItemStack.STREAM_CODEC.encode(buffer, value.prototype);
-      buffer.writeVarLong(value.amount);
-      buffer.writeDouble(value.chance);
-      buffer.writeUtf(value.selector, ResourceSelector.MAX_LENGTH);
-      buffer.writeBoolean(value.ignoresComponents());
-      ItemStack.OPTIONAL_STREAM_CODEC.encode(buffer, value.preview);
-      buffer.writeBoolean(value.parallelUnaffected);
-    }
+    buffer.writeVarInt(15);
+    buffer.writeNbt(tag);
   }
 
   private static MachineRecipe read(RegistryFriendlyByteBuf buffer) {
     try {
-      int schema = buffer.readVarInt();
-      if (schema != 14) {
+      if (buffer.readVarInt() != 15) {
         throw new DecoderException("Unsupported machine recipe wire schema");
       }
-      var machine = buffer.readResourceLocation();
-      int priority = buffer.readVarInt(), duration = buffer.readVarInt();
-      long energyPerTick = buffer.readVarLong();
-      long energyOutputPerTick = buffer.readVarLong();
-      var fluidPerTick = FluidStack.OPTIONAL_STREAM_CODEC.decode(buffer);
-      var fluidInputs = readFluids(buffer);
-      var fluidOutputs = readFluids(buffer);
-      var failureAction = readFailureAction(buffer);
-      boolean parallelized = buffer.readBoolean();
-      long randomSeed = buffer.readVarLong();
-      var inputs = readAmounts(buffer);
-      var outputs = readAmounts(buffer);
-      int interfaceCount = buffer.readVarInt();
-      if (interfaceCount < 0 || interfaceCount > SmartInterfaceType.MAX_TYPES) {
-        throw new DecoderException("Too many interface number requirements");
+      var encoded = buffer.readNbt();
+      if (encoded == null) {
+        throw new DecoderException("Missing machine recipe declaration");
       }
-      var interfaceInputs = new ArrayList<SmartNumberRequirement>();
-      for (int index = 0; index < interfaceCount; index++) {
-        interfaceInputs.add(
-            new SmartNumberRequirement(
-                buffer.readUtf(ResourceSelector.MAX_LENGTH),
-                buffer.readDouble(),
-                buffer.readDouble()));
-      }
-      var selectors = new RecipeSelectors(
-          buffer.readUtf(ResourceSelector.MAX_LENGTH),
-          buffer.readUtf(ResourceSelector.MAX_LENGTH),
-          buffer.readUtf(ResourceSelector.MAX_LENGTH),
-          buffer.readUtf(ResourceSelector.MAX_LENGTH),
-          buffer.readUtf(ResourceSelector.MAX_LENGTH));
-      var chemicals = new ChemicalRecipeData(readChemicals(buffer), readChemicals(buffer), readChemicals(buffer));
-      var options = new RecipeExecutionOptions(buffer.readUtf(64), buffer.readVarInt());
-      var scriptOptions = RecipeScriptOptions.CODEC.codec()
-          .parse(JsonOps.INSTANCE, JsonParser.parseString(buffer.readUtf(2_097_152))).getOrThrow();
-      return new MachineRecipe(
-          machine,
-          priority,
-          duration,
-          energyPerTick,
-          fluidPerTick,
-          fluidInputs,
-          fluidOutputs,
-          failureAction,
-          parallelized,
-          randomSeed,
-          inputs,
-          outputs,
-          interfaceInputs,
-          selectors,
-          chemicals,
-          new Extras(energyOutputPerTick, options, scriptOptions));
-    } catch (IllegalArgumentException | ArithmeticException | IndexOutOfBoundsException invalid) {
+      var ops = buffer.registryAccess().createSerializationContext(NbtOps.INSTANCE);
+
+      return CODEC.codec().parse(ops, encoded).getOrThrow();
+    } catch (RuntimeException invalid) {
       throw new DecoderException("Invalid machine recipe packet", invalid);
     }
-  }
-
-  private static List<FluidRequirement> readFluids(RegistryFriendlyByteBuf buffer) {
-    int size = buffer.readVarInt();
-    if (size < 0 || size > MachineRecipeJson.MAX_DEMANDS) {
-      throw new DecoderException("Invalid machine recipe fluid input size");
-    }
-    var values = new ArrayList<FluidRequirement>(size);
-    for (int i = 0; i < size; i++) {
-      var fluid = FluidStack.OPTIONAL_STREAM_CODEC.decode(buffer);
-      if (fluid.isEmpty()) {
-        throw new DecoderException("Empty machine recipe fluid input");
-      }
-      values.add(new FluidRequirement(fluid, buffer.readDouble(), buffer.readBoolean()));
-    }
-    return List.copyOf(values);
-  }
-
-  private static String readFailureAction(RegistryFriendlyByteBuf buffer) {
-    int ordinal = buffer.readVarInt();
-    if (ordinal < 0 || ordinal >= RecipeFailureAction.values().length) {
-      throw new DecoderException("Invalid recipe failure action");
-    }
-    return RecipeFailureAction.values()[ordinal].serialized();
-  }
-
-  private static List<ItemAmount> readAmounts(RegistryFriendlyByteBuf buffer) {
-    int size = buffer.readVarInt();
-    if (size < 0 || size > MachineRecipeJson.MAX_DEMANDS) {
-      throw new DecoderException("Invalid machine recipe list size");
-    }
-    var values = new ArrayList<ItemAmount>(size);
-    for (int i = 0; i < size; i++) {
-      values.add(
-          new ItemAmount(
-              ItemStack.STREAM_CODEC.decode(buffer),
-              buffer.readVarLong(),
-              buffer.readDouble(),
-              buffer.readUtf(ResourceSelector.MAX_LENGTH),
-              buffer.readBoolean() ? "item" : "exact",
-              ItemStack.OPTIONAL_STREAM_CODEC.decode(buffer),
-              buffer.readBoolean()));
-    }
-    return List.copyOf(values);
   }
 
   @Override
@@ -674,11 +465,11 @@ public final class MachineRecipe implements Recipe<RecipeInput> {
 
   @Override
   public ItemStack getResultItem(HolderLookup.Provider registries) {
-    if (outputs.isEmpty()) {
+    if (outputs().isEmpty()) {
       return ItemStack.EMPTY;
     }
-    var result = outputs.getFirst().prototype(registries);
-    result.setCount((int) Math.min(outputs.getFirst().amount, result.getMaxStackSize()));
+    var result = outputs().getFirst().prototype(registries);
+    result.setCount((int) Math.min(outputs().getFirst().amount, result.getMaxStackSize()));
     return result;
   }
 

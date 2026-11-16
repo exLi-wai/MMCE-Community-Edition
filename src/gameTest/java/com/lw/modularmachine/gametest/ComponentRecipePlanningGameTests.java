@@ -1,5 +1,6 @@
 package com.lw.modularmachine.gametest;
 
+import com.lw.modularmachine.machine.recipe.RecipePortSnapshot;
 import com.lw.modularmachine.blockentity.MachineControllerBlockEntity;
 import com.lw.modularmachine.blockentity.MachinePortBlockEntity;
 import com.lw.modularmachine.api.orientation.MachineOrientation;
@@ -381,8 +382,8 @@ public final class ComponentRecipePlanningGameTests {
   }
 
   private static String logicalPartId(RecipeExecutionTicket ticket, String address) {
-    return ticket.ports().stream().filter(port -> port.partId().equals(address))
-        .map(RecipeExecutionTicket.PortSnapshot::logicalPartId).findFirst().orElseThrow();
+    return ticket.ports().stream().filter(port -> port.partId().equals(address)).map(RecipePortSnapshot::logicalPartId)
+        .findFirst().orElseThrow();
   }
 
   private static MachinePortBlockEntity port(GameTestHelper helper, MachineControllerBlockEntity controller, String id) {

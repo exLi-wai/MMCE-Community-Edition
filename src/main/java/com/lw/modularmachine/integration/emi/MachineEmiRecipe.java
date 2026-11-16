@@ -1,6 +1,6 @@
 package com.lw.modularmachine.integration.emi;
 
-import com.lw.modularmachine.integration.jei.ClientMachineJeiCatalog;
+import com.lw.modularmachine.client.preview.ClientMachineCatalog;
 import com.lw.modularmachine.util.minecraft.registry.RegisteredMachineItems;
 import com.lw.modularmachine.registry.MachineRegistries;
 import dev.emi.emi.api.recipe.BasicEmiRecipe;
@@ -14,9 +14,9 @@ import net.minecraft.resources.ResourceLocation;
 import net.minecraft.world.item.ItemStack;
 
 final class MachineEmiRecipe extends BasicEmiRecipe {
-  private final ClientMachineJeiCatalog.Machine machine;
+  private final ClientMachineCatalog.Machine machine;
 
-  MachineEmiRecipe(EmiRecipeCategory category, ClientMachineJeiCatalog.Machine machine) {
+  MachineEmiRecipe(EmiRecipeCategory category, ClientMachineCatalog.Machine machine) {
     super(category,
         ResourceLocation.fromNamespaceAndPath(machine.id().getNamespace(), "/structure/" + machine.id().getPath()), 184,
         220);

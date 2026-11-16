@@ -1,5 +1,6 @@
 package com.lw.modularmachine.gametest;
 
+import com.lw.modularmachine.machine.recipe.RecipePortSnapshot;
 import com.lw.modularmachine.block.MachineControllerBlock;
 import com.lw.modularmachine.blockentity.MachineControllerBlockEntity;
 import com.lw.modularmachine.blockentity.MachinePortBlockEntity;
@@ -7,11 +8,16 @@ import com.lw.modularmachine.machine.PortKind;
 import com.lw.modularmachine.api.orientation.MachineOrientation;
 import com.lw.modularmachine.machine.recipe.RecipeCommitGuard;
 import com.lw.modularmachine.machine.recipe.RecipeExecutionTicket;
+import com.lw.modularmachine.machine.recipe.ItemResourceKey;
+import com.lw.modularmachine.machine.recipe.search.ItemOutputLayout;
+import com.lw.modularmachine.machine.recipe.search.RecipeCandidate;
+import com.lw.modularmachine.machine.recipe.search.RecipePlanner;
 import com.lw.modularmachine.machine.structure.StructureService;
-import com.lw.modularmachine.machine.structure.VerificationState;
+import com.lw.modularmachine.api.controller.VerificationState;
 import com.lw.modularmachine.network.MachinePayloads;
 import com.lw.modularmachine.registry.MachineRegistries;
 import java.util.List;
+import java.util.Set;
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.atomic.AtomicBoolean;
 import net.minecraft.core.BlockPos;
@@ -42,6 +48,53 @@ public final class RecipeResourceTicketGameTests {
   private static final String[] PORTS = {"item_input_bus_normal", "item_output_bus_normal", "fluid_input_hatch_normal",
       "fluid_output_hatch_normal", "energy_input_hatch_normal", "energy_output_hatch_normal"};
 
+  @GameTest(template = "empty16", timeoutTicks = 80)
+  public static void full_resource_ticket_never_lends_input_slots_to_output_planning(GameTestHelper helper) {
+    var controller = build(helper, helper.absolutePos(new BlockPos(7, 5, 7)), MachineOrientation.IDENTITY);
+    var input = port(helper, controller, "item_in");
+    var output = port(helper, controller, "item_out");
+    for (int slot = 2; slot < output.inventory().getSlots(); slot++) {
+      output.inventory().setStackInSlot(slot, new ItemStack(Items.STONE, 64));
+    }
+    long inputRevision = input.resourceRevision();
+    long outputRevision = output.resourceRevision();
+    var ticket = capture(helper, controller);
+    var iron = ItemResourceKey.of(new ItemStack(Items.IRON_INGOT));
+    var gold = ItemResourceKey.of(new ItemStack(Items.GOLD_INGOT));
+    var layout = new ItemOutputLayout(ticket, Set.of(iron, gold));
+    helper.assertTrue(
+        layout.snapshot().outputs().size() == output.inventory().getSlots(),
+        "Full resource ticket exposed non-output slots to the output planner");
+    for (int instances = 1; instances <= 3; instances++) {
+      var candidate = RecipeCandidate.outputOnly(
+          "mmcece/output_capacity_" + instances,
+          List.of(
+              new RecipeCandidate.Output<>(iron, 40L * instances),
+              new RecipeCandidate.Output<>(gold, 40L * instances)));
+      var result = RecipePlanner.prepareOutputs(layout.snapshot(), candidate).advance(65_536);
+      helper.assertTrue(
+          result.status() == (instances == 1 ? RecipePlanner.Status.SELECTED : RecipePlanner.Status.NO_MATCH),
+          "Two output slots incorrectly admitted " + instances + " batches of two 40-item outputs");
+      if (instances == 1) {
+        var replacements = layout.prepare(result.plan().orElseThrow());
+        helper.assertTrue(
+            replacements.keySet().equals(Set.of(view(ticket, "item_out").partId()))
+                && replacements.values().stream().flatMap(List::stream)
+                    .filter(stack -> stack.is(Items.IRON_INGOT) || stack.is(Items.GOLD_INGOT))
+                    .mapToInt(ItemStack::getCount).sum() == 80,
+            "Prepared output replacements addressed input storage or lost output claims");
+      }
+    }
+    helper.assertTrue(
+        input.resourceRevision() == inputRevision
+            && output.resourceRevision() == outputRevision
+            && input.inventory().getStackInSlot(0).isEmpty()
+            && output.inventory().getStackInSlot(0).isEmpty()
+            && output.inventory().getStackInSlot(1).isEmpty(),
+        "Output capacity planning wrote to physical storage");
+    helper.succeed();
+  }
+
   @GameTest(template = "empty16", timeoutTicks = 100)
   public static void all_24_poses_keep_stable_part_ids_and_defensive_component_snapshots(GameTestHelper helper) {
     var origin = helper.absolutePos(new BlockPos(7, 5, 7));
@@ -53,7 +106,7 @@ public final class RecipeResourceTicketGameTests {
       input.inventory().setStackInSlot(0, stack);
       var ticket = capture(helper, controller);
       helper.assertTrue(
-          ticket.ports().stream().map(RecipeExecutionTicket.PortSnapshot::logicalPartId).toList()
+          ticket.ports().stream().map(RecipePortSnapshot::logicalPartId).toList()
               .equals(List.of("energy_in", "energy_out", "fluid_in", "fluid_out", "item_in", "item_out")),
           "Part order depends on world axes");
       var view = view(ticket, "item_in");
@@ -331,7 +384,7 @@ public final class RecipeResourceTicketGameTests {
     return ticket.orElseThrow();
   }
 
-  private static RecipeExecutionTicket.PortSnapshot view(RecipeExecutionTicket ticket, String part) {
+  private static RecipePortSnapshot view(RecipeExecutionTicket ticket, String part) {
     return ticket.ports().stream().filter(p -> p.logicalPartId().equals(part)).findFirst().orElseThrow();
   }
 

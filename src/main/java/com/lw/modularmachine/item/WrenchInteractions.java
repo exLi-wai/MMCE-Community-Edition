@@ -5,7 +5,8 @@ import com.lw.modularmachine.block.FactoryControllerBlock;
 import com.lw.modularmachine.block.MachineControllerBlock;
 import com.lw.modularmachine.machine.orientation.ControllerOrientationActions;
 import com.lw.modularmachine.api.orientation.MachineOrientation;
-import com.lw.modularmachine.machine.structure.StructureService.StructureSubject;
+import com.lw.modularmachine.blockentity.FactoryControllerBlockEntity;
+import com.lw.modularmachine.blockentity.MachineControllerBlockEntity;
 import java.util.Locale;
 import net.minecraft.core.Direction;
 import net.minecraft.core.registries.Registries;
@@ -81,8 +82,9 @@ public final class WrenchInteractions {
     }
     // Query the actual held stack and world instance; never trust client preview
     // data.
+    var entity = level.getBlockEntity(event.getPos());
     if (!isWrench(player.getMainHandItem())
-        || !(level.getBlockEntity(event.getPos()) instanceof StructureSubject controller)) {
+        || !(entity instanceof MachineControllerBlockEntity || entity instanceof FactoryControllerBlockEntity)) {
       event.setCancellationResult(InteractionResult.FAIL);
       return;
     }
@@ -91,7 +93,7 @@ public final class WrenchInteractions {
         .orientationOf(state) : MachineControllerBlock.orientationOf(state);
     var target = ControllerOrientationActions
         .wrenchTarget(current, event.getHitVec().getDirection(), player.isSecondaryUseActive());
-    var result = MachineControllerApi.reorient(controller, target, player);
+    var result = MachineControllerApi.reorient(player.serverLevel(), event.getPos(), target, player);
     player.displayClientMessage(
         Component.translatable("message.mmcece.wrench_" + result.name().toLowerCase(Locale.ROOT), pose(target)),
         true);

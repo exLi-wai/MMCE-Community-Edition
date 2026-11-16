@@ -52,7 +52,7 @@ public final class MachineCommands {
       source.sendFailure(Component.translatable("commands.mmcece.diagnose.not_controller", position.toShortString()));
       return 0;
     }
-    var snapshot = MachineControllerApi.inspect(controller);
+    var snapshot = MachineControllerApi.inspect(level, position);
     if (snapshot.isEmpty()) {
       source.sendFailure(Component.translatable("commands.mmcece.diagnose.unavailable"));
       return 0;
@@ -112,7 +112,7 @@ public final class MachineCommands {
       source.sendFailure(Component.translatable("commands.mmcece.diagnose.not_controller", position.toShortString()));
       return 0;
     }
-    var snapshot = MachineControllerApi.inspect(controller);
+    var snapshot = MachineControllerApi.inspect(source.getLevel(), position);
     if (snapshot.isEmpty()) {
       source.sendFailure(Component.translatable("commands.mmcece.diagnose.unavailable"));
       return 0;

@@ -3,10 +3,10 @@ package com.lw.modularmachine.gametest;
 import com.lw.modularmachine.blockentity.FactoryControllerBlockEntity;
 import com.lw.modularmachine.blockentity.MachinePortBlockEntity;
 import com.lw.modularmachine.blockentity.UpgradeBusBlockEntity;
-import com.lw.modularmachine.machine.factory.FactoryUpgradeCompatibility;
-import com.lw.modularmachine.machine.factory.FactoryUpgradeDefinition;
-import com.lw.modularmachine.api.upgrade.FactoryUpgradeEntry;
-import com.lw.modularmachine.machine.factory.FactoryUpgradeService;
+import com.lw.modularmachine.machine.upgrade.UpgradeCompatibility;
+import com.lw.modularmachine.machine.upgrade.UpgradeDefinition;
+import com.lw.modularmachine.api.upgrade.UpgradeEntry;
+import com.lw.modularmachine.machine.upgrade.UpgradeCatalogService;
 import com.lw.modularmachine.network.UpgradeBusPayloads;
 import com.lw.modularmachine.registry.MachineRegistries;
 import java.util.List;
@@ -30,12 +30,12 @@ public final class UpgradeCompatibilityRunGameTests {
   private static final ResourceLocation UPGRADE = id("compatibility_run_speed");
   private static final ResourceLocation ITEM = ResourceLocation.fromNamespaceAndPath("minecraft", "amethyst_shard");
   private static final String THREAD = "upgrade_thread";
-  private static List<FactoryUpgradeDefinition> savedDefinitions;
+  private static List<UpgradeDefinition> savedDefinitions;
 
   @AfterBatch(batch = "upgrade_compatibility_run")
   public static void cleanup(ServerLevel level) {
     if (savedDefinitions != null) {
-      FactoryUpgradeService.replaceDefinitions(savedDefinitions);
+      UpgradeCatalogService.replaceDefinitions(savedDefinitions);
       savedDefinitions = null;
     }
   }
@@ -43,11 +43,10 @@ public final class UpgradeCompatibilityRunGameTests {
   @GameTest(template = "empty16", batch = "upgrade_compatibility_run", timeoutTicks = 400)
   public static void compatibility_reload_keeps_paid_run_frozen_and_updates_the_next_run(GameTestHelper helper) {
     var level = helper.getLevel();
-    savedDefinitions = FactoryUpgradeService.snapshot().definitions();
-    var effect = new FactoryUpgradeEntry(UPGRADE, 0, 2, 1, 1, 1, 1, 1);
-    FactoryUpgradeService.replaceDefinitions(
-        List.of(
-            new FactoryUpgradeDefinition(ITEM, effect, new FactoryUpgradeCompatibility(Set.of(MACHINE), Set.of()))));
+    savedDefinitions = UpgradeCatalogService.snapshot().definitions();
+    var effect = new UpgradeEntry(UPGRADE, 0, 2, 1, 1, 1, 1, 1);
+    UpgradeCatalogService.replaceDefinitions(
+        List.of(new UpgradeDefinition(ITEM, effect, new UpgradeCompatibility(Set.of(MACHINE), Set.of()))));
 
     var origin = helper.absolutePos(new BlockPos(7, 5, 7));
     var factory = UpgradeBusGameTests.buildUpgradeFactory(helper, origin, MACHINE);
@@ -74,9 +73,8 @@ public final class UpgradeCompatibilityRunGameTests {
         "Allowed upgrade did not freeze the first paid run");
     var paidId = paid.runId();
 
-    FactoryUpgradeService.replaceDefinitions(
-        List.of(
-            new FactoryUpgradeDefinition(ITEM, effect, new FactoryUpgradeCompatibility(Set.of(), Set.of(MACHINE)))));
+    UpgradeCatalogService.replaceDefinitions(
+        List.of(new UpgradeDefinition(ITEM, effect, new UpgradeCompatibility(Set.of(), Set.of(MACHINE)))));
     bus.serverTick();
     factory.serverTick();
     var stillPaid = factory.run(THREAD).orElseThrow();

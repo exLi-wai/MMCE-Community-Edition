@@ -1,6 +1,6 @@
 package com.lw.modularmachine.machine.factory;
 
-import com.lw.modularmachine.api.upgrade.FactoryUpgradeSnapshot;
+import com.lw.modularmachine.api.upgrade.UpgradeSnapshot;
 import java.util.List;
 import net.minecraft.nbt.CompoundTag;
 import net.minecraft.nbt.ListTag;
@@ -23,7 +23,7 @@ class FactoryThreadStateCodecTest {
         FactoryThreadState.State.BLOCKED,
         FactoryThreadState.Reason.OUTPUT_BLOCKED,
         19,
-        new FactoryUpgradeSnapshot(4, 2, 1, 1, 1, 1, 1, 1));
+        new UpgradeSnapshot(4, 2, 1, 1, 1, 1, 1, 1));
 
     assertEquals(List.of(thread), FactoryThreadStateCodec.read(FactoryThreadStateCodec.write(List.of(thread))));
   }
@@ -54,7 +54,7 @@ class FactoryThreadStateCodecTest {
         FactoryThreadState.State.IDLE,
         FactoryThreadState.Reason.NONE,
         2,
-        new FactoryUpgradeSnapshot(8, 4, 1, 1, 1, 1, 1, 1));
+        new UpgradeSnapshot(8, 4, 1, 1, 1, 1, 1, 1));
     var encoded = FactoryThreadStateCodec.write(List.of(thread));
     assertEquals(thread, FactoryThreadStateCodec.read(encoded).get(0));
     encoded.getCompound(0).getCompound("upgrade_snapshot").putInt("parallel_limit", 7);

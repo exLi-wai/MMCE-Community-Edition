@@ -1,22 +1,16 @@
 package com.lw.modularmachine.machine.recipe;
 
+import com.lw.modularmachine.machine.recipe.resource.RecipeResourceExecutionRegistry;
 import com.lw.modularmachine.machine.recipe.search.RecipeResourceRequirements;
-import com.lw.modularmachine.machine.factory.UpgradeLifecyclePublisher;
 import com.lw.modularmachine.ModularMachine;
 import com.lw.modularmachine.blockentity.FactoryControllerBlockEntity;
-import com.lw.modularmachine.blockentity.MachinePortBlockEntity;
-import com.lw.modularmachine.blockentity.UpgradeBusBlockEntity.StartCostLease;
 import com.lw.modularmachine.config.MachineConfig;
-import com.lw.modularmachine.machine.PortKind;
 import com.lw.modularmachine.machine.factory.FactoryThreadState;
-import com.lw.modularmachine.machine.factory.FactoryUpgradeStartCosts;
-import java.util.ArrayList;
 import java.util.HashMap;
 import java.util.List;
 import net.minecraft.core.NonNullList;
 import net.minecraft.resources.ResourceLocation;
 import net.minecraft.world.item.ItemStack;
-import net.neoforged.neoforge.fluids.FluidStack;
 import java.util.Optional;
 
 /** Atomic item-input commit for one independent factory channel. */
@@ -37,21 +31,26 @@ public final class FactoryRecipeStarter {
   }
 
   public static Result start(FactoryControllerBlockEntity factory, String threadId, RecipeStartPlan plan) {
-    if (factory == null || threadId == null || plan == null || !factory.beginRunStart(threadId)) {
+    return start(factory, threadId, plan, MachineConfig.FACTORY_SEARCH_WORK.get());
+  }
+
+  public static Result start(FactoryControllerBlockEntity factory, String threadId, RecipeStartPlan plan, int workBudget) {
+    if (workBudget < 0) {
+      throw new IllegalArgumentException("Negative factory start budget");
+    }
+    if (factory == null || threadId == null || plan == null || !factory.runState().beginRunStart(threadId)) {
       return Result.BUSY;
     }
     boolean committed = false;
-    var leases = new ArrayList<MachinePortBlockEntity.ItemStartLease>();
-    var fluidLeases = new HashMap<String, MachinePortBlockEntity.FluidStartLease>();
-    ChemicalTransactions.Batch chemicals = null;
-    var patterns = new PatternInputTransaction();
-    var upgradeLeases = new ArrayList<StartCostLease>();
+    var resources = new FactoryStartupResources(factory, threadId);
+    var patterns = resources.patterns();
+    RecipeResourceExecutionRegistry.Prepared additionalResources = null;
     try {
       var nativeRecipe = MachineRecipeService.definitionForStart(factory, plan);
       if (nativeRecipe.isEmpty()) {
         return Result.UNMANAGED_RECIPE;
       }
-      int checkBudget = MachineConfig.FACTORY_SEARCH_WORK.get();
+      int checkBudget = workBudget;
       var admission = plan.advanceFactoryChecks(factory, threadId, checkBudget);
       checkBudget -= admission.workUsed();
       switch (admission.status()) {
@@ -78,7 +77,7 @@ public final class FactoryRecipeStarter {
       if (RecipeResourceRequirements.missing(ticket, nativeRecipe.orElseThrow()).isPresent()) {
         return Result.STALE;
       }
-      if (RecipeItemPreparation.transformsOutputs(nativeRecipe.orElseThrow())) {
+      if (RecipeItemPreparation.transformsOutputs(nativeRecipe.orElseThrow()) && !plan.hasPreparedOutputRuns(1)) {
         plan.withOutputPreparationContext(threadId);
         int preparedOutputs = plan.prepareParallel(nativeRecipe.orElseThrow(), 1, checkBudget);
         checkBudget = plan.parallelBudgetRemaining();
@@ -89,31 +88,20 @@ public final class FactoryRecipeStarter {
           return Result.CHECK_REJECTED;
         }
       }
-      var ports = new HashMap<String, RecipeExecutionTicket.PortSnapshot>();
+      var ports = new HashMap<String, RecipePortSnapshot>();
       for (var port : ticket.ports()) {
         ports.put(port.partId(), port);
       }
       var replacements = new HashMap<String, NonNullList<ItemStack>>();
       for (var deduction : plan.deductions()) {
-        var port = ports.get(deduction.slot().partId());
-        if (port == null || port.kind() != PortKind.ITEM_INPUT) {
+        var target = resources.prepareDeduction(deduction, ports, replacements);
+        if (!target.accepted()) {
           return Result.STALE;
         }
-        if (port.patternInput()) {
-          if (!deduction.key().matches(port.items().get(deduction.slot().slot()))) {
-            return Result.STALE;
-          }
-          patterns.consumeItem(port, deduction.slot().slot(), deduction.count());
+        var contents = target.contents();
+        if (contents == null) {
           continue;
         }
-        var contents = replacements.computeIfAbsent(deduction.slot().partId(), ignored -> {
-          var values = port.items();
-          var copy = NonNullList.withSize(values.size(), ItemStack.EMPTY);
-          for (int i = 0; i < values.size(); i++) {
-            copy.set(i, values.get(i));
-          }
-          return copy;
-        });
         int slot = deduction.slot().slot();
         if (slot >= contents.size()
             || !deduction.key().matches(contents.get(slot))
@@ -124,17 +112,17 @@ public final class FactoryRecipeStarter {
             slot,
             contents.get(slot).copyWithCount(Math.toIntExact(contents.get(slot).getCount() - deduction.count())));
       }
-      var fluidDebits = planFluidDebits(
-          ticket,
-          nativeRecipe.orElseThrow().fluidInputs(),
-          nativeRecipe.orElseThrow().selectors().fluidInput());
+      var fluidDebits = StartupFluidAllocation
+          .plan(ticket, nativeRecipe.orElseThrow().fluidInputs(), nativeRecipe.orElseThrow().selectors().fluidInput());
       if (fluidDebits == null) {
         return Result.STALE;
       }
-      chemicals = ChemicalTransactions.inputs(ticket, nativeRecipe.orElseThrow().chemicals().inputs());
-      if (chemicals == null) {
+      additionalResources = RecipeResourceExecutionRegistry
+          .prepareStart(ticket, nativeRecipe.orElseThrow().resourceData(), 1);
+      if (additionalResources == null) {
         return Result.STALE;
       }
+      resources.enlistAdditional(additionalResources);
       var startCosts = plan.prepareFactoryStartup(factory, threadId, 1);
       if (!startCosts.current()) {
         return Result.STALE;
@@ -160,7 +148,7 @@ public final class FactoryRecipeStarter {
           .map(FactoryThreadState::upgradeSnapshot).findFirst().orElseThrow();
       var preparedRuns = plan.preparedOutputRuns(1);
       var run = !preparedRuns.isEmpty() ? preparedRuns.getFirst()
-          .atStartTick(factory.getLevel().getGameTime()) : FrozenItemRun.freeze(
+          .atStartTick(factory.getLevel().getGameTime()) : FrozenRecipeFactory.freeze(
               ResourceLocation.parse(plan.recipe().id()),
               nativeRecipe.orElseThrow(),
               ticket.definitionEpoch(),
@@ -185,7 +173,7 @@ public final class FactoryRecipeStarter {
           default -> Result.STALE;
         };
       }
-      fluidDebits = planFluidDebits(
+      fluidDebits = StartupFluidAllocation.plan(
           ticket,
           run.fluidInputClaims(factory.getLevel().registryAccess()),
           nativeRecipe.orElseThrow().selectors().fluidInput());
@@ -205,94 +193,36 @@ public final class FactoryRecipeStarter {
           patterns.consumeFluid(port, debit.amount());
         }
       }
-      chemicals.addPatterns(patterns);
+      additionalResources.addPatterns(patterns);
+      if (!additionalResources.current()) {
+        return Result.STALE;
+      }
       patterns.acquire();
-      startCosts.acquireInto(upgradeLeases);
-      chemicals.acquire();
+      startCosts.acquireInto(resources.upgradeLeases());
+      additionalResources.acquire();
       if (!run.preparedItemCallbacksCurrent()) {
         return Result.STALE;
       }
-      for (var port : ticket.ports()) {
-        if (!port.patternInput() && port.kind().resource() == PortKind.Resource.ITEM) {
-          var lease = port.identity().acquireItemStart(port.revision());
-          var replacement = replacements.get(port.partId());
-          if (replacement != null) {
-            lease.replacePrepared(replacement);
-          }
-          leases.add(lease);
-        } else if (!port.patternInput() && port.kind() == PortKind.FLUID_INPUT && !fluidDebits.isEmpty()) {
-          fluidLeases.put(port.partId(), port.identity().acquireFluidStart(port.revision(), port.tankIndex()));
-        }
-      }
+      resources.acquire(ticket, replacements, !fluidDebits.isEmpty());
       for (var debit : fluidDebits) {
-        if (!ports.get(debit.partId()).patternInput() && !fluidLeases.get(debit.partId()).drainExact(debit.amount())) {
+        if (!ports.get(debit.partId()).patternInput() && !resources.drainFluid(debit.partId(), debit.amount())) {
           return Result.STALE;
         }
       }
-      factory.installRun(threadId, run);
+      factory.runState().installRun(threadId, run);
       committed = true;
       return Result.STARTED;
-    } catch (com.lw.modularmachine.machine.factory.UpgradeRecipeChecks.StaleException stale) {
+    } catch (com.lw.modularmachine.machine.upgrade.UpgradeRecipeCheckHandlers.StaleException stale) {
       return Result.STALE;
     } catch (RuntimeException failure) {
       ModularMachine.LOGGER.warn("Factory recipe start failed at {}", factory.getBlockPos(), failure);
       return Result.FAILED;
     } finally {
-      patterns.resolve(committed);
-      for (var lease : leases) {
-        lease.resolve(committed);
-      }
-      for (var lease : fluidLeases.values()) {
-        lease.resolve(committed);
-      }
-      for (var lease : upgradeLeases) {
-        lease.resolve(committed);
-      }
-      if (chemicals != null) {
-        chemicals.resolve(committed);
-      }
-      factory.finishRunStart(threadId, committed);
+      resources.resolve(committed);
       if (committed) {
-        patterns.publish();
-        chemicals.publish();
-        factory.setChanged();
-        FactoryUpgradeStartCosts.publish(factory, upgradeLeases);
-        UpgradeLifecyclePublisher.recipeStarted(factory, threadId, factory.runSet(threadId).runs());
-        leases.forEach(MachinePortBlockEntity.ItemStartLease::publish);
-        fluidLeases.values().forEach(MachinePortBlockEntity.FluidStartLease::publish);
+        resources.publishCommitted();
       }
     }
   }
 
-  private record FluidDebit(String partId, FluidStack amount) {
-  }
-
-  private static List<FluidDebit> planFluidDebits(RecipeExecutionTicket ticket, List<FluidStack> requirements, String selector) {
-    var reserved = new HashMap<String, Long>();
-    var result = new ArrayList<FluidDebit>();
-    for (var requirement : requirements) {
-      int remaining = requirement.getAmount();
-      for (var port : ticket.ports()) {
-        if (port.kind() != PortKind.FLUID_INPUT
-            || !port.selector().equals(selector)
-            || !FluidStack.isSameFluidSameComponents(port.fluid(), requirement)) {
-          continue;
-        }
-        long already = reserved.getOrDefault(port.partId(), 0L);
-        int amount = (int) Math.min(remaining, Math.max(0, port.fluidAmount() - already));
-        if (amount > 0) {
-          reserved.put(port.partId(), already + amount);
-          result.add(new FluidDebit(port.partId(), requirement.copyWithAmount(amount)));
-          remaining -= amount;
-        }
-        if (remaining == 0) {
-          break;
-        }
-      }
-      if (remaining > 0) {
-        return null;
-      }
-    }
-    return List.copyOf(result);
-  }
 }

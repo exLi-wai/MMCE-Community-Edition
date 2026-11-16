@@ -1,7 +1,7 @@
 package com.lw.modularmachine.menu;
 
 import com.lw.modularmachine.item.MachineBlueprintItem;
-import com.lw.modularmachine.storage.ControllerBlueprintInventory;
+import com.lw.modularmachine.machine.controller.ControllerBlueprintInventory;
 import net.minecraft.world.entity.player.Inventory;
 import net.minecraft.world.entity.player.Player;
 import net.minecraft.world.inventory.AbstractContainerMenu;
@@ -14,14 +14,7 @@ import net.neoforged.neoforge.items.SlotItemHandler;
 public abstract class ControllerBlueprintMenu extends AbstractContainerMenu {
   protected ControllerBlueprintMenu(MenuType<?> type, int id, Inventory inventory, ControllerBlueprintInventory blueprints, int playerX, int blueprintX) {
     super(type, id);
-    for (int row = 0; row < 3; row++) {
-      for (int column = 0; column < 9; column++) {
-        addSlot(new Slot(inventory, column + row * 9 + 9, playerX + column * 18, 131 + row * 18));
-      }
-    }
-    for (int column = 0; column < 9; column++) {
-      addSlot(new Slot(inventory, column, playerX + column * 18, 189));
-    }
+    PlayerInventorySlots.add(inventory, this::addSlot, playerX, 131, 189);
     addSlot(new SlotItemHandler(blueprints, 0, blueprintX, 8) {
       @Override
       public void setChanged() {

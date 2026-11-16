@@ -1,6 +1,8 @@
 package com.lw.modularmachine.machine;
 
+import com.lw.modularmachine.api.component.ResourceType;
 import java.util.List;
+import java.util.Map;
 
 /**
  * Initial defaults follow the old ItemBusSize, FluidHatchSize and
@@ -53,12 +55,19 @@ public record HatchTier(String name, long capacity, long transferLimit) {
       new HatchTier("ludicrous", 16_000, 0),
       new HatchTier("vacuum", 32_000, 0));
 
-  public static List<HatchTier> forResource(PortKind.Resource resource) {
-    return switch (resource) {
-      case ITEM -> ITEMS;
-      case FLUID -> FLUIDS;
-      case ENERGY -> ENERGY;
-      case CHEMICAL -> CHEMICALS;
-    };
+  public static List<HatchTier> forResource(ResourceType resource) {
+    var tiers = Map.of(
+        ResourceType.ITEM,
+        ITEMS,
+        ResourceType.FLUID,
+        FLUIDS,
+        ResourceType.ENERGY,
+        ENERGY,
+        ResourceType.CHEMICAL,
+        CHEMICALS).get(resource);
+    if (tiers == null) {
+      throw new IllegalArgumentException("No native hatch tiers for resource: " + resource.id());
+    }
+    return tiers;
   }
 }

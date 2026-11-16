@@ -1,6 +1,8 @@
 package com.lw.modularmachine.machine.recipe;
 
 import com.lw.modularmachine.ModularMachine;
+import com.lw.modularmachine.api.recipe.resource.RecipeResourceParticipant;
+import com.lw.modularmachine.machine.recipe.resource.RecipeResourceTransaction;
 import com.lw.modularmachine.api.component.ChemicalStackData;
 import com.lw.modularmachine.blockentity.PatternProviderBlockEntity;
 import com.lw.modularmachine.machine.network.pattern.PatternProviderState;
@@ -16,7 +18,8 @@ import org.jetbrains.annotations.ApiStatus;
 
 /** Internal participant in the existing resource/run commit decision. */
 @ApiStatus.Internal
-public final class PatternInputTransaction {
+public final class PatternInputTransaction implements RecipeResourceParticipant {
+  private final RecipeResourceTransaction resources = new RecipeResourceTransaction();
   private final Map<PatternProviderBlockEntity, Participant> participants = new LinkedHashMap<>();
   private final Map<PatternInputSource, Map<PatternResourceKey, Long>> consumption = new LinkedHashMap<>();
   private final List<Binding> starts = new ArrayList<>();
@@ -62,7 +65,7 @@ public final class PatternInputTransaction {
     consumption.computeIfAbsent(source, ignored -> new LinkedHashMap<>()).merge(key, amount, Math::addExact);
   }
 
-  public void consumeItem(RecipeExecutionTicket.PortSnapshot port, int slot, long amount) {
+  public void consumeItem(RecipePortSnapshot port, int slot, long amount) {
     var source = port.patternSource();
     if (!port.patternInput()
         || slot < 0
@@ -90,7 +93,7 @@ public final class PatternInputTransaction {
     participant.items.set(slot, before.copyWithCount(Math.toIntExact(before.getCount() - amount)));
   }
 
-  public void consumeFluid(RecipeExecutionTicket.PortSnapshot port, FluidStack amount) {
+  public void consumeFluid(RecipePortSnapshot port, FluidStack amount) {
     if (!port.patternInput() || amount.isEmpty() || !FluidStack.isSameFluidSameComponents(port.fluid(), amount)) {
       throw new IllegalStateException("Invalid pattern fluid debit");
     }
@@ -108,14 +111,14 @@ public final class PatternInputTransaction {
     participant.fluid = participant.fluid.copyWithAmount(participant.fluid.getAmount() - amount.getAmount());
   }
 
-  public void consumeChemical(RecipeExecutionTicket.PortSnapshot port, ChemicalStackData amount) {
+  public void consumeChemical(RecipePortSnapshot port, ChemicalStackData amount) {
     if (!port.patternInput() || amount.isEmpty() || !port.chemical().chemical().equals(amount.chemical())) {
       throw new IllegalStateException("Invalid pattern chemical debit");
     }
     consume(port.patternSource(), port.patternKey(0), amount.amount());
   }
 
-  public void bindStart(RecipeExecutionTicket ticket, List<FrozenItemRun> runs) {
+  public void bindStart(RecipeExecutionTicket ticket, List<FrozenRecipeRun> runs) {
     var source = ticket.patternSource();
     if (source == null) {
       return;
@@ -126,7 +129,7 @@ public final class PatternInputTransaction {
     }
   }
 
-  public static PatternInputTransaction release(StructureService.StructureSubject owner, List<FrozenItemRun> runs) {
+  public static PatternInputTransaction release(StructureService.StructureSubject owner, List<FrozenRecipeRun> runs) {
     var result = new PatternInputTransaction();
     for (var run : runs) {
       var source = PatternRunSources.source(owner, run);
@@ -158,13 +161,20 @@ public final class PatternInputTransaction {
       // Unrelated receipts may have changed during a budgeted search. The exact
       // source shares and independent storage were revalidated above; acquire
       // the current revision on this same server thread, without callbacks.
-      participant.stateLease = source.provider().state().acquire(source.instance(), participant.checkedStateRevision);
+      var items = resources.phase();
+      var fluids = resources.phase();
+      var state = resources.phase();
+      participant.stateLease = state.enlist(
+          source.provider().state().acquire(source.instance(), participant.checkedStateRevision),
+          PatternProviderState.Lease::resolve);
       if (participant.items != null) {
-        participant.itemLease = source.provider().independentItems().acquire();
+        participant.itemLease = items
+            .enlist(source.provider().independentItems().acquire(), TransactionalItemStackHandler.Lease::resolve);
         participant.itemLease.replacePrepared(participant.items);
       }
       if (participant.fluid != null) {
-        participant.fluidLease = source.provider().independentFluid().acquire();
+        participant.fluidLease = fluids
+            .enlist(source.provider().independentFluid().acquire(), TransactionalFluidTank.Lease::resolve);
         participant.fluidLease.replacePrepared(participant.fluid);
       }
     }
@@ -197,18 +207,9 @@ public final class PatternInputTransaction {
     }
   }
 
+  @Override
   public void resolve(boolean commit) {
-    for (var participant : participants.values()) {
-      if (participant.itemLease != null) {
-        participant.itemLease.resolve(commit);
-      }
-      if (participant.fluidLease != null) {
-        participant.fluidLease.resolve(commit);
-      }
-      if (participant.stateLease != null) {
-        participant.stateLease.resolve(commit);
-      }
-    }
+    resources.resolve(commit);
     if (commit) {
       for (var binding : starts) {
         PatternRunSources.bind(binding.owner(), binding.run(), binding.source());
@@ -220,6 +221,7 @@ public final class PatternInputTransaction {
     committed = commit;
   }
 
+  @Override
   public void publish() {
     if (!committed) {
       return;

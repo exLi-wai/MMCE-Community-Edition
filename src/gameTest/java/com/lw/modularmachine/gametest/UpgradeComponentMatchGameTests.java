@@ -2,11 +2,11 @@ package com.lw.modularmachine.gametest;
 
 import com.google.gson.JsonObject;
 import com.google.gson.JsonParseException;
-import com.lw.modularmachine.machine.factory.FactoryUpgradeCompatibility;
-import com.lw.modularmachine.machine.factory.FactoryUpgradeDefinition;
-import com.lw.modularmachine.api.upgrade.FactoryUpgradeEntry;
-import com.lw.modularmachine.machine.factory.FactoryUpgradeEntryResolver;
-import com.lw.modularmachine.machine.factory.FactoryUpgradeService;
+import com.lw.modularmachine.machine.upgrade.UpgradeCompatibility;
+import com.lw.modularmachine.machine.upgrade.UpgradeDefinition;
+import com.lw.modularmachine.api.upgrade.UpgradeEntry;
+import com.lw.modularmachine.machine.upgrade.UpgradeEntryResolver;
+import com.lw.modularmachine.machine.upgrade.UpgradeCatalogService;
 import com.lw.modularmachine.network.UpgradeBusPayloads;
 import java.util.ArrayList;
 import java.util.List;
@@ -32,12 +32,12 @@ import net.neoforged.neoforge.gametest.PrefixGameTestTemplate;
 public final class UpgradeComponentMatchGameTests {
   private static final ResourceLocation PAPER = ResourceLocation.fromNamespaceAndPath("minecraft", "paper");
   private static final ResourceLocation MACHINE = id("test_upgrade_bus_binding");
-  private static List<FactoryUpgradeDefinition> savedDefinitions;
+  private static List<UpgradeDefinition> savedDefinitions;
 
   @AfterBatch(batch = "upgrade_component_matching")
   public static void cleanup(ServerLevel level) {
     if (savedDefinitions != null) {
-      FactoryUpgradeService.replaceDefinitions(savedDefinitions);
+      UpgradeCatalogService.replaceDefinitions(savedDefinitions);
       savedDefinitions = null;
     }
   }
@@ -52,7 +52,7 @@ public final class UpgradeComponentMatchGameTests {
             return;
           }
           GameTestUpgradeFixtures.install();
-          savedDefinitions = FactoryUpgradeService.snapshot().definitions();
+          savedDefinitions = UpgradeCatalogService.snapshot().definitions();
           try {
             verify(helper);
             helper.succeed();
@@ -63,7 +63,7 @@ public final class UpgradeComponentMatchGameTests {
   }
 
   private static void verify(GameTestHelper helper) {
-    var snapshot = FactoryUpgradeService.snapshot();
+    var snapshot = UpgradeCatalogService.snapshot();
     var named = paper("Exact Upgrade", 2);
     var different = paper("Other Upgrade", 2);
     var data = new ItemStack(Items.PAPER, 2);
@@ -89,7 +89,7 @@ public final class UpgradeComponentMatchGameTests {
     assertEffect(helper, damaged, "test_component_damage", 6);
     damaged.setDamageValue(5);
     helper.assertTrue(
-        !FactoryUpgradeEntryResolver.isUpgrade(damaged) && FactoryUpgradeEntryResolver.resolve(damaged).isEmpty(),
+        !UpgradeEntryResolver.isUpgrade(damaged) && UpgradeEntryResolver.resolve(damaged).isEmpty(),
         "An unmatched damage variant became an upgrade without a fallback");
 
     try {
@@ -121,12 +121,12 @@ public final class UpgradeComponentMatchGameTests {
     bus.inventory().setStackInSlot(0, named.copy());
     var restricted = new ArrayList<>(snapshot.definitions());
     restricted.replaceAll(
-        definition -> definition.effect().id().equals(namedDefinition.effect().id()) ? new FactoryUpgradeDefinition(
+        definition -> definition.effect().id().equals(namedDefinition.effect().id()) ? new UpgradeDefinition(
             definition.item(),
             definition.effect(),
-            new FactoryUpgradeCompatibility(Set.of(id("different_machine")), Set.of()),
+            new UpgradeCompatibility(Set.of(id("different_machine")), Set.of()),
             definition.components()) : definition);
-    FactoryUpgradeService.replaceDefinitions(restricted);
+    UpgradeCatalogService.replaceDefinitions(restricted);
     bus.serverTick();
     factory.serverTick();
     var denied = UpgradeBusPayloads.capture(7, bus);
@@ -135,12 +135,12 @@ public final class UpgradeComponentMatchGameTests {
             && denied.entries().isEmpty()
             && denied.incompatible().equals(List.of(namedDefinition.effect().id()))
             && factory.scheduler().channels().getFirst().parallelLimit() == 1
-            && FactoryUpgradeEntryResolver.resolve(named, MACHINE).isEmpty(),
+            && UpgradeEntryResolver.resolve(named, MACHINE).isEmpty(),
         "A machine-incompatible exact match fell back to the generic upgrade");
 
     var withoutNamed = snapshot.definitions().stream()
         .filter(definition -> !definition.effect().id().equals(namedDefinition.effect().id())).toList();
-    FactoryUpgradeService.replaceDefinitions(withoutNamed);
+    UpgradeCatalogService.replaceDefinitions(withoutNamed);
     bus.serverTick();
     factory.serverTick();
     var fallback = UpgradeBusPayloads.capture(7, bus);
@@ -153,7 +153,7 @@ public final class UpgradeComponentMatchGameTests {
 
     var exactOnly = withoutNamed.stream()
         .filter(definition -> !definition.item().equals(PAPER) || definition.exactComponents()).toList();
-    FactoryUpgradeService.replaceDefinitions(exactOnly);
+    UpgradeCatalogService.replaceDefinitions(exactOnly);
     bus.serverTick();
     factory.serverTick();
     helper.assertTrue(
@@ -163,33 +163,29 @@ public final class UpgradeComponentMatchGameTests {
         "Unmatched ordinary component variants invalidated the bus or retained a stale effect");
   }
 
-  private static void verifyRejectedCandidates(GameTestHelper helper, FactoryUpgradeService.Snapshot snapshot) {
-    var effect = new FactoryUpgradeEntry(id("component_conflict"), 1, 1, 1, 1, 1, 1, 1);
+  private static void verifyRejectedCandidates(GameTestHelper helper, UpgradeCatalogService.Snapshot snapshot) {
+    var effect = new UpgradeEntry(id("component_conflict"), 1, 1, 1, 1, 1, 1, 1);
     var unknown = new JsonObject();
     unknown.add("mmcece:absent_component", new JsonObject());
-    var invalid = new FactoryUpgradeDefinition(PAPER, effect, FactoryUpgradeCompatibility.unrestricted(), unknown);
-    var duplicateDefault = new FactoryUpgradeDefinition(
-        PAPER,
-        effect,
-        FactoryUpgradeCompatibility.unrestricted(),
-        new JsonObject());
-    var duplicateGeneric = new FactoryUpgradeDefinition(PAPER, effect);
+    var invalid = new UpgradeDefinition(PAPER, effect, UpgradeCompatibility.unrestricted(), unknown);
+    var duplicateDefault = new UpgradeDefinition(PAPER, effect, UpgradeCompatibility.unrestricted(), new JsonObject());
+    var duplicateGeneric = new UpgradeDefinition(PAPER, effect);
     for (var definition : List.of(invalid, duplicateDefault, duplicateGeneric)) {
       var definitions = new ArrayList<>(snapshot.definitions());
       definitions.add(definition);
       try {
-        FactoryUpgradeService.replaceDefinitions(definitions);
+        UpgradeCatalogService.replaceDefinitions(definitions);
         helper.fail("Unknown component or duplicate upgrade matcher was published");
       } catch (JsonParseException expected) {
         helper.assertTrue(
-            FactoryUpgradeService.snapshot() == snapshot,
+            UpgradeCatalogService.snapshot() == snapshot,
             "Rejected matcher partially replaced the catalog");
       }
     }
   }
 
   private static void assertEffect(GameTestHelper helper, ItemStack stack, String definition, int parallel) {
-    var selected = FactoryUpgradeEntryResolver.resolve(stack).orElseThrow();
+    var selected = UpgradeEntryResolver.resolve(stack).orElseThrow();
     helper.assertTrue(
         selected.id().equals(id(definition)) && selected.parallelAdd() == parallel,
         "Wrong component upgrade: " + stack + " -> " + selected);

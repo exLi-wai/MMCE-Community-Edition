@@ -316,200 +316,23 @@ public final class RangedSelectionService {
       return;
     }
     try {
-      boolean close = false;
+      boolean close = request.action() == Action.BEGIN_PICK;
       switch (request.action()) {
-        case BEGIN_PICK -> {
-          requireTarget(session, request);
-          session.picking = request.target();
-          session.first = null;
-          if (request.target() == PickTarget.PART) {
-            session.partEditor = null;
-            session.partState = null;
-          }
-          session.status = message(request.target() == PickTarget.PART ? "picking_part" : "picking");
-          if (request.target() == PickTarget.PART) {
-            player.displayClientMessage(session.status, true);
-          }
-          session.revision++;
-          close = true;
-        }
-        case CANCEL_PICK -> {
-          session.picking = PickTarget.NONE;
-          session.first = null;
-          session.status = message("cancelled");
-          session.revision++;
-        }
-        case CLEAR_BOX -> {
-          requireTarget(session, request);
-          if (request.target() == PickTarget.PART) {
-            throw RangedSelectionMessages.invalid("part_not_boundary");
-          }
-          boolean changed = box(session, request.target()) != null;
-          setBox(session, request.target(), null);
-          if (changed) {
-            session.clearPartEdits();
-            session.changed();
-          }
-          session.revision++;
-          syncMain(player, session);
-        }
-        case SET_MODE -> {
-          if (request.index() != 0 && request.index() != 1) {
-            throw RangedSelectionMessages.invalid("invalid_mode");
-          }
-          boolean append = request.index() == 1;
-          if (session.append != append) {
-            session.append = append;
-            session.clearPartEdits();
-            session.changed();
-          }
-          session.revision++;
-        }
-        case LIST_FILES -> {
-          session.filter = request.value();
-          session.filePage = Math.max(0, request.index());
-          if (session.catalog == null || request.index() == 0) {
-            session.catalogFuture = AsyncStructureWork.submit(() -> {
-              try {
-                return MachineDefinitionFileStore.scan();
-              } catch (IOException failure) {
-                throw new CompletionException(failure);
-              }
-            });
-            if (session.catalogFuture == null) {
-              throw RangedSelectionMessages.invalid("worker_busy");
-            }
-          } else {
-            session.filePage = Math.min(session.filePage, session.catalog.pages(session.filter) - 1);
-          }
-        }
-        case SELECT_FILE -> {
-          if (session.catalog == null) {
-            throw RangedSelectionMessages.invalid("file_list_required");
-          }
-          var entry = session.catalog.entries().stream().filter(value -> value.token().equals(request.value()))
-              .findFirst().orElseThrow(() -> new IllegalArgumentException("The selected file token has expired"));
-          if (!session.fileToken.equals(entry.token()) || !session.append) {
-            session.clearPartEdits();
-            session.changed();
-          }
-          session.fileToken = entry.token();
-          session.fileLabel = entry.path().getFileName().toString();
-          session.append = true;
-          session.revision++;
-        }
-        case ADD_SEGMENT -> {
-          if (session.segments.size() >= RangedSelectionData.MAX_SEGMENTS) {
-            throw RangedSelectionMessages.invalid("segment_limit", RangedSelectionData.MAX_SEGMENTS);
-          }
-          session.segments.add(new Segment(Settings.defaults(), null, null, null));
-          session.selected = session.segments.size() - 1;
-          session.changed();
-          session.revision++;
-        }
-        case SELECT_SEGMENT -> {
-          requireSegment(session, request.index());
-          session.selected = request.index();
-          session.revision++;
-        }
-        case REMOVE_SEGMENT -> {
-          requireSegment(session, request.index());
-          session.segments.remove(request.index());
-          if (session.segments.isEmpty()) {
-            session.segments.add(new Segment(Settings.defaults(), null, null, null));
-          }
-          session.selected = Math.min(session.selected, session.segments.size() - 1);
-          session.clearPartEdits();
-          session.changed();
-          session.revision++;
-        }
-        case UPDATE -> {
-          requireSegment(session, request.index());
-          if (request.index() != session.selected) {
-            throw RangedSelectionMessages.invalid("segment_changed");
-          }
-          var before = session.segments.get(session.selected);
-          if (!before.settings().equals(request.settings())
-              || session.deduplicate != request.deduplicate()
-              || session.includeAir != request.includeAir()
-              || !session.fileName.equals(request.value())) {
-            session.changed();
-          }
-          session.segments
-              .set(session.selected, new Segment(request.settings(), before.body(), before.start(), before.end()));
-          session.deduplicate = request.deduplicate();
-          session.includeAir = request.includeAir();
-          session.fileName = request.value();
-          session.revision++;
-        }
-        case CLEAR -> {
-          session.main = null;
-          session.segments.clear();
-          session.segments.add(new Segment(Settings.defaults(), null, null, null));
-          session.selected = 0;
-          session.picking = PickTarget.NONE;
-          session.first = null;
-          session.clearPartEdits();
-          session.changed();
-          session.revision++;
-          syncMain(player, session);
-          session.status = message("cleared");
-        }
-        case PREVIEW -> {
-          if (session.result == null || session.saved == null) {
-            throw RangedSelectionMessages.invalid("export_before_preview");
-          }
-          session.cancelPreview();
-          session.previewRequest++;
-          session.preview = new RangedSelectionPreview(
-              session.result,
-              session.selected,
-              request.index(),
-              StructureService.definitionEpoch());
-        }
-        case UPDATE_PART -> {
-          var editor = requirePart(player, session);
-          var edit = Objects.requireNonNull(request.partEdit(), "Missing part edit");
-          PartOverrides.apply(new JsonObject(), edit);
-          if (!edit.empty()
-              && !session.partEdits.containsKey(editor.position())
-              && session.partEdits.size() >= RangedSelectionData.MAX_PART_EDITS) {
-            throw RangedSelectionMessages.invalid("part_edit_limit", RangedSelectionData.MAX_PART_EDITS);
-          }
-          if (edit.empty()) {
-            session.partEdits.remove(editor.position());
-            session.editedStates.remove(editor.position());
-          } else {
-            session.partEdits.put(editor.position(), edit);
-            session.editedStates.put(editor.position(), session.partState);
-          }
-          session.partEditor = new PartEditor(
-              editor.position(),
-              editor.observedBlock(),
-              editor.observedProperties(),
-              edit);
-          session.changed();
-          session.revision++;
-          session.status = message("part_saved", session.partEdits.size());
-        }
-        case RESET_PART -> {
-          var editor = requirePart(player, session);
-          session.partEdits.remove(editor.position());
-          session.editedStates.remove(editor.position());
-          session.partEditor = new PartEditor(
-              editor.position(),
-              editor.observedBlock(),
-              editor.observedProperties(),
-              PartEdit.inherit());
-          session.changed();
-          session.revision++;
-          session.status = message("part_reset");
-        }
-        case CLOSE_PART -> {
-          session.partEditor = null;
-          session.partState = null;
-          session.revision++;
-        }
+        case BEGIN_PICK -> beginPick(player, session, request);
+        case CANCEL_PICK -> cancelPick(session);
+        case CLEAR_BOX -> clearBox(player, session, request);
+        case SET_MODE -> setMode(session, request.index());
+        case LIST_FILES -> listFiles(session, request.value(), request.index());
+        case SELECT_FILE -> selectFile(session, request.value());
+        case ADD_SEGMENT -> addSegment(session);
+        case SELECT_SEGMENT -> selectSegment(session, request.index());
+        case REMOVE_SEGMENT -> removeSegment(session, request.index());
+        case UPDATE -> updateSettings(session, request);
+        case CLEAR -> clearSelection(player, session);
+        case PREVIEW -> beginPreview(session, request.index());
+        case UPDATE_PART -> updatePart(player, session, request.partEdit());
+        case RESET_PART -> resetPart(player, session);
+        case CLOSE_PART -> closePart(session);
         case OPEN -> {
         }
       }
@@ -521,6 +344,208 @@ public final class RangedSelectionService {
       }
       send(player, session, true, false);
     }
+  }
+
+  private static void beginPick(ServerPlayer player, Session session, Request request) {
+    requireTarget(session, request);
+    session.picking = request.target();
+    session.first = null;
+    if (request.target() == PickTarget.PART) {
+      session.partEditor = null;
+      session.partState = null;
+    }
+    session.status = message(request.target() == PickTarget.PART ? "picking_part" : "picking");
+    if (request.target() == PickTarget.PART) {
+      player.displayClientMessage(session.status, true);
+    }
+    session.revision++;
+  }
+
+  private static void cancelPick(Session session) {
+    session.picking = PickTarget.NONE;
+    session.first = null;
+    session.status = message("cancelled");
+    session.revision++;
+  }
+
+  private static void clearBox(ServerPlayer player, Session session, Request request) {
+    requireTarget(session, request);
+    if (request.target() == PickTarget.PART) {
+      throw RangedSelectionMessages.invalid("part_not_boundary");
+    }
+    boolean changed = box(session, request.target()) != null;
+    setBox(session, request.target(), null);
+    if (changed) {
+      session.clearPartEdits();
+      session.changed();
+    }
+    session.revision++;
+    syncMain(player, session);
+  }
+
+  private static void setMode(Session session, int index) {
+    if (index != 0 && index != 1) {
+      throw RangedSelectionMessages.invalid("invalid_mode");
+    }
+    boolean append = index == 1;
+    if (session.append != append) {
+      session.append = append;
+      session.clearPartEdits();
+      session.changed();
+    }
+    session.revision++;
+  }
+
+  private static void listFiles(Session session, String filter, int page) {
+    session.filter = filter;
+    session.filePage = Math.max(0, page);
+    if (session.catalog == null || page == 0) {
+      session.catalogFuture = AsyncStructureWork.submit(() -> {
+        try {
+          return MachineDefinitionFileStore.scan();
+        } catch (IOException failure) {
+          throw new CompletionException(failure);
+        }
+      });
+      if (session.catalogFuture == null) {
+        throw RangedSelectionMessages.invalid("worker_busy");
+      }
+    } else {
+      session.filePage = Math.min(session.filePage, session.catalog.pages(session.filter) - 1);
+    }
+  }
+
+  private static void selectFile(Session session, String token) {
+    if (session.catalog == null) {
+      throw RangedSelectionMessages.invalid("file_list_required");
+    }
+    var entry = session.catalog.entries().stream().filter(value -> value.token().equals(token)).findFirst()
+        .orElseThrow(() -> new IllegalArgumentException("The selected file token has expired"));
+    if (!session.fileToken.equals(entry.token()) || !session.append) {
+      session.clearPartEdits();
+      session.changed();
+    }
+    session.fileToken = entry.token();
+    session.fileLabel = entry.path().getFileName().toString();
+    session.append = true;
+    session.revision++;
+  }
+
+  private static void addSegment(Session session) {
+    if (session.segments.size() >= RangedSelectionData.MAX_SEGMENTS) {
+      throw RangedSelectionMessages.invalid("segment_limit", RangedSelectionData.MAX_SEGMENTS);
+    }
+    session.segments.add(new Segment(Settings.defaults(), null, null, null));
+    session.selected = session.segments.size() - 1;
+    session.changed();
+    session.revision++;
+  }
+
+  private static void selectSegment(Session session, int index) {
+    requireSegment(session, index);
+    session.selected = index;
+    session.revision++;
+  }
+
+  private static void removeSegment(Session session, int index) {
+    requireSegment(session, index);
+    session.segments.remove(index);
+    if (session.segments.isEmpty()) {
+      session.segments.add(new Segment(Settings.defaults(), null, null, null));
+    }
+    session.selected = Math.min(session.selected, session.segments.size() - 1);
+    session.clearPartEdits();
+    session.changed();
+    session.revision++;
+  }
+
+  private static void updateSettings(Session session, Request request) {
+    requireSegment(session, request.index());
+    if (request.index() != session.selected) {
+      throw RangedSelectionMessages.invalid("segment_changed");
+    }
+    var before = session.segments.get(session.selected);
+    if (!before.settings().equals(request.settings())
+        || session.deduplicate != request.deduplicate()
+        || session.includeAir != request.includeAir()
+        || !session.fileName.equals(request.value())) {
+      session.changed();
+    }
+    session.segments
+        .set(session.selected, new Segment(request.settings(), before.body(), before.start(), before.end()));
+    session.deduplicate = request.deduplicate();
+    session.includeAir = request.includeAir();
+    session.fileName = request.value();
+    session.revision++;
+  }
+
+  private static void clearSelection(ServerPlayer player, Session session) {
+    session.main = null;
+    session.segments.clear();
+    session.segments.add(new Segment(Settings.defaults(), null, null, null));
+    session.selected = 0;
+    session.picking = PickTarget.NONE;
+    session.first = null;
+    session.clearPartEdits();
+    session.changed();
+    session.revision++;
+    syncMain(player, session);
+    session.status = message("cleared");
+  }
+
+  private static void beginPreview(Session session, int index) {
+    if (session.result == null || session.saved == null) {
+      throw RangedSelectionMessages.invalid("export_before_preview");
+    }
+    session.cancelPreview();
+    session.previewRequest++;
+    session.preview = new RangedSelectionPreview(
+        session.result,
+        session.selected,
+        index,
+        StructureService.definitionEpoch());
+  }
+
+  private static void updatePart(ServerPlayer player, Session session, PartEdit requestedEdit) {
+    var editor = requirePart(player, session);
+    var edit = Objects.requireNonNull(requestedEdit, "Missing part edit");
+    PartOverrides.apply(new JsonObject(), edit);
+    if (!edit.empty()
+        && !session.partEdits.containsKey(editor.position())
+        && session.partEdits.size() >= RangedSelectionData.MAX_PART_EDITS) {
+      throw RangedSelectionMessages.invalid("part_edit_limit", RangedSelectionData.MAX_PART_EDITS);
+    }
+    if (edit.empty()) {
+      session.partEdits.remove(editor.position());
+      session.editedStates.remove(editor.position());
+    } else {
+      session.partEdits.put(editor.position(), edit);
+      session.editedStates.put(editor.position(), session.partState);
+    }
+    session.partEditor = new PartEditor(editor.position(), editor.observedBlock(), editor.observedProperties(), edit);
+    session.changed();
+    session.revision++;
+    session.status = message("part_saved", session.partEdits.size());
+  }
+
+  private static void resetPart(ServerPlayer player, Session session) {
+    var editor = requirePart(player, session);
+    session.partEdits.remove(editor.position());
+    session.editedStates.remove(editor.position());
+    session.partEditor = new PartEditor(
+        editor.position(),
+        editor.observedBlock(),
+        editor.observedProperties(),
+        PartEdit.inherit());
+    session.changed();
+    session.revision++;
+    session.status = message("part_reset");
+  }
+
+  private static void closePart(Session session) {
+    session.partEditor = null;
+    session.partState = null;
+    session.revision++;
   }
 
   private static void submit(ServerPlayer player, Session session, StructureService.StructureSubject controller) {
@@ -777,23 +802,13 @@ public final class RangedSelectionService {
   }
 
   private static boolean selectedPosition(Session session, BlockPos position) {
-    if (!session.append && contains(session.main, position)) {
+    if (!session.append && (session.main != null && session.main.contains(position))) {
       return true;
     }
     return session.segments.stream().anyMatch(
-        segment -> contains(segment.body(), position)
-            || contains(segment.start(), position)
-            || contains(segment.end(), position));
-  }
-
-  private static boolean contains(Box box, BlockPos position) {
-    return box != null
-        && position.getX() >= Math.min(box.first().getX(), box.second().getX())
-        && position.getX() <= Math.max(box.first().getX(), box.second().getX())
-        && position.getY() >= Math.min(box.first().getY(), box.second().getY())
-        && position.getY() <= Math.max(box.first().getY(), box.second().getY())
-        && position.getZ() >= Math.min(box.first().getZ(), box.second().getZ())
-        && position.getZ() <= Math.max(box.first().getZ(), box.second().getZ());
+        segment -> (segment.body() != null && segment.body().contains(position))
+            || (segment.start() != null && segment.start().contains(position))
+            || (segment.end() != null && segment.end().contains(position)));
   }
 
   private static Component savedMessage(Session session) {

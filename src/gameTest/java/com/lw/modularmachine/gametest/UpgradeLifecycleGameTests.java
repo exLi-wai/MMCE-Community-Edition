@@ -1,14 +1,14 @@
 package com.lw.modularmachine.gametest;
 
-import com.lw.modularmachine.machine.factory.UpgradeLifecyclePublisher;
+import com.lw.modularmachine.machine.upgrade.UpgradeLifecyclePublisher;
 import com.lw.modularmachine.blockentity.FactoryControllerBlockEntity;
 import com.lw.modularmachine.blockentity.MachinePortBlockEntity;
 import com.lw.modularmachine.blockentity.UpgradeBusBlockEntity;
-import com.lw.modularmachine.machine.factory.FactoryUpgradeCompatibility;
-import com.lw.modularmachine.machine.factory.FactoryUpgradeDefinition;
-import com.lw.modularmachine.api.upgrade.FactoryUpgradeEntry;
-import com.lw.modularmachine.api.upgrade.FactoryUpgradeEvents;
-import com.lw.modularmachine.machine.factory.FactoryUpgradeService;
+import com.lw.modularmachine.machine.upgrade.UpgradeCompatibility;
+import com.lw.modularmachine.machine.upgrade.UpgradeDefinition;
+import com.lw.modularmachine.api.upgrade.UpgradeEntry;
+import com.lw.modularmachine.api.upgrade.UpgradeEvents;
+import com.lw.modularmachine.machine.upgrade.UpgradeCatalogService;
 import com.lw.modularmachine.machine.recipe.FactoryOutputEngine;
 import com.lw.modularmachine.machine.recipe.FactoryParallelStarter;
 import com.lw.modularmachine.machine.recipe.FactoryRecipeStarter;
@@ -45,7 +45,7 @@ public final class UpgradeLifecycleGameTests {
   private static final ResourceLocation FAILING = id("test_upgrade_failing_observer");
   private static final ResourceLocation HEALTHY = id("test_upgrade_healthy_observer");
   private static final String THREAD = "upgrade_thread";
-  private static List<FactoryUpgradeDefinition> savedDefinitions;
+  private static List<UpgradeDefinition> savedDefinitions;
 
   private record Fixture(
       FactoryControllerBlockEntity factory,
@@ -56,11 +56,11 @@ public final class UpgradeLifecycleGameTests {
 
   @AfterBatch(batch = "upgrade_lifecycle_notifications")
   public static void cleanup(ServerLevel level) {
-    FactoryUpgradeEvents.remove(OBSERVER);
-    FactoryUpgradeEvents.remove(FAILING);
-    FactoryUpgradeEvents.remove(HEALTHY);
+    UpgradeEvents.remove(OBSERVER);
+    UpgradeEvents.remove(FAILING);
+    UpgradeEvents.remove(HEALTHY);
     if (savedDefinitions != null) {
-      FactoryUpgradeService.replaceDefinitions(savedDefinitions);
+      UpgradeCatalogService.replaceDefinitions(savedDefinitions);
       savedDefinitions = null;
     }
   }
@@ -75,7 +75,7 @@ public final class UpgradeLifecycleGameTests {
             return;
           }
           GameTestUpgradeFixtures.install();
-          savedDefinitions = FactoryUpgradeService.snapshot().definitions();
+          savedDefinitions = UpgradeCatalogService.snapshot().definitions();
           beginSingleRun(helper);
         })));
   }
@@ -84,7 +84,7 @@ public final class UpgradeLifecycleGameTests {
     var loaded = savedDefinitions.stream()
         .filter(definition -> definition.effect().id().equals(id("test_lifecycle_upgrade"))).findFirst().orElseThrow();
     helper.assertTrue(OBSERVER.equals(loaded.lifecycleHandler()), "Lifecycle field was not loaded from resources");
-    FactoryUpgradeService
+    UpgradeCatalogService
         .replaceDefinitions(List.of(loaded, definition("paper", FAILING, 0), definition("iron_nugget", HEALTHY, 0)));
     var fixture = build(helper);
     var current = new AtomicReference<>(fixture);
@@ -98,18 +98,18 @@ public final class UpgradeLifecycleGameTests {
     UpgradeBusGameTests.confirm(helper, fixture.factory());
     fixture.factory().serverTick();
     helper.assertTrue(
-        !fixture.bus().upgradeCatalogValid() && fixture.factory().upgradeSources().isEmpty(),
+        !fixture.bus().upgradeCatalogValid() && fixture.factory().upgrades().sources().isEmpty(),
         "Missing event handler retained upgrade effects");
 
-    var events = new ArrayList<FactoryUpgradeEvents.Context>();
-    var healthy = new ArrayList<FactoryUpgradeEvents.Context>();
+    var events = new ArrayList<UpgradeEvents.Context>();
+    var healthy = new ArrayList<UpgradeEvents.Context>();
     var failures = new AtomicInteger();
-    FactoryUpgradeEvents.Listener stable = (context, upgrade) -> {
+    UpgradeEvents.Listener stable = (context, upgrade) -> {
       var active = current.get();
       helper.assertTrue(
           active.input().inventory().getStackInSlot(0).isEmpty(),
           "Callback ran before input lease resolved");
-      if (context.type() == FactoryUpgradeEvents.Type.STARTED) {
+      if (context.type() == UpgradeEvents.Type.STARTED) {
         helper.assertTrue(
             active.factory().runSet(THREAD).runs().size() == context.runs().size(),
             "Start callback ran before run installation");
@@ -120,9 +120,9 @@ public final class UpgradeLifecycleGameTests {
       }
       events.add(context);
     };
-    FactoryUpgradeEvents.Listener first = (context, upgrade) -> {
+    UpgradeEvents.Listener first = (context, upgrade) -> {
       helper.assertTrue(
-          context.type() == FactoryUpgradeEvents.Type.STARTED && upgrade.slot() == 0 && upgrade.count() == 2,
+          context.type() == UpgradeEvents.Type.STARTED && upgrade.slot() == 0 && upgrade.count() == 2,
           "Initial callback type or whole-slot identity differs");
       helper.assertTrue(
           context.machine().equals(MACHINE)
@@ -140,37 +140,38 @@ public final class UpgradeLifecycleGameTests {
       } catch (IllegalStateException expected) {
       }
       try {
-        fixture.bus().unbindFactory();
+        fixture.bus().unbindOwner();
         helper.fail("Event callback changed source ownership");
       } catch (IllegalStateException expected) {
       }
-      helper.assertTrue(!fixture.factory().beginRunStart(THREAD), "Event reentered factory startup");
+      helper.assertTrue(!fixture.factory().runState().beginRunStart(THREAD), "Event reentered factory startup");
       helper.assertTrue(
-          fixture.factory().advanceOutput(THREAD, fixture.factory().runSet(THREAD)) == FactoryOutputEngine.Result.STALE,
+          fixture.factory().runCoordinator()
+              .advanceOutput(THREAD, fixture.factory().runSet(THREAD)) == FactoryOutputEngine.Result.STALE,
           "Event reentered output submission");
       fixture.factory().serverTick();
       stable.onEvent(context, upgrade);
-      FactoryUpgradeEvents.register(OBSERVER, stable);
+      UpgradeEvents.register(OBSERVER, stable);
     };
-    FactoryUpgradeEvents.register(FAILING, (context, upgrade) -> {
+    UpgradeEvents.register(FAILING, (context, upgrade) -> {
       failures.incrementAndGet();
       throw new IllegalStateException("expected observer failure");
     });
-    FactoryUpgradeEvents.register(HEALTHY, (context, upgrade) -> healthy.add(context));
-    FactoryUpgradeEvents.register(OBSERVER, first);
-    var published = FactoryUpgradeService.snapshot();
-    FactoryUpgradeEvents.register(OBSERVER, first);
-    FactoryUpgradeEvents.remove(id("unknown_event_handler"));
-    helper.assertTrue(FactoryUpgradeService.snapshot() == published, "No-op observer registration changed epoch");
+    UpgradeEvents.register(HEALTHY, (context, upgrade) -> healthy.add(context));
+    UpgradeEvents.register(OBSERVER, first);
+    var published = UpgradeCatalogService.snapshot();
+    UpgradeEvents.register(OBSERVER, first);
+    UpgradeEvents.remove(id("unknown_event_handler"));
+    helper.assertTrue(UpgradeCatalogService.snapshot() == published, "No-op observer registration changed epoch");
     boolean rejected = CompletableFuture.supplyAsync(() -> {
       try {
-        FactoryUpgradeEvents.register(OBSERVER, stable);
+        UpgradeEvents.register(OBSERVER, stable);
         return false;
       } catch (IllegalStateException expected) {
         return true;
       }
     }).join();
-    helper.assertTrue(rejected && FactoryUpgradeService.snapshot() == published, "Worker changed observer registry");
+    helper.assertTrue(rejected && UpgradeCatalogService.snapshot() == published, "Worker changed observer registry");
     fixture.bus().serverTick();
     fixture.factory().serverTick();
     helper.assertTrue(fixture.bus().upgradeCatalogValid(), "Registering event handlers did not recover source");
@@ -197,7 +198,7 @@ public final class UpgradeLifecycleGameTests {
     awaitBlocked(helper, restored, current, events, healthy, failures, stable, 120);
   }
 
-  private static void awaitBlocked(GameTestHelper helper, Fixture fixture, AtomicReference<Fixture> current, List<FactoryUpgradeEvents.Context> events, List<FactoryUpgradeEvents.Context> healthy, AtomicInteger failures, FactoryUpgradeEvents.Listener stable, int remaining) {
+  private static void awaitBlocked(GameTestHelper helper, Fixture fixture, AtomicReference<Fixture> current, List<UpgradeEvents.Context> events, List<UpgradeEvents.Context> healthy, AtomicInteger failures, UpgradeEvents.Listener stable, int remaining) {
     helper.runAfterDelay(1, () -> {
       fixture.bus().serverTick();
       fixture.factory().serverTick();
@@ -219,14 +220,14 @@ public final class UpgradeLifecycleGameTests {
     });
   }
 
-  private static void awaitSingleCompletion(GameTestHelper helper, Fixture fixture, AtomicReference<Fixture> current, List<FactoryUpgradeEvents.Context> events, List<FactoryUpgradeEvents.Context> healthy, AtomicInteger failures, FactoryUpgradeEvents.Listener stable, int remaining) {
+  private static void awaitSingleCompletion(GameTestHelper helper, Fixture fixture, AtomicReference<Fixture> current, List<UpgradeEvents.Context> events, List<UpgradeEvents.Context> healthy, AtomicInteger failures, UpgradeEvents.Listener stable, int remaining) {
     helper.runAfterDelay(1, () -> {
       fixture.bus().serverTick();
       fixture.factory().serverTick();
       if (fixture.factory().run(THREAD).isEmpty() && countIron(fixture.output()) == 1) {
         helper.assertTrue(
             events.size() == 2
-                && events.get(1).type() == FactoryUpgradeEvents.Type.FINISHED
+                && events.get(1).type() == UpgradeEvents.Type.FINISHED
                 && events.get(0).runs().getFirst().runId().equals(events.get(1).runs().getFirst().runId())
                 && healthy.size() == 2
                 && failures.get() == 2,
@@ -240,14 +241,14 @@ public final class UpgradeLifecycleGameTests {
     });
   }
 
-  private static void beginParallel(GameTestHelper helper, Fixture fixture, AtomicReference<Fixture> current, List<FactoryUpgradeEvents.Context> events, FactoryUpgradeEvents.Listener stable) {
-    FactoryUpgradeEvents.remove(OBSERVER);
+  private static void beginParallel(GameTestHelper helper, Fixture fixture, AtomicReference<Fixture> current, List<UpgradeEvents.Context> events, UpgradeEvents.Listener stable) {
+    UpgradeEvents.remove(OBSERVER);
     fixture.bus().serverTick();
     helper.assertTrue(
-        !fixture.bus().upgradeCatalogValid() && fixture.factory().upgradeSources().isEmpty(),
+        !fixture.bus().upgradeCatalogValid() && fixture.factory().upgrades().sources().isEmpty(),
         "Removing observer retained its upgrade source");
-    FactoryUpgradeEvents.register(OBSERVER, stable);
-    FactoryUpgradeService.replaceDefinitions(List.of(definition("glowstone_dust", OBSERVER, 1)));
+    UpgradeEvents.register(OBSERVER, stable);
+    UpgradeCatalogService.replaceDefinitions(List.of(definition("glowstone_dust", OBSERVER, 1)));
     fixture.bus().inventory().setStackInSlot(0, new ItemStack(Items.GLOWSTONE_DUST));
     fixture.bus().inventory().setStackInSlot(1, ItemStack.EMPTY);
     fixture.bus().inventory().setStackInSlot(2, ItemStack.EMPTY);
@@ -271,7 +272,7 @@ public final class UpgradeLifecycleGameTests {
     fixture.factory().serverTick();
     helper.assertTrue(
         events.size() == 1
-            && events.getFirst().type() == FactoryUpgradeEvents.Type.STARTED
+            && events.getFirst().type() == UpgradeEvents.Type.STARTED
             && events.getFirst().runs().size() == 2
             && fixture.factory().runSet(THREAD).runs().size() == 2,
         "Parallel start was not one batch notification with two independent runs");
@@ -279,17 +280,17 @@ public final class UpgradeLifecycleGameTests {
     awaitParallelCompletion(helper, fixture, events, 120);
   }
 
-  private static void awaitParallelCompletion(GameTestHelper helper, Fixture fixture, List<FactoryUpgradeEvents.Context> events, int remaining) {
+  private static void awaitParallelCompletion(GameTestHelper helper, Fixture fixture, List<UpgradeEvents.Context> events, int remaining) {
     helper.runAfterDelay(1, () -> {
       fixture.bus().serverTick();
       fixture.factory().serverTick();
       if (fixture.factory().run(THREAD).isEmpty() && countIron(fixture.output()) == 2) {
         helper.assertTrue(
             events.size() == 2
-                && events.get(1).type() == FactoryUpgradeEvents.Type.FINISHED
+                && events.get(1).type() == UpgradeEvents.Type.FINISHED
                 && events.get(1).runs().size() == 2
-                && events.get(0).runs().stream().map(FactoryUpgradeEvents.RunSnapshot::runId).toList()
-                    .equals(events.get(1).runs().stream().map(FactoryUpgradeEvents.RunSnapshot::runId).toList()),
+                && events.get(0).runs().stream().map(UpgradeEvents.RunSnapshot::runId).toList()
+                    .equals(events.get(1).runs().stream().map(UpgradeEvents.RunSnapshot::runId).toList()),
             "Parallel completion lost run identities or emitted more than once");
         for (int attempt = 0; attempt < 100; attempt++) {
           fixture.factory().serverTick();
@@ -364,11 +365,11 @@ public final class UpgradeLifecycleGameTests {
     }
   }
 
-  private static FactoryUpgradeDefinition definition(String item, ResourceLocation observer, int parallelAdd) {
-    return new FactoryUpgradeDefinition(
+  private static UpgradeDefinition definition(String item, ResourceLocation observer, int parallelAdd) {
+    return new UpgradeDefinition(
         ResourceLocation.fromNamespaceAndPath("minecraft", item),
-        new FactoryUpgradeEntry(id("lifecycle_" + item), parallelAdd, 1, 1, 1, 1, 1, 1),
-        new FactoryUpgradeCompatibility(Set.of(MACHINE), Set.of()),
+        new UpgradeEntry(id("lifecycle_" + item), parallelAdd, 1, 1, 1, 1, 1, 1),
+        new UpgradeCompatibility(Set.of(MACHINE), Set.of()),
         null,
         null,
         observer);

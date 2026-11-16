@@ -10,8 +10,8 @@ import org.junit.jupiter.api.Test;
 import static org.junit.jupiter.api.Assertions.*;
 
 class ItemRunStateTest {
-  private static FrozenItemRun complete() {
-    var run = FrozenItemRun.read(FrozenItemRunTest.valid());
+  private static FrozenRecipeRun complete() {
+    var run = FrozenRecipeRun.read(FrozenRecipeRunTest.valid());
     for (int tick = 0; tick < 20; tick++) {
       run = run.advanced(tick);
     }
@@ -20,7 +20,7 @@ class ItemRunStateTest {
 
   @Test
   void transitionsAreImmutableAndGettersMatchSavedProgress() {
-    var before = FrozenItemRun.read(FrozenItemRunTest.valid());
+    var before = FrozenRecipeRun.read(FrozenRecipeRunTest.valid());
     var after = before.advanced(10);
     assertEquals(0, before.progress());
     assertEquals(1, after.progress());
@@ -31,9 +31,9 @@ class ItemRunStateTest {
 
   @Test
   void currentRunRetainsSameTickStampOnReload() {
-    var run = FrozenItemRun.read(FrozenItemRunTest.valid()).advanced(10);
+    var run = FrozenRecipeRun.read(FrozenRecipeRunTest.valid()).advanced(10);
     assertEquals(3, run.save().getInt("schema"));
-    var loaded = FrozenItemRun.read(run.save());
+    var loaded = FrozenRecipeRun.read(run.save());
     assertSame(loaded, loaded.advanced(10));
     assertEquals(2, loaded.advanced(11).progress());
     assertEquals(run.runId(), loaded.runId());
@@ -41,7 +41,7 @@ class ItemRunStateTest {
 
   @Test
   void finishRequiresDurationAndCreatesOneStableLongAmountBuffer() {
-    var start = FrozenItemRun.read(FrozenItemRunTest.valid());
+    var start = FrozenRecipeRun.read(FrozenRecipeRunTest.valid());
     assertThrows(IllegalStateException.class, start::finished);
     var pending = complete();
     assertTrue(pending.pendingOutput());
@@ -50,7 +50,7 @@ class ItemRunStateTest {
     assertEquals(
         pending.definition().getList("outputs", Tag.TAG_COMPOUND),
         pending.save().getList("outputs", Tag.TAG_COMPOUND));
-    assertTrue(FrozenItemRun.read(pending.save()).pendingOutput());
+    assertTrue(FrozenRecipeRun.read(pending.save()).pendingOutput());
   }
 
   @Test
@@ -58,23 +58,23 @@ class ItemRunStateTest {
     var valid = complete().save();
     var altered = valid.copy();
     altered.getList("outputs", Tag.TAG_COMPOUND).getCompound(0).putLong("amount", 3);
-    assertThrows(IllegalArgumentException.class, () -> FrozenItemRun.read(altered));
+    assertThrows(IllegalArgumentException.class, () -> FrozenRecipeRun.read(altered));
     var missing = valid.copy();
     missing.remove("outputs");
-    assertThrows(IllegalArgumentException.class, () -> FrozenItemRun.read(missing));
+    assertThrows(IllegalArgumentException.class, () -> FrozenRecipeRun.read(missing));
     var early = valid.copy();
     early.putInt("progress", 19);
-    assertThrows(IllegalArgumentException.class, () -> FrozenItemRun.read(early));
+    assertThrows(IllegalArgumentException.class, () -> FrozenRecipeRun.read(early));
     assertEquals(2, valid.getList("outputs", Tag.TAG_COMPOUND).getCompound(0).getLong("amount"));
   }
 
   @Test
   void integerMaximumDurationCannotWrapProgress() {
-    var data = FrozenItemRunTest.valid();
+    var data = FrozenRecipeRunTest.valid();
     data.putInt("duration", Integer.MAX_VALUE);
     data.putInt("progress", Integer.MAX_VALUE - 1);
     data.getCompound("definition").putInt("duration", Integer.MAX_VALUE);
-    var run = FrozenItemRun.read(data).advanced(1);
+    var run = FrozenRecipeRun.read(data).advanced(1);
     assertEquals(Integer.MAX_VALUE, run.progress());
     assertSame(run, run.advanced(2));
     assertTrue(run.finished().pendingOutput());

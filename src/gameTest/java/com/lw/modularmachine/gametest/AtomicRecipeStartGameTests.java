@@ -6,7 +6,7 @@ import com.lw.modularmachine.blockentity.MachinePortBlockEntity;
 import com.lw.modularmachine.machine.PortKind;
 import com.lw.modularmachine.api.orientation.MachineOrientation;
 import com.lw.modularmachine.machine.recipe.AtomicRecipeStarter;
-import com.lw.modularmachine.machine.recipe.FrozenItemRun;
+import com.lw.modularmachine.machine.recipe.FrozenRecipeRun;
 import com.lw.modularmachine.machine.recipe.RecipeStartPlan;
 import com.lw.modularmachine.machine.recipe.search.RecipeSearch;
 import com.lw.modularmachine.machine.structure.StructureService;
@@ -271,7 +271,7 @@ public final class AtomicRecipeStartGameTests {
         "Pending orientation charged input");
   }
 
-  private static FrozenItemRun multiBusStart(GameTestHelper helper) {
+  private static FrozenRecipeRun multiBusStart(GameTestHelper helper) {
     var controller = multi(helper);
     var a = port(helper, controller, "input_a");
     var b = port(helper, controller, "input_b");
@@ -308,7 +308,7 @@ public final class AtomicRecipeStartGameTests {
     }
   }
 
-  private static void multiBusRollbackAndBusyRetry(GameTestHelper helper, FrozenItemRun run) {
+  private static void multiBusRollbackAndBusyRetry(GameTestHelper helper, FrozenRecipeRun run) {
     var controller = multi(helper);
     var a = port(helper, controller, "input_a");
     var b = port(helper, controller, "input_b");
@@ -316,7 +316,7 @@ public final class AtomicRecipeStartGameTests {
     b.inventory().setStackInSlot(0, new ItemStack(Items.DIRT, 1));
     long ar = a.resourceRevision(), br = b.resourceRevision();
     int size = a.inventory().getSlots();
-    try (var owner = controller.acquireRecipeStart();
+    try (var owner = controller.runState().acquireStart();
         var first = a.acquireItemStart(ar);
         var second = b.acquireItemStart(br)) {
       first.replacePrepared(NonNullList.withSize(size, ItemStack.EMPTY));

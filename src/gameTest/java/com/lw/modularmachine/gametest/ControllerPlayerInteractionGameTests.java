@@ -6,7 +6,7 @@ import com.lw.modularmachine.blockentity.MachineControllerBlockEntity;
 import com.lw.modularmachine.item.WrenchInteractions;
 import com.lw.modularmachine.api.orientation.MachineOrientation;
 import com.lw.modularmachine.machine.structure.StructureService;
-import com.lw.modularmachine.machine.structure.VerificationFailure;
+import com.lw.modularmachine.api.controller.VerificationFailure;
 import com.lw.modularmachine.menu.MachineControllerMenu;
 import com.lw.modularmachine.registry.MachineRegistries;
 import com.mojang.authlib.GameProfile;
@@ -65,7 +65,7 @@ public final class ControllerPlayerInteractionGameTests {
     BlockPos pos = helper.absolutePos(new BlockPos(7, 4, 7));
     var controller = controller(helper, pos, "test_schema2_axis");
     confirm(helper, controller);
-    var snapshot = MachineControllerApi.inspect(controller).orElseThrow();
+    var snapshot = MachineControllerApi.inspect(helper.getLevel(), pos).orElseThrow();
     helper.assertTrue(
         snapshot.position().equals(pos)
             && snapshot.machineId().equals(id("test_schema2_axis"))
@@ -78,7 +78,8 @@ public final class ControllerPlayerInteractionGameTests {
     var player = player(helper, pos, 7);
     helper.assertTrue(
         MachineControllerApi.reorient(
-            controller,
+            helper.getLevel(),
+            pos,
             MachineOrientation.of(Direction.NORTH, 1),
             player) == MachineControllerApi.ReorientationResult.CHANGED,
         "Controller API did not route through checked reorientation");

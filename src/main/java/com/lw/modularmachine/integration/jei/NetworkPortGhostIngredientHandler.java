@@ -1,10 +1,10 @@
 package com.lw.modularmachine.integration.jei;
 
+import com.lw.modularmachine.api.component.ResourceType;
 import com.lw.modularmachine.client.NetworkPortScreen;
 import com.lw.modularmachine.integration.mekanism.jei.MekanismGhostIngredients;
-import com.lw.modularmachine.machine.PortKind;
-import com.lw.modularmachine.machine.chemical.ChemicalPlatform;
 import com.lw.modularmachine.machine.network.NetworkPortResource;
+import com.lw.modularmachine.machine.network.NetworkResourceSamples;
 import com.lw.modularmachine.util.Mods;
 import java.util.ArrayList;
 import java.util.List;
@@ -17,7 +17,6 @@ import mezz.jei.api.neoforge.NeoForgeTypes;
 import net.minecraft.client.renderer.Rect2i;
 import net.minecraft.world.item.ItemStack;
 import net.neoforged.neoforge.fluids.FluidStack;
-import net.neoforged.neoforge.fluids.FluidUtil;
 
 /**
  * JEI drops configure prototypes; they never insert real items or network
@@ -67,28 +66,17 @@ final class NetworkPortGhostIngredientHandler implements IGhostIngredientHandler
         && expected.getHeight() == actual.getHeight();
   }
 
-  private static <I> Optional<NetworkPortResource> convert(PortKind.Resource resource, IIngredientType<I> type, I ingredient) {
+  private static <I> Optional<NetworkPortResource> convert(ResourceType resource, IIngredientType<I> type, I ingredient) {
     if (type.equals(VanillaTypes.ITEM_STACK) && ingredient instanceof ItemStack item && !item.isEmpty()) {
-      var sample = item.copyWithCount(1);
-      return switch (resource) {
-        case ITEM -> Optional.of(new NetworkPortResource.Item(sample));
-        case FLUID ->
-          FluidUtil.getFluidContained(sample).filter(fluid -> !fluid.isEmpty()).map(NetworkPortResource.Fluid::new);
-        case CHEMICAL -> {
-          var chemical = ChemicalPlatform.sampleContainer(sample);
-          yield chemical.isEmpty() ? Optional.empty() : Optional
-              .of(new NetworkPortResource.Chemical(chemical.chemical()));
-        }
-        case ENERGY -> Optional.empty();
-      };
+      return NetworkResourceSamples.sample(resource, item);
     }
-    if (resource == PortKind.Resource.FLUID
+    if (resource == ResourceType.FLUID
         && type.equals(NeoForgeTypes.FLUID_STACK)
         && ingredient instanceof FluidStack fluid
         && !fluid.isEmpty()) {
       return Optional.of(new NetworkPortResource.Fluid(fluid));
     }
-    if (resource == PortKind.Resource.CHEMICAL && Mods.MEKANISM.isLoaded()) {
+    if (resource == ResourceType.CHEMICAL && Mods.MEKANISM.isLoaded()) {
       return MekanismGhostIngredients.convert(type, ingredient);
     }
     return Optional.empty();

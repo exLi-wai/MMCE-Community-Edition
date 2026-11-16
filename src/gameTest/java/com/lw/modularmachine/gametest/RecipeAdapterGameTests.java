@@ -1,5 +1,6 @@
 package com.lw.modularmachine.gametest;
 
+import com.lw.modularmachine.api.recipe.RecipeRunStatus;
 import java.util.stream.Collectors;
 import com.lw.modularmachine.api.recipe.MachineRecipeBuilder;
 import com.lw.modularmachine.api.recipe.adapter.RecipeAdapterContext;
@@ -11,7 +12,6 @@ import com.lw.modularmachine.block.MachineControllerBlock;
 import com.lw.modularmachine.blockentity.MachineControllerBlockEntity;
 import com.lw.modularmachine.blockentity.MachinePortBlockEntity;
 import com.lw.modularmachine.api.orientation.MachineOrientation;
-import com.lw.modularmachine.machine.recipe.ItemRunEngine;
 import com.lw.modularmachine.machine.recipe.MachineRecipeService;
 import com.lw.modularmachine.machine.structure.StructureService;
 import com.lw.modularmachine.registry.MachineRegistries;
@@ -74,7 +74,7 @@ public final class RecipeAdapterGameTests {
       helper.assertTrue(controller.canCommitProduction(), "Missing-resource fixture must be structurally confirmed");
       controller.serverTick();
       helper.assertTrue(
-          controller.recipeRunStatus() == ItemRunEngine.Result.MISSING_ENERGY_INPUT,
+          controller.recipeRunStatus() == RecipeRunStatus.MISSING_ENERGY_INPUT,
           "Controller must report the absent energy input component: " + controller.recipeRunStatus());
       helper.assertTrue(
           controller.runningRecipe().isEmpty(),

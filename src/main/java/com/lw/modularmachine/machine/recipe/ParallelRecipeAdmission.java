@@ -1,14 +1,19 @@
 package com.lw.modularmachine.machine.recipe;
 
-import com.lw.modularmachine.machine.recipe.search.ChemicalOutputLayout;
+import com.lw.modularmachine.api.recipe.resource.RecipeResourcePlanning;
+import com.lw.modularmachine.api.upgrade.UpgradeSnapshot;
+import com.lw.modularmachine.machine.recipe.resource.RecipeResourceExecutionRegistry;
 import com.lw.modularmachine.machine.recipe.search.FluidOutputLayout;
 import com.lw.modularmachine.machine.recipe.search.FluidResourceKey;
 import com.lw.modularmachine.machine.recipe.search.ItemOutputLayout;
 import com.lw.modularmachine.machine.recipe.search.RecipeCandidate;
 import com.lw.modularmachine.machine.recipe.search.RecipePlanner;
+import com.lw.modularmachine.machine.recipe.search.ResourcePlanningAdapter;
+import com.lw.modularmachine.machine.recipe.search.ResourcePlanningSequence;
 import com.lw.modularmachine.machine.PortKind;
 import java.util.HashMap;
 import java.util.HashSet;
+import java.util.List;
 import net.neoforged.neoforge.fluids.FluidStack;
 
 /**
@@ -17,20 +22,16 @@ import net.neoforged.neoforge.fluids.FluidStack;
 final class ParallelRecipeAdmission {
   private final RecipeStartPlan plan;
   private final MachineRecipe definition;
-  private final ItemOutputLayout layout;
-  private final FluidOutputLayout fluids;
+  private ItemOutputLayout layout;
+  private FluidOutputLayout fluids;
   private final boolean aggregateDefinition;
-  private int low = 1, high, probe;
-  private RecipePlanner.Session<ItemResourceKey> items;
-  private FluidOutputLayout.Planning fluidPlan;
-  private ChemicalOutputLayout.Planning chemicalPlan;
-  private int remainingBudget;
+  private final ParallelAdmissionSearch search;
 
-  ParallelRecipeAdmission(RecipeStartPlan plan, MachineRecipe definition, int limit, boolean aggregateDefinition) {
+  ParallelRecipeAdmission(RecipeStartPlan plan, MachineRecipe definition, int limit, boolean aggregateDefinition, UpgradeSnapshot upgrades) {
     this.plan = plan;
     this.definition = definition;
     this.aggregateDefinition = aggregateDefinition;
-    high = Math.min(
+    int high = Math.min(
         definition.parallelized() ? limit : Math.min(limit, 1),
         Math.min(plan.maxRepeatableInputs(), plan.maxRepeatableOutputs()));
     high = ChemicalTransactions.arithmeticLimit(definition, high);
@@ -64,17 +65,13 @@ final class ParallelRecipeAdmission {
         high = (int) Math.min(high, (available - fixed) / requiredFluids.get(key));
       }
     }
-    if (definition.energyPerTick() > 0) {
-      high = (int) Math.min(high, Long.MAX_VALUE / definition.energyPerTick());
-    }
-    if (definition.energyOutputPerTick() > 0) {
-      high = (int) Math.min(high, Long.MAX_VALUE / definition.energyOutputPerTick());
-    }
     if (aggregateDefinition) {
-      var fee = definition.fluidPerTick();
-      if (!fee.isEmpty()) {
-        high = Math.min(high, Integer.MAX_VALUE / fee.getAmount());
-      }
+      high = FrozenRecipeFactory.aggregateTickLimit(
+          high,
+          definition.energyPerTick(),
+          definition.energyOutputPerTick(),
+          definition.fluidPerTick().getAmount(),
+          upgrades);
       for (var output : definition.fluidOutputRequirements()) {
         if (!output.parallelUnaffected()) {
           high = Math.min(high, Integer.MAX_VALUE / output.stack().getAmount());
@@ -85,91 +82,66 @@ final class ParallelRecipeAdmission {
           high = (int) Math.min(high, Long.MAX_VALUE / output.amount());
         }
       }
+    } else {
+      high = FrozenRecipeFactory
+          .factoryTickLimit(high, definition.energyPerTick(), definition.energyOutputPerTick(), upgrades);
     }
-    var keys = new HashSet<ItemResourceKey>();
-    if (!RecipeItemPreparation.transformsOutputs(definition)) {
-      plan.recipe().outputs().forEach(output -> keys.add(output.key()));
-    }
-    layout = new ItemOutputLayout(plan.source(), keys);
-    fluids = new FluidOutputLayout(plan.source(), plan.source().level().registryAccess());
+    search = new ParallelAdmissionSearch(high, this::prepareProbe);
   }
 
   int advance(int budget) {
-    remainingBudget = budget;
-    if (high < 1) {
-      return 0;
-    }
-    while (low < high) {
-      if (budget <= 0) {
-        return -1;
-      }
-      if (fluidPlan == null) {
-        budget--;
-        probe = low + (int) (((long) high - low + 1) / 2);
-        var claims = RecipeItemPreparation.inputCandidate(plan.recipe(), definition).outputs().stream()
-            .map(
-                output -> new RecipeCandidate.Output<>(
-                    output.key(),
-                    output.parallelUnaffected() && aggregateDefinition ? output.count() : Math
-                        .multiplyExact(output.count(), probe)))
-            .toList();
-        items = claims.isEmpty() ? null : RecipePlanner.prepareOutputs(
-            layout.snapshot(),
-            RecipeCandidate.outputOnly(plan.recipe().id() + "/parallel_admission", claims));
-        var fluidClaims = definition.fluidOutputRequirements().stream().filter(output -> output.chance() == 1)
-            .map(
-                requirement -> new RecipeCandidate.Output<>(
-                    new FluidResourceKey(requirement.stack(), plan.source().level().registryAccess())
-                        .withSelector(definition.selectors().fluidOutput()),
-                    requirement.parallelUnaffected() && aggregateDefinition ? requirement.stack().getAmount() : Math
-                        .multiplyExact((long) requirement.stack().getAmount(), probe)))
-            .toList();
-        fluidPlan = fluids.planClaims(fluidClaims);
-        chemicalPlan = new ChemicalOutputLayout(plan.source())
-            .plan(ChemicalTransactions.scaled(definition.chemicals().outputs(), probe));
-      }
-      if (fluidPlan.status() == RecipePlanner.Status.BUDGET_EXHAUSTED) {
-        var fluidResult = fluidPlan.advance(budget);
-        budget -= fluidResult.workUsed();
-      }
-      if (fluidPlan.status() == RecipePlanner.Status.BUDGET_EXHAUSTED) {
-        return -1;
-      }
-      boolean matches = fluidPlan.status() == RecipePlanner.Status.SELECTED;
-      if (matches && chemicalPlan.status() == RecipePlanner.Status.BUDGET_EXHAUSTED) {
-        var result = chemicalPlan.advance(budget);
-        budget -= result.workUsed();
-        if (result.status() == RecipePlanner.Status.BUDGET_EXHAUSTED) {
-          return -1;
-        }
-      }
-      matches = matches
-          && chemicalPlan.status() == RecipePlanner.Status.SELECTED
-          && ChemicalTransactions
-              .inputs(plan.source(), ChemicalTransactions.scaled(definition.chemicals().inputs(), probe)) != null;
-      if (matches && items != null) {
-        var itemResult = items.advance(budget);
-        budget -= itemResult.workUsed();
-        if (itemResult.status() == RecipePlanner.Status.BUDGET_EXHAUSTED) {
-          return -1;
-        }
-        matches = itemResult.status() == RecipePlanner.Status.SELECTED;
-      }
-      if (matches) {
-        low = probe;
-      } else {
-        high = probe - 1;
-      }
-      fluidPlan = null;
-      chemicalPlan = null;
-      items = null;
-    }
+    return search.advance(budget);
+  }
 
-    remainingBudget = budget;
-    return low;
+  private RecipeResourcePlanning prepareProbe(int instances) {
+    return new ResourcePlanningSequence(
+        List.of(
+            () -> prepareFluidOutputs(instances),
+            () -> RecipeResourceExecutionRegistry.prepareAdmission(plan.source(), definition.resourceData(), instances),
+            () -> prepareItemOutputs(instances)));
+  }
+
+  private RecipeResourcePlanning prepareFluidOutputs(int instances) {
+    if (fluids == null) {
+      fluids = new FluidOutputLayout(plan.source(), plan.source().level().registryAccess());
+    }
+    var claims = definition.fluidOutputRequirements().stream().filter(output -> output.chance() == 1)
+        .map(
+            requirement -> new RecipeCandidate.Output<>(
+                new FluidResourceKey(requirement.stack(), plan.source().level().registryAccess())
+                    .withSelector(definition.selectors().fluidOutput()),
+                requirement.parallelUnaffected() && aggregateDefinition ? requirement.stack().getAmount() : Math
+                    .multiplyExact((long) requirement.stack().getAmount(), instances)))
+        .toList();
+    var planning = fluids.planClaims(claims);
+
+    return new ResourcePlanningAdapter<>(planning::status, planning::advance);
+  }
+
+  private RecipeResourcePlanning prepareItemOutputs(int instances) {
+    var claims = RecipeItemPreparation.inputCandidate(plan.recipe(), definition).outputs().stream()
+        .map(
+            output -> new RecipeCandidate.Output<>(
+                output.key(),
+                output.parallelUnaffected() && aggregateDefinition ? output.count() : Math
+                    .multiplyExact(output.count(), instances)))
+        .toList();
+    if (claims.isEmpty()) {
+      return new ResourcePlanningSequence(List.of());
+    }
+    if (layout == null) {
+      var keys = new HashSet<ItemResourceKey>();
+      claims.forEach(output -> keys.add(output.key()));
+      layout = new ItemOutputLayout(plan.source(), keys);
+    }
+    var planning = RecipePlanner.prepareOutputs(
+        layout.snapshot(),
+        RecipeCandidate.outputOnly(plan.recipe().id() + "/parallel_admission", claims));
+
+    return new ResourcePlanningAdapter<>(() -> planning.advance(0).status(), planning::advance);
   }
 
   int remainingBudget() {
-    return remainingBudget;
+    return search.remainingBudget();
   }
 }

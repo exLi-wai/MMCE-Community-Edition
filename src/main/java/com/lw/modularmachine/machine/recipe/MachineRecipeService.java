@@ -3,8 +3,8 @@ package com.lw.modularmachine.machine.recipe;
 import com.lw.modularmachine.machine.recipe.search.CompiledRecipeSet;
 import com.lw.modularmachine.machine.recipe.search.RecipeCatalog;
 import com.lw.modularmachine.machine.recipe.search.RecipeCandidate;
-import com.lw.modularmachine.machine.chemical.ChemicalPlatform;
-import com.lw.modularmachine.machine.factory.UpgradeRecipeChecks;
+import com.lw.modularmachine.machine.recipe.resource.RecipeResourceExecutionRegistry;
+import com.lw.modularmachine.machine.upgrade.UpgradeRecipeCheckHandlers;
 import com.lw.modularmachine.api.recipe.RecipeModifier;
 import com.lw.modularmachine.api.recipe.RecipeSelectors;
 import com.lw.modularmachine.api.recipe.adapter.RecipeAdapterTags;
@@ -13,8 +13,6 @@ import com.lw.modularmachine.blockentity.FactoryControllerBlockEntity;
 import com.lw.modularmachine.blockentity.MachineControllerBlockEntity;
 import com.lw.modularmachine.config.MachineConfig;
 import com.lw.modularmachine.machine.controller.MachineControllerScriptDataService;
-import com.lw.modularmachine.integration.kubejs.MachineItemRecipeKubeJSSources;
-import com.lw.modularmachine.integration.kubejs.KubeJSRecipeItemCallbacks;
 import com.lw.modularmachine.machine.structure.MachineDefinition;
 import com.lw.modularmachine.machine.structure.StructureService;
 import com.lw.modularmachine.machine.recipe.adapter.RecipeAdapterImports;
@@ -55,12 +53,12 @@ public final class MachineRecipeService {
   private record Prepared(
       long structureEpoch,
       Collection<RecipeHolder<?>> recipeView,
-      Map<ResourceLocation, CompiledRecipeSet<ItemResourceKey>> candidates,
+      Map<ResourceLocation, RecipeCatalog> catalogs,
       Map<ResourceLocation, MachineRecipe> definitions,
       Map<ResourceLocation, RecipeModifierTemplate> templates,
       MachineRecipeJson.Defaults defaults,
       long recipeAdapterScriptRevision,
-      KubeJSRecipeItemCallbacks.Snapshot itemCallbacks) {
+      RecipeScriptCallbacks.Snapshot itemCallbacks) {
   }
 
   private MachineRecipeService() {
@@ -134,7 +132,7 @@ public final class MachineRecipeService {
         }
       }
       validatePorts(entry.getKey(), recipe, machine);
-      validateChemicals(entry.getKey(), recipe);
+      RecipeResourceExecutionRegistry.validateDefinition(entry.getKey(), recipe.resourceData(), registries);
       candidates.computeIfAbsent(recipe.machineId(), ignored -> new ArrayList<>())
           .add(recipe.compile(entry.getKey(), registries));
       effective.put(entry.getKey(), recipe);
@@ -143,6 +141,7 @@ public final class MachineRecipeService {
     candidates.forEach((machine, values) -> {
       frozen.put(machine, new CompiledRecipeSet<>(values)); // Compile every machine before any publication.
     });
+    var catalogs = prepareCatalogs(frozen, effective);
     boolean changed = !imports.recipes().isEmpty()
         || effective.entrySet().stream().anyMatch(entry -> entry.getValue() != actual.get(entry.getKey()));
     if (!RecipeAdapterScriptSources.isCurrent(imports.scriptRevision())) {
@@ -168,12 +167,12 @@ public final class MachineRecipeService {
     var candidate = new Prepared(
         StructureService.definitionEpoch(),
         manager.getRecipes(),
-        Map.copyOf(frozen),
+        catalogs,
         Map.copyOf(effective),
         Map.copyOf(templates),
         defaults,
         imports.scriptRevision(),
-        KubeJSRecipeItemCallbacks.snapshot());
+        RecipeScriptCallbacks.snapshot());
     PREPARED.entrySet().removeIf(
         entry -> entry.getKey() != manager
             && ACTIVE.values().stream().noneMatch(active -> active.manager == entry.getKey()));
@@ -184,21 +183,31 @@ public final class MachineRecipeService {
     return catalogFor((StructureService.StructureSubject) controller);
   }
 
-  private static void validateChemicals(ResourceLocation recipeId, MachineRecipe recipe) {
-    if (recipe.chemicals().isEmpty()) {
-      return;
-    }
-    if (!ChemicalPlatform.available()) {
-      throw new IllegalArgumentException(recipeId + ": Chemical recipes require the Mekanism integration");
-    }
-    var requirements = new ArrayList<>(recipe.chemicals().inputs());
-    requirements.addAll(recipe.chemicals().outputs());
-    requirements.addAll(recipe.chemicals().perTick());
-    for (var requirement : requirements) {
-      if (!ChemicalPlatform.contains(requirement.chemical())) {
-        throw new IllegalArgumentException(recipeId + ": Unknown chemical " + requirement.chemical());
-      }
-    }
+  /**
+   * Compiles resource strategies while reload can still reject the prospective
+   * generation.
+   */
+  private static Map<ResourceLocation, RecipeCatalog> prepareCatalogs(Map<ResourceLocation, CompiledRecipeSet<ItemResourceKey>> candidates, Map<ResourceLocation, MachineRecipe> effective) {
+    var grouped = new HashMap<ResourceLocation, Map<String, MachineRecipe>>();
+    effective.forEach(
+        (id, recipe) -> grouped.computeIfAbsent(recipe.machineId(), ignored -> new HashMap<>())
+            .put(id.toString(), recipe));
+    var result = new HashMap<ResourceLocation, RecipeCatalog>();
+    candidates.forEach((machine, recipes) -> {
+      var definitions = grouped.getOrDefault(machine, Map.of());
+      var fluids = new HashMap<String, List<FluidStack>>();
+      var outputs = new HashMap<String, List<FluidStack>>();
+      var selectors = new HashMap<String, RecipeSelectors>();
+      definitions.forEach((id, definition) -> {
+        fluids.put(id, definition.fluidInputs());
+        outputs.put(id, definition.guaranteedFluidOutputs());
+        selectors.put(id, definition.selectors());
+      });
+      result.put(
+          machine,
+          new RecipeCatalog(machine, recipes, fluids, outputs, () -> false, null, definitions, List.of(), selectors));
+    });
+    return Map.copyOf(result);
   }
 
   public static Optional<RecipeCatalog> catalogFor(StructureService.StructureSubject owner) {
@@ -292,7 +301,7 @@ public final class MachineRecipeService {
     compiler.advance(level.getGameTime(), level.registryAccess());
     if (compiler.failed()) {
       if (reportFailure) {
-        throw new UpgradeRecipeChecks.FailedException();
+        throw new UpgradeRecipeCheckHandlers.FailedException();
       }
       return Optional.empty();
     }
@@ -406,7 +415,7 @@ public final class MachineRecipeService {
     // already installed before a later script generation failed validation.
     if (!alreadyPublished
         && (!RecipeAdapterScriptSources.isCurrent(prepared.recipeAdapterScriptRevision())
-            || !KubeJSRecipeItemCallbacks.isCurrent(prepared.itemCallbacks()))) {
+            || !RecipeScriptCallbacks.isCurrent(prepared.itemCallbacks()))) {
       return null;
     }
     boolean durationMultiplier = MachineConfig.durationMultiplierEnabled();
@@ -416,7 +425,7 @@ public final class MachineRecipeService {
     }
     var next = new Published(server, manager, prepared, durationMultiplier, defaults);
     if (!alreadyPublished) {
-      KubeJSRecipeItemCallbacks.install(prepared.itemCallbacks());
+      RecipeScriptCallbacks.install(prepared.itemCallbacks());
     }
     ACTIVE.put(server, next);
     return next;
@@ -442,32 +451,7 @@ public final class MachineRecipeService {
       this.durationMultiplier = durationMultiplier;
       this.defaults = defaults;
       var values = new HashMap<ResourceLocation, RecipeCatalog>();
-      prepared.candidates().forEach((machine, recipes) -> {
-        var fluids = new HashMap<String, List<FluidStack>>();
-        var outputs = new HashMap<String, List<FluidStack>>();
-        var definitions = new HashMap<String, MachineRecipe>();
-        var selectors = new HashMap<String, RecipeSelectors>();
-        prepared.definitions().forEach((id, definition) -> {
-          if (definition.machineId().equals(machine)) {
-            fluids.put(id.toString(), definition.fluidInputs());
-            outputs.put(id.toString(), definition.guaranteedFluidOutputs());
-            definitions.put(id.toString(), definition);
-            selectors.put(id.toString(), definition.selectors());
-          }
-        });
-        values.put(
-            machine,
-            new RecipeCatalog(
-                machine,
-                recipes,
-                fluids,
-                outputs,
-                this::isCurrent,
-                null,
-                definitions,
-                List.of(),
-                selectors));
-      });
+      prepared.catalogs().forEach((machine, catalog) -> values.put(machine, catalog.publish(this::isCurrent)));
       catalogs = Map.copyOf(values);
     }
 
@@ -502,8 +486,8 @@ public final class MachineRecipeService {
   public static void stopped(ServerStoppedEvent event) {
     ACTIVE.remove(event.getServer());
     PREPARED.clear();
-    MachineItemRecipeKubeJSSources.clear();
-    KubeJSRecipeItemCallbacks.reset();
+    RecipeScriptSources.clear();
+    RecipeScriptCallbacks.reset();
     RecipeAdapterScriptSources.clear();
   }
 }

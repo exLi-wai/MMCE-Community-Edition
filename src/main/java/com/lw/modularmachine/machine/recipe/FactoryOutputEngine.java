@@ -1,26 +1,25 @@
 package com.lw.modularmachine.machine.recipe;
 
-import com.lw.modularmachine.machine.recipe.search.ChemicalOutputLayout;
-import com.lw.modularmachine.machine.recipe.search.ChemicalResourceKey;
+import com.lw.modularmachine.machine.recipe.resource.RecipeResourceTransaction;
+import com.lw.modularmachine.machine.recipe.resource.RecipeResourceExecutionRegistry;
 import com.lw.modularmachine.machine.recipe.search.FluidOutputLayout;
 import com.lw.modularmachine.machine.recipe.search.FluidResourceKey;
 import com.lw.modularmachine.machine.recipe.search.ItemOutputLayout;
 import com.lw.modularmachine.machine.recipe.search.RecipeCandidate;
 import com.lw.modularmachine.machine.recipe.search.RecipePlanner;
-import com.lw.modularmachine.machine.factory.UpgradeLifecyclePublisher;
+import com.lw.modularmachine.machine.upgrade.UpgradeLifecyclePublisher;
 import com.lw.modularmachine.ModularMachine;
 import com.lw.modularmachine.blockentity.FactoryControllerBlockEntity;
 import com.lw.modularmachine.blockentity.MachinePortBlockEntity;
 import com.lw.modularmachine.blockentity.UpgradeBusBlockEntity;
 import com.lw.modularmachine.config.MachineConfig;
 import com.lw.modularmachine.machine.factory.FactoryRunSet;
-import com.lw.modularmachine.api.upgrade.FactoryUpgradeRuntimeData;
-import com.lw.modularmachine.machine.factory.FactoryUpgradeStartCosts;
+import com.lw.modularmachine.api.upgrade.UpgradeRuntimeData;
+import com.lw.modularmachine.machine.upgrade.UpgradeStartCosts;
 import java.util.ArrayList;
 import java.util.HashMap;
 import java.util.HashSet;
 import java.util.LinkedHashMap;
-import java.util.List;
 import java.util.Map;
 import net.minecraft.core.NonNullList;
 import net.minecraft.server.level.ServerLevel;
@@ -46,7 +45,7 @@ public final class FactoryOutputEngine {
     final ItemOutputLayout itemLayout;
     final RecipePlanner.Session<ItemResourceKey> itemPlanner;
     final FluidOutputLayout.Planning fluidPlanner;
-    final ChemicalOutputLayout.Planning chemicalPlanner;
+    final RecipeResourceExecutionRegistry.OutputPlanning resourcePlanner;
 
     Work(FactoryRunSet set, RecipeExecutionTicket ticket, ServerLevel level) {
       this.set = set;
@@ -75,7 +74,7 @@ public final class FactoryOutputEngine {
       var fluidClaims = fluidTotals.entrySet().stream()
           .map(entry -> new RecipeCandidate.Output<>(entry.getKey(), entry.getValue())).toList();
       fluidPlanner = new FluidOutputLayout(ticket, level.registryAccess()).planClaims(fluidClaims);
-      chemicalPlanner = new ChemicalOutputLayout(ticket).planClaims(chemicalOutputClaims(set));
+      resourcePlanner = RecipeResourceExecutionRegistry.prepareOutputs(ticket, set.runs());
     }
   }
 
@@ -170,17 +169,17 @@ public final class FactoryOutputEngine {
       replacements = work.itemLayout.prepare(itemResult.plan().orElseThrow());
       budget -= itemResult.workUsed();
     }
-    if (work.chemicalPlanner.status() == RecipePlanner.Status.BUDGET_EXHAUSTED) {
-      work.chemicalPlanner.advance(budget);
+    if (work.resourcePlanner.status() != RecipePlanner.Status.SELECTED) {
+      work.resourcePlanner.advance(budget);
     }
-    if (work.chemicalPlanner.status() == RecipePlanner.Status.NO_MATCH) {
+    if (work.resourcePlanner.status() == RecipePlanner.Status.NO_MATCH) {
       return Result.BLOCKED;
     }
-    if (work.chemicalPlanner.status() == RecipePlanner.Status.BUDGET_EXHAUSTED) {
+    if (work.resourcePlanner.status() == RecipePlanner.Status.BUDGET_EXHAUSTED) {
       return Result.PLANNING;
     }
 
-    var runtime = factory.upgradeRuntimeWork().prepare(FactoryUpgradeRuntimeData.Phase.FINISHED, threadId, set.runs());
+    var runtime = factory.upgradeRuntimeWork().prepare(UpgradeRuntimeData.Phase.FINISHED, threadId, set.runs());
     switch (runtime.status()) {
       case PENDING -> {
         return Result.UPGRADE_PENDING;
@@ -206,7 +205,11 @@ public final class FactoryOutputEngine {
       return Result.STALE;
     }
     var additions = work.fluidPlanner.additions();
-    var chemicals = ChemicalTransactions.outputs(checked.orElseThrow(), work.chemicalPlanner.additions());
+    var additionalResources = work.resourcePlanner.prepared(checked.orElseThrow());
+    if (!additionalResources.current()) {
+      workByThread.remove(threadId);
+      return Result.STALE;
+    }
     var itemLeases = new LinkedHashMap<String, MachinePortBlockEntity.ItemStartLease>();
     var fluidLeases = new LinkedHashMap<String, MachinePortBlockEntity.FluidStartLease>();
     var upgradeLeases = new ArrayList<UpgradeBusBlockEntity.StartCostLease>();
@@ -216,17 +219,31 @@ public final class FactoryOutputEngine {
     } catch (RuntimeException unavailable) {
       return Result.STALE;
     }
+    var resourceTransaction = new RecipeResourceTransaction();
+    var itemResources = resourceTransaction.phase();
+    var fluidResources = resourceTransaction.phase();
+    resourceTransaction.phase().track(upgradeLeases, UpgradeBusBlockEntity.StartCostLease::resolve);
+    resourceTransaction.phase().enlist(additionalResources);
+    resourceTransaction.phase().enlist(patternRelease);
     boolean committed = false;
     try {
       patternRelease.acquire();
       runtime.acquireInto(upgradeLeases);
-      chemicals.acquire();
+      additionalResources.acquire();
       for (var port : checked.orElseThrow().ports()) {
         if (replacements.containsKey(port.partId())) {
-          itemLeases.put(port.partId(), port.identity().acquireItemStart(port.revision()));
+          itemLeases.put(
+              port.partId(),
+              itemResources.enlist(
+                  port.identity().acquireItemStart(port.revision()),
+                  MachinePortBlockEntity.ItemStartLease::resolve));
         }
         if (additions.containsKey(port.partId())) {
-          fluidLeases.put(port.partId(), port.identity().acquireFluidOutputStart(port.revision(), port.tankIndex()));
+          fluidLeases.put(
+              port.partId(),
+              fluidResources.enlist(
+                  port.identity().acquireFluidOutputStart(port.revision(), port.tankIndex()),
+                  MachinePortBlockEntity.FluidStartLease::resolve));
         }
       }
       for (var replacement : replacements.entrySet()) {
@@ -242,7 +259,7 @@ public final class FactoryOutputEngine {
           return Result.STALE;
         }
       }
-      if (!factory.removeRunSetIfSame(threadId, set)) {
+      if (!factory.runState().removeRunSetIfSame(threadId, set)) {
         return Result.STALE;
       }
       committed = true;
@@ -251,23 +268,13 @@ public final class FactoryOutputEngine {
       workByThread.remove(threadId);
       return Result.STALE;
     } finally {
-      for (var lease : itemLeases.values()) {
-        lease.resolve(committed);
-      }
-      for (var lease : fluidLeases.values()) {
-        lease.resolve(committed);
-      }
-      for (var lease : upgradeLeases) {
-        lease.resolve(committed);
-      }
-      chemicals.resolve(committed);
-      patternRelease.resolve(committed);
+      resourceTransaction.resolve(committed);
     }
     patternRelease.publish();
-    chemicals.publish();
+    additionalResources.publish();
     workByThread.remove(threadId);
-    factory.upgradeRuntimeWork().clear(FactoryUpgradeRuntimeData.Phase.FINISHED, threadId);
-    FactoryUpgradeStartCosts.publish(factory, upgradeLeases);
+    factory.upgradeRuntimeWork().clear(UpgradeRuntimeData.Phase.FINISHED, threadId);
+    UpgradeStartCosts.publish(factory, upgradeLeases);
     factory.setChanged();
     UpgradeLifecyclePublisher.recipeFinished(factory, threadId, set.runs());
     itemLeases.values().forEach(FactoryOutputEngine::publishItem);
@@ -283,20 +290,6 @@ public final class FactoryOutputEngine {
 
   public void invalidate() {
     workByThread.clear();
-  }
-
-  static List<RecipeCandidate.Output<ChemicalResourceKey>> chemicalOutputClaims(FactoryRunSet set) {
-    // Collapse repeated run outputs before the planner applies its demand-row
-    // limit.
-    var totals = new LinkedHashMap<ChemicalResourceKey, Long>();
-    for (var run : set.runs()) {
-      for (var output : run.chemicalOutputs()) {
-        totals.merge(new ChemicalResourceKey(output.chemical(), output.selector()), output.amount(), Math::addExact);
-      }
-    }
-
-    return totals.entrySet().stream().map(entry -> new RecipeCandidate.Output<>(entry.getKey(), entry.getValue()))
-        .toList();
   }
 
   private static boolean logicalPortsMatch(FactoryControllerBlockEntity factory, FactoryRunSet set) {

@@ -60,6 +60,26 @@ public final class RangedSelectionData {
       first = Objects.requireNonNull(first).immutable();
       second = Objects.requireNonNull(second).immutable();
     }
+    public boolean contains(BlockPos position) {
+      return position.getX() >= Math.min(first.getX(), second.getX())
+          && position.getX() <= Math.max(first.getX(), second.getX())
+          && position.getY() >= Math.min(first.getY(), second.getY())
+          && position.getY() <= Math.max(first.getY(), second.getY())
+          && position.getZ() >= Math.min(first.getZ(), second.getZ())
+          && position.getZ() <= Math.max(first.getZ(), second.getZ());
+    }
+
+    /** Iteration order and mutable cursor follow BlockPos.betweenClosed. */
+    public Iterable<BlockPos> positions() {
+      return BlockPos.betweenClosed(
+          Math.min(first.getX(), second.getX()),
+          Math.min(first.getY(), second.getY()),
+          Math.min(first.getZ(), second.getZ()),
+          Math.max(first.getX(), second.getX()),
+          Math.max(first.getY(), second.getY()),
+          Math.max(first.getZ(), second.getZ()));
+    }
+
     public long volume() {
       long x = Math.abs((long) first.getX() - second.getX()) + 1;
       long y = Math.abs((long) first.getY() - second.getY()) + 1;

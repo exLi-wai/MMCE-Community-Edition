@@ -11,7 +11,6 @@ import net.minecraft.server.level.ServerPlayer;
 import net.minecraft.world.entity.player.Inventory;
 import net.minecraft.world.entity.player.Player;
 import net.minecraft.world.inventory.AbstractContainerMenu;
-import net.minecraft.world.inventory.Slot;
 import net.minecraft.world.item.ItemStack;
 import net.neoforged.neoforge.network.PacketDistributor;
 
@@ -43,14 +42,7 @@ public final class NetworkPortMenu extends AbstractContainerMenu {
     this.port = port;
     viewer = inventory.player;
     int inventoryY = port.kind().isInput() ? 124 : 113;
-    for (int row = 0; row < 3; row++) {
-      for (int col = 0; col < 9; col++) {
-        addSlot(new Slot(inventory, 9 + row * 9 + col, 8 + col * 18, inventoryY + row * 18));
-      }
-    }
-    for (int col = 0; col < 9; col++) {
-      addSlot(new Slot(inventory, col, 8 + col * 18, inventoryY + 58));
-    }
+    PlayerInventorySlots.add(inventory, this::addSlot, 8, inventoryY, inventoryY + 58);
   }
 
   public NetworkPortBlockEntity port() {
@@ -192,23 +184,9 @@ public final class NetworkPortMenu extends AbstractContainerMenu {
 
   @Override
   public ItemStack quickMoveStack(Player player, int index) {
-    if (!stillValid(player) || index < 0 || index >= slots.size() || !slots.get(index).hasItem()) {
+    if (!stillValid(player)) {
       return ItemStack.EMPTY;
     }
-    var slot = slots.get(index);
-    var original = slot.getItem().copy();
-    int start = index < 27 ? 27 : 0;
-    int end = index < 27 ? 36 : 27;
-    if (!moveItemStackTo(slot.getItem(), start, end, false)) {
-      return ItemStack.EMPTY;
-    }
-    if (slot.getItem().isEmpty()) {
-      slot.setByPlayer(ItemStack.EMPTY);
-    } else {
-      slot.setChanged();
-    }
-    slot.onTake(player, slot.getItem());
-
-    return original;
+    return PlayerInventorySlots.quickMove(player, index, slots, this::moveItemStackTo);
   }
 }

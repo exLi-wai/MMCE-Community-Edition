@@ -9,6 +9,6 @@ public final class FactoryParallelOutputCommitter {
   }
 
   public static boolean flush(FactoryControllerBlockEntity factory, String threadId, FactoryRunSet set) {
-    return factory.advanceOutput(threadId, set) == FactoryOutputEngine.Result.COMMITTED;
+    return factory.runCoordinator().advanceOutput(threadId, set) == FactoryOutputEngine.Result.COMMITTED;
   }
 }

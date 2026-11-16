@@ -3,7 +3,6 @@ package com.lw.modularmachine.machine.recipe;
 import com.google.gson.JsonElement;
 import com.google.gson.JsonParseException;
 import com.google.gson.JsonParser;
-import com.lw.modularmachine.integration.kubejs.MachineItemRecipeKubeJSSources;
 import com.lw.modularmachine.api.recipe.adapter.RecipeAdapterTags;
 import java.io.IOException;
 import java.util.LinkedHashMap;
@@ -40,7 +39,7 @@ public final class MachineRecipeReloadListener extends ContextAwareReloadListene
         .thenAcceptAsync(roots -> {
           try {
             var sources = new LinkedHashMap<>(roots);
-            for (var entry : MachineItemRecipeKubeJSSources.snapshot().entrySet()) {
+            for (var entry : RecipeScriptSources.snapshot().entrySet()) {
               if (sources.putIfAbsent(entry.getKey(), entry.getValue()) != null) {
                 throw new JsonParseException(entry.getKey() + ": Duplicate native/KubeJS machine recipe ID");
               }
@@ -61,7 +60,7 @@ public final class MachineRecipeReloadListener extends ContextAwareReloadListene
                 .forEach((id, holders) -> itemTags.put(id, holders.stream().map(holder -> holder.value()).toList()));
             MachineRecipeService.stage(target, decoded, sources, getRegistryLookup(), new RecipeAdapterTags(itemTags));
           } finally {
-            MachineItemRecipeKubeJSSources.clear();
+            RecipeScriptSources.clear();
           }
         }, game);
   }

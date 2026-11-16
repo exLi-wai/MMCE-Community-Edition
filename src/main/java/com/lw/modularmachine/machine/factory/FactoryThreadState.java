@@ -1,6 +1,6 @@
 package com.lw.modularmachine.machine.factory;
 
-import com.lw.modularmachine.api.upgrade.FactoryUpgradeSnapshot;
+import com.lw.modularmachine.api.upgrade.UpgradeSnapshot;
 import java.util.Objects;
 import net.minecraft.resources.ResourceLocation;
 
@@ -19,7 +19,7 @@ public record FactoryThreadState(
     State state,
     Reason reason,
     long revision,
-    FactoryUpgradeSnapshot upgradeSnapshot) {
+    UpgradeSnapshot upgradeSnapshot) {
   public static final int MIN_PRIORITY = -100_000;
   public static final int MAX_PRIORITY = 100_000;
 
@@ -121,7 +121,7 @@ public record FactoryThreadState(
     if (nextLimit == parallelLimit && nextUpgradeRevision == upgradeRevision) {
       return this;
     }
-    var nextSnapshot = new FactoryUpgradeSnapshot(
+    var nextSnapshot = new UpgradeSnapshot(
         nextUpgradeRevision,
         nextLimit,
         upgradeSnapshot.speedNumerator(),
@@ -145,7 +145,7 @@ public record FactoryThreadState(
         nextSnapshot);
   }
 
-  public FactoryThreadState withUpgradeSnapshot(FactoryUpgradeSnapshot snapshot) {
+  public FactoryThreadState withUpgradeSnapshot(UpgradeSnapshot snapshot) {
     if (snapshot == null || snapshot.revision() < upgradeRevision) {
       throw new IllegalArgumentException("Invalid factory upgrade snapshot revision");
     }
@@ -206,6 +206,8 @@ public record FactoryThreadState(
     MISSING_FLUID_OUTPUT,
     MISSING_CHEMICAL_INPUT,
     MISSING_CHEMICAL_OUTPUT,
-    MISSING_ENERGY_OUTPUT
+    MISSING_ENERGY_OUTPUT,
+    WAITING_RESOURCE,
+    MISSING_RESOURCE_INPUT
   }
 }

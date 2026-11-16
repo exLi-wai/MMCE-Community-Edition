@@ -2,7 +2,7 @@ package com.lw.modularmachine.integration.kubejs;
 
 import com.lw.modularmachine.ModularMachine;
 import com.lw.modularmachine.api.recipe.RecipeCommandActions;
-import com.lw.modularmachine.machine.factory.FactoryUpgradeKubeJSHandlers;
+import com.lw.modularmachine.machine.upgrade.UpgradeScriptHandlers;
 import com.lw.modularmachine.machine.recipe.command.RecipeCommandService;
 import com.lw.modularmachine.util.callback.ServerCallbackRegistry;
 import java.util.List;
@@ -25,7 +25,7 @@ public final class KubeJSServerHandlers {
   record Snapshot(
       long generation,
       List<KubeJSMachineEventRegistration.Handler> machines,
-      FactoryUpgradeKubeJSHandlers.Snapshot upgrades,
+      UpgradeScriptHandlers.Snapshot upgrades,
       List<KubeJSSmartInterfaceRegistration.Handler> smart,
       List<KubeJSRecipeLifecycleRegistration.Handler> recipes,
       List<KubeJSRecipeLifecycleRegistration.FailurePolicy> failures,
@@ -120,8 +120,8 @@ public final class KubeJSServerHandlers {
         () -> KubeJSMachineEventRegistration.install(List.of()));
     installDomain(
         "runtime upgrade",
-        () -> FactoryUpgradeKubeJSHandlers.install(snapshot.upgrades()),
-        () -> FactoryUpgradeKubeJSHandlers.install(FactoryUpgradeKubeJSHandlers.Snapshot.EMPTY));
+        () -> UpgradeScriptHandlers.install(snapshot.upgrades()),
+        () -> UpgradeScriptHandlers.install(UpgradeScriptHandlers.Snapshot.EMPTY));
     installDomain(
         "smart interface",
         () -> KubeJSSmartInterfaceHandlers.install(snapshot.smart()),

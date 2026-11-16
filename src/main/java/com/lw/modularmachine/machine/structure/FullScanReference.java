@@ -1,5 +1,7 @@
 package com.lw.modularmachine.machine.structure;
 
+import com.lw.modularmachine.api.controller.VerificationFailure;
+import com.lw.modularmachine.api.controller.VerificationState;
 import java.util.function.IntFunction;
 
 /**

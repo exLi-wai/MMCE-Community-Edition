@@ -48,7 +48,7 @@ public final class MachineDefinitionReloadListener extends ContextAwareReloadLis
   @Override
   public CompletableFuture<Void> reload(PreparationBarrier barrier, ResourceManager resources, ProfilerFiller prepareProfiler, ProfilerFiller applyProfiler, Executor backgroundExecutor, Executor gameExecutor) {
     return CompletableFuture.supplyAsync(() -> readResources(resources), backgroundExecutor)
-        .thenApplyAsync(roots -> new Input(roots, MachineDefinition.blockReferences(roots)), backgroundExecutor)
+        .thenApplyAsync(roots -> new Input(roots, MachineDefinitionParser.blockReferences(roots)), backgroundExecutor)
         .thenCompose(
             input -> CompletableFuture.supplyAsync(
                 () -> new Captured(
@@ -84,7 +84,7 @@ public final class MachineDefinitionReloadListener extends ContextAwareReloadLis
       if (!entry.getValue().isJsonObject()) {
         throw new JsonParseException(entry.getKey() + ": $: Expected object");
       }
-      MachineDefinition definition = MachineDefinition
+      MachineDefinition definition = MachineDefinitionParser
           .parse(entry.getKey(), entry.getValue().getAsJsonObject(), snapshot, defaults);
       candidate.put(entry.getKey(), definition);
       var compilation = definition.orientationCompilation();

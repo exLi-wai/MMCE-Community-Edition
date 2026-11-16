@@ -1,19 +1,19 @@
 package com.lw.modularmachine.gametest;
 
-import com.lw.modularmachine.machine.factory.UpgradeLifecyclePublisher;
+import com.lw.modularmachine.machine.upgrade.UpgradeLifecyclePublisher;
 import com.lw.modularmachine.blockentity.FactoryControllerBlockEntity;
 import com.lw.modularmachine.blockentity.MachinePortBlockEntity;
 import com.lw.modularmachine.blockentity.UpgradeBusBlockEntity;
 import com.lw.modularmachine.config.MachineConfig;
-import com.lw.modularmachine.api.upgrade.FactoryDynamicUpgrades;
+import com.lw.modularmachine.api.upgrade.DynamicUpgrades;
 import com.lw.modularmachine.machine.factory.FactoryThreadState;
-import com.lw.modularmachine.machine.factory.FactoryUpgradeCompatibility;
-import com.lw.modularmachine.machine.factory.FactoryUpgradeDefinition;
-import com.lw.modularmachine.api.upgrade.FactoryUpgradeEntry;
-import com.lw.modularmachine.api.upgrade.FactoryUpgradeEvents;
-import com.lw.modularmachine.api.upgrade.FactoryUpgradeItemData;
-import com.lw.modularmachine.machine.factory.FactoryUpgradeService;
-import com.lw.modularmachine.machine.factory.FactoryUpgradeStartCosts;
+import com.lw.modularmachine.machine.upgrade.UpgradeCompatibility;
+import com.lw.modularmachine.machine.upgrade.UpgradeDefinition;
+import com.lw.modularmachine.api.upgrade.UpgradeEntry;
+import com.lw.modularmachine.api.upgrade.UpgradeEvents;
+import com.lw.modularmachine.api.upgrade.UpgradeItemData;
+import com.lw.modularmachine.machine.upgrade.UpgradeCatalogService;
+import com.lw.modularmachine.machine.upgrade.UpgradeStartCosts;
 import com.lw.modularmachine.machine.recipe.FactoryParallelStarter;
 import com.lw.modularmachine.machine.recipe.FactoryRecipeStarter;
 import com.lw.modularmachine.machine.recipe.RecipeStartPlan;
@@ -54,7 +54,7 @@ public final class UpgradeItemDataGameTests {
   private static final ResourceLocation EFFECT = id("test_item_data_effect");
   private static final ResourceLocation OBSERVER = id("test_item_data_observer");
   private static final String THREAD = "upgrade_thread";
-  private static List<FactoryUpgradeDefinition> savedDefinitions;
+  private static List<UpgradeDefinition> savedDefinitions;
 
   private record Fixture(
       FactoryControllerBlockEntity factory,
@@ -75,11 +75,11 @@ public final class UpgradeItemDataGameTests {
   }
 
   private static void cleanup() {
-    FactoryUpgradeItemData.remove(HANDLER);
-    FactoryDynamicUpgrades.remove(EFFECT);
-    FactoryUpgradeEvents.remove(OBSERVER);
+    UpgradeItemData.remove(HANDLER);
+    DynamicUpgrades.remove(EFFECT);
+    UpgradeEvents.remove(OBSERVER);
     if (savedDefinitions != null) {
-      FactoryUpgradeService.replaceDefinitions(savedDefinitions);
+      UpgradeCatalogService.replaceDefinitions(savedDefinitions);
       savedDefinitions = null;
     }
   }
@@ -92,12 +92,12 @@ public final class UpgradeItemDataGameTests {
   private static void verifySuccess(GameTestHelper helper, Fixture fixture) {
     var current = new AtomicReference<>(fixture);
     var observations = new ArrayList<Long>();
-    FactoryUpgradeEvents.register(OBSERVER, (context, upgrade) -> {
-      if (context.type() == FactoryUpgradeEvents.Type.STARTED) {
-        long uses = FactoryUpgradeItemData.read(current.get().busB().inventory().getStackInSlot(0)).getLong("uses");
+    UpgradeEvents.register(OBSERVER, (context, upgrade) -> {
+      if (context.type() == UpgradeEvents.Type.STARTED) {
+        long uses = UpgradeItemData.read(current.get().busB().inventory().getStackInSlot(0)).getLong("uses");
         helper.assertTrue(
             uses == upgrade.itemData().getCompound("components").getCompound("minecraft:custom_data")
-                .getCompound(FactoryUpgradeItemData.DATA_KEY).getLong("uses"),
+                .getCompound(UpgradeItemData.DATA_KEY).getLong("uses"),
             "Startup observer saw item data from before the commit");
         observations.add(uses);
       }
@@ -111,7 +111,7 @@ public final class UpgradeItemDataGameTests {
     fixture.input().inventory().setStackInSlot(0, ItemStack.EMPTY);
     var calls = new AtomicInteger();
     var retained = new AtomicReference<CompoundTag>();
-    FactoryUpgradeItemData.register(HANDLER, (context, upgrade, data) -> {
+    UpgradeItemData.register(HANDLER, (context, upgrade, data) -> {
       calls.incrementAndGet();
       helper.assertTrue(
           context.machine().equals(MACHINE)
@@ -126,13 +126,13 @@ public final class UpgradeItemDataGameTests {
         helper.fail("Data preparation modified a live upgrade slot");
       } catch (IllegalStateException expected) {
       }
-      helper.assertTrue(!fixture.factory().beginRunStart(THREAD), "Data preparation reentered startup");
+      helper.assertTrue(!fixture.factory().runState().beginRunStart(THREAD), "Data preparation reentered startup");
       fixture.factory().serverTick();
       data.putLong("uses", Math.addExact(data.getLong("uses"), context.instances()));
       data.putString("id", "minecraft:diamond");
       retained.set(data);
 
-      return new FactoryUpgradeItemData.Update(data);
+      return new UpgradeItemData.Update(data);
     });
     synchronize(helper, fixture);
     for (int attempt = 0; attempt < 100; attempt++) {
@@ -141,7 +141,7 @@ public final class UpgradeItemDataGameTests {
     }
     helper.assertTrue(calls.get() == 0, "Idle ticks or menus executed startup data transforms");
     try {
-      FactoryUpgradeStartCosts.prepare(fixture.factory(), 2);
+      UpgradeStartCosts.prepare(fixture.factory(), 2);
       helper.fail("Context-free startup preparation bypassed a data declaration");
     } catch (IllegalArgumentException expected) {
     }
@@ -170,7 +170,7 @@ public final class UpgradeItemDataGameTests {
               && fixture.factory().run(THREAD).isEmpty()
               && fixture.input().inventory().getStackInSlot(0).getCount() == 2
               && fixture.busA().inventory().getStackInSlot(0).getCount() == 3
-              && FactoryUpgradeItemData.read(fixture.busA().inventory().getStackInSlot(0)).isEmpty()
+              && UpgradeItemData.read(fixture.busA().inventory().getStackInSlot(0)).isEmpty()
               && fixture.busA().upgradeRevision() == revisionA
               && fixture.busB().upgradeRevision() == revisionB,
           "Partial data budget published prepared copies or charged costs");
@@ -224,9 +224,9 @@ public final class UpgradeItemDataGameTests {
 
   private static void beginNoopAndClear(GameTestHelper helper, Fixture fixture, AtomicInteger calls, List<Long> observations) {
     clearOutput(fixture);
-    FactoryUpgradeItemData.register(HANDLER, (context, upgrade, data) -> {
+    UpgradeItemData.register(HANDLER, (context, upgrade, data) -> {
       calls.incrementAndGet();
-      return new FactoryUpgradeItemData.Update(data);
+      return new UpgradeItemData.Update(data);
     });
     synchronize(helper, fixture);
     long revision = fixture.busB().upgradeRevision();
@@ -241,8 +241,7 @@ public final class UpgradeItemDataGameTests {
         "No-op data changed revision or a fully consumed item ran its data transform");
     awaitOutput(helper, fixture, 1, 120, () -> {
       clearOutput(fixture);
-      FactoryUpgradeItemData
-          .register(HANDLER, (context, upgrade, data) -> new FactoryUpgradeItemData.Update(new CompoundTag()));
+      UpgradeItemData.register(HANDLER, (context, upgrade, data) -> new UpgradeItemData.Update(new CompoundTag()));
       synchronize(helper, fixture);
       long beforeClear = fixture.busB().upgradeRevision();
       fixture.input().inventory().setStackInSlot(0, new ItemStack(Items.DIRT));
@@ -251,7 +250,7 @@ public final class UpgradeItemDataGameTests {
               && fixture.busB().upgradeRevision() == beforeClear + 1
               && uses(fixture.busB()) == 0
               && !fixture.busB().inventory().getStackInSlot(0).get(DataComponents.CUSTOM_DATA).copyTag()
-                  .contains(FactoryUpgradeItemData.DATA_KEY)
+                  .contains(UpgradeItemData.DATA_KEY)
               && fixture.busB().inventory().getStackInSlot(0).get(DataComponents.CUSTOM_DATA).copyTag()
                   .getString("foreign").equals("NA")
               && observations.equals(List.of(2L, 2L, 0L)),
@@ -268,29 +267,29 @@ public final class UpgradeItemDataGameTests {
   private static void verifyFailures(GameTestHelper helper, Fixture fixture) {
     var firstCalls = new AtomicInteger();
     var lastCalls = new AtomicInteger();
-    FactoryUpgradeItemData.Preparer failing = (context, upgrade, data) -> {
+    UpgradeItemData.Preparer failing = (context, upgrade, data) -> {
       if (upgrade.itemId().equals(ResourceLocation.fromNamespaceAndPath("minecraft", "phantom_membrane"))) {
         lastCalls.incrementAndGet();
         throw new IllegalStateException("expected later data preparation failure");
       }
       firstCalls.incrementAndGet();
       data.putLong("uses", context.instances());
-      return new FactoryUpgradeItemData.Update(data);
+      return new UpgradeItemData.Update(data);
     };
-    FactoryUpgradeItemData.register(HANDLER, failing);
-    var published = FactoryUpgradeService.snapshot();
-    FactoryUpgradeItemData.register(HANDLER, failing);
-    FactoryUpgradeItemData.remove(id("unknown_item_data_handler"));
+    UpgradeItemData.register(HANDLER, failing);
+    var published = UpgradeCatalogService.snapshot();
+    UpgradeItemData.register(HANDLER, failing);
+    UpgradeItemData.remove(id("unknown_item_data_handler"));
     boolean workerRejected = CompletableFuture.supplyAsync(() -> {
       try {
-        FactoryUpgradeItemData.register(HANDLER, failing);
+        UpgradeItemData.register(HANDLER, failing);
         return false;
       } catch (IllegalStateException expected) {
         return true;
       }
     }).join();
     helper.assertTrue(
-        workerRejected && FactoryUpgradeService.snapshot() == published,
+        workerRejected && UpgradeCatalogService.snapshot() == published,
         "Worker or no-op data registration changed the catalog");
     synchronize(helper, fixture);
     fixture.input().inventory().setStackInSlot(0, new ItemStack(Items.DIRT, 2));
@@ -316,22 +315,22 @@ public final class UpgradeItemDataGameTests {
         FactoryRecipeStarter.start(fixture.factory(), THREAD, plan) == FactoryRecipeStarter.Result.CHECK_ERROR,
         "Single startup used a separate unsafe data path");
     assertUnpaid(helper, fixture, 2);
-    FactoryUpgradeItemData.Preparer stable = (context, upgrade, data) -> {
+    UpgradeItemData.Preparer stable = (context, upgrade, data) -> {
       data.putLong("uses", Math.addExact(data.getLong("uses"), context.instances()));
-      return new FactoryUpgradeItemData.Update(data);
+      return new UpgradeItemData.Update(data);
     };
-    FactoryUpgradeItemData.register(HANDLER, (context, upgrade, data) -> {
-      FactoryUpgradeItemData.register(HANDLER, stable);
-      return new FactoryUpgradeItemData.Update(data);
+    UpgradeItemData.register(HANDLER, (context, upgrade, data) -> {
+      UpgradeItemData.register(HANDLER, stable);
+      return new UpgradeItemData.Update(data);
     });
     synchronize(helper, fixture);
     helper.assertTrue(
         FactoryRecipeStarter.start(fixture.factory(), THREAD, plan(fixture)) == FactoryRecipeStarter.Result.STALE,
         "Self-replacing preparer committed an old result");
     assertUnpaid(helper, fixture, 2);
-    FactoryUpgradeItemData.register(HANDLER, (context, upgrade, data) -> {
+    UpgradeItemData.register(HANDLER, (context, upgrade, data) -> {
       fixture.input().inventory().setStackInSlot(0, new ItemStack(Items.DIRT));
-      return new FactoryUpgradeItemData.Update(data);
+      return new UpgradeItemData.Update(data);
     });
     synchronize(helper, fixture);
     helper.assertTrue(
@@ -339,28 +338,28 @@ public final class UpgradeItemDataGameTests {
         "Resource mutation inside a preparer retained a startup proof");
     assertUnpaid(helper, fixture, 1);
     fixture.input().inventory().setStackInSlot(0, new ItemStack(Items.DIRT, 2));
-    FactoryUpgradeItemData.register(HANDLER, (context, upgrade, data) -> null);
+    UpgradeItemData.register(HANDLER, (context, upgrade, data) -> null);
     synchronize(helper, fixture);
     helper.assertTrue(
         FactoryRecipeStarter.start(fixture.factory(), THREAD, plan(fixture)) == FactoryRecipeStarter.Result.CHECK_ERROR,
         "Null data result was accepted");
     assertUnpaid(helper, fixture, 2);
-    FactoryUpgradeItemData.register(HANDLER, stable);
+    UpgradeItemData.register(HANDLER, stable);
     synchronize(helper, fixture);
     verifyLateRollback(helper, fixture);
     var malformed = shard(3);
     var malformedData = malformed.get(DataComponents.CUSTOM_DATA).copyTag();
-    malformedData.putInt(FactoryUpgradeItemData.DATA_KEY, 42);
+    malformedData.putInt(UpgradeItemData.DATA_KEY, 42);
     malformed.set(DataComponents.CUSTOM_DATA, CustomData.of(malformedData));
     fixture.busA().inventory().setStackInSlot(0, malformed);
     synchronize(helper, fixture);
     helper.assertTrue(
         FactoryRecipeStarter.start(fixture.factory(), THREAD, plan(fixture)) == FactoryRecipeStarter.Result.CHECK_ERROR
             && fixture.busA().inventory().getStackInSlot(0).get(DataComponents.CUSTOM_DATA).copyTag()
-                .getInt(FactoryUpgradeItemData.DATA_KEY) == 42,
+                .getInt(UpgradeItemData.DATA_KEY) == 42,
         "Malformed existing data was silently normalized or overwritten");
     fixture.busA().inventory().setStackInSlot(0, shard(3));
-    FactoryUpgradeItemData.remove(HANDLER);
+    UpgradeItemData.remove(HANDLER);
     fixture.busA().serverTick();
     fixture.busB().serverTick();
     fixture.factory().serverTick();
@@ -368,7 +367,7 @@ public final class UpgradeItemDataGameTests {
         fixture.factory().run(THREAD).isEmpty()
             && fixture.factory().scheduler().channels().getFirst().reason() == FactoryThreadState.Reason.CHECK_ERROR,
         "Removed preparer did not close required startup sources");
-    FactoryUpgradeItemData.register(HANDLER, stable);
+    UpgradeItemData.register(HANDLER, stable);
     synchronize(helper, fixture);
     fixture.input().inventory().setStackInSlot(0, new ItemStack(Items.DIRT));
     helper.assertTrue(
@@ -381,9 +380,9 @@ public final class UpgradeItemDataGameTests {
   }
 
   private static void verifyLateRollback(GameTestHelper helper, Fixture fixture) {
-    var prepared = FactoryUpgradeStartCosts.prepare(fixture.factory(), THREAD, RECIPE, 2);
+    var prepared = UpgradeStartCosts.prepare(fixture.factory(), THREAD, RECIPE, 2);
     helper.assertTrue(
-        prepared.advance(65_536).status() == FactoryUpgradeStartCosts.Status.READY,
+        prepared.advance(65_536).status() == UpgradeStartCosts.Status.READY,
         "Rollback fixture did not prepare data");
     var same = NonNullList.withSize(fixture.busB().inventory().getSlots(), ItemStack.EMPTY);
     for (int slot = 0; slot < same.size(); slot++) {
@@ -403,7 +402,7 @@ public final class UpgradeItemDataGameTests {
       leases.forEach(lease -> lease.resolve(false));
       held.resolve(false);
     }
-    FactoryUpgradeStartCosts.publish(fixture.factory(), leases);
+    UpgradeStartCosts.publish(fixture.factory(), leases);
     assertUnpaid(helper, fixture, 2);
   }
 
@@ -426,17 +425,17 @@ public final class UpgradeItemDataGameTests {
             return;
           }
           GameTestUpgradeFixtures.install();
-          savedDefinitions = FactoryUpgradeService.snapshot().definitions();
+          savedDefinitions = UpgradeCatalogService.snapshot().definitions();
           var echo = savedDefinitions.stream()
               .filter(definition -> definition.effect().id().equals(id("test_upgrade_item_data"))).findFirst()
               .orElseThrow();
           helper
               .assertTrue(HANDLER.equals(echo.startDataHandler()), "Startup data field was not loaded from resources");
-          FactoryUpgradeItemData.remove(HANDLER);
-          FactoryDynamicUpgrades.register(EFFECT, context -> {
+          UpgradeItemData.remove(HANDLER);
+          DynamicUpgrades.register(EFFECT, context -> {
             long uses = context.itemData().getCompound("components").getCompound("minecraft:custom_data")
-                .getCompound(FactoryUpgradeItemData.DATA_KEY).getLong("uses");
-            return new FactoryUpgradeEntry(
+                .getCompound(UpgradeItemData.DATA_KEY).getLong("uses");
+            return new UpgradeEntry(
                 context.baseEffect().id(),
                 context.baseEffect().parallelAdd(),
                 Math.toIntExact(Math.min(10L, uses + 1)),
@@ -446,17 +445,17 @@ public final class UpgradeItemDataGameTests {
                 1,
                 1);
           });
-          var membrane = new FactoryUpgradeDefinition(
+          var membrane = new UpgradeDefinition(
               ResourceLocation.fromNamespaceAndPath("minecraft", "phantom_membrane"),
-              new FactoryUpgradeEntry(id("membrane_data"), 0, 1, 1, 1, 1, 1, 1),
-              new FactoryUpgradeCompatibility(Set.of(MACHINE), Set.of()),
+              new UpgradeEntry(id("membrane_data"), 0, 1, 1, 1, 1, 1, 1),
+              new UpgradeCompatibility(Set.of(MACHINE), Set.of()),
               null,
               null,
               observer ? OBSERVER : null,
               null,
               null,
               HANDLER);
-          FactoryUpgradeService.replaceDefinitions(List.of(echo, membrane));
+          UpgradeCatalogService.replaceDefinitions(List.of(echo, membrane));
           var origin = helper.absolutePos(new BlockPos(7, 5, 7));
           var factory = UpgradeBusGameTests.buildUpgradeFactory(helper, origin, MACHINE);
           helper.getLevel().setBlockAndUpdate(
@@ -508,9 +507,9 @@ public final class UpgradeItemDataGameTests {
       fixture.factory().serverTick();
     }
     helper.assertTrue(
-        fixture.factory().beginRunStart(THREAD),
+        fixture.factory().runState().beginRunStart(THREAD),
         "Item data fixture could not publish its upgrade snapshot");
-    fixture.factory().finishRunStart(THREAD, false);
+    fixture.factory().runState().finishRunStart(THREAD, false);
   }
 
   private static void tick(Fixture fixture) {
@@ -520,7 +519,7 @@ public final class UpgradeItemDataGameTests {
   }
 
   private static long uses(UpgradeBusBlockEntity bus) {
-    return FactoryUpgradeItemData.read(bus.inventory().getStackInSlot(0)).getLong("uses");
+    return UpgradeItemData.read(bus.inventory().getStackInSlot(0)).getLong("uses");
   }
 
   private static RecipeStartPlan plan(Fixture fixture) {

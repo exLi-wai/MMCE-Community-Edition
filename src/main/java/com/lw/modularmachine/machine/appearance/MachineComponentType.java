@@ -1,5 +1,7 @@
 package com.lw.modularmachine.machine.appearance;
 
+import com.lw.modularmachine.api.component.ResourceType;
+import java.util.Map;
 import com.lw.modularmachine.block.FactoryControllerBlock;
 import com.lw.modularmachine.block.MachineCasingBlock;
 import com.lw.modularmachine.block.MachineControllerBlock;
@@ -25,6 +27,15 @@ public enum MachineComponentType implements StringRepresentable {
   CHEMICAL_HATCH("chemical_hatch");
 
   private final String name;
+  private static final Map<ResourceType, MachineComponentType> RESOURCE_MODELS = Map.of(
+      ResourceType.ITEM,
+      ITEM_BUS,
+      ResourceType.FLUID,
+      FLUID_HATCH,
+      ResourceType.ENERGY,
+      ENERGY_HATCH,
+      ResourceType.CHEMICAL,
+      CHEMICAL_HATCH);
 
   MachineComponentType(String name) {
     this.name = name;
@@ -43,12 +54,7 @@ public enum MachineComponentType implements StringRepresentable {
       return CASING;
     }
     if (block instanceof MachinePortBlock port) {
-      return switch (port.kind().resource()) {
-        case ITEM -> ITEM_BUS;
-        case FLUID -> FLUID_HATCH;
-        case CHEMICAL -> CHEMICAL_HATCH;
-        case ENERGY -> ENERGY_HATCH;
-      };
+      return RESOURCE_MODELS.get(port.kind().resource());
     }
     if (block instanceof ParallelControllerBlock) {
       return PARALLEL_CONTROLLER;

@@ -6,11 +6,16 @@ import com.google.gson.JsonObject;
 import com.lw.modularmachine.machine.recipe.MachineRecipe;
 import com.lw.modularmachine.machine.recipe.MachineRecipeJson;
 import com.lw.modularmachine.machine.recipe.ResourceSelector;
+import com.lw.modularmachine.machine.recipe.resource.RecipeResourceBuilderDeclarations;
+import com.lw.modularmachine.api.recipe.resource.RecipeResourceType;
+import com.lw.modularmachine.api.recipe.resource.RecipeResources;
 import com.lw.modularmachine.api.smart.SmartNumberRequirement;
 import com.mojang.serialization.Codec;
 import com.mojang.serialization.JsonOps;
 import java.util.ArrayList;
 import java.util.List;
+import java.util.LinkedHashMap;
+import java.util.Map;
 import java.util.Objects;
 import net.minecraft.core.HolderLookup;
 import net.minecraft.resources.ResourceLocation;
@@ -34,6 +39,7 @@ public final class MachineRecipeBuilder {
   private final List<ChemicalRequirement> chemicalPerTick = new ArrayList<>();
   private final List<SmartNumberRequirement> interfaceInputs = new ArrayList<>();
   private final List<RecipeModifier> modifiers = new ArrayList<>();
+  private final Map<ResourceLocation, RecipeResources.Entry<?>> resourceDeclarations = new LinkedHashMap<>();
   private RecipeSelectors selectors = RecipeSelectors.NONE;
   private RecipeFailureAction failureAction;
   private Boolean parallelized;
@@ -60,6 +66,17 @@ public final class MachineRecipeBuilder {
 
   public ResourceLocation id() {
     return id;
+  }
+
+  /**
+   * Replaces this registered resource's complete native fields when the recipe is
+   * encoded.
+   */
+  public <D> MachineRecipeBuilder setResource(RecipeResourceType<D> type, D data) {
+    var entry = RecipeResourceBuilderDeclarations.capture(type, data);
+    resourceDeclarations.put(type.id(), entry);
+
+    return this;
   }
 
   public MachineRecipeBuilder priority(int priority) {
@@ -255,6 +272,9 @@ public final class MachineRecipeBuilder {
     }
     if (!modifiers.isEmpty()) {
       json.add("modifiers", encode(Codec.list(RecipeModifier.CODEC), modifiers, registries));
+    }
+    for (var entry : resourceDeclarations.values()) {
+      RecipeResourceBuilderDeclarations.apply(json, entry, registries);
     }
 
     MachineRecipeJson.validate(json);

@@ -1,6 +1,8 @@
 package com.lw.modularmachine.integration.ae2;
 
 import appeng.api.crafting.IPatternDetails;
+import static com.lw.modularmachine.integration.ae2.Ae2NodePersistence.NODE_TAG;
+import static com.lw.modularmachine.integration.ae2.Ae2NodePersistence.OWNER_TAG;
 import appeng.api.crafting.PatternDetailsHelper;
 import appeng.api.features.IPlayerRegistry;
 import appeng.api.networking.GridFlags;
@@ -58,8 +60,6 @@ import org.jetbrains.annotations.ApiStatus;
  */
 @ApiStatus.Internal
 final class Ae2PatternConnection implements PatternNetworkPlatform.Connection, ICraftingProvider, IInWorldGridNodeHost, IActionHost, NetworkPortService.Work {
-  private static final String NODE_TAG = "node";
-  private static final String OWNER_TAG = "owner_id";
   private static final IGridNodeListener<Ae2PatternConnection> LISTENER = new IGridNodeListener<>() {
     @Override
     public void onSaveChanges(Ae2PatternConnection owner, IGridNode node) {
@@ -170,15 +170,7 @@ final class Ae2PatternConnection implements PatternNetworkPlatform.Connection, I
 
   @Override
   public void save(CompoundTag tag, HolderLookup.Provider registries) {
-    if (node != null) {
-      node.saveToNBT(tag);
-    } else if (retained.contains(NODE_TAG, Tag.TAG_COMPOUND)) {
-      tag.put(NODE_TAG, retained.getCompound(NODE_TAG).copy());
-    }
-    int owner = node != null && node.getNode() != null ? node.getNode().getOwningPlayerId() : owningPlayerId;
-    if (owner >= 0) {
-      tag.putInt(OWNER_TAG, owner);
-    }
+    Ae2NodePersistence.save(tag, node, retained, owningPlayerId);
   }
 
   @Override
@@ -418,6 +410,8 @@ final class Ae2PatternConnection implements PatternNetworkPlatform.Connection, I
       case NetworkPortResource.Fluid fluid -> AEFluidKey.of(fluid.stack());
       case NetworkPortResource.Chemical chemical ->
         chemicalKeys == null ? null : chemicalKeys.apply(new ChemicalStackData(chemical.id(), 1));
+      // No transport codec: leave the complete share in its physical ledger.
+      default -> null;
     };
   }
 

@@ -1,5 +1,6 @@
 package com.lw.modularmachine.gametest;
 
+import com.lw.modularmachine.machine.structure.MachineDefinitionParser;
 import com.google.gson.JsonObject;
 import com.google.gson.JsonParseException;
 import com.lw.modularmachine.api.controller.MachineControllerApi;
@@ -9,8 +10,8 @@ import com.lw.modularmachine.blockentity.MachinePortBlockEntity;
 import com.lw.modularmachine.machine.structure.CompiledStructure;
 import com.lw.modularmachine.machine.structure.MachineDefinition;
 import com.lw.modularmachine.machine.structure.StructureService;
-import com.lw.modularmachine.machine.structure.VerificationFailure;
-import com.lw.modularmachine.machine.structure.VerificationState;
+import com.lw.modularmachine.api.controller.VerificationFailure;
+import com.lw.modularmachine.api.controller.VerificationState;
 import com.lw.modularmachine.registry.MachineRegistries;
 import java.util.Map;
 import net.minecraft.core.BlockPos;
@@ -105,8 +106,8 @@ public final class MachineGameTests {
     for (var block : MachineRegistries.PORTS.values()) {
       helper.getLevel().setBlockAndUpdate(pos, block.get().defaultBlockState());
       var port = (MachinePortBlockEntity) helper.getLevel().getBlockEntity(pos);
-      switch (port.kind().resource()) {
-        case ITEM -> {
+      switch (port.kind().resource().name()) {
+        case "ITEM" -> {
           var cap = helper.getLevel().getCapability(Capabilities.ItemHandler.BLOCK, pos, Direction.UP);
           helper.assertTrue(cap != null && cap.getSlots() == port.tier().capacity(), "Wrong item tier capability");
           helper.assertTrue(port.inventory().getSlots() == port.tier().capacity(), "Wrong tier slot count");
@@ -119,7 +120,7 @@ public final class MachineGameTests {
             helper.assertTrue(cap.insertItem(0, stack, false).getCount() == 2, "Output accepted external insertion");
           }
         }
-        case FLUID -> {
+        case "FLUID" -> {
           var cap = helper.getLevel().getCapability(Capabilities.FluidHandler.BLOCK, pos, Direction.UP);
           helper.assertTrue(
               cap != null && cap.getTankCapacity(0) == port.tier().capacity(),
@@ -130,7 +131,7 @@ public final class MachineGameTests {
                   && port.fluidTank().getFluidAmount() == 0,
               "Fluid direction/simulation failed");
         }
-        case ENERGY -> {
+        case "ENERGY" -> {
           var cap = helper.getLevel().getCapability(Capabilities.EnergyStorage.BLOCK, pos, Direction.UP);
           helper.assertTrue(
               cap != null && port.energy().capacity() == port.tier().capacity(),
@@ -309,7 +310,8 @@ public final class MachineGameTests {
         helper.assertTrue(
             controller.verificationFailure() == VerificationFailure.MISMATCH,
             "Missing block not diagnosed");
-        var diagnostic = MachineControllerApi.inspect(controller).orElseThrow().structureDiagnostic().orElseThrow();
+        var diagnostic = MachineControllerApi.inspect(helper.getLevel(), controller.getBlockPos()).orElseThrow()
+            .structureDiagnostic().orElseThrow();
         helper.assertTrue(
             diagnostic.position().equals(bad)
                 && !diagnostic.expected().isBlank()
@@ -417,7 +419,7 @@ public final class MachineGameTests {
     JsonObject root = new JsonObject();
     root.add("dynamic-patterns", new JsonObject());
     try {
-      MachineDefinition.parse(ResourceLocation.fromNamespaceAndPath("mmcece", "invalid"), root);
+      MachineDefinitionParser.parse(ResourceLocation.fromNamespaceAndPath("mmcece", "invalid"), root);
       helper.fail("Unsupported feature was silently accepted");
     } catch (JsonParseException expected) {
       helper.succeed();

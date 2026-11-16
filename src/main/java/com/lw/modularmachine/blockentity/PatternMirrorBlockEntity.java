@@ -1,12 +1,12 @@
 package com.lw.modularmachine.blockentity;
 
+import com.lw.modularmachine.machine.structure.StructureChangeRouter;
 import com.lw.modularmachine.api.component.MachineColorable;
 import com.lw.modularmachine.config.MachineConfig;
-import com.lw.modularmachine.machine.factory.UpgradeLifecyclePublisher;
+import com.lw.modularmachine.machine.upgrade.UpgradeLifecyclePublisher;
 import com.lw.modularmachine.machine.network.pattern.PatternProviderReference;
 import com.lw.modularmachine.machine.recipe.RecipeLifecyclePublisher;
 import com.lw.modularmachine.machine.smart.SmartInterfaceEventPublisher;
-import com.lw.modularmachine.machine.structure.StructureService;
 import com.lw.modularmachine.registry.MachineRegistries;
 import com.lw.modularmachine.util.thread.ServerThreadGuard;
 import java.util.Optional;
@@ -150,7 +150,7 @@ public final class PatternMirrorBlockEntity extends BlockEntity implements Machi
   }
   private void notifyStructure() {
     if (level instanceof ServerLevel server) {
-      StructureService.blockChanged(server, worldPosition);
+      StructureChangeRouter.blockChanged(server, worldPosition);
     }
   }
 

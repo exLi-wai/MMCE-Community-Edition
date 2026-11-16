@@ -59,7 +59,7 @@ class MachineDefinitionSchemaTest {
         StandardCharsets.UTF_8)) {
       root = JsonParser.parseReader(reader).getAsJsonObject();
     }
-    var references = MachineDefinition.blockReferences(Map.of(fixtureId, root));
+    var references = MachineDefinitionParser.blockReferences(Map.of(fixtureId, root));
     assertEquals(
         List.of(
             id("parallel_controller_infinite"),
@@ -77,7 +77,7 @@ class MachineDefinitionSchemaTest {
     root.getAsJsonArray("parts").get(0).getAsJsonObject()
         .add("field", json("{\"name\":\"energy_stored\",\"min\":9,\"max\":20}"));
     root.add("operation", json("{\"type\":\"energy_transfer\",\"energy_per_tick\":128}"));
-    var definition = MachineDefinition.parse(ID, root, EMPTY);
+    var definition = MachineDefinitionParser.parse(ID, root, EMPTY);
     assertSame(OrientationPolicy.HORIZONTAL, definition.orientationPolicy());
     assertEquals(0x1111, definition.allowedOrientationMask());
     assertEquals("offset:1,0,0", definition.parts().getFirst().id());
@@ -244,7 +244,7 @@ class MachineDefinitionSchemaTest {
   void referenceCollectionFreezesLiteralsAndIdentifiesTheirJsonPaths() {
     JsonObject root = json(
         "{\"parts\":[{\"offset\":[1,0,0],\"block\":[\"minecraft:furnace\",\"minecraft:dispenser\"],\"properties\":{\"facing\":\"north\"}}]}");
-    var references = MachineDefinition.blockReferences(Map.of(ID, root));
+    var references = MachineDefinitionParser.blockReferences(Map.of(ID, root));
     assertEquals(2, references.size());
     assertEquals("north", references.getFirst().properties().getFirst().literal());
     assertTrue(references.getFirst().properties().getFirst().path().endsWith("$.parts[0].properties.facing"));
@@ -258,7 +258,7 @@ class MachineDefinitionSchemaTest {
   void propertyArraysCaptureLiteralsWithoutMaterializingTheirProduct() {
     JsonObject root = json(
         "{\"parts\":[{\"offset\":[1,0,0],\"block\":\"minecraft:oak_stairs\",\"properties\":{\"half\":[\"bottom\",\"top\"],\"shape\":[\"straight\",\"outer_left\"]}}]}");
-    var references = MachineDefinition.blockReferences(Map.of(ID, root));
+    var references = MachineDefinitionParser.blockReferences(Map.of(ID, root));
     assertEquals(1, references.size());
     assertEquals(
         List.of("bottom", "top", "straight", "outer_left"),
@@ -284,7 +284,7 @@ class MachineDefinitionSchemaTest {
     var properties = new JsonObject();
     properties.add("variant", values);
     part.add("properties", properties);
-    var references = MachineDefinition.blockReferences(Map.of(ID, root));
+    var references = MachineDefinitionParser.blockReferences(Map.of(ID, root));
     assertEquals(300, references.size());
     assertEquals(ResourceLocation.parse("example:block_0"), references.getFirst().id());
     assertEquals(ResourceLocation.parse("example:block_299"), references.getLast().id());
@@ -296,8 +296,10 @@ class MachineDefinitionSchemaTest {
   @Test
   void directSnapshotParsingCannotBypassTheSharedAlternativeResourceBudget() {
     var root = oversizedAlternatives(4097, 1024);
-    var references = assertThrows(JsonParseException.class, () -> MachineDefinition.blockReferences(Map.of(ID, root)));
-    var direct = assertThrows(JsonParseException.class, () -> MachineDefinition.parse(ID, root, EMPTY));
+    var references = assertThrows(
+        JsonParseException.class,
+        () -> MachineDefinitionParser.blockReferences(Map.of(ID, root)));
+    var direct = assertThrows(JsonParseException.class, () -> MachineDefinitionParser.parse(ID, root, EMPTY));
     assertTrue(references.getMessage().contains("4194304 block alternatives"));
     assertTrue(direct.getMessage().contains("4194304 block alternatives"));
   }
@@ -307,7 +309,7 @@ class MachineDefinitionSchemaTest {
     var root = oversizedAlternatives(4096, 512);
     var failure = assertThrows(
         JsonParseException.class,
-        () -> MachineDefinition.blockReferences(Map.of(id("a"), root, id("b"), root, id("c"), root)));
+        () -> MachineDefinitionParser.blockReferences(Map.of(id("a"), root, id("b"), root, id("c"), root)));
     assertTrue(failure.getMessage().contains("4194304 block alternatives"));
   }
 
@@ -419,7 +421,7 @@ class MachineDefinitionSchemaTest {
   }
 
   private static MachineDefinition parse(JsonObject root) {
-    return MachineDefinition.parse(ID, root, EMPTY);
+    return MachineDefinitionParser.parse(ID, root, EMPTY);
   }
 
   private static void assertPath(JsonObject root, String path) {

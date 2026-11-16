@@ -1,6 +1,7 @@
 package com.lw.modularmachine.command;
 
 import com.lw.modularmachine.blockentity.FactoryControllerBlockEntity;
+import com.lw.modularmachine.machine.factory.FactoryThreadConfiguration;
 import com.lw.modularmachine.machine.factory.FactoryThreadState;
 import com.mojang.brigadier.arguments.IntegerArgumentType;
 import com.mojang.brigadier.arguments.StringArgumentType;
@@ -32,7 +33,7 @@ public final class FactoryCommands {
                     .then(Commands.argument("machine", ResourceLocationArgument.id()).executes(FactoryCommands::bind)))
             .then(
                 Commands.literal("preset")
-                    .executes(context -> configure(context, FactoryControllerBlockEntity::resetThreadPreset)))
+                    .executes(context -> configure(context, factory -> factory.threadConfiguration().resetPreset())))
             .then(
                 Commands.literal("add").then(
                     Commands.argument("thread", StringArgumentType.word()).executes(context -> add(context, 0)).then(
@@ -40,15 +41,17 @@ public final class FactoryCommands {
                             .executes(context -> add(context, IntegerArgumentType.getInteger(context, "priority"))))))
             .then(
                 Commands.literal("remove").then(
-                    Commands.argument("thread", StringArgumentType.word())
-                        .executes(context -> configure(context, factory -> factory.removeThread(threadId(context))))))
+                    Commands.argument("thread", StringArgumentType.word()).executes(
+                        context -> configure(
+                            context,
+                            factory -> factory.threadConfiguration().removeThread(threadId(context))))))
             .then(
                 Commands.literal("priority").then(
                     Commands.argument("thread", StringArgumentType.word()).then(
                         Commands.argument("priority", priority()).executes(
                             context -> configure(
                                 context,
-                                factory -> factory.setThreadPriority(
+                                factory -> factory.threadConfiguration().setThreadPriority(
                                     threadId(context),
                                     IntegerArgumentType.getInteger(context, "priority"))))))));
   }
@@ -84,8 +87,8 @@ public final class FactoryCommands {
             "commands.mmcece.factory.info",
             factory.machineId(),
             factory.threadCount(),
-            factory.threadsInitialized(),
-            factory.configurationRevision()),
+            factory.threadConfiguration().initialized(),
+            factory.threadConfiguration().revision()),
         false);
     for (var thread : factory.scheduler().channels().stream().limit(INFO_THREAD_LIMIT).toList()) {
       Object recipe = thread.lockedRecipe() == null ? Component
@@ -114,14 +117,14 @@ public final class FactoryCommands {
   private static int bind(CommandContext<CommandSourceStack> context) throws CommandSyntaxException {
     var id = ResourceLocationArgument.getId(context, "machine");
 
-    return configure(context, factory -> factory.configureMachine(id));
+    return configure(context, factory -> factory.threadConfiguration().configureMachine(id));
   }
 
   private static int add(CommandContext<CommandSourceStack> context, int priority) throws CommandSyntaxException {
-    return configure(context, factory -> factory.addThread(threadId(context), priority));
+    return configure(context, factory -> factory.threadConfiguration().addThread(threadId(context), priority));
   }
 
-  private static int configure(CommandContext<CommandSourceStack> context, Function<FactoryControllerBlockEntity, FactoryControllerBlockEntity.ConfigurationResult> action)
+  private static int configure(CommandContext<CommandSourceStack> context, Function<FactoryControllerBlockEntity, FactoryThreadConfiguration.ConfigurationResult> action)
       throws CommandSyntaxException {
     var factory = factory(context);
     if (factory == null) {
@@ -129,11 +132,11 @@ public final class FactoryCommands {
     }
     var result = action.apply(factory);
     var message = Component.translatable("commands.mmcece.factory.result." + result.name().toLowerCase(Locale.ROOT));
-    if (result == FactoryControllerBlockEntity.ConfigurationResult.SUCCESS) {
+    if (result == FactoryThreadConfiguration.ConfigurationResult.SUCCESS) {
       context.getSource().sendSuccess(() -> message, true);
       return 1;
     }
-    if (result == FactoryControllerBlockEntity.ConfigurationResult.NO_CHANGE) {
+    if (result == FactoryThreadConfiguration.ConfigurationResult.NO_CHANGE) {
       context.getSource().sendSuccess(() -> message, false);
       return 1;
     }

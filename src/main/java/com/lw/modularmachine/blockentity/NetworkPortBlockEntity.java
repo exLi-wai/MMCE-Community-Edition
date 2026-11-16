@@ -1,15 +1,16 @@
 package com.lw.modularmachine.blockentity;
 
+import com.lw.modularmachine.api.component.ResourceType;
 import com.lw.modularmachine.api.component.ChemicalStackData;
 import com.lw.modularmachine.api.component.MachineColorable;
-import com.lw.modularmachine.machine.PortKind;
 import com.lw.modularmachine.machine.chemical.ChemicalPlatform;
 import com.lw.modularmachine.machine.network.MachineNetworkPlatform;
 import com.lw.modularmachine.machine.network.NetworkPortResource;
 import com.lw.modularmachine.machine.network.NetworkPortService;
 import com.lw.modularmachine.machine.network.NetworkPortSnapshot;
+import com.lw.modularmachine.machine.network.NetworkResourceSamples;
 import com.lw.modularmachine.machine.recipe.RecipeLifecyclePublisher;
-import com.lw.modularmachine.machine.factory.UpgradeLifecyclePublisher;
+import com.lw.modularmachine.machine.upgrade.UpgradeLifecyclePublisher;
 import com.lw.modularmachine.machine.smart.SmartInterfaceEventPublisher;
 import com.lw.modularmachine.menu.NetworkPortMenu;
 import com.lw.modularmachine.registry.MachineRegistries;
@@ -17,6 +18,7 @@ import com.lw.modularmachine.storage.TransactionalChemicalTank;
 import com.lw.modularmachine.storage.TransactionalFluidTank;
 import java.util.ArrayList;
 import java.util.List;
+import java.util.Map;
 import java.util.Objects;
 import java.util.Optional;
 import net.minecraft.core.BlockPos;
@@ -33,13 +35,173 @@ import net.minecraft.world.inventory.AbstractContainerMenu;
 import net.minecraft.world.item.ItemStack;
 import net.minecraft.world.level.block.state.BlockState;
 import net.neoforged.neoforge.fluids.FluidStack;
-import net.neoforged.neoforge.fluids.FluidUtil;
 
 /**
  * Owned physical buffers with a narrow network adapter. A network transfer and
  * its local quantity change resolve in the same main-thread visit.
  */
 public final class NetworkPortBlockEntity extends MachinePortBlockEntity {
+  private record Buffered<T extends NetworkPortResource>(T resource, long amount) {
+  }
+
+  /**
+   * Internal dispatch over the real native buffer operations, not over value
+   * codecs.
+   */
+  private abstract static class BufferAdapter<T extends NetworkPortResource> {
+    private final Class<T> valueClass;
+    private final String storageField;
+    private final boolean extraBuffers;
+    private final long maximumStored;
+
+    private BufferAdapter(Class<T> valueClass, String storageField, boolean extraBuffers, long maximumStored) {
+      this.valueClass = valueClass;
+      this.storageField = storageField;
+      this.extraBuffers = extraBuffers;
+      this.maximumStored = maximumStored;
+    }
+
+    abstract Buffered<T> read(NetworkPortBlockEntity port, int index);
+
+    abstract void transferTyped(NetworkPortBlockEntity port, int index, T resource, long stored, long maximum, boolean extracting, long expectedRevision);
+
+    void initializeExtra(NetworkPortBlockEntity port) {
+    }
+
+    void restoreExtra(NetworkPortBlockEntity port, int index, NetworkPortSnapshot.Row buffer) {
+      throw new IllegalArgumentException("This native network buffer has no extra tanks");
+    }
+
+    void validateBase(CompoundTag saved, HolderLookup.Provider registries) {
+    }
+
+    boolean available(T value) {
+      return true;
+    }
+
+    final boolean accepts(NetworkPortResource value) {
+      return valueClass.isInstance(value) && available(valueClass.cast(value));
+    }
+
+    final void transfer(NetworkPortBlockEntity port, int index, NetworkPortResource resource, long stored, long maximum, boolean extracting, long expectedRevision) {
+      transferTyped(port, index, valueClass.cast(resource), stored, maximum, extracting, expectedRevision);
+    }
+  }
+
+  private static final Map<ResourceType, BufferAdapter<?>> BUFFERS = Map.of(
+      ResourceType.ITEM,
+      new BufferAdapter<NetworkPortResource.Item>(NetworkPortResource.Item.class, "items", false, Integer.MAX_VALUE) {
+        @Override
+        Buffered<NetworkPortResource.Item> read(NetworkPortBlockEntity port, int index) {
+          var stack = port.inventory().getStackInSlot(index);
+
+          return stack.isEmpty() ? new Buffered<>(null, 0) : new Buffered<>(
+              new NetworkPortResource.Item(stack),
+              stack.getCount());
+        }
+
+        @Override
+        void transferTyped(NetworkPortBlockEntity port, int index, NetworkPortResource.Item resource, long stored, long maximum, boolean extracting, long expectedRevision) {
+          port.transferItems(index, resource, (int) stored, maximum, extracting, expectedRevision);
+        }
+      },
+      ResourceType.FLUID,
+      new BufferAdapter<NetworkPortResource.Fluid>(NetworkPortResource.Fluid.class, "fluid", true, Integer.MAX_VALUE) {
+        @Override
+        Buffered<NetworkPortResource.Fluid> read(NetworkPortBlockEntity port, int index) {
+          var stack = port.fluidTank(index).getFluid();
+
+          return stack.isEmpty() ? new Buffered<>(null, 0) : new Buffered<>(
+              new NetworkPortResource.Fluid(stack),
+              stack.getAmount());
+        }
+
+        @Override
+        void transferTyped(NetworkPortBlockEntity port, int index, NetworkPortResource.Fluid resource, long stored, long maximum, boolean extracting, long expectedRevision) {
+          port.transferFluid(index, resource, (int) stored, maximum, extracting, expectedRevision);
+        }
+
+        @Override
+        void initializeExtra(NetworkPortBlockEntity port) {
+          port.fluids.add(
+              new TransactionalFluidTank(
+                  Integer.MAX_VALUE,
+                  port::assertMutationThread,
+                  port::beforeResourceWrite,
+                  port::changed));
+        }
+
+        @Override
+        void restoreExtra(NetworkPortBlockEntity port, int index, NetworkPortSnapshot.Row buffer) {
+          var stored = buffer.buffered() == null ? FluidStack.EMPTY : NetworkPortResource.Fluid.class
+              .cast(buffer.buffered()).stack().copyWithAmount((int) buffer.stored());
+          port.fluidTank(index).setFluid(stored);
+        }
+
+        @Override
+        void validateBase(CompoundTag saved, HolderLookup.Provider registries) {
+          if (saved.isEmpty()) {
+            return;
+          }
+          if (!saved.contains("Fluid", Tag.TAG_COMPOUND)) {
+            throw new IllegalArgumentException("Invalid physical fluid network buffer");
+          }
+          FluidStack.CODEC.parse(registries.createSerializationContext(NbtOps.INSTANCE), saved.getCompound("Fluid"))
+              .getOrThrow();
+        }
+      },
+      ResourceType.CHEMICAL,
+      new BufferAdapter<NetworkPortResource.Chemical>(
+          NetworkPortResource.Chemical.class,
+          "chemical",
+          true,
+          Long.MAX_VALUE) {
+        @Override
+        Buffered<NetworkPortResource.Chemical> read(NetworkPortBlockEntity port, int index) {
+          var stack = port.chemicalTank(index).getStack();
+
+          return stack.isEmpty() ? new Buffered<>(null, 0) : new Buffered<>(
+              new NetworkPortResource.Chemical(stack.chemical()),
+              stack.amount());
+        }
+
+        @Override
+        void transferTyped(NetworkPortBlockEntity port, int index, NetworkPortResource.Chemical resource, long stored, long maximum, boolean extracting, long expectedRevision) {
+          port.transferChemical(index, resource, maximum, extracting);
+        }
+
+        @Override
+        void initializeExtra(NetworkPortBlockEntity port) {
+          port.chemicals.add(
+              new TransactionalChemicalTank(
+                  Integer.MAX_VALUE,
+                  port::assertMutationThread,
+                  port::beforeResourceWrite,
+                  port::changed));
+        }
+
+        @Override
+        void restoreExtra(NetworkPortBlockEntity port, int index, NetworkPortSnapshot.Row buffer) {
+          var stored = buffer.buffered() == null ? ChemicalStackData.EMPTY : new ChemicalStackData(
+              NetworkPortResource.Chemical.class.cast(buffer.buffered()).id(),
+              buffer.stored());
+          port.chemicalTank(index).load(stored.save());
+        }
+
+        @Override
+        boolean available(NetworkPortResource.Chemical value) {
+          return ChemicalPlatform.contains(value.id());
+        }
+
+        @Override
+        void validateBase(CompoundTag saved, HolderLookup.Provider registries) {
+          var chemical = ChemicalStackData.load(saved);
+          if (!chemical.isEmpty() && !ChemicalPlatform.contains(chemical.chemical())) {
+            throw new IllegalArgumentException("Invalid physical chemical network buffer");
+          }
+        }
+      });
+
   private final int rows;
   private final List<TransactionalFluidTank> fluids = new ArrayList<>();
   private final List<TransactionalChemicalTank> chemicals = new ArrayList<>();
@@ -56,24 +218,19 @@ public final class NetworkPortBlockEntity extends MachinePortBlockEntity {
     rows = kind().isInput() ? 9 : 36;
     fluids.add(super.fluidTank());
     chemicals.add(super.chemicalTank());
+    var adapter = bufferAdapter();
     for (int index = 1; index < rows; index++) {
-      if (kind().resource() == PortKind.Resource.FLUID) {
-        fluids.add(
-            new TransactionalFluidTank(
-                Integer.MAX_VALUE,
-                this::assertMutationThread,
-                this::beforeResourceWrite,
-                this::changed));
-      }
-      if (kind().resource() == PortKind.Resource.CHEMICAL) {
-        chemicals.add(
-            new TransactionalChemicalTank(
-                Integer.MAX_VALUE,
-                this::assertMutationThread,
-                this::beforeResourceWrite,
-                this::changed));
-      }
+      adapter.initializeExtra(this);
     }
+  }
+
+  private BufferAdapter<?> bufferAdapter() {
+    var adapter = BUFFERS.get(kind().resource());
+    if (adapter == null) {
+      throw new IllegalStateException("Unsupported native network buffer: " + kind().resource().id());
+    }
+
+    return adapter;
   }
 
   public MachineNetworkPlatform.Connection connection() {
@@ -159,17 +316,7 @@ public final class NetworkPortBlockEntity extends MachinePortBlockEntity {
     }
     externalCall = true;
     try {
-      var sample = carried.copyWithCount(1);
-      return switch (kind().resource()) {
-        case ITEM -> Optional.of(new NetworkPortResource.Item(sample));
-        case FLUID -> FluidUtil.getFluidContained(sample).map(NetworkPortResource.Fluid::new);
-        case CHEMICAL -> {
-          var chemical = ChemicalPlatform.sampleContainer(sample);
-          yield chemical.isEmpty() ? Optional.empty() : Optional
-              .of(new NetworkPortResource.Chemical(chemical.chemical()));
-        }
-        case ENERGY -> Optional.empty();
-      };
+      return NetworkResourceSamples.sample(kind().resource(), carried);
     } finally {
       externalCall = false;
     }
@@ -181,8 +328,8 @@ public final class NetworkPortBlockEntity extends MachinePortBlockEntity {
         || slot < 0
         || slot >= 9
         || expectedRevision != configRevision
-        || resource != null && (resource.kind() != kind().resource() || amount < 1)
-        || resource instanceof NetworkPortResource.Chemical chemical && !ChemicalPlatform.contains(chemical.id())
+        || resource != null
+            && (resource.kind() != kind().resource() || amount < 1 || !bufferAdapter().accepts(resource))
         || resource == null && amount != 0) {
       return false;
     }
@@ -213,37 +360,13 @@ public final class NetworkPortBlockEntity extends MachinePortBlockEntity {
   }
 
   private NetworkPortSnapshot.Row row(int index, HolderLookup.Provider registries) {
-    NetworkPortResource resource = null;
-    long amount = 0;
-    switch (kind().resource()) {
-      case ITEM -> {
-        var stack = inventory().getStackInSlot(index);
-        if (!stack.isEmpty()) {
-          resource = new NetworkPortResource.Item(stack);
-          amount = stack.getCount();
-        }
-      }
-      case FLUID -> {
-        var stack = fluidTank(index).getFluid();
-        if (!stack.isEmpty()) {
-          resource = new NetworkPortResource.Fluid(stack);
-          amount = stack.getAmount();
-        }
-      }
-      case CHEMICAL -> {
-        var stack = chemicalTank(index).getStack();
-        if (!stack.isEmpty()) {
-          resource = new NetworkPortResource.Chemical(stack.chemical());
-          amount = stack.amount();
-        }
-      }
-      case ENERGY -> throw new IllegalStateException("Energy is not a network buffer");
-    }
+    var buffered = bufferAdapter().read(this, index);
+
     return new NetworkPortSnapshot.Row(
         kind().isInput() ? copyResource(configured[index], registries) : null,
         kind().isInput() ? targets[index] : 0,
-        copyResource(resource, registries),
-        amount);
+        copyResource(buffered.resource(), registries),
+        buffered.amount());
   }
 
   private NetworkPortResource copyResource(NetworkPortResource resource) {
@@ -308,24 +431,7 @@ public final class NetworkPortBlockEntity extends MachinePortBlockEntity {
     if (resource == null || requested <= 0) {
       return;
     }
-    switch (kind().resource()) {
-      case ITEM -> transferItems(
-          index,
-          (NetworkPortResource.Item) resource,
-          (int) row.stored(),
-          requested,
-          extracting,
-          expectedRevision);
-      case FLUID -> transferFluid(
-          index,
-          (NetworkPortResource.Fluid) resource,
-          (int) row.stored(),
-          requested,
-          extracting,
-          expectedRevision);
-      case CHEMICAL -> transferChemical(index, (NetworkPortResource.Chemical) resource, requested, extracting);
-      case ENERGY -> throw new IllegalStateException("Energy is not a network buffer");
-    }
+    bufferAdapter().transfer(this, index, resource, row.stored(), requested, extracting, expectedRevision);
   }
 
   private void transferItems(int index, NetworkPortResource.Item resource, int stored, long maximum, boolean extracting, long expectedRevision) {
@@ -464,7 +570,7 @@ public final class NetworkPortBlockEntity extends MachinePortBlockEntity {
     }
     data.put("config", configs);
     var extra = new ListTag();
-    for (int index = 1; index < rows && kind().resource() != PortKind.Resource.ITEM; index++) {
+    for (int index = 1; index < rows && bufferAdapter().extraBuffers; index++) {
       var row = row(index, registries);
       var entry = new CompoundTag();
       if (row.buffered() != null) {
@@ -512,7 +618,7 @@ public final class NetworkPortBlockEntity extends MachinePortBlockEntity {
       requireCompoundList((ListTag) data.get("config"));
       requireCompoundList((ListTag) data.get("extra_buffers"));
       if (configs.size() != (kind().isInput() ? 9 : 0)
-          || extra.size() != (kind().resource() == PortKind.Resource.ITEM ? 0 : rows - 1)) {
+          || extra.size() != (bufferAdapter().extraBuffers ? rows - 1 : 0)) {
         throw new IllegalArgumentException("Wrong network buffer count");
       }
       var newConfig = new NetworkPortResource[9];
@@ -537,8 +643,8 @@ public final class NetworkPortBlockEntity extends MachinePortBlockEntity {
           }
           amount = entry.getLong("amount");
           resource = readIdentity(entry.getCompound("resource"), registries);
-          if (kind().resource() == PortKind.Resource.FLUID && amount > Integer.MAX_VALUE) {
-            throw new IllegalArgumentException("Fluid quantity exceeds int capacity");
+          if (amount > bufferAdapter().maximumStored) {
+            throw new IllegalArgumentException("Network quantity exceeds native buffer capacity");
           }
         }
         buffers.add(new NetworkPortSnapshot.Row(null, 0, resource, amount));
@@ -550,17 +656,7 @@ public final class NetworkPortBlockEntity extends MachinePortBlockEntity {
         targets[index] = newTargets[index];
       }
       for (int index = 0; index < buffers.size(); index++) {
-        var buffer = buffers.get(index);
-        if (kind().resource() == PortKind.Resource.FLUID) {
-          fluidTank(index + 1).setFluid(
-              buffer.buffered() instanceof NetworkPortResource.Fluid fluid ? fluid.stack()
-                  .copyWithAmount((int) buffer.stored()) : FluidStack.EMPTY);
-        } else {
-          var stored = buffer.buffered() instanceof NetworkPortResource.Chemical chemical ? new ChemicalStackData(
-              chemical.id(),
-              buffer.stored()) : ChemicalStackData.EMPTY;
-          chemicalTank(index + 1).load(stored.save());
-        }
+        bufferAdapter().restoreExtra(this, index + 1, buffers.get(index));
       }
       configRevision = Math.incrementExact(configRevision);
       boolean loaded = level instanceof ServerLevel && !isRemoved();
@@ -590,29 +686,12 @@ public final class NetworkPortBlockEntity extends MachinePortBlockEntity {
     if (!data.contains("schema", Tag.TAG_INT) || data.getInt("schema") != 1) {
       throw new IllegalArgumentException("Invalid physical network buffer schema");
     }
-    String field = switch (kind().resource()) {
-      case ITEM -> "items";
-      case FLUID -> "fluid";
-      case CHEMICAL -> "chemical";
-      case ENERGY -> throw new IllegalStateException("Unexpected network energy buffer");
-    };
+    var adapter = bufferAdapter();
+    String field = adapter.storageField;
     if (!data.contains(field, Tag.TAG_COMPOUND)) {
       throw new IllegalArgumentException("Missing physical network buffer");
     }
-    var saved = data.getCompound(field);
-    if (kind().resource() == PortKind.Resource.FLUID && !saved.isEmpty()) {
-      if (!saved.contains("Fluid", Tag.TAG_COMPOUND)) {
-        throw new IllegalArgumentException("Invalid physical fluid network buffer");
-      }
-      FluidStack.CODEC.parse(registries.createSerializationContext(NbtOps.INSTANCE), saved.getCompound("Fluid"))
-          .getOrThrow();
-    }
-    if (kind().resource() == PortKind.Resource.CHEMICAL) {
-      var chemical = ChemicalStackData.load(saved);
-      if (!chemical.isEmpty() && !ChemicalPlatform.contains(chemical.chemical())) {
-        throw new IllegalArgumentException("Invalid physical chemical network buffer");
-      }
-    }
+    adapter.validateBase(data.getCompound(field), registries);
   }
 
   private NetworkPortResource readResource(CompoundTag entry, HolderLookup.Provider registries) {
@@ -626,8 +705,7 @@ public final class NetworkPortBlockEntity extends MachinePortBlockEntity {
 
   private NetworkPortResource readIdentity(CompoundTag tag, HolderLookup.Provider registries) {
     var resource = NetworkPortResource.load(registries, tag.copy());
-    if (resource.kind() != kind().resource()
-        || resource instanceof NetworkPortResource.Chemical chemical && !ChemicalPlatform.contains(chemical.id())) {
+    if (resource.kind() != kind().resource() || !bufferAdapter().accepts(resource)) {
       throw new IllegalArgumentException("Unavailable or mixed network resource");
     }
     return resource;

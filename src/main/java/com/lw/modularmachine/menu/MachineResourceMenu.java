@@ -9,7 +9,6 @@ import net.minecraft.server.level.ServerPlayer;
 import net.minecraft.world.entity.player.Inventory;
 import net.minecraft.world.entity.player.Player;
 import net.minecraft.world.inventory.AbstractContainerMenu;
-import net.minecraft.world.inventory.Slot;
 import net.minecraft.world.item.ItemStack;
 import net.neoforged.neoforge.network.PacketDistributor;
 
@@ -37,14 +36,7 @@ public final class MachineResourceMenu extends AbstractContainerMenu {
     if (viewer instanceof ServerPlayer) {
       this.lastSentStatus = MachinePayloads.resourceStatus(port);
     }
-    for (int row = 0; row < 3; row++) {
-      for (int col = 0; col < 9; col++) {
-        addSlot(new Slot(inventory, col + row * 9 + 9, 8 + col * 18, 84 + row * 18));
-      }
-    }
-    for (int col = 0; col < 9; col++) {
-      addSlot(new Slot(inventory, col, 8 + col * 18, 142));
-    }
+    PlayerInventorySlots.add(inventory, this::addSlot, 8, 84, 142);
   }
 
   public MachinePortBlockEntity port() {
@@ -68,40 +60,15 @@ public final class MachineResourceMenu extends AbstractContainerMenu {
 
   @Override
   public boolean stillValid(Player player) {
-    return !port.isRemoved()
-        && port.schemaSupported()
-        && port.getLevel() == player.level()
-        && player.level().getBlockEntity(port.getBlockPos()) == port
-        && player.distanceToSqr(
-            port.getBlockPos().getX() + .5,
-            port.getBlockPos().getY() + .5,
-            port.getBlockPos().getZ() + .5) <= 64;
+    return !port.isRemoved() && port.schemaSupported() && PlayerInventorySlots.withinReach(player, port);
   }
 
   @Override
   public ItemStack quickMoveStack(Player player, int index) {
-    if (!stillValid(player) || index < 0 || index >= slots.size()) {
+    if (!stillValid(player)) {
       return ItemStack.EMPTY;
     }
-    Slot slot = slots.get(index);
-    if (!slot.hasItem()) {
-      return ItemStack.EMPTY;
-    }
-    ItemStack original = slot.getItem().copy();
-    if (index < 27) {
-      if (!moveItemStackTo(slot.getItem(), 27, 36, false)) {
-        return ItemStack.EMPTY;
-      }
-    } else if (!moveItemStackTo(slot.getItem(), 0, 27, false)) {
-      return ItemStack.EMPTY;
-    }
-    if (slot.getItem().isEmpty()) {
-      slot.setByPlayer(ItemStack.EMPTY);
-    } else {
-      slot.setChanged();
-    }
-    slot.onTake(player, slot.getItem());
-    return original;
+    return PlayerInventorySlots.quickMove(player, index, slots, this::moveItemStackTo);
   }
 
   @Override

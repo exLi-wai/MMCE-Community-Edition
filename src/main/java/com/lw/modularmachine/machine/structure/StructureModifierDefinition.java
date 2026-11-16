@@ -66,7 +66,7 @@ public record StructureModifierDefinition(
       }
       final MachineDefinition compiled;
       try {
-        compiled = MachineDefinition.parse(id, synthetic, snapshot);
+        compiled = MachineDefinitionParser.parse(id, synthetic, snapshot);
       } catch (RuntimeException invalid) {
         throw new JsonParseException(
             id + ": $.structure_modifiers." + source.id() + ": " + invalid.getMessage(),

@@ -1,12 +1,16 @@
 package com.lw.modularmachine.integration.kubejs;
 
+import com.lw.modularmachine.machine.recipe.RecipeDeclaredObservers;
+import com.lw.modularmachine.integration.kubejs.KubeJSRecipeRows.ItemRow;
+import com.lw.modularmachine.integration.kubejs.KubeJSRecipeRows.FluidRow;
+import com.lw.modularmachine.integration.kubejs.KubeJSRecipeRows.ChemicalRow;
+import com.lw.modularmachine.machine.recipe.RecipeScriptCallbacks;
 import com.google.gson.JsonArray;
 import com.google.gson.JsonElement;
 import com.google.gson.JsonObject;
 import com.lw.modularmachine.ModularMachine;
 import com.lw.modularmachine.api.recipe.RecipeFailureAction;
 import com.lw.modularmachine.api.recipe.ChemicalRecipeData;
-import com.lw.modularmachine.api.recipe.ChemicalRequirement;
 import com.lw.modularmachine.api.recipe.RecipeModifier;
 import com.lw.modularmachine.api.recipe.RecipeSelectors;
 import com.lw.modularmachine.api.recipe.FluidRequirement;
@@ -14,12 +18,14 @@ import com.lw.modularmachine.api.recipe.RecipeExecutionOptions;
 import com.lw.modularmachine.api.recipe.RecipeScriptOptions;
 import com.lw.modularmachine.api.recipe.RecipeItemCallbacks;
 import com.lw.modularmachine.api.recipe.RecipeLifecycleEvents;
+import com.lw.modularmachine.api.recipe.resource.RecipeResources;
 import com.lw.modularmachine.api.smart.SmartNumberRequirement;
 import com.lw.modularmachine.machine.recipe.ItemStackSnapshots;
 import com.lw.modularmachine.machine.recipe.MachineRecipe;
 import com.lw.modularmachine.machine.recipe.MachineRecipeJson;
 import com.lw.modularmachine.machine.recipe.ResourceSelector;
 import com.lw.modularmachine.machine.recipe.RecipeModifiers;
+import com.lw.modularmachine.machine.recipe.resource.RecipeResourceBuilderDeclarations;
 import com.lw.modularmachine.machine.smart.SmartInterfaceType;
 import com.mojang.serialization.Codec;
 import com.mojang.serialization.JsonOps;
@@ -28,7 +34,6 @@ import dev.latvian.mods.kubejs.script.KubeJSContext;
 import dev.latvian.mods.kubejs.script.ScriptType;
 import dev.latvian.mods.kubejs.util.KubeResourceLocation;
 import dev.latvian.mods.rhino.Context;
-import java.math.BigDecimal;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Objects;
@@ -64,55 +69,22 @@ public final class KubeJSRecipeBuilder {
   public static RecipeBuilder newBuilder(Context context, RecipesKubeEvent event, String recipeName, String machineName, Number processingTickTime, Number sortingPriority) {
     requireServerScript(context);
     Objects.requireNonNull(event, "recipe event");
-    var id = identifier(recipeName, "recipe");
+    var id = KubeJSRecipeArguments.identifier(recipeName, "recipe");
     if (recipeName.indexOf(':') < 0) {
       id = ResourceLocation.fromNamespaceAndPath(ModularMachine.MODID, id.getPath());
     }
     return new RecipeBuilder(
         event,
         id,
-        identifier(machineName, "machine"),
-        (int) integer(processingTickTime, "processing tick time", 1, Integer.MAX_VALUE),
-        (int) integer(sortingPriority, "sorting priority", Integer.MIN_VALUE, Integer.MAX_VALUE));
+        KubeJSRecipeArguments.identifier(machineName, "machine"),
+        (int) KubeJSRecipeArguments.integer(processingTickTime, "processing tick time", 1, Integer.MAX_VALUE),
+        (int) KubeJSRecipeArguments.integer(sortingPriority, "sorting priority", Integer.MIN_VALUE, Integer.MAX_VALUE));
   }
 
   private static void requireServerScript(Context context) {
     if (!(context instanceof KubeJSContext kubeContext) || kubeContext.getType() != ScriptType.SERVER) {
       throw new IllegalStateException("Machine recipe builders require a server recipe script");
     }
-  }
-
-  private static ResourceLocation identifier(String text, String field) {
-    var id = text == null ? null : ResourceLocation.tryParse(text);
-    if (id == null) {
-      throw new IllegalArgumentException("Invalid machine recipe " + field + " ID: " + text);
-    }
-    return id;
-  }
-
-  private static long integer(Number value, String field, long minimum, long maximum) {
-    Objects.requireNonNull(value, field);
-    if ((value instanceof Double || value instanceof Float) && Math.abs(value.doubleValue()) > 9007199254740991D) {
-      throw new IllegalArgumentException("Large " + field + " values require an exact decimal string");
-    }
-    final long amount;
-    try {
-      amount = new BigDecimal(value.toString()).longValueExact();
-    } catch (ArithmeticException | NumberFormatException invalid) {
-      throw new IllegalArgumentException(field + " requires an exact integer", invalid);
-    }
-    if (amount < minimum || amount > maximum) {
-      throw new IllegalArgumentException(field + " is outside its integer range");
-    }
-    return amount;
-  }
-
-  private static long integer(String value, String field, long minimum, long maximum) {
-    Objects.requireNonNull(value, field);
-    if (!value.matches("[0-9]+")) {
-      throw new IllegalArgumentException(field + " requires an exact decimal integer string");
-    }
-    return integer(new BigDecimal(value), field, minimum, maximum);
   }
 
   public static final class RecipeBuilder {
@@ -127,55 +99,6 @@ public final class KubeJSRecipeBuilder {
       CHEMICAL
     }
 
-    private static final class ItemRow {
-      final ItemStack prototype;
-      final long amount;
-      double chance = 1;
-      boolean parallelUnaffected;
-      String selector = "";
-      String match = "exact";
-      ItemStack preview;
-      ResourceLocation checker;
-      RecipeItemCallbacks.Checker inlineChecker;
-      final List<ResourceLocation> itemModifiers = new ArrayList<>();
-      final Map<ResourceLocation, RecipeItemCallbacks.Modifier> inlineModifiers = new LinkedHashMap<>();
-      final Map<ResourceLocation, RecipeItemCallbacks.InputModifier> inlineInputModifiers = new LinkedHashMap<>();
-
-      ItemRow(ItemStack prototype, long amount) {
-        this.prototype = prototype;
-        this.amount = amount;
-      }
-    }
-
-    private static final class ChemicalRow {
-      final ResourceLocation chemical;
-      final long amount;
-      String selector = "";
-
-      ChemicalRow(ResourceLocation chemical, long amount) {
-        this.chemical = chemical;
-        this.amount = amount;
-      }
-
-      ChemicalRequirement requirement() {
-        return new ChemicalRequirement(chemical, amount, selector);
-      }
-    }
-
-    private static final class FluidRow {
-      final FluidStack stack;
-      double chance = 1;
-      boolean parallelUnaffected;
-
-      FluidRow(FluidStack stack) {
-        this.stack = stack;
-      }
-
-      FluidRequirement requirement() {
-        return new FluidRequirement(stack, chance, parallelUnaffected);
-      }
-    }
-
     private final RecipesKubeEvent event;
     private final ResourceLocation id, machine;
     private final int duration, priority;
@@ -186,8 +109,9 @@ public final class KubeJSRecipeBuilder {
         chemicalPerTick = new ArrayList<>();
     private final List<SmartNumberRequirement> interfaceInputs = new ArrayList<>();
     private final List<RecipeModifier> modifiers = new ArrayList<>();
+    private final Map<ResourceLocation, RecipeResources.Entry<?>> resourceDeclarations = new LinkedHashMap<>();
     private final List<String> tooltips = new ArrayList<>();
-    private final List<KubeJSRecipeBuilderHandlers.Handler> lifecycleHandlers = new ArrayList<>();
+    private final List<RecipeDeclaredObservers.Handler> lifecycleHandlers = new ArrayList<>();
     private FluidStack fluidPerTick = FluidStack.EMPTY;
     private long energyPerTick;
     private long energyOutputPerTick;
@@ -221,6 +145,25 @@ public final class KubeJSRecipeBuilder {
       if (built || Thread.currentThread() != owner) {
         throw new IllegalStateException("Machine recipe builder is built or used outside its recipe thread");
       }
+    }
+
+    /**
+     * Uses only a Java-installed descriptor and its complete owned native field
+     * declaration.
+     */
+    public RecipeBuilder setResource(String resourceId, JsonObject declaration) {
+      requireMutable();
+      var entry = RecipeResourceBuilderDeclarations.decode(
+          KubeJSRecipeArguments.identifier(resourceId, "recipe resource"),
+          declaration,
+          event.registries.access());
+      resourceDeclarations.put(entry.type().id(), entry);
+      last = LastRequirement.NONE;
+      lastItem = null;
+      lastChemical = null;
+      lastFluid = null;
+
+      return this;
     }
 
     public RecipeBuilder addItemInput(ItemStack stack) {
@@ -277,11 +220,11 @@ public final class KubeJSRecipeBuilder {
     }
 
     public RecipeBuilder addItemInput(ItemStack stack, Number amount) {
-      return addItem(inputs, stack, integer(amount, "item amount", 1, Long.MAX_VALUE));
+      return addItem(inputs, stack, KubeJSRecipeArguments.integer(amount, "item amount", 1, Long.MAX_VALUE));
     }
 
     public RecipeBuilder addItemInput(ItemStack stack, String amount) {
-      return addItem(inputs, stack, integer(amount, "item amount", 1, Long.MAX_VALUE));
+      return addItem(inputs, stack, KubeJSRecipeArguments.integer(amount, "item amount", 1, Long.MAX_VALUE));
     }
 
     public RecipeBuilder addItemInputIgnoringComponents(ItemStack stack) {
@@ -289,11 +232,11 @@ public final class KubeJSRecipeBuilder {
     }
 
     public RecipeBuilder addItemInputIgnoringComponents(ItemStack stack, Number amount) {
-      return addItemIgnoringComponents(stack, integer(amount, "item amount", 1, Long.MAX_VALUE));
+      return addItemIgnoringComponents(stack, KubeJSRecipeArguments.integer(amount, "item amount", 1, Long.MAX_VALUE));
     }
 
     public RecipeBuilder addItemInputIgnoringComponents(ItemStack stack, String amount) {
-      return addItemIgnoringComponents(stack, integer(amount, "item amount", 1, Long.MAX_VALUE));
+      return addItemIgnoringComponents(stack, KubeJSRecipeArguments.integer(amount, "item amount", 1, Long.MAX_VALUE));
     }
 
     private RecipeBuilder addItemIgnoringComponents(ItemStack stack, long amount) {
@@ -311,11 +254,11 @@ public final class KubeJSRecipeBuilder {
     }
 
     public RecipeBuilder addItemOutput(ItemStack stack, Number amount) {
-      return addItem(outputs, stack, integer(amount, "item amount", 1, Long.MAX_VALUE));
+      return addItem(outputs, stack, KubeJSRecipeArguments.integer(amount, "item amount", 1, Long.MAX_VALUE));
     }
 
     public RecipeBuilder addItemOutput(ItemStack stack, String amount) {
-      return addItem(outputs, stack, integer(amount, "item amount", 1, Long.MAX_VALUE));
+      return addItem(outputs, stack, KubeJSRecipeArguments.integer(amount, "item amount", 1, Long.MAX_VALUE));
     }
 
     public RecipeBuilder addItemInputs(List<ItemStack> stacks) {
@@ -359,11 +302,11 @@ public final class KubeJSRecipeBuilder {
     }
 
     public RecipeBuilder addEnergyPerTickInput(Number amount) {
-      return addEnergy(integer(amount, "FE/t", 0, Long.MAX_VALUE));
+      return addEnergy(KubeJSRecipeArguments.integer(amount, "FE/t", 0, Long.MAX_VALUE));
     }
 
     public RecipeBuilder addEnergyPerTickInput(String amount) {
-      return addEnergy(integer(amount, "FE/t", 0, Long.MAX_VALUE));
+      return addEnergy(KubeJSRecipeArguments.integer(amount, "FE/t", 0, Long.MAX_VALUE));
     }
 
     private RecipeBuilder addEnergy(long amount) {
@@ -379,11 +322,11 @@ public final class KubeJSRecipeBuilder {
     }
 
     public RecipeBuilder addEnergyPerTickOutput(Number amount) {
-      return addEnergyOutput(integer(amount, "output FE/t", 0, Long.MAX_VALUE));
+      return addEnergyOutput(KubeJSRecipeArguments.integer(amount, "output FE/t", 0, Long.MAX_VALUE));
     }
 
     public RecipeBuilder addEnergyPerTickOutput(String amount) {
-      return addEnergyOutput(integer(amount, "output FE/t", 0, Long.MAX_VALUE));
+      return addEnergyOutput(KubeJSRecipeArguments.integer(amount, "output FE/t", 0, Long.MAX_VALUE));
     }
 
     private RecipeBuilder addEnergyOutput(long amount) {
@@ -488,7 +431,7 @@ public final class KubeJSRecipeBuilder {
       if (rows.size() >= ChemicalRecipeData.MAX_REQUIREMENTS) {
         throw new IllegalArgumentException("Too many machine recipe chemical requirements");
       }
-      var row = new ChemicalRow(identifier(chemical, "chemical"), amount);
+      var row = new ChemicalRow(KubeJSRecipeArguments.identifier(chemical, "chemical"), amount);
       rows.add(row);
       last = LastRequirement.CHEMICAL;
       lastChemical = row;
@@ -497,11 +440,11 @@ public final class KubeJSRecipeBuilder {
     }
 
     private static long chemicalAmount(Number value) {
-      return integer(value, "chemical amount", 1, Long.MAX_VALUE);
+      return KubeJSRecipeArguments.integer(value, "chemical amount", 1, Long.MAX_VALUE);
     }
 
     private static long chemicalAmount(String value) {
-      return integer(value, "chemical amount", 1, Long.MAX_VALUE);
+      return KubeJSRecipeArguments.integer(value, "chemical amount", 1, Long.MAX_VALUE);
     }
 
     private FluidStack detachedFluid(FluidStack fluid) {
@@ -561,13 +504,13 @@ public final class KubeJSRecipeBuilder {
 
     public RecipeBuilder setRandomSeed(Number seed) {
       requireMutable();
-      randomSeed = integer(seed, "random seed", 0, Long.MAX_VALUE);
+      randomSeed = KubeJSRecipeArguments.integer(seed, "random seed", 0, Long.MAX_VALUE);
       return this;
     }
 
     public RecipeBuilder setRandomSeed(String seed) {
       requireMutable();
-      randomSeed = integer(seed, "random seed", 0, Long.MAX_VALUE);
+      randomSeed = KubeJSRecipeArguments.integer(seed, "random seed", 0, Long.MAX_VALUE);
       return this;
     }
 
@@ -681,7 +624,8 @@ public final class KubeJSRecipeBuilder {
 
     public RecipeBuilder setMaxThreads(Number maximum) {
       requireMutable();
-      maxThreads = (int) integer(maximum, "maximum recipe threads", 0, RecipeExecutionOptions.MAX_THREADS);
+      maxThreads = (int) KubeJSRecipeArguments
+          .integer(maximum, "maximum recipe threads", 0, RecipeExecutionOptions.MAX_THREADS);
       return this;
     }
 
@@ -726,14 +670,14 @@ public final class KubeJSRecipeBuilder {
 
     public RecipeBuilder setNBTChecker(String handler) {
       var row = requireInputItem();
-      row.checker = identifier(handler, "item checker");
+      row.checker = KubeJSRecipeArguments.identifier(handler, "item checker");
       row.inlineChecker = null;
       return this;
     }
 
     public RecipeBuilder setNBTChecker(RecipeItemCallbacks.Checker checker) {
       var row = requireInputItem();
-      row.checker = KubeJSRecipeItemCallbacks.identity(id, "input/" + inputs.indexOf(row) + "/checker");
+      row.checker = KubeJSCallbackIds.identity(id, "input/" + inputs.indexOf(row) + "/checker");
       row.inlineChecker = Objects.requireNonNull(checker, "item checker");
       return this;
     }
@@ -751,7 +695,7 @@ public final class KubeJSRecipeBuilder {
         throw new IllegalArgumentException("Too many item modifiers in one row");
       }
       boolean input = inputs.contains(row);
-      return KubeJSRecipeItemCallbacks.identity(
+      return KubeJSCallbackIds.identity(
           id,
           (input ? "input/" : "output/") + (input ? inputs.indexOf(row) : outputs
               .indexOf(row)) + "/modifier/" + row.itemModifiers.size());
@@ -760,7 +704,7 @@ public final class KubeJSRecipeBuilder {
     public RecipeBuilder addItemModifier(String handler) {
       var row = requireLastItem();
       modifierIdentity(row);
-      var callback = identifier(handler, "item modifier");
+      var callback = KubeJSRecipeArguments.identifier(handler, "item modifier");
       if (row.itemModifiers.contains(callback)) {
         throw new IllegalArgumentException("Duplicate item modifier in one row");
       }
@@ -815,8 +759,8 @@ public final class KubeJSRecipeBuilder {
         throw new IllegalArgumentException("Too many inline recipe lifecycle handlers");
       }
       lifecycleHandlers.add(
-          new KubeJSRecipeBuilderHandlers.Handler(
-              KubeJSRecipeItemCallbacks.identity(id, "lifecycle/" + lifecycleHandlers.size()),
+          new RecipeDeclaredObservers.Handler(
+              KubeJSCallbackIds.identity(id, "lifecycle/" + lifecycleHandlers.size()),
               machine,
               id,
               type,
@@ -843,14 +787,14 @@ public final class KubeJSRecipeBuilder {
     }
 
     private void captureCallbacks() {
-      lifecycleHandlers.forEach(KubeJSRecipeItemCallbacks::lifecycle);
+      lifecycleHandlers.forEach(RecipeScriptCallbacks::lifecycle);
       for (var rows : List.of(inputs, outputs)) {
         for (var row : rows) {
           if (row.inlineChecker != null) {
-            KubeJSRecipeItemCallbacks.checker(row.checker, row.inlineChecker);
+            RecipeScriptCallbacks.checker(row.checker, row.inlineChecker);
           }
-          row.inlineModifiers.forEach(KubeJSRecipeItemCallbacks::modifier);
-          row.inlineInputModifiers.forEach(KubeJSRecipeItemCallbacks::inputModifier);
+          row.inlineModifiers.forEach(RecipeScriptCallbacks::modifier);
+          row.inlineInputModifiers.forEach(RecipeScriptCallbacks::inputModifier);
         }
       }
     }
@@ -858,6 +802,17 @@ public final class KubeJSRecipeBuilder {
     public void build(Context context) {
       requireMutable();
       requireServerScript(context);
+      var json = declarationJson();
+      built = true;
+      var recipe = event.custom(context, json);
+      if (recipe == null || recipe.creationError) {
+        throw new IllegalStateException("KubeJS rejected the native machine recipe declaration");
+      }
+      recipe.id(new KubeResourceLocation(id));
+      captureCallbacks();
+    }
+
+    private JsonObject declarationJson() {
       var json = new JsonObject();
       json.addProperty("type", MachineRecipeJson.TYPE);
       json.addProperty("machine", machine.toString());
@@ -920,16 +875,13 @@ public final class KubeJSRecipeBuilder {
       if (!chemicals.isEmpty()) {
         json.add("chemicals", encode(ChemicalRecipeData.CODEC, chemicals));
       }
+      for (var entry : resourceDeclarations.values()) {
+        RecipeResourceBuilderDeclarations.apply(json, entry, event.registries.access());
+      }
       MachineRecipeJson.validate(json);
       MachineRecipe.CODEC.codec().parse(event.registries.access().createSerializationContext(JsonOps.INSTANCE), json)
           .getOrThrow();
-      built = true;
-      var recipe = event.custom(context, json);
-      if (recipe == null || recipe.creationError) {
-        throw new IllegalStateException("KubeJS rejected the native machine recipe declaration");
-      }
-      recipe.id(new KubeResourceLocation(id));
-      captureCallbacks();
+      return json;
     }
 
     private JsonArray itemRows(List<ItemRow> rows) {

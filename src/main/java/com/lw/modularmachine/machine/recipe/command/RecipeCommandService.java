@@ -8,7 +8,7 @@ import com.lw.modularmachine.api.recipe.RecipeCommandActions.Source;
 import com.lw.modularmachine.api.recipe.RecipeLifecycleEvents.Context;
 import com.lw.modularmachine.api.recipe.RecipeLifecycleEvents.Type;
 import com.lw.modularmachine.config.MachineConfig;
-import com.lw.modularmachine.machine.factory.UpgradeLifecyclePublisher;
+import com.lw.modularmachine.machine.upgrade.UpgradeLifecyclePublisher;
 import com.lw.modularmachine.machine.smart.SmartInterfaceEventPublisher;
 import com.lw.modularmachine.machine.structure.StructureService.StructureSubject;
 import com.lw.modularmachine.util.callback.ServerCallbackRegistry;

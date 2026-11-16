@@ -9,7 +9,7 @@ import com.lw.modularmachine.blockentity.MachineControllerBlockEntity;
 import com.lw.modularmachine.blockentity.MachinePortBlockEntity;
 import com.lw.modularmachine.machine.factory.FactoryThreadState.State;
 import com.lw.modularmachine.machine.factory.FactoryThreadState;
-import com.lw.modularmachine.api.upgrade.FactoryUpgradeSnapshot;
+import com.lw.modularmachine.api.upgrade.UpgradeSnapshot;
 import com.lw.modularmachine.api.orientation.MachineOrientation;
 import com.lw.modularmachine.machine.recipe.search.RecipeSearch;
 import com.lw.modularmachine.machine.recipe.MachineRecipe;
@@ -377,8 +377,8 @@ public final class NativeMachineRecipeGameTests {
                 MachineRegistries.PORTS.get("energy_input_hatch_normal").get().defaultBlockState());
             var factory = (FactoryControllerBlockEntity) level.getBlockEntity(origin);
             factory.bindMachine(machine);
-            var upgrades = new FactoryUpgradeSnapshot(0, 2, 2, 1, 3, 1, 1, 1);
-            factory.replaceThreads(
+            var upgrades = new UpgradeSnapshot(0, 2, 2, 1, 3, 1, 1, 1);
+            factory.threadConfiguration().replaceThreads(
                 List.of(
                     factoryThread("channel_a", machine, recipe, upgrades),
                     factoryThread("channel_b", machine, recipe, upgrades)));
@@ -457,7 +457,7 @@ public final class NativeMachineRecipeGameTests {
         }));
   }
 
-  private static FactoryThreadState factoryThread(String threadId, ResourceLocation machine, ResourceLocation recipe, FactoryUpgradeSnapshot upgrades) {
+  private static FactoryThreadState factoryThread(String threadId, ResourceLocation machine, ResourceLocation recipe, UpgradeSnapshot upgrades) {
     return new FactoryThreadState(
         threadId,
         machine,

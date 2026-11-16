@@ -1,6 +1,7 @@
 package com.lw.modularmachine.machine.network.pattern;
 
 import com.lw.modularmachine.machine.network.NetworkPortResource;
+import com.lw.modularmachine.machine.network.codec.NetworkResourceCodecs;
 import java.util.Objects;
 import net.minecraft.core.HolderLookup;
 import net.minecraft.nbt.CompoundTag;
@@ -32,11 +33,8 @@ public final class PatternResourceKey {
   }
 
   public static PatternResourceKey load(CompoundTag tag, HolderLookup.Provider registries) {
-    var identity = NetworkPortResource.load(registries, tag.copy());
     // Stored prototypes are count one; do not silently normalize damaged counts.
-    if (!identity.save(registries).equals(tag)) {
-      throw new IllegalArgumentException("Noncanonical pattern resource identity");
-    }
+    var identity = NetworkResourceCodecs.loadCanonical(registries, tag.copy());
 
     return capture(identity, registries);
   }

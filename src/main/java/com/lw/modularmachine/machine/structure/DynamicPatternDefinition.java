@@ -138,15 +138,15 @@ public record DynamicPatternDefinition(
       if (source.has("faces")) {
         validateFaces(source.get("faces"), path + ".faces");
       }
-      var start = MachineDefinition.parseParts(
+      var start = MachinePartParser.parse(
           machine,
           partArray(alias(source, "parts_start", "parts-start", path), false, path + ".parts_start"),
           path + ".parts_start",
           snapshot,
           true);
-      var body = MachineDefinition
-          .parseParts(machine, partArray(source.get("parts"), true, path + ".parts"), path + ".parts", snapshot, true);
-      var end = MachineDefinition.parseParts(
+      var body = MachinePartParser
+          .parse(machine, partArray(source.get("parts"), true, path + ".parts"), path + ".parts", snapshot, true);
+      var end = MachinePartParser.parse(
           machine,
           partArray(alias(source, "parts_end", "parts-end", path), false, path + ".parts_end"),
           path + ".parts_end",

@@ -1,6 +1,6 @@
 package com.lw.modularmachine.machine.factory;
 
-import com.lw.modularmachine.api.upgrade.FactoryUpgradeSnapshot;
+import com.lw.modularmachine.api.upgrade.UpgradeSnapshot;
 import java.util.List;
 import net.minecraft.resources.ResourceLocation;
 import org.junit.jupiter.api.Test;
@@ -20,7 +20,7 @@ class FactorySchedulerTest {
         FactoryThreadState.State.IDLE,
         FactoryThreadState.Reason.NONE,
         0,
-        FactoryUpgradeSnapshot.identity(0));
+        UpgradeSnapshot.identity(0));
   }
 
   @Test

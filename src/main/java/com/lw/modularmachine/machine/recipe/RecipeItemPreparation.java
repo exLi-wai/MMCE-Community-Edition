@@ -62,7 +62,7 @@ public final class RecipeItemPreparation {
         ownership);
   }
 
-  static InputCheck checkInputs(MachineRecipe recipe, RecipeExecutionTicket ticket, Optional<String> thread, int instances, FrozenItemRun run) {
+  static InputCheck checkInputs(MachineRecipe recipe, RecipeExecutionTicket ticket, Optional<String> thread, int instances, FrozenRecipeRun run) {
     var slices = new ArrayList<RecipeItemCallbackService.InputItem>();
     var reserved = new HashMap<PhysicalSlot, Long>();
     for (int row = 0; row < recipe.inputs().size(); row++) {

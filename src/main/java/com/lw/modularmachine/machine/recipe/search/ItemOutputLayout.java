@@ -1,5 +1,6 @@
 package com.lw.modularmachine.machine.recipe.search;
 
+import com.lw.modularmachine.machine.PortKind;
 import com.lw.modularmachine.machine.recipe.ItemResourceKey;
 import com.lw.modularmachine.machine.recipe.RecipeExecutionTicket;
 import java.util.ArrayList;
@@ -13,8 +14,9 @@ import net.minecraft.world.item.ItemStack;
 import org.jetbrains.annotations.ApiStatus;
 
 /**
- * Detached output slot images and their shared capacity domain. Nothing is
- * inserted during planning.
+ * Detached item-output slot images and their shared capacity domain. Full
+ * resource tickets are accepted, but input storage never contributes space.
+ * Nothing is inserted during planning.
  */
 @ApiStatus.Internal
 public final class ItemOutputLayout {
@@ -31,6 +33,9 @@ public final class ItemOutputLayout {
     var copied = new HashMap<String, List<ItemStack>>();
     var limitsBySize = new HashMap<ItemSlotDomain, Map<ItemResourceKey, Long>>();
     for (var port : ticket.ports()) {
+      if (port.kind() != PortKind.ITEM_OUTPUT) {
+        continue;
+      }
       var items = port.items();
       copied.put(port.partId(), items);
       for (int i = 0; i < items.size(); i++) {

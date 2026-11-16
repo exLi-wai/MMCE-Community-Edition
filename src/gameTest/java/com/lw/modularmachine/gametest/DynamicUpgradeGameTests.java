@@ -2,12 +2,12 @@ package com.lw.modularmachine.gametest;
 
 import com.lw.modularmachine.blockentity.MachinePortBlockEntity;
 import com.lw.modularmachine.blockentity.UpgradeBusBlockEntity;
-import com.lw.modularmachine.api.upgrade.FactoryDynamicUpgrades;
-import com.lw.modularmachine.machine.factory.FactoryUpgradeCompatibility;
-import com.lw.modularmachine.machine.factory.FactoryUpgradeDefinition;
-import com.lw.modularmachine.api.upgrade.FactoryUpgradeEntry;
-import com.lw.modularmachine.machine.factory.FactoryUpgradeEntryResolver;
-import com.lw.modularmachine.machine.factory.FactoryUpgradeService;
+import com.lw.modularmachine.api.upgrade.DynamicUpgrades;
+import com.lw.modularmachine.machine.upgrade.UpgradeCompatibility;
+import com.lw.modularmachine.machine.upgrade.UpgradeDefinition;
+import com.lw.modularmachine.api.upgrade.UpgradeEntry;
+import com.lw.modularmachine.machine.upgrade.UpgradeEntryResolver;
+import com.lw.modularmachine.machine.upgrade.UpgradeCatalogService;
 import com.lw.modularmachine.network.UpgradeBusPayloads;
 import com.lw.modularmachine.registry.MachineRegistries;
 import java.util.List;
@@ -39,14 +39,14 @@ public final class DynamicUpgradeGameTests {
   private static final ResourceLocation RUN_HANDLER = id("test_dynamic_run_effect");
   private static final ResourceLocation MACHINE = id("test_upgrade_bus_binding");
   private static final String THREAD = "upgrade_thread";
-  private static List<FactoryUpgradeDefinition> savedDefinitions;
+  private static List<UpgradeDefinition> savedDefinitions;
 
   @AfterBatch(batch = "dynamic_upgrade_effects")
   public static void cleanup(ServerLevel level) {
-    FactoryDynamicUpgrades.remove(HANDLER);
-    FactoryDynamicUpgrades.remove(RUN_HANDLER);
+    DynamicUpgrades.remove(HANDLER);
+    DynamicUpgrades.remove(RUN_HANDLER);
     if (savedDefinitions != null) {
-      FactoryUpgradeService.replaceDefinitions(savedDefinitions);
+      UpgradeCatalogService.replaceDefinitions(savedDefinitions);
       savedDefinitions = null;
     }
   }
@@ -61,7 +61,7 @@ public final class DynamicUpgradeGameTests {
             return;
           }
           GameTestUpgradeFixtures.install();
-          savedDefinitions = FactoryUpgradeService.snapshot().definitions();
+          savedDefinitions = UpgradeCatalogService.snapshot().definitions();
           try {
             verifyEffects(helper);
             beginPaidRuns(helper);
@@ -88,27 +88,19 @@ public final class DynamicUpgradeGameTests {
     UpgradeBusGameTests.confirm(helper, factory);
     factory.serverTick();
     helper.assertTrue(
-        !bus.upgradeCatalogValid() && factory.upgradeSources().isEmpty(),
+        !bus.upgradeCatalogValid() && factory.upgrades().sources().isEmpty(),
         "Missing dynamic handler fell back to static or stale effects");
 
     var calls = new AtomicInteger();
     var multiplier = new AtomicInteger(1);
-    var observed = new AtomicReference<FactoryDynamicUpgrades.Context>();
-    FactoryDynamicUpgrades.register(HANDLER, context -> {
+    var observed = new AtomicReference<DynamicUpgrades.Context>();
+    DynamicUpgrades.register(HANDLER, context -> {
       calls.incrementAndGet();
       observed.set(context);
       var itemData = context.itemData();
       int charge = itemData.getCompound("components").getCompound("minecraft:custom_data").getInt("charge");
       itemData.getCompound("components").getCompound("minecraft:custom_data").putInt("charge", 999);
-      return new FactoryUpgradeEntry(
-          context.baseEffect().id(),
-          charge * context.count() * multiplier.get(),
-          2,
-          1,
-          1,
-          1,
-          1,
-          1);
+      return new UpgradeEntry(context.baseEffect().id(), charge * context.count() * multiplier.get(), 2, 1, 1, 1, 1, 1);
     });
     bus.serverTick();
     factory.serverTick();
@@ -135,10 +127,10 @@ public final class DynamicUpgradeGameTests {
       UpgradeBusPayloads.capture(7, bus);
     }
     helper.assertTrue(
-        calls.get() == resolvedCalls && FactoryUpgradeEntryResolver.resolve(stack).isEmpty(),
+        calls.get() == resolvedCalls && UpgradeEntryResolver.resolve(stack).isEmpty(),
         "Unchanged menus/ticks repeated callbacks or raw resolution bypassed the dynamic context");
     multiplier.set(2);
-    FactoryDynamicUpgrades.invalidate(HANDLER);
+    DynamicUpgrades.invalidate(HANDLER);
     bus.serverTick();
     factory.serverTick();
     helper.assertTrue(
@@ -162,10 +154,10 @@ public final class DynamicUpgradeGameTests {
         "Dynamic bus rebuild lost its handler context, items, or saved revision");
 
     var protectedBus = bus;
-    List<FactoryDynamicUpgrades.Evaluator> invalid = List.of(
+    List<DynamicUpgrades.Evaluator> invalid = List.of(
         value -> null,
-        value -> new FactoryUpgradeEntry(id("wrong_identity"), 1, 1, 1, 1, 1, 1, 1),
-        value -> new FactoryUpgradeEntry(value.baseEffect().id(), 1, 300, 1, 1, 1, 1, 1),
+        value -> new UpgradeEntry(id("wrong_identity"), 1, 1, 1, 1, 1, 1, 1),
+        value -> new UpgradeEntry(value.baseEffect().id(), 1, 300, 1, 1, 1, 1, 1),
         value -> {
           throw new IllegalArgumentException("test callback failure");
         },
@@ -174,51 +166,51 @@ public final class DynamicUpgradeGameTests {
           return value.baseEffect();
         });
     for (var evaluator : invalid) {
-      FactoryDynamicUpgrades.register(HANDLER, evaluator);
+      DynamicUpgrades.register(HANDLER, evaluator);
       bus.serverTick();
       factory.serverTick();
       helper.assertTrue(
           !bus.upgradeCatalogValid()
-              && factory.upgradeSources().isEmpty()
+              && factory.upgrades().sources().isEmpty()
               && !UpgradeBusPayloads.capture(7, bus).valid()
               && ItemStack.matches(before, bus.inventory().getStackInSlot(0)),
           "Invalid callback retained a source or changed inventory during evaluation");
     }
 
-    FactoryDynamicUpgrades.Evaluator stable = value -> value.baseEffect();
+    DynamicUpgrades.Evaluator stable = value -> value.baseEffect();
     var replaced = new AtomicBoolean();
-    FactoryDynamicUpgrades.register(HANDLER, value -> {
+    DynamicUpgrades.register(HANDLER, value -> {
       replaced.set(true);
-      FactoryDynamicUpgrades.register(HANDLER, stable);
-      return new FactoryUpgradeEntry(value.baseEffect().id(), 100, 1, 1, 1, 1, 1, 1);
+      DynamicUpgrades.register(HANDLER, stable);
+      return new UpgradeEntry(value.baseEffect().id(), 100, 1, 1, 1, 1, 1, 1);
     });
     bus.serverTick();
     helper.assertTrue(
-        replaced.get() && !bus.upgradeCatalogValid() && factory.upgradeSources().isEmpty(),
+        replaced.get() && !bus.upgradeCatalogValid() && factory.upgrades().sources().isEmpty(),
         "Callback result survived a reentrant handler replacement");
     bus.serverTick();
     factory.serverTick();
     helper.assertTrue(
         bus.upgradeCatalogValid() && factory.scheduler().channels().getFirst().parallelLimit() == 3,
         "New handler generation did not recover the source");
-    var published = FactoryUpgradeService.snapshot();
+    var published = UpgradeCatalogService.snapshot();
     boolean workerRejected = CompletableFuture.supplyAsync(() -> {
       try {
-        FactoryDynamicUpgrades.register(HANDLER, stable);
+        DynamicUpgrades.register(HANDLER, stable);
         return false;
       } catch (IllegalStateException expected) {
         return true;
       }
     }).join();
     helper.assertTrue(
-        workerRejected && FactoryUpgradeService.snapshot() == published,
+        workerRejected && UpgradeCatalogService.snapshot() == published,
         "Worker published a handler generation");
-    FactoryDynamicUpgrades.remove(HANDLER);
+    DynamicUpgrades.remove(HANDLER);
     bus.serverTick();
     helper.assertTrue(
-        !bus.upgradeCatalogValid() && factory.upgradeSources().isEmpty(),
+        !bus.upgradeCatalogValid() && factory.upgrades().sources().isEmpty(),
         "Removed handler retained effects");
-    FactoryDynamicUpgrades.register(HANDLER, stable);
+    DynamicUpgrades.register(HANDLER, stable);
     bus.serverTick();
     factory.serverTick();
     helper.assertTrue(
@@ -230,15 +222,14 @@ public final class DynamicUpgradeGameTests {
     var level = helper.getLevel();
     var machine = id("test_upgrade_compatibility_run");
     var origin = helper.absolutePos(new BlockPos(7, 5, 7));
-    var effect = new FactoryUpgradeEntry(id("dynamic_run_speed"), 0, 1, 1, 1, 1, 1, 1);
-    FactoryDynamicUpgrades
-        .register(RUN_HANDLER, value -> new FactoryUpgradeEntry(value.baseEffect().id(), 0, 2, 1, 1, 1, 1, 1));
-    FactoryUpgradeService.replaceDefinitions(
+    var effect = new UpgradeEntry(id("dynamic_run_speed"), 0, 1, 1, 1, 1, 1, 1);
+    DynamicUpgrades.register(RUN_HANDLER, value -> new UpgradeEntry(value.baseEffect().id(), 0, 2, 1, 1, 1, 1, 1));
+    UpgradeCatalogService.replaceDefinitions(
         List.of(
-            new FactoryUpgradeDefinition(
+            new UpgradeDefinition(
                 ResourceLocation.fromNamespaceAndPath("minecraft", "amethyst_shard"),
                 effect,
-                new FactoryUpgradeCompatibility(Set.of(machine), Set.of()),
+                new UpgradeCompatibility(Set.of(machine), Set.of()),
                 null,
                 RUN_HANDLER)));
     var factory = UpgradeBusGameTests.buildUpgradeFactory(helper, origin, machine);
@@ -259,7 +250,7 @@ public final class DynamicUpgradeGameTests {
     }
     var paid = factory.run(THREAD).orElseThrow();
     helper.assertTrue(paid.duration() == 10, "Dynamic speed did not freeze into the first paid run");
-    FactoryDynamicUpgrades.register(RUN_HANDLER, FactoryDynamicUpgrades.Context::baseEffect);
+    DynamicUpgrades.register(RUN_HANDLER, DynamicUpgrades.Context::baseEffect);
     bus.serverTick();
     factory.serverTick();
     helper.assertTrue(

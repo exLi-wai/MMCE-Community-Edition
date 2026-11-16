@@ -3,11 +3,11 @@ package com.lw.modularmachine.gametest;
 import com.google.gson.JsonParseException;
 import com.lw.modularmachine.blockentity.FactoryControllerBlockEntity;
 import com.lw.modularmachine.blockentity.UpgradeBusBlockEntity;
-import com.lw.modularmachine.machine.factory.FactoryUpgradeCompatibility;
-import com.lw.modularmachine.machine.factory.FactoryUpgradeDefinition;
-import com.lw.modularmachine.api.upgrade.FactoryUpgradeEntry;
-import com.lw.modularmachine.machine.factory.FactoryUpgradeEntryResolver;
-import com.lw.modularmachine.machine.factory.FactoryUpgradeService;
+import com.lw.modularmachine.machine.upgrade.UpgradeCompatibility;
+import com.lw.modularmachine.machine.upgrade.UpgradeDefinition;
+import com.lw.modularmachine.api.upgrade.UpgradeEntry;
+import com.lw.modularmachine.machine.upgrade.UpgradeEntryResolver;
+import com.lw.modularmachine.machine.upgrade.UpgradeCatalogService;
 import com.lw.modularmachine.menu.UpgradeBusMenu;
 import com.lw.modularmachine.network.UpgradeBusPayloads;
 import com.mojang.authlib.GameProfile;
@@ -37,12 +37,12 @@ import net.neoforged.neoforge.gametest.PrefixGameTestTemplate;
 @GameTestHolder("mmcece")
 @PrefixGameTestTemplate(false)
 public final class FixedUpgradeDefinitionGameTests {
-  private static List<FactoryUpgradeDefinition> savedDefinitions;
+  private static List<UpgradeDefinition> savedDefinitions;
 
   @AfterBatch(batch = "fixed_upgrade_definitions")
   public static void cleanup(ServerLevel level) {
     if (savedDefinitions != null) {
-      FactoryUpgradeService.replaceDefinitions(savedDefinitions);
+      UpgradeCatalogService.replaceDefinitions(savedDefinitions);
       savedDefinitions = null;
     }
   }
@@ -57,7 +57,7 @@ public final class FixedUpgradeDefinitionGameTests {
             return;
           }
           GameTestUpgradeFixtures.install();
-          savedDefinitions = FactoryUpgradeService.snapshot().definitions();
+          savedDefinitions = UpgradeCatalogService.snapshot().definitions();
           try {
             verify(helper);
             helper.succeed();
@@ -76,11 +76,11 @@ public final class FixedUpgradeDefinitionGameTests {
     var stack = new ItemStack(Items.AMETHYST_SHARD, 2);
     stack.set(DataComponents.CUSTOM_NAME, Component.literal("Unmodified fixed upgrade"));
     var before = stack.copy();
-    helper.assertTrue(!FactoryUpgradeEntryResolver.isMarked(stack), "Fixed item fixture already had override data");
+    helper.assertTrue(!UpgradeEntryResolver.isMarked(stack), "Fixed item fixture already had override data");
     bus.inventory().setStackInSlot(0, stack);
     UpgradeBusGameTests.confirm(helper, factory);
     factory.serverTick();
-    var source = factory.upgradeSources().getFirst().catalog().snapshot();
+    var source = factory.upgrades().sources().getFirst().catalog().snapshot();
     helper.assertTrue(
         source.parallelLimit() == 5
             && source.energyNumerator() == 9
@@ -104,12 +104,12 @@ public final class FixedUpgradeDefinitionGameTests {
         new UpgradeBusPayloads.Status(7, payload.position().above(), payload.revision(), true, List.of()));
     helper.assertTrue(menu.status().equals(payload), "A different menu or bus replaced the active description");
 
-    var restricted = new FactoryUpgradeDefinition(
+    var restricted = new UpgradeDefinition(
         ResourceLocation.fromNamespaceAndPath("minecraft", "amethyst_shard"),
-        new FactoryUpgradeEntry(id("restricted_fixed_parallel"), 2, 1, 1, 1, 1, 1, 1),
-        new FactoryUpgradeCompatibility(Set.of(id("test_upgrade_bus_binding")), Set.of()));
-    FactoryUpgradeService.replaceDefinitions(List.of(restricted));
-    bus.unbindFactory();
+        new UpgradeEntry(id("restricted_fixed_parallel"), 2, 1, 1, 1, 1, 1, 1),
+        new UpgradeCompatibility(Set.of(id("test_upgrade_bus_binding")), Set.of()));
+    UpgradeCatalogService.replaceDefinitions(List.of(restricted));
+    bus.unbindOwner();
     bus.refreshUpgradeDefinitions();
     var unboundStatus = UpgradeBusPayloads.capture(7, bus);
     helper.assertTrue(
@@ -117,12 +117,12 @@ public final class FixedUpgradeDefinitionGameTests {
             && unboundStatus.machine() == null
             && unboundStatus.incompatible().contains(id("restricted_fixed_parallel"))
             && unboundStatus.entries().isEmpty()
-            && factory.upgradeSources().isEmpty(),
+            && factory.upgrades().sources().isEmpty(),
         "Unbound filtered effects were applied without a machine context");
-    helper.assertTrue(bus.bindFactory(factory), "Machine-compatible fixed effect could not be rebound");
+    helper.assertTrue(bus.bindOwner(factory), "Machine-compatible fixed effect could not be rebound");
     factory.serverTick();
     helper.assertTrue(
-        factory.upgradeSources().size() == 1 && factory.scheduler().channels().getFirst().parallelLimit() == 5,
+        factory.upgrades().sources().size() == 1 && factory.scheduler().channels().getFirst().parallelLimit() == 5,
         "Machine-compatible fixed effect was not restored after rebinding");
 
     var override = before.copy();
@@ -131,20 +131,20 @@ public final class FixedUpgradeDefinitionGameTests {
     data.putInt("parallel_add", 1);
     override.set(DataComponents.CUSTOM_DATA, CustomData.of(data));
     helper.assertTrue(
-        FactoryUpgradeEntryResolver.resolve(override).orElseThrow().parallelAdd() == 2,
+        UpgradeEntryResolver.resolve(override).orElseThrow().parallelAdd() == 2,
         "Explicit per-stack effects were combined with fixed definitions twice");
     data.putInt("parallel_add", -1);
     override.set(DataComponents.CUSTOM_DATA, CustomData.of(data));
     helper.assertTrue(
-        FactoryUpgradeEntryResolver.resolve(override).isEmpty(),
+        UpgradeEntryResolver.resolve(override).isEmpty(),
         "Malformed explicit effects fell back to a fixed definition");
 
-    var replacement = new FactoryUpgradeDefinition(
+    var replacement = new UpgradeDefinition(
         ResourceLocation.fromNamespaceAndPath("minecraft", "amethyst_shard"),
-        new FactoryUpgradeEntry(id("replacement_fixed_parallel"), 4, 1, 1, 1, 1, 1, 1));
-    FactoryUpgradeService.replaceDefinitions(List.of(replacement));
+        new UpgradeEntry(id("replacement_fixed_parallel"), 4, 1, 1, 1, 1, 1, 1));
+    UpgradeCatalogService.replaceDefinitions(List.of(replacement));
     helper.assertTrue(
-        !bus.upgradeCatalogValid() && factory.upgradeSources().isEmpty(),
+        !bus.upgradeCatalogValid() && factory.upgrades().sources().isEmpty(),
         "Old definition epoch continued publishing an upgrade source");
     bus.serverTick();
     factory.serverTick();
@@ -157,32 +157,31 @@ public final class FixedUpgradeDefinitionGameTests {
     menu.acceptStatus(changed);
     menu.acceptStatus(payload);
     helper.assertTrue(menu.status().equals(changed), "A stale description overwrote a newer upgrade revision");
-    var published = FactoryUpgradeService.snapshot();
+    var published = UpgradeCatalogService.snapshot();
     try {
-      FactoryUpgradeService.replaceDefinitions(List.of(replacement, replacement));
+      UpgradeCatalogService.replaceDefinitions(List.of(replacement, replacement));
       helper.fail("Duplicate fixed item mapping was accepted");
     } catch (JsonParseException expected) {
-      helper.assertTrue(FactoryUpgradeService.snapshot() == published, "Failed compile partially published mappings");
+      helper.assertTrue(UpgradeCatalogService.snapshot() == published, "Failed compile partially published mappings");
     }
     try {
-      FactoryUpgradeService
-          .replaceDefinitions(List.of(new FactoryUpgradeDefinition(id("absent_item"), replacement.effect())));
+      UpgradeCatalogService.replaceDefinitions(List.of(new UpgradeDefinition(id("absent_item"), replacement.effect())));
       helper.fail("Unknown upgrade item was accepted");
     } catch (JsonParseException expected) {
-      helper.assertTrue(FactoryUpgradeService.snapshot() == published, "Unknown item replaced the last valid catalog");
+      helper.assertTrue(UpgradeCatalogService.snapshot() == published, "Unknown item replaced the last valid catalog");
     }
     boolean workerRejected = CompletableFuture.supplyAsync(() -> {
       try {
-        FactoryUpgradeService.replaceDefinitions(List.of());
+        UpgradeCatalogService.replaceDefinitions(List.of());
         return false;
       } catch (IllegalStateException expected) {
         return true;
       }
     }).join();
     helper.assertTrue(
-        workerRejected && FactoryUpgradeService.snapshot() == published,
+        workerRejected && UpgradeCatalogService.snapshot() == published,
         "Worker changed the upgrade catalog");
-    FactoryUpgradeService.replaceDefinitions(List.of());
+    UpgradeCatalogService.replaceDefinitions(List.of());
     bus.serverTick();
     factory.serverTick();
     helper.assertTrue(
@@ -198,12 +197,12 @@ public final class FixedUpgradeDefinitionGameTests {
     var secondMachine = id("test_upgrade_bus_shared_binding");
     var upgradeId = id("machine_filtered_upgrade");
     var itemId = ResourceLocation.fromNamespaceAndPath("minecraft", "amethyst_shard");
-    var effect = new FactoryUpgradeEntry(upgradeId, 2, 2, 1, 1, 1, 1, 1);
-    var definition = new FactoryUpgradeDefinition(
+    var effect = new UpgradeEntry(upgradeId, 2, 2, 1, 1, 1, 1, 1);
+    var definition = new UpgradeDefinition(
         itemId,
         effect,
-        new FactoryUpgradeCompatibility(Set.of(firstMachine), Set.of(secondMachine)));
-    FactoryUpgradeService.replaceDefinitions(List.of(definition));
+        new UpgradeCompatibility(Set.of(firstMachine), Set.of(secondMachine)));
+    UpgradeCatalogService.replaceDefinitions(List.of(definition));
     bus.serverTick();
     first.serverTick();
     helper.assertTrue(
@@ -216,7 +215,7 @@ public final class FixedUpgradeDefinitionGameTests {
     UpgradeBusGameTests.confirm(helper, second);
     second.serverTick();
     helper.assertTrue(bus.isBoundTo(first), "Second machine stole the existing binding");
-    helper.assertTrue(bus.bindFactory(second), "Could not bind the shared bus to the second machine");
+    helper.assertTrue(bus.bindOwner(second), "Could not bind the shared bus to the second machine");
     first.serverTick();
     second.serverTick();
     var rejected = UpgradeBusPayloads.capture(7, bus);
@@ -234,7 +233,7 @@ public final class FixedUpgradeDefinitionGameTests {
     var huge = original.copyWithCount(64);
     bus.inventory().setStackInSlot(0, huge);
     helper.assertTrue(
-        FactoryUpgradeEntryResolver.resolve(huge).isEmpty()
+        UpgradeEntryResolver.resolve(huge).isEmpty()
             && bus.upgradeCatalogValid()
             && bus.upgradeCatalog().entries().isEmpty()
             && bus.incompatibleUpgrades().equals(List.of(upgradeId)),
@@ -245,19 +244,19 @@ public final class FixedUpgradeDefinitionGameTests {
     overrideData.putInt("parallel_add", 1);
     marked.set(DataComponents.CUSTOM_DATA, CustomData.of(overrideData));
     helper.assertTrue(
-        FactoryUpgradeEntryResolver.resolve(marked, firstMachine).isPresent()
-            && FactoryUpgradeEntryResolver.resolve(marked, secondMachine).isEmpty(),
+        UpgradeEntryResolver.resolve(marked, firstMachine).isPresent()
+            && UpgradeEntryResolver.resolve(marked, secondMachine).isEmpty(),
         "Per-stack override bypassed the fixed item's machine compatibility");
     bus.inventory().setStackInSlot(0, original.copy());
 
-    FactoryUpgradeService.replaceDefinitions(
+    UpgradeCatalogService.replaceDefinitions(
         List.of(
-            new FactoryUpgradeDefinition(
+            new UpgradeDefinition(
                 itemId,
                 effect,
-                new FactoryUpgradeCompatibility(Set.of(secondMachine), Set.of(firstMachine)))));
+                new UpgradeCompatibility(Set.of(secondMachine), Set.of(firstMachine)))));
     helper.assertTrue(
-        !bus.upgradeCatalogValid() && second.upgradeSources().isEmpty(),
+        !bus.upgradeCatalogValid() && second.upgrades().sources().isEmpty(),
         "Previous compatibility rules remained authoritative after reload");
     bus.serverTick();
     second.serverTick();
@@ -272,18 +271,14 @@ public final class FixedUpgradeDefinitionGameTests {
         "Reloaded whitelist did not apply to the already bound machine");
     verifyPacket(helper, allowedAfterReload);
 
-    FactoryUpgradeService.replaceDefinitions(
-        List.of(
-            new FactoryUpgradeDefinition(
-                itemId,
-                effect,
-                new FactoryUpgradeCompatibility(Set.of(), Set.of(secondMachine)))));
+    UpgradeCatalogService.replaceDefinitions(
+        List.of(new UpgradeDefinition(itemId, effect, new UpgradeCompatibility(Set.of(), Set.of(secondMachine)))));
     bus.serverTick();
     second.serverTick();
     helper.assertTrue(
         second.scheduler().channels().getFirst().parallelLimit() == 1 && !bus.incompatibleUpgrades().isEmpty(),
         "Blacklist did not revoke the previously allowed effect");
-    helper.assertTrue(bus.bindFactory(first), "Could not rebind the bus to the non-blacklisted machine");
+    helper.assertTrue(bus.bindOwner(first), "Could not rebind the bus to the non-blacklisted machine");
     first.serverTick();
     helper.assertTrue(
         first.scheduler().channels().getFirst().parallelLimit() == 5
@@ -291,12 +286,12 @@ public final class FixedUpgradeDefinitionGameTests {
             && ItemStack.matches(original, bus.inventory().getStackInSlot(0)),
         "Blacklist rejected another machine or modified the original item");
 
-    FactoryUpgradeService.replaceDefinitions(
+    UpgradeCatalogService.replaceDefinitions(
         List.of(
-            new FactoryUpgradeDefinition(
+            new UpgradeDefinition(
                 itemId,
                 effect,
-                new FactoryUpgradeCompatibility(Set.of(id("future_unknown_machine")), Set.of()))));
+                new UpgradeCompatibility(Set.of(id("future_unknown_machine")), Set.of()))));
     bus.serverTick();
     first.serverTick();
     helper.assertTrue(

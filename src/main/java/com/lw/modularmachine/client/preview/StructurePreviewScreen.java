@@ -7,14 +7,11 @@ import com.lw.modularmachine.api.client.preview.PreviewViewport;
 import com.lw.modularmachine.util.client.gui.GuiTextures;
 import java.util.ArrayList;
 import java.util.HashSet;
-import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.Objects;
 import java.util.Optional;
-import java.util.NavigableMap;
 import java.util.Set;
-import java.util.TreeMap;
 import net.minecraft.Util;
 import net.minecraft.client.gui.GuiGraphics;
 import net.minecraft.client.gui.components.EditBox;
@@ -32,10 +29,6 @@ import org.jetbrains.annotations.Nullable;
  */
 @ApiStatus.Internal
 public abstract class StructurePreviewScreen extends Screen {
-  private static final int CANDIDATE_COLUMNS = 10;
-  private static final int CANDIDATE_HORIZONTAL_SPACING = 20;
-  private static final int CANDIDATE_VERTICAL_SPACING = 20;
-  private static final int CANDIDATE_MAX_WIDTH = 250;
   private static final int REQUIRED_BLOCK_COLUMNS = 10;
   private static final int REQUIRED_BLOCK_HORIZONTAL_SPACING = 20;
   private static final int REQUIRED_BLOCK_VERTICAL_SPACING = 20;
@@ -58,89 +51,63 @@ public abstract class StructurePreviewScreen extends Screen {
       .fromNamespaceAndPath("mmcece", "textures/gui/button_2.png");
   private static final ResourceLocation SETTINGS_ICON = ResourceLocation
       .fromNamespaceAndPath("mmcece", "textures/gui/seetting.png");
-  private MachinePreviewDefinition definition;
-  private MachinePreviewDefinition pendingDefinition;
-  private MachinePreviewSelection pendingSelection;
-  private int color, pendingColor;
-  private MachinePreviewSelection selection;
   private final List<EditBox> lengthFields = new ArrayList<>();
-  private final Map<String, LengthInput> lengthInputs = new LinkedHashMap<>();
-  private final Map<String, Boolean> includedGroups = new LinkedHashMap<>();
   private int materialScroll;
-  private final PreviewRenderer renderer = PreviewRenderer.create();
-  private final PreviewCamera camera = new PreviewCamera(89F);
-  private PreviewSceneData scene;
-  private List<PreviewSceneData.Entry> animated = List.of();
-  private int step;
-  private boolean cycle = true, dragging, settingsOpen = true;
-  private double dragDistance;
-  private int selected = -1;
-  private long candidateScroll;
-  private long lastCycle;
-  private SceneStatistics statistics;
-  private Integer shownY;
-  private boolean pickReady;
+  private final PreviewDisplayState preview = new PreviewDisplayState(new PreviewHost());
+  private final PreviewLengthInputs lengthInputs = new PreviewLengthInputs(
+      preview,
+      this::retainedDynamicKeys,
+      this::dynamicLengthChanged);
+  private final PreviewCandidatePanel candidates = new PreviewCandidatePanel(preview);
 
-  private static final class LengthInput {
-    final EditBox field;
-    int accepted;
-    boolean valid = true;
-
-    LengthInput(EditBox field, int accepted) {
-      this.field = field;
-      this.accepted = accepted;
+  private final class PreviewHost implements PreviewDisplayState.Host {
+    @Override
+    public int initialLength(String key, int minimum, int maximum) {
+      return initialDynamicLength(key, minimum, maximum);
     }
-  }
-
-  /**
-   * Statistics belong to the complete scene, independently of material-list
-   * inclusion.
-   */
-  private static final class SceneStatistics {
-    final PreviewSceneData scene;
-    final NavigableMap<Integer, Integer> layers = new TreeMap<>();
-    int cursor, blocks;
-    int minX = Integer.MAX_VALUE, minY = Integer.MAX_VALUE, minZ = Integer.MAX_VALUE;
-    int maxX = Integer.MIN_VALUE, maxY = Integer.MIN_VALUE, maxZ = Integer.MIN_VALUE;
-
-    SceneStatistics(PreviewSceneData scene) {
-      this.scene = scene;
+    @Override
+    public boolean failed() {
+      return previewFailed();
     }
-
-    boolean ready() {
-      return cursor == scene.entries().size();
-    }
-
-    void advance(int budget, long deadline) {
-      for (int work = 0; work < budget && !ready() && System.nanoTime() < deadline; work++) {
-        var entry = scene.entries().get(cursor++);
-        var pos = entry.position();
-        minX = Math.min(minX, pos.getX());
-        minY = Math.min(minY, pos.getY());
-        minZ = Math.min(minZ, pos.getZ());
-        maxX = Math.max(maxX, pos.getX());
-        maxY = Math.max(maxY, pos.getY());
-        maxZ = Math.max(maxZ, pos.getZ());
-        boolean block = entry.states().stream().anyMatch(state -> !state.isAir());
-        layers.merge(pos.getY(), block ? 1 : 0, Integer::sum);
-        if (block) {
-          blocks++;
-        }
+    @Override
+    public void cleared() {
+      if (minecraft != null) {
+        rebuildFields();
       }
     }
-
-    long width() {
-      return scene.entries().isEmpty() ? 0 : (long) maxX - minX + 1;
+    @Override
+    public void selectionPublished() {
+      rebuildFields();
     }
-
-    long height() {
-      return scene.entries().isEmpty() ? 0 : (long) maxY - minY + 1;
+    @Override
+    public void sceneChanged() {
+      pickReady = false;
+      dragging = false;
+      candidates.select(-1);
     }
-
-    long depth() {
-      return scene.entries().isEmpty() ? 0 : (long) maxZ - minZ + 1;
+    @Override
+    public void showLayer(Integer layer) {
+      StructurePreviewScreen.this.showLayer(layer);
     }
   }
+
+  protected final boolean preparingPreview() {
+    return preview.preparing();
+  }
+
+  @Nullable
+  protected final Map<String, Integer> completedPreviewLengths(MachinePreviewDefinition expected) {
+    return preview.completedLengths(expected);
+  }
+
+  protected final void setPreview(MachinePreviewDefinition next, int nextColor) {
+    preview.set(next, nextColor);
+  }
+
+  private final PreviewCamera camera = new PreviewCamera(89F);
+  private boolean dragging, settingsOpen = true;
+  private double dragDistance;
+  private boolean pickReady;
 
   protected StructurePreviewScreen(Component title) {
     super(title);
@@ -159,19 +126,21 @@ public abstract class StructurePreviewScreen extends Screen {
   }
 
   protected int initialDynamicLength(String key, int minimum, int maximum) {
-    var input = lengthInputs.get(key);
+    return lengthInputs.initial(key, minimum, maximum);
+  }
 
-    return input != null && input.accepted >= minimum && input.accepted <= maximum ? input.accepted : minimum;
+  protected final boolean previewFailed() {
+    return lengthInputs.failed();
   }
 
   protected final String dynamicGroupKey(int index) {
-    return definition.segments().get(index).id();
+    return preview.definition.segments().get(index).id();
   }
 
   /** Drafts may retain inputs for groups whose current world capture is empty. */
   protected Set<String> retainedDynamicKeys() {
-    return definition == null ? Set.of() : Set
-        .copyOf(definition.segments().stream().map(segment -> segment.id()).toList());
+    return preview.definition == null ? Set.of() : Set
+        .copyOf(preview.definition.segments().stream().map(segment -> segment.id()).toList());
   }
 
   /**
@@ -217,7 +186,7 @@ public abstract class StructurePreviewScreen extends Screen {
   }
 
   protected final boolean materialListVisible() {
-    return settingsOpen && selection != null;
+    return settingsOpen && preview.selection != null;
   }
 
   protected final int materialListWidth() {
@@ -240,36 +209,6 @@ public abstract class StructurePreviewScreen extends Screen {
     return budget;
   }
 
-  /**
-   * Live sources can finish the current display before capturing further changes.
-   */
-  protected final boolean preparingPreview() {
-    return pendingSelection != null && pendingSelection.building()
-        || selection != null && selection.building()
-        || statistics != null && !statistics.ready();
-  }
-
-  /** Only completed, nonempty scenes may be exported by an editor subclass. */
-  @Nullable
-  protected final Map<String, Integer> completedPreviewLengths(MachinePreviewDefinition expected) {
-    if (expected == null
-        || definition != expected
-        || pendingSelection != null
-        || selection == null
-        || scene == null
-        || scene.entries().isEmpty()
-        || preparingPreview()
-        || previewFailed()) {
-      return null;
-    }
-    var lengths = new LinkedHashMap<String, Integer>();
-    for (int index = 0; index < definition.segments().size(); index++) {
-      lengths.put(definition.segments().get(index).id(), selection.length(index));
-    }
-
-    return Map.copyOf(lengths);
-  }
-
   protected final void resetPreviewCamera() {
     camera.reset();
     dragging = false;
@@ -282,57 +221,21 @@ public abstract class StructurePreviewScreen extends Screen {
   }
 
   protected Component dynamicGroupTitle(int index) {
-    return tr("dynamic_layers", definition.segments().get(index).id());
-  }
-
-  /**
-   * A replacement is published after its complete display layout has been built.
-   */
-  protected final void setPreview(MachinePreviewDefinition next, int nextColor) {
-    if (next == null) {
-      definition = null;
-      pendingDefinition = null;
-      selection = null;
-      pendingSelection = null;
-      scene = null;
-      statistics = null;
-      shownY = null;
-      animated = List.of();
-      pickReady = false;
-      dragging = false;
-      selectPosition(-1);
-      renderer.close();
-      if (minecraft != null) {
-        rebuildFields();
-      }
-      return;
-    }
-    if (pendingDefinition == next && pendingColor == nextColor
-        || pendingSelection == null && definition == next && color == nextColor) {
-      return;
-    }
-    pendingDefinition = next;
-    pendingColor = nextColor;
-    int[] lengths = new int[next.segments().size()];
-    for (int i = 0; i < lengths.length; i++) {
-      var segment = next.segments().get(i);
-      lengths[i] = initialDynamicLength(segment.id(), segment.minimum(), segment.maximum());
-    }
-    pendingSelection = new MachinePreviewSelection(next, nextColor, lengths);
+    return tr("dynamic_layers", preview.definition.segments().get(index).id());
   }
 
   @Override
   protected void init() {
     rebuildFields();
-    lastCycle = Util.getMillis();
+    preview.lastCycle = Util.getMillis();
   }
 
   private void rebuildFields() {
     var focused = getFocused();
     if (focused == null) {
-      for (var input : lengthInputs.values()) {
-        if (input.field.isFocused()) {
-          focused = input.field;
+      for (var input : lengthInputs.fields()) {
+        if (input.isFocused()) {
+          focused = input;
           break;
         }
       }
@@ -341,102 +244,21 @@ public abstract class StructurePreviewScreen extends Screen {
     lengthFields.clear();
     var keys = new HashSet<>(retainedDynamicKeys());
     keys.add("");
-    if (definition != null && selection != null) {
-      for (int i = 0; i < definition.segments().size(); i++) {
-        String key = definition.segments().get(i).id();
+    if (preview.definition != null && preview.selection != null) {
+      for (int i = 0; i < preview.definition.segments().size(); i++) {
+        String key = preview.definition.segments().get(i).id();
         if (canEditDynamicLengths()) {
-          var input = lengthInputs.get(key);
-          if (input == null) {
-            var field = new EditBox(font, 0, 0, 80, 18, dynamicGroupTitle(i));
-            field.setMaxLength(10);
-            field.setFilter(value -> value.matches("[0-9]*"));
-            field.setValue(Integer.toString(selection.length(i)));
-            input = new LengthInput(field, selection.length(i));
-            lengthInputs.put(key, input);
-            field.setResponder(value -> editLength(key, value));
-          } else if (input.valid && input.accepted != selection.length(i)) {
-            input.accepted = selection.length(i);
-            input.field.setValue(Integer.toString(input.accepted));
-          }
-          validateLengthInput(key, input);
-          input.field.active = keys.contains(key);
-          lengthFields.add(addWidget(input.field));
+          lengthFields.add(addWidget(lengthInputs.reconcile(font, dynamicGroupTitle(i), key, i, keys)));
         }
       }
     }
-    lengthInputs.keySet().retainAll(keys);
-    includedGroups.keySet().retainAll(keys);
+    lengthInputs.retain(keys);
+    preview.includedGroups.keySet().retainAll(keys);
     rebuildAdditionalWidgets();
     if (focused != null && children().contains(focused)) {
       setFocused(focused);
     }
     positionFields(materialPanel());
-  }
-
-  private static int segmentIndex(MachinePreviewDefinition source, String key) {
-    if (source != null) {
-      for (int i = 0; i < source.segments().size(); i++) {
-        if (source.segments().get(i).id().equals(key)) {
-          return i;
-        }
-      }
-    }
-    return -1;
-  }
-
-  private void editLength(String key, String value) {
-    var input = lengthInputs.get(key);
-    var target = pendingSelection == null ? selection : pendingSelection;
-    var source = pendingSelection == null ? definition : pendingDefinition;
-    int index = segmentIndex(source, key);
-    boolean valid = false;
-    if (input != null && target != null && index >= 0 && retainedDynamicKeys().contains(key)) {
-      try {
-        int requested = Integer.parseInt(value);
-        valid = target.setLength(index, requested);
-        if (valid && input.accepted != requested) {
-          input.accepted = requested;
-          dynamicLengthChanged(key, requested);
-        }
-      } catch (IllegalArgumentException | ArithmeticException invalid) {
-        // Preserve raw text and the last complete scene while editing.
-      }
-    }
-    if (input != null) {
-      input.valid = valid;
-      input.field.setTextColor(valid ? 0xFFE0E0E0 : 0xFFFF7777);
-    }
-  }
-
-  private void validateLengthInput(String key, LengthInput input) {
-    int index = segmentIndex(definition, key);
-    input.valid = false;
-    if (index >= 0) {
-      var bounds = definition.segments().get(index);
-      try {
-        int requested = Integer.parseInt(input.field.getValue());
-        input.valid = requested == selection.length(index)
-            && requested >= bounds.minimum()
-            && requested <= bounds.maximum();
-      } catch (NumberFormatException invalid) {
-        // Reattaching a field must not replace an unfinished number.
-      }
-    }
-    input.field.setTextColor(input.valid ? 0xFFE0E0E0 : 0xFFFF7777);
-  }
-
-  private int desiredLength(int index) {
-    var input = lengthInputs.get(definition.segments().get(index).id());
-    return input == null ? selection.length(index) : input.accepted;
-  }
-
-  protected final boolean previewFailed() {
-    return selection != null && selection.failed()
-        || pendingSelection != null && pendingSelection.failed()
-        || lengthInputs.entrySet().stream().anyMatch(
-            entry -> !entry.getValue().valid
-                && (segmentIndex(definition, entry.getKey()) >= 0
-                    || segmentIndex(pendingDefinition, entry.getKey()) >= 0));
   }
 
   private static Component tr(String key, Object... args) {
@@ -451,44 +273,7 @@ public abstract class StructurePreviewScreen extends Screen {
     }
     long deadline = System.nanoTime() + 2_000_000L;
     int budget = Math.clamp(preparePreview(2048, deadline), 0, 2048);
-    if (pendingSelection != null) {
-      budget -= pendingSelection.advance(budget, deadline);
-      if (!pendingSelection.building() && (!pendingSelection.failed() || selection == null)) {
-        for (int i = 0; i <= pendingDefinition.segments().size(); i++) {
-          String key = i == 0 ? "" : pendingDefinition.segments().get(i - 1).id();
-          if (!includedGroups.getOrDefault(key, true)) {
-            pendingSelection.toggleIncluded(i);
-          }
-        }
-        definition = pendingDefinition;
-        color = pendingColor;
-        selection = pendingSelection;
-        pendingDefinition = null;
-        pendingSelection = null;
-        rebuildFields();
-      }
-    } else if (selection != null) {
-      budget -= selection.advance(budget, deadline);
-    }
-    if (selection != null && selection.scene() != scene && selection.scene() != null) {
-      scene = selection.scene();
-      animated = scene.entries().stream().filter(entry -> entry.states().size() > 1).toList();
-      renderer.setScene(scene);
-      statistics = new SceneStatistics(scene);
-      pickReady = false;
-      dragging = false;
-      selectPosition(-1);
-    }
-    if (statistics != null && !statistics.ready()) {
-      statistics.advance(budget, deadline);
-    }
-    if (shownY != null && statistics != null && statistics.ready() && !statistics.layers.containsKey(shownY)) {
-      showLayer(null);
-    }
-    if (cycle && !animated.isEmpty() && Util.getMillis() - lastCycle >= 1500) {
-      step++;
-      lastCycle = Util.getMillis();
-    }
+    preview.advance(budget, deadline);
   }
 
   @Override
@@ -500,8 +285,8 @@ public abstract class StructurePreviewScreen extends Screen {
     int panelWidth = panel.width();
     panel.drawBackground(graphics);
     panel.drawHeader(graphics, font, headerTitle(), headerIcon());
-    if (selection == null) {
-      if (pendingSelection != null) {
+    if (preview.selection == null) {
+      if (preview.pendingSelection != null) {
         graphics.drawString(
             font,
             tr(previewFailed() ? "dynamic_invalid" : "dynamic_building"),
@@ -513,7 +298,7 @@ public abstract class StructurePreviewScreen extends Screen {
       return;
     }
     drawStatistics(graphics, left, top, panelWidth);
-    if (scene != null) {
+    if (preview.scene != null) {
       drawScene(graphics, panel);
     }
     drawSettingsButton(graphics, left, top, panelWidth, mouseX, mouseY);
@@ -521,7 +306,7 @@ public abstract class StructurePreviewScreen extends Screen {
     if (settingsOpen) {
       drawRequiredBlocks(graphics, mouseX, mouseY, partialTick);
     }
-    drawSelectedCandidates(graphics, mouseX, mouseY);
+    candidates.draw(graphics, font, previewArea(panel), mouseX, mouseY);
     drawLayerControls(graphics, mouseX, mouseY);
     if (mouseX >= left + 18 && mouseX < left + panelWidth - 18 && mouseY >= top + 30 && mouseY < top + 44) {
       graphics.renderTooltip(
@@ -537,19 +322,24 @@ public abstract class StructurePreviewScreen extends Screen {
     if (previewFailed()) {
       return tr("dynamic_invalid");
     }
-    if (preparingPreview() || statistics == null || !statistics.ready()) {
+    if (preparingPreview() || preview.statistics == null || !preview.statistics.ready()) {
       return tr("details.statistics_pending");
     }
-    if (shownY == null) {
-      return tr("details.dimensions", statistics.width(), statistics.height(), statistics.depth(), statistics.blocks);
+    if (preview.shownY == null) {
+      return tr(
+          "details.dimensions",
+          preview.statistics.width(),
+          preview.statistics.height(),
+          preview.statistics.depth(),
+          preview.statistics.blocks);
     }
     return tr(
         "details.dimensions_layer",
-        statistics.width(),
-        statistics.height(),
-        statistics.depth(),
-        statistics.blocks,
-        statistics.layers.getOrDefault(shownY, 0));
+        preview.statistics.width(),
+        preview.statistics.height(),
+        preview.statistics.depth(),
+        preview.statistics.blocks,
+        preview.statistics.layers.getOrDefault(preview.shownY, 0));
   }
 
   private void drawStatistics(GuiGraphics graphics, int left, int top, int panelWidth) {
@@ -597,20 +387,21 @@ public abstract class StructurePreviewScreen extends Screen {
   }
 
   private Integer adjacentLayer(boolean next) {
-    if (statistics == null || !statistics.ready() || statistics.layers.isEmpty()) {
+    if (preview.statistics == null || !preview.statistics.ready() || preview.statistics.layers.isEmpty()) {
       return null;
     }
-    if (shownY == null) {
-      return next ? statistics.layers.firstKey() : statistics.layers.lastKey();
+    if (preview.shownY == null) {
+      return next ? preview.statistics.layers.firstKey() : preview.statistics.layers.lastKey();
     }
-    return next ? statistics.layers.higherKey(shownY) : statistics.layers.lowerKey(shownY);
+    return next ? preview.statistics.layers.higherKey(preview.shownY) : preview.statistics.layers
+        .lowerKey(preview.shownY);
   }
 
   private void showLayer(Integer layer) {
-    shownY = layer;
+    preview.shownY = layer;
     pickReady = false;
     dragging = false;
-    selectPosition(-1);
+    candidates.select(-1);
   }
 
   private void moveLayer(boolean next) {
@@ -624,7 +415,7 @@ public abstract class StructurePreviewScreen extends Screen {
     var controls = layerControls();
     drawStepButton(graphics, controls.left(), controls.top(), "<", adjacentLayer(false) != null, mouseX, mouseY);
     drawStepButton(graphics, controls.nextX(), controls.top(), ">", adjacentLayer(true) != null, mouseX, mouseY);
-    var label = shownY == null ? tr("details.layer_all") : tr("details.layer_current", shownY);
+    var label = preview.shownY == null ? tr("details.layer_all") : tr("details.layer_current", preview.shownY);
     GuiTextures.blitNineSlice(graphics, CONTROL_TEXTURE, controls.labelX(), controls.top(), controls.labelWidth(), 18);
     String visible = font.plainSubstrByWidth(label.getString(), controls.labelWidth() - 8);
     graphics.drawString(
@@ -641,7 +432,7 @@ public abstract class StructurePreviewScreen extends Screen {
         all,
         controls.allX() + (52 - font.width(all)) / 2,
         controls.top() + 5,
-        shownY == null ? 0xFF888888 : 0xFF202020,
+        preview.shownY == null ? 0xFF888888 : 0xFF202020,
         false);
     if (controls.contains(mouseX, mouseY)) {
       var action = mouseX < controls.labelX() ? tr("details.layer_previous") : mouseX >= controls.allX() ? tr(
@@ -696,12 +487,12 @@ public abstract class StructurePreviewScreen extends Screen {
   }
 
   private int dynamicGroups() {
-    return definition == null ? 0 : definition.segments().size();
+    return preview.definition == null ? 0 : preview.definition.segments().size();
   }
 
   private int dynamicCardHeight(int index) {
     int height = canEditDynamicLengths() ? DYNAMIC_CARD_HEIGHT : MAIN_CARD_HEIGHT;
-    return height + (dynamicGroupAction(definition.segments().get(index).id()) == null ? 0 : 22);
+    return height + (dynamicGroupAction(preview.definition.segments().get(index).id()) == null ? 0 : 22);
   }
 
   private int dynamicCardOffset(int index) {
@@ -713,11 +504,11 @@ public abstract class StructurePreviewScreen extends Screen {
   }
 
   private int contentHeight(int panelWidth) {
-    if (selection == null) {
+    if (preview.selection == null) {
       return 0;
     }
     int columns = materialColumns(panelWidth);
-    int rows = Math.max(1, (selection.materials().size() + columns - 1) / columns);
+    int rows = Math.max(1, (preview.selection.materials().size() + columns - 1) / columns);
     return dynamicCardOffset(dynamicGroups()) + 18 + rows * REQUIRED_BLOCK_VERTICAL_SPACING + 4;
   }
 
@@ -760,7 +551,7 @@ public abstract class StructurePreviewScreen extends Screen {
       if (y + cardHeight <= panel.bodyTop() || y >= panel.bodyBottom()) {
         continue;
       }
-      var segment = definition.segments().get(i);
+      var segment = preview.definition.segments().get(i);
       drawCard(graphics, panel, y, cardHeight, dynamicGroupTitle(i), i + 1);
       if (canEditDynamicLengths()) {
         int amount = hasShiftDown() ? 4 : 1;
@@ -769,7 +560,7 @@ public abstract class StructurePreviewScreen extends Screen {
             panel.left() + 14,
             y + 17,
             "-" + amount,
-            desiredLength(i) > segment.minimum(),
+            lengthInputs.desiredLength(i) > segment.minimum(),
             mouseX,
             mouseY);
         drawStepButton(
@@ -777,7 +568,7 @@ public abstract class StructurePreviewScreen extends Screen {
             panel.left() + panel.width() - 36,
             y + 17,
             "+" + amount,
-            desiredLength(i) < segment.maximum(),
+            lengthInputs.desiredLength(i) < segment.maximum(),
             mouseX,
             mouseY);
         lengthFields.get(i).render(graphics, mouseX, mouseY, partialTick);
@@ -816,7 +607,7 @@ public abstract class StructurePreviewScreen extends Screen {
     graphics.drawString(font, tr("required_blocks"), panel.left() + 8, materialsY + 3, 0xFF202020, false);
     int columns = materialColumns(panel.width());
     int index = 0;
-    for (var entry : selection.materials().entrySet()) {
+    for (var entry : preview.selection.materials().entrySet()) {
       int x = panel.left() + 8 + index % columns * REQUIRED_BLOCK_HORIZONTAL_SPACING;
       int y = materialsY + 18 + index / columns * REQUIRED_BLOCK_VERTICAL_SPACING;
       index++;
@@ -830,7 +621,7 @@ public abstract class StructurePreviewScreen extends Screen {
         tooltip = Screen.getTooltipFromItem(minecraft, stack);
       }
     }
-    if (selection.materials().isEmpty()) {
+    if (preview.selection.materials().isEmpty()) {
       graphics.drawString(font, tr("materials_empty"), panel.left() + 8, materialsY + 20, 0xFF606060, false);
     }
     graphics.disableScissor();
@@ -864,7 +655,7 @@ public abstract class StructurePreviewScreen extends Screen {
     int width = panel.width() - 16;
     graphics.fill(x, y, x + width, y + height, 0xFFC6C6C6);
     graphics.renderOutline(x, y, width, height, 0xFF555555);
-    graphics.fill(x + 1, y + 1, x + width - 1, y + 3, selection.included(group) ? 0xFF52984A : 0xFF888888);
+    graphics.fill(x + 1, y + 1, x + width - 1, y + 3, preview.selection.included(group) ? 0xFF52984A : 0xFF888888);
     graphics.drawString(font, font.plainSubstrByWidth(title.getString(), width - 12), x + 6, y + 6, 0xFF202020, false);
     int toggleY = y + height - INCLUDE_BUTTON_HEIGHT - 5;
     int textY = toggleY + (INCLUDE_BUTTON_HEIGHT - font.lineHeight) / 2;
@@ -880,13 +671,13 @@ public abstract class StructurePreviewScreen extends Screen {
         INCLUDE_BUTTON_HEIGHT,
         INCLUDE_BUTTON_WIDTH,
         INCLUDE_BUTTON_HEIGHT);
-    var text = tr(selection.included(group) ? "included_yes" : "included_no");
+    var text = tr(preview.selection.included(group) ? "included_yes" : "included_no");
     graphics.drawString(
         font,
         text,
         toggleX + (INCLUDE_BUTTON_WIDTH - font.width(text)) / 2,
         textY,
-        selection.included(group) ? 0xFF2F721B : 0xFF606060,
+        preview.selection.included(group) ? 0xFF2F721B : 0xFF606060,
         false);
   }
 
@@ -905,129 +696,19 @@ public abstract class StructurePreviewScreen extends Screen {
       return;
     }
     float available = Math.min(area.width(), area.height());
-    float baseScale = Math.max(.01F, Math.min(24F, available * .55F / selection.extent()));
-    renderer.render(
+    float baseScale = Math.max(.01F, Math.min(24F, available * .55F / preview.selection.extent()));
+    preview.renderer.render(
         graphics,
         new PreviewViewport(area.left(), area.top(), area.width(), area.height(), baseScale),
         camera,
-        shownY == null ? PreviewRenderer.ALL_LAYERS : shownY,
-        step);
+        preview.shownY == null ? PreviewRenderer.ALL_LAYERS : preview.shownY,
+        preview.step);
     pickReady = true;
-  }
-
-  private record CandidatePanel(int left, int top, int width, int height, int columns, int count) {
-    int bodyTop() {
-      return top + 24;
-    }
-    int bodyBottom() {
-      return top + height - 14;
-    }
-    long contentHeight() {
-      return ((long) (count - 1) / columns + 1) * CANDIDATE_VERTICAL_SPACING;
-    }
-    long maximumScroll() {
-      return Math.max(0L, contentHeight() - (bodyBottom() - bodyTop()));
-    }
-    boolean contains(double x, double y) {
-      return x >= left && x < left + width && y >= top && y < top + height;
-    }
-    boolean bodyContains(double x, double y) {
-      return contains(x, y) && y >= bodyTop() && y < bodyBottom();
-    }
-    boolean closeContains(double x, double y) {
-      return contains(x, y) && x >= left + width - 24 && y < top + 24;
-    }
-  }
-
-  private CandidatePanel candidatePanel() {
-    if (selection == null || selected < 0 || selected >= selection.parts().size()) {
-      return null;
-    }
-    int count = selection.parts().get(selected).alternatives().size();
-    if (count == 0) {
-      return null;
-    }
-    var area = previewArea(StructurePreviewPanel.forScreen(width, height));
-    if (area.width() < 56 || area.height() < 38) {
-      return null;
-    }
-    int availableWidth = Math.max(36, Math.min(CANDIDATE_MAX_WIDTH, area.width() - 20));
-    int columns = Math.max(1, Math.min(CANDIDATE_COLUMNS, (availableWidth - 16) / CANDIDATE_HORIZONTAL_SPACING));
-    int panelWidth = Math.min(availableWidth, 16 + columns * CANDIDATE_HORIZONTAL_SPACING);
-    long rows = (long) (count - 1) / columns + 1;
-    int panelHeight = (int) Math.min(Math.max(38, area.height() - 2), 38L + rows * CANDIDATE_VERTICAL_SPACING);
-
-    return new CandidatePanel(area.left() + 10, area.top() + 10, panelWidth, panelHeight, columns, count);
-  }
-
-  private void drawSelectedCandidates(GuiGraphics graphics, int mouseX, int mouseY) {
-    var panel = candidatePanel();
-    if (panel == null) {
-      return;
-    }
-    var alternatives = selection.parts().get(selected).alternatives();
-    candidateScroll = Math.max(0L, Math.min(candidateScroll, panel.maximumScroll()));
-    graphics.fill(panel.left(), panel.top(), panel.left() + panel.width(), panel.top() + panel.height(), 0xE6D5D5D5);
-    graphics.renderOutline(panel.left(), panel.top(), panel.width(), panel.height(), 0xFF555555);
-    graphics.drawString(
-        font,
-        font.plainSubstrByWidth(tr("candidates").getString(), panel.width() - 36),
-        panel.left() + 8,
-        panel.top() + 8,
-        0xFF202020,
-        false);
-    graphics.drawString(font, "X", panel.left() + panel.width() - 16, panel.top() + 8, 0xFF202020, false);
-    int visibleHeight = panel.bodyBottom() - panel.bodyTop();
-    ItemStack hovered = ItemStack.EMPTY;
-    if (visibleHeight > 0) {
-      long firstRow = candidateScroll / CANDIDATE_VERTICAL_SPACING;
-      long lastRow = (candidateScroll + visibleHeight + CANDIDATE_VERTICAL_SPACING - 1) / CANDIDATE_VERTICAL_SPACING;
-      int first = (int) Math.min(panel.count(), firstRow * panel.columns());
-      int end = (int) Math.min(panel.count(), lastRow * panel.columns());
-      graphics.enableScissor(panel.left() + 2, panel.bodyTop(), panel.left() + panel.width() - 2, panel.bodyBottom());
-      try {
-        for (int index = first; index < end; index++) {
-          var stack = new ItemStack(alternatives.get(index).getBlock());
-          int x = panel.left() + 8 + index % panel.columns() * CANDIDATE_HORIZONTAL_SPACING;
-          int y = panel
-              .bodyTop() + (int) ((long) (index / panel.columns()) * CANDIDATE_VERTICAL_SPACING - candidateScroll);
-          graphics.renderItem(stack, x, y);
-          graphics.renderItemDecorations(font, stack, x, y);
-          if (panel.bodyContains(mouseX, mouseY) && mouseX >= x && mouseX < x + 18 && mouseY >= y && mouseY < y + 18) {
-            hovered = stack;
-          }
-        }
-      } finally {
-        graphics.disableScissor();
-      }
-    }
-    if (panel.maximumScroll() > 0 && visibleHeight > 0) {
-      int thumb = (int) Math
-          .min(visibleHeight, Math.max(12L, (long) visibleHeight * visibleHeight / panel.contentHeight()));
-      int y = panel.bodyTop() + (int) ((visibleHeight - thumb) * ((double) candidateScroll / panel.maximumScroll()));
-      graphics.fill(panel.left() + panel.width() - 4, y, panel.left() + panel.width() - 2, y + thumb, 0xFF707070);
-    }
-    if (!hovered.isEmpty()) {
-      graphics.renderTooltip(font, hovered, mouseX, mouseY);
-    }
-  }
-
-  private void selectPosition(int index) {
-    if (index >= 0
-        && (scene == null
-            || index >= scene.entries().size()
-            || shownY != null && scene.entries().get(index).position().getY() != shownY)) {
-      index = -1;
-    }
-    if (selected != index) {
-      selected = index;
-      candidateScroll = 0;
-    }
   }
 
   @Override
   public boolean mouseClicked(double x, double y, int button) {
-    if (selection == null) {
+    if (preview.selection == null) {
       return super.mouseClicked(x, y, button);
     }
     int panelLeft = Math.max(12, (width - Math.min(760, width - 24)) / 2);
@@ -1054,11 +735,11 @@ public abstract class StructurePreviewScreen extends Screen {
       }
       return true;
     }
-    var candidates = candidatePanel();
-    if (candidates != null && candidates.contains(x, y)) {
+    var candidatePanel = candidates.panel(previewArea(StructurePreviewPanel.forScreen(width, height)));
+    if (candidatePanel != null && candidatePanel.contains(x, y)) {
       setFocused(null);
-      if (button == 0 && candidates.closeContains(x, y)) {
-        selectPosition(-1);
+      if (button == 0 && candidatePanel.closeContains(x, y)) {
+        candidates.select(-1);
       }
       return true;
     }
@@ -1119,7 +800,7 @@ public abstract class StructurePreviewScreen extends Screen {
       group = segment + 1;
       cardY = offset;
       cardHeight = dynamicCardHeight(segment);
-      var action = dynamicGroupAction(definition.segments().get(segment).id());
+      var action = dynamicGroupAction(preview.definition.segments().get(segment).id());
       if (action != null
           && localY >= cardY + cardHeight - 51
           && localY < cardY + cardHeight - 33
@@ -1137,8 +818,8 @@ public abstract class StructurePreviewScreen extends Screen {
           direction = 1;
         }
         if (direction != 0) {
-          var bounds = definition.segments().get(segment);
-          long value = desiredLength(segment) + (long) direction * (hasShiftDown() ? 4 : 1);
+          var bounds = preview.definition.segments().get(segment);
+          long value = lengthInputs.desiredLength(segment) + (long) direction * (hasShiftDown() ? 4 : 1);
           lengthFields.get(segment).setValue(Long.toString(Math.clamp(value, bounds.minimum(), bounds.maximum())));
           setFocused(null);
           return true;
@@ -1149,8 +830,9 @@ public abstract class StructurePreviewScreen extends Screen {
         && localY < cardY + cardHeight - 5
         && x >= panel.left() + panel.width() - 16 - INCLUDE_BUTTON_WIDTH
         && x < panel.left() + panel.width() - 16) {
-      selection.toggleIncluded(group);
-      includedGroups.put(group == 0 ? "" : definition.segments().get(group - 1).id(), selection.included(group));
+      preview.selection.toggleIncluded(group);
+      preview.includedGroups
+          .put(group == 0 ? "" : preview.definition.segments().get(group - 1).id(), preview.selection.included(group));
       setFocused(null);
       return true;
     }
@@ -1164,7 +846,7 @@ public abstract class StructurePreviewScreen extends Screen {
     }
     if (button == 0) {
       dragDistance += Math.abs(dx) + Math.abs(dy);
-      if (shownY == null) {
+      if (preview.shownY == null) {
         camera.rotate(dx, dy);
       } else {
         camera.pan(dx, dy);
@@ -1183,12 +865,12 @@ public abstract class StructurePreviewScreen extends Screen {
     PreviewSceneData.Entry picked = null;
     if (button == 0
         && dragDistance <= 4
-        && scene != null
+        && preview.scene != null
         && pickReady
         && previewArea(StructurePreviewPanel.forScreen(width, height)).contains(x, y)) {
-      selectPosition(renderer.pick(x, y));
-      if (selected >= 0) {
-        picked = scene.entries().get(selected);
+      candidates.select(preview.renderer.pick(x, y));
+      if (candidates.selected() >= 0) {
+        picked = preview.scene.entries().get(candidates.selected());
       }
     }
     dragging = false;
@@ -1212,8 +894,8 @@ public abstract class StructurePreviewScreen extends Screen {
       positionFields(materialPanel());
       return true;
     }
-    if (keyCode == GLFW.GLFW_KEY_X && selected >= 0) {
-      selectPosition(-1);
+    if (keyCode == GLFW.GLFW_KEY_X && candidates.selected() >= 0) {
+      candidates.select(-1);
       return true;
     }
     return super.keyPressed(keyCode, scanCode, modifiers);
@@ -1221,7 +903,7 @@ public abstract class StructurePreviewScreen extends Screen {
 
   @Override
   public boolean mouseScrolled(double x, double y, double scrollX, double scrollY) {
-    if (selection == null) {
+    if (preview.selection == null) {
       return super.mouseScrolled(x, y, scrollX, scrollY);
     }
     if (layerControls().contains(x, y)) {
@@ -1230,10 +912,9 @@ public abstract class StructurePreviewScreen extends Screen {
       }
       return true;
     }
-    var candidates = candidatePanel();
-    if (candidates != null && candidates.contains(x, y)) {
-      candidateScroll = Math.round(
-          Math.max(0D, Math.min(candidates.maximumScroll(), candidateScroll - scrollY * CANDIDATE_VERTICAL_SPACING)));
+    var candidatePanel = candidates.panel(previewArea(StructurePreviewPanel.forScreen(width, height)));
+    if (candidatePanel != null && candidatePanel.contains(x, y)) {
+      candidates.scroll(candidatePanel, scrollY);
       return true;
     }
     var panel = materialPanel();
@@ -1252,7 +933,7 @@ public abstract class StructurePreviewScreen extends Screen {
   @Override
   public void removed() {
     dragging = false;
-    renderer.close();
+    preview.renderer.close();
     super.removed();
   }
 }

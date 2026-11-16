@@ -2,7 +2,7 @@ package com.lw.modularmachine.machine.controller;
 
 import com.lw.modularmachine.api.controller.ControllerOwnership;
 import com.lw.modularmachine.config.MachineConfig;
-import com.lw.modularmachine.machine.factory.UpgradeLifecyclePublisher;
+import com.lw.modularmachine.machine.upgrade.UpgradeLifecyclePublisher;
 import com.lw.modularmachine.machine.smart.SmartInterfaceEventPublisher;
 import com.lw.modularmachine.util.thread.ServerThreadGuard;
 import java.util.Objects;

@@ -1,5 +1,6 @@
 package com.lw.modularmachine.block;
 
+import com.lw.modularmachine.api.component.ResourceType;
 import com.lw.modularmachine.blockentity.NetworkPortBlockEntity;
 import com.lw.modularmachine.machine.HatchTier;
 import com.lw.modularmachine.machine.PortKind;
@@ -32,7 +33,7 @@ public final class NetworkPortBlock extends MachinePortBlock {
 
   public NetworkPortBlock(Properties properties, PortKind kind) {
     super(properties, kind, new HatchTier("network", kind.isInput() ? 9 : 36, 0));
-    if (kind.resource() == PortKind.Resource.ENERGY) {
+    if (kind.resource() == ResourceType.ENERGY) {
       throw new IllegalArgumentException("Network ports require items, fluids or chemicals");
     }
     codec = simpleCodec(settings -> new NetworkPortBlock(settings, kind));
@@ -55,12 +56,12 @@ public final class NetworkPortBlock extends MachinePortBlock {
 
   @Override
   public int fluidCapacity() {
-    return kind().resource() == PortKind.Resource.FLUID ? Integer.MAX_VALUE : 0;
+    return kind().resource() == ResourceType.FLUID ? Integer.MAX_VALUE : 0;
   }
 
   @Override
   public long chemicalCapacity() {
-    return kind().resource() == PortKind.Resource.CHEMICAL ? Integer.MAX_VALUE : 0;
+    return kind().resource() == ResourceType.CHEMICAL ? Integer.MAX_VALUE : 0;
   }
 
   @Override

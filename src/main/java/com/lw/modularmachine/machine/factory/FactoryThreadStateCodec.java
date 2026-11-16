@@ -1,5 +1,6 @@
 package com.lw.modularmachine.machine.factory;
 
+import com.lw.modularmachine.machine.upgrade.UpgradeSnapshotCodec;
 import java.util.ArrayList;
 import java.util.List;
 import net.minecraft.nbt.CompoundTag;
@@ -33,7 +34,7 @@ public final class FactoryThreadStateCodec {
       tag.putInt("priority", thread.priority());
       tag.putInt("parallel_limit", thread.parallelLimit());
       tag.putLong("upgrade_revision", thread.upgradeRevision());
-      tag.put("upgrade_snapshot", FactoryUpgradeSnapshotCodec.write(thread.upgradeSnapshot()));
+      tag.put("upgrade_snapshot", UpgradeSnapshotCodec.write(thread.upgradeSnapshot()));
       tag.putString("state", thread.state().name());
       tag.putString("reason", thread.reason().name());
       tag.putLong("revision", thread.revision());
@@ -65,7 +66,7 @@ public final class FactoryThreadStateCodec {
       }
       var lockedRecipe = tag.contains("locked_recipe", Tag.TAG_STRING) ? ResourceLocation
           .parse(tag.getString("locked_recipe")) : null;
-      var snapshot = FactoryUpgradeSnapshotCodec.read(tag.getCompound("upgrade_snapshot"));
+      var snapshot = UpgradeSnapshotCodec.read(tag.getCompound("upgrade_snapshot"));
       var state = new FactoryThreadState(
           tag.getString("id"),
           ResourceLocation.parse(tag.getString("machine")),

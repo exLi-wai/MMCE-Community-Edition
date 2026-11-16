@@ -8,7 +8,7 @@ import org.junit.jupiter.api.Test;
 class PreparedOutputClaimsTest {
   @Test
   void startClaimsMatchFrozenCompletionAmountsForParallelAndFixedRows() {
-    var source = FrozenItemRunTest.valid();
+    var source = FrozenRecipeRunTest.valid();
     source.putInt("parallel_instances", 4);
     var outputs = source.getCompound("definition").getList("outputs", Tag.TAG_COMPOUND);
     var fixed = outputs.getCompound(0).copy();
@@ -16,7 +16,7 @@ class PreparedOutputClaimsTest {
     fixed.putString("selector", "fixed");
     outputs.add(fixed);
 
-    var run = FrozenItemRun.read(source);
+    var run = FrozenRecipeRun.read(source);
     var claims = run.startOutputRows();
     assertEquals(8, claims.getCompound(0).getLong("amount"));
     assertEquals(2, claims.getCompound(1).getLong("amount"));
@@ -26,7 +26,7 @@ class PreparedOutputClaimsTest {
 
   @Test
   void probabilityRowsDoNotClaimStartSpaceOrMutateFrozenOutputs() {
-    var source = FrozenItemRunTest.valid();
+    var source = FrozenRecipeRunTest.valid();
     var outputs = source.getCompound("definition").getList("outputs", Tag.TAG_COMPOUND);
     var probable = outputs.getCompound(0).copy();
     probable.putDouble("chance", 0.5D);
@@ -35,7 +35,7 @@ class PreparedOutputClaimsTest {
     absent.putDouble("chance", 0);
     outputs.add(absent);
 
-    var run = FrozenItemRun.read(source);
+    var run = FrozenRecipeRun.read(source);
     var claims = run.startOutputRows();
     assertEquals(1, claims.size());
     assertFalse(claims.getCompound(0).contains("chance"));

@@ -1,7 +1,7 @@
 package com.lw.modularmachine.network;
 
-import com.lw.modularmachine.machine.factory.FactoryUpgradeCatalog;
-import com.lw.modularmachine.api.upgrade.FactoryUpgradeEntry;
+import com.lw.modularmachine.machine.upgrade.UpgradeCatalog;
+import com.lw.modularmachine.api.upgrade.UpgradeEntry;
 import java.util.ArrayList;
 import java.util.Collections;
 import java.util.List;
@@ -12,8 +12,8 @@ import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 
 class UpgradeBusStatusPayloadTest {
-  private static FactoryUpgradeEntry effect() {
-    return new FactoryUpgradeEntry(ResourceLocation.fromNamespaceAndPath("test", "upgrade"), 2, 3, 2, 1, 2, 1, 1);
+  private static UpgradeEntry effect() {
+    return new UpgradeEntry(ResourceLocation.fromNamespaceAndPath("test", "upgrade"), 2, 3, 2, 1, 2, 1, 1);
   }
 
   @Test
@@ -48,7 +48,7 @@ class UpgradeBusStatusPayloadTest {
             true,
             List.of(effect()),
             machine,
-            Collections.nCopies(FactoryUpgradeCatalog.MAX_SLOTS, effect().id())));
+            Collections.nCopies(UpgradeCatalog.MAX_SLOTS, effect().id())));
     assertThrows(
         IllegalArgumentException.class,
         () -> new UpgradeBusPayloads.Status(1, BlockPos.ZERO, 2, false, List.of(), machine, List.of(effect().id())));
@@ -63,7 +63,7 @@ class UpgradeBusStatusPayloadTest {
             BlockPos.ZERO,
             0,
             true,
-            Collections.nCopies(FactoryUpgradeCatalog.MAX_SLOTS + 1, effect())));
+            Collections.nCopies(UpgradeCatalog.MAX_SLOTS + 1, effect())));
     assertThrows(
         IllegalArgumentException.class,
         () -> new UpgradeBusPayloads.Status(1, BlockPos.ZERO, 0, false, List.of(effect())));

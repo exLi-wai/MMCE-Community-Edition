@@ -1,5 +1,6 @@
 package com.lw.modularmachine.integration.jei;
 
+import com.lw.modularmachine.client.preview.ClientMachineCatalog;
 import com.lw.modularmachine.ModularMachine;
 import com.lw.modularmachine.client.NetworkPortScreen;
 import com.lw.modularmachine.machine.recipe.MachineRecipe;
@@ -53,7 +54,7 @@ public final class MachineJeiPlugin implements IModPlugin {
     }
     recipes = grouped;
     var machines = new TreeSet<ResourceLocation>(grouped.keySet());
-    machines.addAll(ClientMachineJeiCatalog.machines().keySet());
+    machines.addAll(ClientMachineCatalog.machines().keySet());
     structureOverview = new MachineStructureJeiCategory(registration.getJeiHelpers());
     registration.addRecipeCategories(structureOverview);
     for (var machine : machines) {
@@ -77,8 +78,8 @@ public final class MachineJeiPlugin implements IModPlugin {
     if (structureOverview != null) {
       registration.addRecipes(
           structureOverview.getRecipeType(),
-          ClientMachineJeiCatalog.machines().values().stream()
-              .sorted(Comparator.comparing(ClientMachineJeiCatalog.Machine::id)).toList());
+          ClientMachineCatalog.machines().values().stream()
+              .sorted(Comparator.comparing(ClientMachineCatalog.Machine::id)).toList());
     }
   }
 

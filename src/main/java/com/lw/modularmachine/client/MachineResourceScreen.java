@@ -1,6 +1,6 @@
 package com.lw.modularmachine.client;
 
-import com.lw.modularmachine.machine.PortKind;
+import com.lw.modularmachine.api.component.ResourceType;
 import com.lw.modularmachine.menu.MachineResourceMenu;
 import com.lw.modularmachine.network.MachinePayloads;
 import com.lw.modularmachine.util.minecraft.energy.EnergyDisplay;
@@ -40,11 +40,11 @@ public final class MachineResourceScreen extends AbstractContainerScreen<Machine
     var texture = ResourceLocation.fromNamespaceAndPath("mmcece", "textures/gui/guibar.png");
     graphics.blit(texture, x, y, 0, 0, imageWidth, imageHeight, 256, 256);
     var status = menu.status();
-    if (status != null && status.kind().resource() == PortKind.Resource.ENERGY) {
+    if (status != null && status.kind().resource() == ResourceType.ENERGY) {
       long amount = status.amount();
       long capacity = status.capacity();
       drawEnergyFill(graphics, x, y, fillPixels(amount, capacity));
-    } else if (status != null && status.kind().resource() == PortKind.Resource.CHEMICAL) {
+    } else if (status != null && status.kind().resource() == ResourceType.CHEMICAL) {
       int filled = fillPixels(status.amount(), status.capacity());
       if (!status.chemical().isEmpty() && filled > 0) {
         var appearance = ChemicalDisplay.describe(status.chemical());
@@ -98,8 +98,8 @@ public final class MachineResourceScreen extends AbstractContainerScreen<Machine
     int localX = (int) mouseX - leftPos;
     int localY = (int) mouseY - topPos;
     if (button == 0
-        && (menu.port().kind().resource() == PortKind.Resource.FLUID
-            || menu.port().kind().resource() == PortKind.Resource.CHEMICAL)
+        && (menu.port().kind().resource() == ResourceType.FLUID
+            || menu.port().kind().resource() == ResourceType.CHEMICAL)
         && localX >= 15
         && localX <= 35
         && localY >= 10
@@ -134,7 +134,7 @@ public final class MachineResourceScreen extends AbstractContainerScreen<Machine
     if (status == null) {
       return;
     }
-    if (status.kind().resource() == PortKind.Resource.ENERGY) {
+    if (status.kind().resource() == ResourceType.ENERGY) {
       graphics.renderComponentTooltip(
           font,
           List.of(
@@ -146,7 +146,7 @@ public final class MachineResourceScreen extends AbstractContainerScreen<Machine
                   EnergyDisplay.unitComponent())),
           mouseX,
           mouseY);
-    } else if (status.kind().resource() == PortKind.Resource.CHEMICAL) {
+    } else if (status.kind().resource() == ResourceType.CHEMICAL) {
       graphics.renderComponentTooltip(
           font,
           List.of(

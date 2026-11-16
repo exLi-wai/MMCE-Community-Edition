@@ -3,7 +3,6 @@ package com.lw.modularmachine.integration.ae2;
 import appeng.api.AECapabilities;
 import appeng.api.stacks.AEKey;
 import com.lw.modularmachine.api.component.ChemicalStackData;
-import com.lw.modularmachine.blockentity.NetworkPortBlockEntity;
 import com.lw.modularmachine.integration.appmek.AppMekanisticsIntegration;
 import com.lw.modularmachine.machine.network.MachineNetworkPlatform;
 import com.lw.modularmachine.machine.network.NetworkPortResource;
@@ -15,13 +14,10 @@ import net.neoforged.bus.api.IEventBus;
 import net.neoforged.neoforge.capabilities.RegisterCapabilitiesEvent;
 import org.jetbrains.annotations.ApiStatus;
 
-/** Internal AE adapter installed only after the central Mods gate succeeds. */
+/** AE2 module registration, including its optional AppMek key bridge. */
 @ApiStatus.Internal
-public final class Ae2Integration implements MachineNetworkPlatform.Adapter {
-  private final Function<ChemicalStackData, AEKey> chemicalKeys;
-
-  private Ae2Integration(Function<ChemicalStackData, AEKey> chemicalKeys) {
-    this.chemicalKeys = chemicalKeys;
+public final class Ae2Integration {
+  private Ae2Integration() {
   }
 
   public static void initialize(IEventBus bus) {
@@ -31,7 +27,7 @@ public final class Ae2Integration implements MachineNetworkPlatform.Adapter {
       chemicals = AppMekanisticsIntegration::key;
       chemicalDecoder = AppMekanisticsIntegration::resource;
     }
-    MachineNetworkPlatform.install(new Ae2Integration(chemicals));
+    MachineNetworkPlatform.install(new Ae2NetworkAdapter(chemicals));
     var patternChemicals = chemicals;
     var patternDecoder = chemicalDecoder;
     PatternNetworkPlatform.install(provider -> new Ae2PatternConnection(provider, patternChemicals, patternDecoder));
@@ -48,15 +44,5 @@ public final class Ae2Integration implements MachineNetworkPlatform.Adapter {
         AECapabilities.IN_WORLD_GRID_NODE_HOST,
         MachineRegistries.PATTERN_PROVIDER_ENTITY.get(),
         (provider, context) -> provider.connection() instanceof Ae2PatternConnection connection ? connection : null);
-  }
-
-  @Override
-  public MachineNetworkPlatform.Connection create(NetworkPortBlockEntity port) {
-    return new Ae2Connection(port, chemicalKeys);
-  }
-
-  @Override
-  public boolean chemicalAvailable() {
-    return chemicalKeys != null;
   }
 }

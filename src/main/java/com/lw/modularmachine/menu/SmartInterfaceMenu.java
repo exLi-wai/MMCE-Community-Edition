@@ -8,7 +8,6 @@ import net.minecraft.server.level.ServerPlayer;
 import net.minecraft.world.entity.player.Inventory;
 import net.minecraft.world.entity.player.Player;
 import net.minecraft.world.inventory.AbstractContainerMenu;
-import net.minecraft.world.inventory.Slot;
 import net.minecraft.world.item.ItemStack;
 import net.neoforged.neoforge.network.PacketDistributor;
 
@@ -33,14 +32,7 @@ public final class SmartInterfaceMenu extends AbstractContainerMenu {
     super(MachineRegistries.SMART_INTERFACE_MENU.get(), id);
     this.smart = smart;
     viewer = inventory.player;
-    for (int row = 0; row < 3; row++) {
-      for (int col = 0; col < 9; col++) {
-        addSlot(new Slot(inventory, 9 + row * 9 + col, 8 + col * 18, 84 + row * 18));
-      }
-    }
-    for (int col = 0; col < 9; col++) {
-      addSlot(new Slot(inventory, col, 8 + col * 18, 142));
-    }
+    PlayerInventorySlots.add(inventory, this::addSlot, 8, 84, 142);
   }
 
   public SmartInterfaceBlockEntity smart() {

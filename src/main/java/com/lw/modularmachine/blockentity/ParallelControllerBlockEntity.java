@@ -1,12 +1,12 @@
 package com.lw.modularmachine.blockentity;
 
+import com.lw.modularmachine.machine.structure.StructureChangeRouter;
 import com.lw.modularmachine.api.component.MachineColorable;
 import com.lw.modularmachine.config.MachineConfig;
 import com.lw.modularmachine.block.ParallelControllerBlock;
 import com.lw.modularmachine.machine.ParallelControllerTier;
 import com.lw.modularmachine.machine.recipe.RecipeLifecyclePublisher;
 import com.lw.modularmachine.machine.smart.SmartInterfaceEventPublisher;
-import com.lw.modularmachine.machine.structure.StructureService;
 import com.lw.modularmachine.menu.ParallelControllerMenu;
 import com.lw.modularmachine.registry.MachineRegistries;
 import com.lw.modularmachine.util.thread.ServerThreadGuard;
@@ -140,7 +140,7 @@ public final class ParallelControllerBlockEntity extends BlockEntity implements 
 
   private void notifyStructure() {
     if (level instanceof ServerLevel server) {
-      StructureService.blockChanged(server, worldPosition);
+      StructureChangeRouter.blockChanged(server, worldPosition);
     }
   }
 

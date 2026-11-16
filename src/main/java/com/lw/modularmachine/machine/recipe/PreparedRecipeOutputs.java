@@ -2,7 +2,7 @@ package com.lw.modularmachine.machine.recipe;
 
 import com.lw.modularmachine.blockentity.FactoryControllerBlockEntity;
 import com.lw.modularmachine.blockentity.MachineControllerBlockEntity;
-import com.lw.modularmachine.machine.factory.UpgradeRecipeChecks;
+import com.lw.modularmachine.machine.upgrade.UpgradeRecipeCheckHandlers;
 import com.lw.modularmachine.machine.recipe.search.ItemOutputLayout;
 import com.lw.modularmachine.machine.recipe.search.RecipeCandidate;
 import com.lw.modularmachine.machine.recipe.search.RecipePlanner;
@@ -24,7 +24,7 @@ final class PreparedRecipeOutputs {
   private final String thread;
   private final boolean aggregate;
   private int instances;
-  private final List<FrozenItemRun> runs = new ArrayList<>();
+  private final List<FrozenRecipeRun> runs = new ArrayList<>();
   private RecipeExecutionTicket outputs;
   private RecipePlanner.Session<ItemResourceKey> placement;
   private boolean admitted;
@@ -43,11 +43,11 @@ final class PreparedRecipeOutputs {
     var source = plan.source();
     source.requireServerThread();
     if (!plan.validateForStart() || runs.stream().anyMatch(run -> !run.preparedItemCallbacksCurrent())) {
-      throw new UpgradeRecipeChecks.StaleException();
+      throw new UpgradeRecipeCheckHandlers.StaleException();
     }
     if (admitted) {
       if (!refreshOutputs()) {
-        throw new UpgradeRecipeChecks.StaleException();
+        throw new UpgradeRecipeCheckHandlers.StaleException();
       }
       return instances;
     }
@@ -62,7 +62,7 @@ final class PreparedRecipeOutputs {
             aggregate ? Optional.empty() : Optional.of(thread),
             aggregate ? instances : 1);
         runs.add(
-            FrozenItemRun.freeze(
+            FrozenRecipeFactory.freeze(
                 ResourceLocation.parse(plan.recipe().id()),
                 recipe,
                 source.definitionEpoch(),
@@ -76,13 +76,13 @@ final class PreparedRecipeOutputs {
                 context));
         remainingBudget--;
         if (!plan.validateForStart() || !runs.getLast().preparedItemCallbacksCurrent()) {
-          throw new UpgradeRecipeChecks.StaleException();
+          throw new UpgradeRecipeCheckHandlers.StaleException();
         }
         continue;
       }
       if (placement == null) {
         outputs = RecipeExecutionTicket.captureOutputs(source.owner())
-            .orElseThrow(UpgradeRecipeChecks.StaleException::new);
+            .orElseThrow(UpgradeRecipeCheckHandlers.StaleException::new);
         var claims = new ArrayList<RecipeCandidate.Output<ItemResourceKey>>();
         runs.forEach(run -> claims.addAll(run.startOutputClaims(source.level().registryAccess())));
         if (claims.isEmpty()) {
@@ -96,7 +96,7 @@ final class PreparedRecipeOutputs {
             RecipeCandidate.outputOnly(plan.recipe().id() + "/prepared_outputs", claims));
       }
       if (!refreshOutputs()) {
-        throw new UpgradeRecipeChecks.StaleException();
+        throw new UpgradeRecipeCheckHandlers.StaleException();
       }
       var result = placement.advance(remainingBudget);
       remainingBudget -= result.workUsed();
@@ -119,7 +119,7 @@ final class PreparedRecipeOutputs {
     return instances == 0 ? 0 : -1;
   }
 
-  List<FrozenItemRun> runs(int requested) {
+  List<FrozenRecipeRun> runs(int requested) {
     if (!admitted || requested != instances) {
       throw new IllegalStateException("Modified outputs have not passed admission");
     }
@@ -138,7 +138,7 @@ final class PreparedRecipeOutputs {
     return admitted
         && instances == requested
         && refreshOutputs()
-        && runs.stream().allMatch(FrozenItemRun::preparedItemCallbacksCurrent);
+        && runs.stream().allMatch(FrozenRecipeRun::preparedItemCallbacksCurrent);
   }
 
   int remainingBudget() {

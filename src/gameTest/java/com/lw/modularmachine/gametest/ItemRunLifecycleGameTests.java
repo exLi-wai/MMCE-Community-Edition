@@ -1,5 +1,7 @@
 package com.lw.modularmachine.gametest;
 
+import com.lw.modularmachine.machine.structure.MachineDefinitionParser;
+import com.lw.modularmachine.api.recipe.RecipeRunStatus;
 import com.google.gson.JsonParser;
 import com.lw.modularmachine.ModularMachine;
 import com.lw.modularmachine.block.MachineControllerBlock;
@@ -9,7 +11,6 @@ import com.lw.modularmachine.config.MachineConfig;
 import com.lw.modularmachine.api.orientation.MachineOrientation;
 import com.lw.modularmachine.machine.recipe.AtomicRecipeStarter;
 import com.lw.modularmachine.machine.recipe.search.RecipeSearch;
-import com.lw.modularmachine.machine.recipe.ItemRunEngine;
 import com.lw.modularmachine.machine.recipe.MachineRecipeService;
 import com.lw.modularmachine.machine.structure.MachineDefinition;
 import com.lw.modularmachine.machine.structure.StructureService;
@@ -138,7 +139,7 @@ public final class ItemRunLifecycleGameTests {
           c.runningRecipe().isEmpty()
               && count(output, Items.IRON_INGOT) == 1
               && input.inventory().getStackInSlot(0).isEmpty()
-              && c.recipeRunStatus() == ItemRunEngine.Result.IDLE,
+              && c.recipeRunStatus() == RecipeRunStatus.IDLE,
           "Simple paid run did not finish: " + c.recipeRunStatus());
       for (int i = 0; i < 5; i++) {
         c.serverTick();
@@ -166,7 +167,7 @@ public final class ItemRunLifecycleGameTests {
           && !current.pendingOutput()
           && !current.runId().equals(firstRun)) {
         h.assertTrue(
-            current.progress() == 0 && controller.recipeRunStatus() == ItemRunEngine.Result.ADVANCED,
+            current.progress() == 0 && controller.recipeRunStatus() == RecipeRunStatus.ADVANCED,
             "Next ordinary recipe was not started in the output-completion tick");
         next.run();
       } else if (remaining <= 0) {
@@ -469,7 +470,7 @@ public final class ItemRunLifecycleGameTests {
       var changed = new HashMap<>(savedDefinitions);
       changed.put(
           MACHINE,
-          MachineDefinition.parse(
+          MachineDefinitionParser.parse(
               MACHINE,
               JsonParser.parseString(
                   "{\"orientation\":{\"policy\":\"all_24\"},\"parts\":[{\"part_id\":\"input\",\"offset\":[-1,0,1],\"port\":\"item_input\"},{\"part_id\":\"replacement_output\",\"offset\":[1,0,1],\"port\":\"item_output\"}]}")
@@ -482,7 +483,7 @@ public final class ItemRunLifecycleGameTests {
                 && controller.runningRecipe().orElseThrow().pendingOutput()
                 && count(output, Items.DIAMOND) == 0
                 && count(output, Items.EMERALD) == 0
-                && controller.recipeRunStatus() == ItemRunEngine.Result.BINDING_CHANGED,
+                && controller.recipeRunStatus() == RecipeRunStatus.BINDING_CHANGED,
             "Pending products were committed through a changed logical output role");
         var restore = savedDefinitions;
         savedDefinitions = null;
@@ -550,7 +551,7 @@ public final class ItemRunLifecycleGameTests {
     var changed = new HashMap<>(savedDefinitions);
     changed.put(
         MACHINE,
-        MachineDefinition.parse(
+        MachineDefinitionParser.parse(
             MACHINE,
             JsonParser.parseString(
                 "{\"orientation\":{\"policy\":\"all_24\"},\"parts\":[{\"part_id\":\"input\",\"offset\":[-1,0,1],\"port\":\"item_input\"},{\"part_id\":\"different_output\",\"offset\":[1,0,1],\"port\":\"item_output\"}]}")
@@ -590,7 +591,7 @@ public final class ItemRunLifecycleGameTests {
               && run.progress() == progress
               && count(output, Items.IRON_INGOT) == 0,
           "Changed logical ports advanced, replaced, or output the frozen paid run");
-      if (controller.canCommitProduction() && controller.recipeRunStatus() == ItemRunEngine.Result.BINDING_CHANGED) {
+      if (controller.canCommitProduction() && controller.recipeRunStatus() == RecipeRunStatus.BINDING_CHANGED) {
         next.run();
       } else if (remaining == 0) {
         h.fail(

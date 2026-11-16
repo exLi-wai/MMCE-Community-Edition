@@ -1,8 +1,8 @@
 package com.lw.modularmachine.integration.mekanism;
 
+import com.lw.modularmachine.api.component.ResourceType;
 import com.lw.modularmachine.api.component.ChemicalStackData;
 import com.lw.modularmachine.blockentity.MachinePortBlockEntity;
-import com.lw.modularmachine.machine.PortKind;
 import com.lw.modularmachine.util.thread.ServerThreadGuard;
 import mekanism.api.Action;
 import mekanism.api.chemical.ChemicalStack;
@@ -44,7 +44,7 @@ final class MekanismChemicalContainers {
     if (player.level() != level
         || !current(port)
         || !port.schemaSupported()
-        || port.kind().resource() != PortKind.Resource.CHEMICAL
+        || port.kind().resource() != ResourceType.CHEMICAL
         || port.chemicalStartInProgress()
         || player.distanceToSqr(Vec3.atCenterOf(port.getBlockPos())) > 64) {
       return false;
@@ -67,7 +67,7 @@ final class MekanismChemicalContainers {
       if (contained.isEmpty()) {
         continue;
       }
-      long accepted = port.chemicalTank().fill(MekanismIntegration.data(contained), true);
+      long accepted = port.chemicalTank().fill(MekanismChemicalStacks.data(contained), true);
       if (accepted == 0) {
         continue;
       }
@@ -77,7 +77,7 @@ final class MekanismChemicalContainers {
           || !ChemicalStack.isSameChemical(removed, contained)) {
         return false;
       }
-      transfer = MekanismIntegration.data(removed);
+      transfer = MekanismChemicalStacks.data(removed);
       intoPort = true;
       break;
     }
@@ -86,7 +86,7 @@ final class MekanismChemicalContainers {
       if (stored.isEmpty()) {
         return false;
       }
-      var offered = MekanismIntegration.stack(stored);
+      var offered = MekanismChemicalStacks.stack(stored);
       var remainder = handler.insertChemical(offered.copy(), Action.EXECUTE);
       if (remainder.getAmount() < 0
           || remainder.getAmount() > offered.getAmount()

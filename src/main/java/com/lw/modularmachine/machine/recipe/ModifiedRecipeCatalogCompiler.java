@@ -3,6 +3,7 @@ package com.lw.modularmachine.machine.recipe;
 import com.lw.modularmachine.machine.recipe.search.CompiledRecipeSet;
 import com.lw.modularmachine.machine.recipe.search.RecipeCatalog;
 import com.lw.modularmachine.machine.recipe.search.RecipeCandidate;
+import com.lw.modularmachine.machine.recipe.resource.RecipeResourceExecutionRegistry;
 import com.lw.modularmachine.api.recipe.RecipeModifier;
 import com.lw.modularmachine.api.recipe.RecipeSelectors;
 import com.lw.modularmachine.ModularMachine;
@@ -75,6 +76,7 @@ final class ModifiedRecipeCatalogCompiler {
         }
         var recipe = template.resolve(rules, registries, durationMultiplier, defaults);
         MachineRecipeService.validatePorts(id, recipe, machine);
+        RecipeResourceExecutionRegistry.validateDefinition(id, recipe.resourceData(), registries);
         candidates.add(recipe.compile(id, registries));
         definitions.put(id.toString(), recipe);
         cursor++;

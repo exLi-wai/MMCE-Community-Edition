@@ -1,6 +1,7 @@
 package com.lw.modularmachine.machine.recipe;
 
 import com.lw.modularmachine.machine.recipe.search.ChemicalResourceKey;
+import com.lw.modularmachine.machine.recipe.resource.chemical.ChemicalResourceExecution;
 import com.lw.modularmachine.machine.recipe.search.ResourceSnapshot;
 import com.lw.modularmachine.machine.recipe.search.RecipeCandidate;
 import com.lw.modularmachine.machine.recipe.search.RecipePlanner;
@@ -25,11 +26,11 @@ class FactoryChemicalOutputTest {
   @Test
   void plans2048RunsWith33OutputRowsAfterMerging() {
     var outputs = Collections.nCopies(33, new ChemicalRequirement(OXYGEN, 100_000));
-    var runs = new ArrayList<FrozenItemRun>();
+    var runs = new ArrayList<FrozenRecipeRun>();
     for (int index = 0; index < 2048; index++) {
       runs.add(pendingRun(index, outputs));
     }
-    var claims = FactoryOutputEngine.chemicalOutputClaims(FactoryRunSet.ofRuns(runs));
+    var claims = ChemicalResourceExecution.outputClaims(runs.stream().map(FrozenRecipeRun::chemicalOutputs).toList());
     long total = 2048L * 33 * 100_000;
     var key = new ChemicalResourceKey(OXYGEN, "");
     assertEquals(List.of(new RecipeCandidate.Output<>(key, total)), claims);
@@ -60,11 +61,11 @@ class FactoryChemicalOutputTest {
             new RecipeCandidate.Output<>(new ChemicalResourceKey(OXYGEN, "product"), 4),
             new RecipeCandidate.Output<>(new ChemicalResourceKey(OXYGEN, ""), 6),
             new RecipeCandidate.Output<>(new ChemicalResourceKey(HYDROGEN, "product"), 10)),
-        FactoryOutputEngine.chemicalOutputClaims(set));
+        ChemicalResourceExecution.outputClaims(set.runs().stream().map(FrozenRecipeRun::chemicalOutputs).toList()));
   }
 
-  private static FrozenItemRun pendingRun(int index, List<ChemicalRequirement> outputs) {
-    var source = FrozenItemRunTest.valid();
+  private static FrozenRecipeRun pendingRun(int index, List<ChemicalRequirement> outputs) {
+    var source = FrozenRecipeRunTest.valid();
     source.putUUID("run_id", new UUID(0, index));
     var definition = source.getCompound("definition");
     definition.put("outputs", new ListTag());
@@ -90,6 +91,6 @@ class FactoryChemicalOutputTest {
     }
     source.put("ports", ports);
 
-    return FrozenItemRun.read(source).advanced(1, 20).finished();
+    return FrozenRecipeRun.read(source).advanced(1, 20).finished();
   }
 }

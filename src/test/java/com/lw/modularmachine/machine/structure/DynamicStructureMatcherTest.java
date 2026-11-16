@@ -1,5 +1,6 @@
 package com.lw.modularmachine.machine.structure;
 
+import com.lw.modularmachine.api.controller.VerificationFailure;
 import com.google.gson.JsonParser;
 import com.lw.modularmachine.api.orientation.MachineOrientation;
 import com.lw.modularmachine.machine.PortKind;
@@ -178,7 +179,7 @@ class DynamicStructureMatcherTest {
       additional.add("start_offset", JsonParser.parseString("[" + (i * 4) + ",0,1]"));
       root.getAsJsonArray("dynamic_patterns").add(additional);
     }
-    return MachineDefinition.parse(
+    return MachineDefinitionParser.parse(
         ResourceLocation.fromNamespaceAndPath("mmcece", "dynamic_matcher_test"),
         root,
         new StateOrientationAdapters.RegistrySnapshot(Map.of()));

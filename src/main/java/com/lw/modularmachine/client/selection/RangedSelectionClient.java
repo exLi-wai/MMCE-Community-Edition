@@ -328,7 +328,7 @@ public final class RangedSelectionClient {
   private static void pickPart(BlockPos position) {
     var current = session;
     var state = current.level.getBlockState(position);
-    if (current.watched.stream().noneMatch(box -> contains(box, position))
+    if (current.watched.stream().noneMatch(box -> box.contains(position))
         || state.getBlock() instanceof MachineControllerBlock
         || state.getBlock() instanceof FactoryControllerBlock
         || state.isAir() && !current.design.includeAir()) {
@@ -449,15 +449,6 @@ public final class RangedSelectionClient {
       }
     }
     return List.copyOf(boxes);
-  }
-
-  private static boolean contains(Box box, BlockPos position) {
-    return position.getX() >= Math.min(box.first().getX(), box.second().getX())
-        && position.getX() <= Math.max(box.first().getX(), box.second().getX())
-        && position.getY() >= Math.min(box.first().getY(), box.second().getY())
-        && position.getY() <= Math.max(box.first().getY(), box.second().getY())
-        && position.getZ() >= Math.min(box.first().getZ(), box.second().getZ())
-        && position.getZ() <= Math.max(box.first().getZ(), box.second().getZ());
   }
 
   /**

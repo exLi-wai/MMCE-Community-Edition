@@ -1,5 +1,7 @@
 package com.lw.modularmachine.machine.recipe;
 
+import com.lw.modularmachine.machine.recipe.resource.RecipeResourceTransaction;
+import com.lw.modularmachine.machine.recipe.resource.PreparedRecipeResource;
 import com.lw.modularmachine.machine.recipe.search.ChemicalResourceKey;
 import com.lw.modularmachine.machine.recipe.search.RecipeResourceRequirements;
 import com.lw.modularmachine.machine.structure.StructureService;
@@ -24,10 +26,10 @@ public final class ChemicalTransactions {
   private ChemicalTransactions() {
   }
 
-  record InputClaim(RecipeExecutionTicket ticket, List<ChemicalRequirement> requirements) {
+  public record InputClaim(RecipeExecutionTicket ticket, List<ChemicalRequirement> requirements) {
   }
 
-  static List<ChemicalRequirement> scaled(List<ChemicalRequirement> requirements, int instances) {
+  public static List<ChemicalRequirement> scaled(List<ChemicalRequirement> requirements, int instances) {
     return requirements.stream()
         .map(
             value -> new ChemicalRequirement(
@@ -37,7 +39,7 @@ public final class ChemicalTransactions {
         .toList();
   }
 
-  static Batch inputs(RecipeExecutionTicket ticket, List<ChemicalRequirement> requirements) {
+  public static Batch inputs(RecipeExecutionTicket ticket, List<ChemicalRequirement> requirements) {
     return inputs(List.of(new InputClaim(ticket, requirements)));
   }
 
@@ -49,7 +51,7 @@ public final class ChemicalTransactions {
     return inputs(ticket, requirements) != null;
   }
 
-  static Batch inputs(List<InputClaim> claims) {
+  public static Batch inputs(List<InputClaim> claims) {
     var changes = new LinkedHashMap<Object, Change>();
     for (var claim : claims) {
       for (var demand : claim.requirements()) {
@@ -83,7 +85,7 @@ public final class ChemicalTransactions {
     return new Batch(List.copyOf(changes.values()), false);
   }
 
-  static Batch outputs(RecipeExecutionTicket ticket, Map<String, ChemicalStackData> additions) {
+  public static Batch outputs(RecipeExecutionTicket ticket, Map<String, ChemicalStackData> additions) {
     var changes = new ArrayList<Change>();
     var found = new HashSet<Object>();
     for (var port : ticket.ports()) {
@@ -118,12 +120,12 @@ public final class ChemicalTransactions {
     return limit;
   }
 
-  static boolean missingInputs(RecipeExecutionTicket ticket, List<ChemicalRequirement> requirements) {
+  public static boolean missingInputs(RecipeExecutionTicket ticket, List<ChemicalRequirement> requirements) {
     return requirements.stream()
         .anyMatch(value -> !RecipeResourceRequirements.has(ticket, PortKind.CHEMICAL_INPUT, value.selector()));
   }
 
-  static Batch fees(RecipeExecutionTicket ticket, List<FrozenItemRun> runs) {
+  static Batch fees(RecipeExecutionTicket ticket, List<FrozenRecipeRun> runs) {
     var claims = new ArrayList<InputClaim>();
     for (var run : runs) {
       if (!run.chemicalPerTick().isEmpty()) {
@@ -137,7 +139,7 @@ public final class ChemicalTransactions {
     return inputs(claims);
   }
 
-  static boolean stillUnavailable(StructureService.StructureSubject owner, List<FrozenItemRun> runs) {
+  static boolean stillUnavailable(StructureService.StructureSubject owner, List<FrozenRecipeRun> runs) {
     var ticket = RecipeExecutionTicket.captureChemicalInputs(owner).orElse(null);
     if (ticket == null
         || runs.stream().anyMatch(run -> !run.matchesInputGroups(ticket) || ticket.forRun(run).isEmpty())) {
@@ -146,20 +148,23 @@ public final class ChemicalTransactions {
     return fees(ticket, runs) == null;
   }
 
-  private record Change(RecipeExecutionTicket.PortSnapshot port, ChemicalStackData amount) {
+  private record Change(RecipePortSnapshot port, ChemicalStackData amount) {
   }
 
-  static final class Batch {
+  public static final class Batch implements PreparedRecipeResource {
     private final List<Change> changes;
     private final boolean output;
     private final List<MachinePortBlockEntity.ChemicalStartLease> leases = new ArrayList<>();
+    private final RecipeResourceTransaction resources = new RecipeResourceTransaction();
+    private final RecipeResourceTransaction.Phase chemicals = resources.phase();
 
     private Batch(List<Change> changes, boolean output) {
       this.changes = changes;
       this.output = output;
     }
 
-    void addPatterns(PatternInputTransaction patterns) {
+    @Override
+    public void addPatterns(PatternInputTransaction patterns) {
       for (var change : changes) {
         if (change.port().patternInput()) {
           if (output) {
@@ -170,7 +175,8 @@ public final class ChemicalTransactions {
       }
     }
 
-    void acquire() {
+    @Override
+    public void acquire() {
       for (var change : changes) {
         var port = change.port();
         if (port.patternInput()) {
@@ -178,7 +184,7 @@ public final class ChemicalTransactions {
         }
         var lease = output ? port.identity().acquireChemicalOutputStart(port.revision(), port.tankIndex()) : port
             .identity().acquireChemicalStart(port.revision(), port.tankIndex());
-        leases.add(lease);
+        leases.add(chemicals.enlist(lease, MachinePortBlockEntity.ChemicalStartLease::resolve));
         var amount = change.amount();
         boolean accepted = output ? lease.fillExact(amount) : lease.drainExact(amount);
         if (!accepted) {
@@ -187,20 +193,17 @@ public final class ChemicalTransactions {
       }
     }
 
-    void resolve(boolean commit) {
-      for (var lease : leases) {
-        lease.resolve(commit);
-      }
+    @Override
+    public void resolve(boolean commit) {
+      resources.resolve(commit);
     }
 
-    void publish() {
-      for (var lease : leases) {
-        try {
-          lease.publish();
-        } catch (RuntimeException notification) {
-          ModularMachine.LOGGER.warn("Committed chemical resource notification failed", notification);
-        }
-      }
+    @Override
+    public void publish() {
+      RecipeResourceTransaction.publishAll(
+          leases,
+          MachinePortBlockEntity.ChemicalStartLease::publish,
+          notification -> ModularMachine.LOGGER.warn("Committed chemical resource notification failed", notification));
     }
   }
 }

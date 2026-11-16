@@ -1,6 +1,6 @@
 package com.lw.modularmachine.machine.recipe.search;
 
-import com.lw.modularmachine.machine.recipe.ItemRunEngine;
+import com.lw.modularmachine.api.recipe.RecipeRunStatus;
 import com.lw.modularmachine.machine.recipe.MachineRecipe;
 import com.lw.modularmachine.machine.recipe.RecipeExecutionTicket;
 import com.lw.modularmachine.machine.PortKind;
@@ -89,16 +89,16 @@ public final class RecipeResourceRequirements {
     return selectors.getOrDefault(kind, Set.of()).contains(selector);
   }
 
-  public static ItemRunEngine.Result ordinaryResult(PortKind missing) {
+  public static RecipeRunStatus ordinaryResult(PortKind missing) {
     return switch (missing) {
-      case ITEM_INPUT -> ItemRunEngine.Result.MISSING_ITEM_INPUT;
-      case ITEM_OUTPUT -> ItemRunEngine.Result.MISSING_ITEM_OUTPUT;
-      case ENERGY_INPUT -> ItemRunEngine.Result.MISSING_ENERGY_INPUT;
-      case ENERGY_OUTPUT -> ItemRunEngine.Result.MISSING_ENERGY_OUTPUT;
-      case FLUID_INPUT -> ItemRunEngine.Result.MISSING_FLUID_INPUT;
-      case FLUID_OUTPUT -> ItemRunEngine.Result.MISSING_FLUID_OUTPUT;
-      case CHEMICAL_INPUT -> ItemRunEngine.Result.MISSING_CHEMICAL_INPUT;
-      case CHEMICAL_OUTPUT -> ItemRunEngine.Result.MISSING_CHEMICAL_OUTPUT;
+      case ITEM_INPUT -> RecipeRunStatus.MISSING_ITEM_INPUT;
+      case ITEM_OUTPUT -> RecipeRunStatus.MISSING_ITEM_OUTPUT;
+      case ENERGY_INPUT -> RecipeRunStatus.MISSING_ENERGY_INPUT;
+      case ENERGY_OUTPUT -> RecipeRunStatus.MISSING_ENERGY_OUTPUT;
+      case FLUID_INPUT -> RecipeRunStatus.MISSING_FLUID_INPUT;
+      case FLUID_OUTPUT -> RecipeRunStatus.MISSING_FLUID_OUTPUT;
+      case CHEMICAL_INPUT -> RecipeRunStatus.MISSING_CHEMICAL_INPUT;
+      case CHEMICAL_OUTPUT -> RecipeRunStatus.MISSING_CHEMICAL_OUTPUT;
       default -> throw new IllegalArgumentException("Unsupported missing recipe component: " + missing);
     };
   }

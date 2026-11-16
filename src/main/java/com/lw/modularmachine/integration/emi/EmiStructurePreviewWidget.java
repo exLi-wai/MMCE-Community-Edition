@@ -4,7 +4,7 @@ import com.lw.modularmachine.api.client.preview.PreviewCamera;
 import com.lw.modularmachine.api.client.preview.PreviewRenderer;
 import com.lw.modularmachine.api.client.preview.PreviewSceneData;
 import com.lw.modularmachine.api.client.preview.PreviewViewport;
-import com.lw.modularmachine.integration.jei.ClientMachineJeiCatalog;
+import com.lw.modularmachine.client.preview.ClientMachineCatalog;
 import com.lw.modularmachine.integration.jei.MachineDetailsScreen;
 import com.lw.modularmachine.util.client.gui.GuiTextures;
 import dev.emi.emi.api.widget.Bounds;
@@ -31,7 +31,7 @@ final class EmiStructurePreviewWidget extends Widget {
       2);
   private static final int DETAILS_HEIGHT = 20;
   private final int x, y, width, height;
-  private final ClientMachineJeiCatalog.Machine machine;
+  private final ClientMachineCatalog.Machine machine;
   private final PreviewSceneData scene;
   private final PreviewRenderer renderer = PreviewRenderer.create();
   private final PreviewCamera camera = new PreviewCamera();
@@ -40,7 +40,7 @@ final class EmiStructurePreviewWidget extends Widget {
   private int dragButton = -1;
   private boolean initialized;
 
-  EmiStructurePreviewWidget(ClientMachineJeiCatalog.Machine machine, int x, int y, int width, int height) {
+  EmiStructurePreviewWidget(ClientMachineCatalog.Machine machine, int x, int y, int width, int height) {
     this.x = x;
     this.y = y;
     this.width = width;

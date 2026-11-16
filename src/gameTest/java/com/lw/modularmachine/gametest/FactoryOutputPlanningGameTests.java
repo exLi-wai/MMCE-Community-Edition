@@ -1,10 +1,11 @@
 package com.lw.modularmachine.gametest;
 
 import com.lw.modularmachine.blockentity.FactoryControllerBlockEntity;
+import com.lw.modularmachine.machine.factory.FactoryThreadConfiguration.Change;
 import com.lw.modularmachine.blockentity.MachinePortBlockEntity;
 import com.lw.modularmachine.config.MachineConfig;
 import com.lw.modularmachine.machine.factory.FactoryThreadState;
-import com.lw.modularmachine.api.upgrade.FactoryUpgradeSnapshot;
+import com.lw.modularmachine.api.upgrade.UpgradeSnapshot;
 import com.lw.modularmachine.machine.structure.StructureService;
 import com.lw.modularmachine.registry.MachineRegistries;
 import java.util.List;
@@ -90,8 +91,8 @@ public final class FactoryOutputPlanningGameTests {
           var fixture = build(helper);
           var thread = fixture.factory.scheduler().channel(THREAD);
           helper.assertTrue(
-              fixture.factory
-                  .updateThread(THREAD, thread.revision(), false, null, null, 1, thread.upgradeRevision() + 1),
+              fixture.factory.threadConfiguration()
+                  .update(THREAD, thread.revision(), Change.parallelLimit(1, thread.upgradeRevision() + 1)),
               "Could not set single-run factory throughput for seamless completion test");
           fixture.input.inventory().setStackInSlot(0, new ItemStack(Items.DIRT, 2));
           until(helper, 100, () -> {
@@ -193,7 +194,8 @@ public final class FactoryOutputPlanningGameTests {
   private static void startSingleRun(GameTestHelper helper, Fixture fixture) {
     var thread = fixture.factory.scheduler().channels().getFirst();
     helper.assertTrue(
-        fixture.factory.updateThread(THREAD, thread.revision(), false, null, null, 1, thread.upgradeRevision() + 1),
+        fixture.factory.threadConfiguration()
+            .update(THREAD, thread.revision(), Change.parallelLimit(1, thread.upgradeRevision() + 1)),
         "Could not switch the same output engine to a single run");
     fixture.input.inventory().setStackInSlot(0, new ItemStack(Items.DIRT));
     until(helper, 100, () -> {
@@ -222,7 +224,7 @@ public final class FactoryOutputPlanningGameTests {
     var fixture = new Fixture();
     fixture.factory = (FactoryControllerBlockEntity) level.getBlockEntity(position);
     fixture.factory.bindMachine(MACHINE);
-    fixture.factory.replaceThreads(
+    fixture.factory.threadConfiguration().replaceThreads(
         List.of(
             new FactoryThreadState(
                 THREAD,
@@ -235,7 +237,7 @@ public final class FactoryOutputPlanningGameTests {
                 FactoryThreadState.State.IDLE,
                 FactoryThreadState.Reason.NONE,
                 0,
-                new FactoryUpgradeSnapshot(0, 2, 1, 1, 1, 1, 1, 1))));
+                new UpgradeSnapshot(0, 2, 1, 1, 1, 1, 1, 1))));
     fixture.input = (MachinePortBlockEntity) level.getBlockEntity(position.offset(-1, 0, 1));
     fixture.output = (MachinePortBlockEntity) level.getBlockEntity(position.offset(1, 0, 1));
     fixture.fluid = (MachinePortBlockEntity) level.getBlockEntity(position.offset(0, 1, 1));

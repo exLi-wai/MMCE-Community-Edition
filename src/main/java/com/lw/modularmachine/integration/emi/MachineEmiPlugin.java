@@ -2,7 +2,7 @@ package com.lw.modularmachine.integration.emi;
 
 import com.lw.modularmachine.ModularMachine;
 import com.lw.modularmachine.client.recipe.MachineRecipeLayout;
-import com.lw.modularmachine.integration.jei.ClientMachineJeiCatalog;
+import com.lw.modularmachine.client.preview.ClientMachineCatalog;
 import com.lw.modularmachine.util.minecraft.registry.RegisteredMachineItems;
 import com.lw.modularmachine.machine.recipe.MachineRecipe;
 import com.lw.modularmachine.machine.recipe.MachineRecipeRegistries;
@@ -35,9 +35,9 @@ public final class MachineEmiPlugin implements EmiPlugin {
     registry.getRecipeManager().getAllRecipesFor(MachineRecipeRegistries.ITEM_TYPE.get()).stream()
         .sorted(Comparator.comparing(holder -> holder.id().toString())).forEach(
             holder -> recipes.computeIfAbsent(holder.value().machineId(), ignored -> new ArrayList<>()).add(holder));
-    var machineIds = new TreeSet<ResourceLocation>(ClientMachineJeiCatalog.machines().keySet());
+    var machineIds = new TreeSet<ResourceLocation>(ClientMachineCatalog.machines().keySet());
     machineIds.addAll(recipes.keySet());
-    var displays = machineIds.stream().map(ClientMachineJeiCatalog.machines()::get).filter(Objects::nonNull).toList();
+    var displays = machineIds.stream().map(ClientMachineCatalog.machines()::get).filter(Objects::nonNull).toList();
     MachineEmiCategory structure = displays.isEmpty() ? null : new MachineEmiCategory(
         ResourceLocation.fromNamespaceAndPath(ModularMachine.MODID, "machines/structure"),
         EmiStack.of(MachineRegistries.CONTROLLER.get()),
@@ -49,7 +49,7 @@ public final class MachineEmiPlugin implements EmiPlugin {
       registry.addWorkstation(structure, EmiStack.of(MachineRegistries.FACTORY_CONTROLLER.get()));
     }
     for (var machine : machineIds) {
-      var display = ClientMachineJeiCatalog.machines().get(machine);
+      var display = ClientMachineCatalog.machines().get(machine);
       if (display == null) {
         continue;
       }
@@ -64,7 +64,7 @@ public final class MachineEmiPlugin implements EmiPlugin {
     }
     registry.addDeferredRecipes(add -> {
       for (var machine : machineIds) {
-        var display = ClientMachineJeiCatalog.machines().get(machine);
+        var display = ClientMachineCatalog.machines().get(machine);
         if (display != null && structure != null) {
           add.accept(new MachineEmiRecipe(structure, display));
         }

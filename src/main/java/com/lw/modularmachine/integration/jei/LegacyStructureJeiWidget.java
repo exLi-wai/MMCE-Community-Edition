@@ -1,5 +1,6 @@
 package com.lw.modularmachine.integration.jei;
 
+import com.lw.modularmachine.client.preview.ClientMachineCatalog;
 import com.lw.modularmachine.api.client.preview.PreviewCamera;
 import com.lw.modularmachine.api.client.preview.PreviewRenderer;
 import com.lw.modularmachine.api.client.preview.PreviewSceneData;
@@ -30,13 +31,13 @@ final class LegacyStructureJeiWidget implements IRecipeWidget, IJeiGuiEventListe
       200,
       20,
       2);
-  private final ClientMachineJeiCatalog.Machine machine;
+  private final ClientMachineCatalog.Machine machine;
   private final PreviewSceneData scene;
   private final PreviewRenderer renderer = PreviewRenderer.create();
   private final PreviewCamera camera = new PreviewCamera();
   private boolean dragging, initialized;
 
-  LegacyStructureJeiWidget(ClientMachineJeiCatalog.Machine machine) {
+  LegacyStructureJeiWidget(ClientMachineCatalog.Machine machine) {
     this.machine = machine;
     scene = new PreviewSceneData(
         machine.color(),

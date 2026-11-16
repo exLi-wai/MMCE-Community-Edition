@@ -212,7 +212,7 @@ final class RangedSelectionPreviewCompiler {
       this.source = source;
       this.key = key;
       for (var box : new Box[]{source.body(), source.start(), source.end()}) {
-        if (box != null && design.controller() != null && contains(box, design.controller())) {
+        if (box != null && design.controller() != null && box.contains(design.controller())) {
           throw new Failure("preview_controller_dynamic");
         }
       }
@@ -481,22 +481,7 @@ final class RangedSelectionPreviewCompiler {
     if (box == null) {
       return List.<BlockPos>of().iterator();
     }
-    return BlockPos.betweenClosed(
-        Math.min(box.first().getX(), box.second().getX()),
-        Math.min(box.first().getY(), box.second().getY()),
-        Math.min(box.first().getZ(), box.second().getZ()),
-        Math.max(box.first().getX(), box.second().getX()),
-        Math.max(box.first().getY(), box.second().getY()),
-        Math.max(box.first().getZ(), box.second().getZ())).iterator();
-  }
-
-  private static boolean contains(Box box, BlockPos position) {
-    return position.getX() >= Math.min(box.first().getX(), box.second().getX())
-        && position.getX() <= Math.max(box.first().getX(), box.second().getX())
-        && position.getY() >= Math.min(box.first().getY(), box.second().getY())
-        && position.getY() <= Math.max(box.first().getY(), box.second().getY())
-        && position.getZ() >= Math.min(box.first().getZ(), box.second().getZ())
-        && position.getZ() <= Math.max(box.first().getZ(), box.second().getZ());
+    return box.positions().iterator();
   }
 
   static Component detail(Throwable failure) {

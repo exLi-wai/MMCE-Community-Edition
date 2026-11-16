@@ -2,6 +2,7 @@ package com.lw.modularmachine.api.recipe;
 
 import com.lw.modularmachine.api.controller.ControllerOwnership;
 import com.lw.modularmachine.machine.recipe.RecipeItemCallbackService;
+import com.lw.modularmachine.util.math.ExactIntegers;
 import java.util.Objects;
 import java.util.Optional;
 import java.math.BigDecimal;
@@ -105,10 +106,10 @@ public final class RecipeItemCallbacks {
 
   public static ItemRequirement requirement(ItemStack stack, Number amount) {
     Objects.requireNonNull(amount, "amount");
-    if ((amount instanceof Double || amount instanceof Float) && Math.abs(amount.doubleValue()) > 9007199254740991D) {
+    if (ExactIntegers.unsafeFloatingInteger(amount)) {
       throw new IllegalArgumentException("Large item requirement amounts need an exact decimal string");
     }
-    return new ItemRequirement(stack, new BigDecimal(amount.toString()).longValueExact());
+    return new ItemRequirement(stack, ExactIntegers.longValueExact(amount));
   }
 
   public static ItemRequirement requirement(ItemStack stack, String amount) {

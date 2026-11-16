@@ -1,5 +1,6 @@
 package com.lw.modularmachine.gametest;
 
+import com.lw.modularmachine.machine.structure.MachineDefinitionParser;
 import com.google.gson.JsonArray;
 import com.google.gson.JsonObject;
 import com.google.gson.JsonParseException;
@@ -11,8 +12,8 @@ import com.lw.modularmachine.machine.structure.CheckResult;
 import com.lw.modularmachine.machine.structure.CompiledStructure;
 import com.lw.modularmachine.machine.structure.MachineDefinition;
 import com.lw.modularmachine.machine.structure.StructureService;
-import com.lw.modularmachine.machine.structure.VerificationFailure;
-import com.lw.modularmachine.machine.structure.VerificationState;
+import com.lw.modularmachine.api.controller.VerificationFailure;
+import com.lw.modularmachine.api.controller.VerificationState;
 import com.lw.modularmachine.registry.MachineRegistries;
 import java.util.concurrent.CompletableFuture;
 import net.minecraft.core.BlockPos;
@@ -317,7 +318,7 @@ public final class OrientationDefinitionGameTests {
   }
 
   private static MachineDefinition parse(JsonObject root) {
-    return MachineDefinition.parse(ResourceLocation.fromNamespaceAndPath("mmcece", "orientation_contract"), root);
+    return MachineDefinitionParser.parse(ResourceLocation.fromNamespaceAndPath("mmcece", "orientation_contract"), root);
   }
 
   private static void expectFailure(GameTestHelper helper, String detail, Runnable call) {

@@ -1,7 +1,9 @@
 package com.lw.modularmachine.machine.configuration;
 
+import com.lw.modularmachine.api.component.ResourceType;
 import com.lw.modularmachine.ModularMachine;
 import com.lw.modularmachine.blockentity.FactoryControllerBlockEntity;
+import com.lw.modularmachine.machine.factory.FactoryThreadConfiguration;
 import com.lw.modularmachine.blockentity.MachinePortBlockEntity;
 import com.lw.modularmachine.blockentity.ParallelControllerBlockEntity;
 import com.lw.modularmachine.blockentity.PatternProviderBlockEntity;
@@ -9,9 +11,8 @@ import com.lw.modularmachine.blockentity.PatternMirrorBlockEntity;
 import com.lw.modularmachine.machine.network.pattern.PatternProviderReference;
 import com.lw.modularmachine.blockentity.SmartInterfaceBlockEntity;
 import com.lw.modularmachine.item.ConfigurationCardItem;
-import com.lw.modularmachine.machine.PortKind;
 import com.lw.modularmachine.machine.configuration.ConfigurationCardData.Kind;
-import com.lw.modularmachine.machine.factory.UpgradeLifecyclePublisher;
+import com.lw.modularmachine.machine.upgrade.UpgradeLifecyclePublisher;
 import com.lw.modularmachine.machine.recipe.RecipeLifecyclePublisher;
 import com.lw.modularmachine.machine.smart.SmartInterfaceEventPublisher;
 import com.lw.modularmachine.machine.structure.StructureService;
@@ -138,7 +139,7 @@ public final class ConfigurationCardService {
   private static void copy(ServerPlayer player, BlockEntity target) {
     ConfigurationCardData copied;
     if (target instanceof FactoryControllerBlockEntity factory) {
-      var preset = factory.copyThreadConfiguration();
+      var preset = factory.threadConfiguration().copyPreset();
       if (preset.isEmpty()) {
         message(player, "unavailable");
         return;
@@ -153,9 +154,8 @@ public final class ConfigurationCardService {
     } else if (target instanceof ParallelControllerBlockEntity parallel && parallel.schemaSupported()) {
       copied = ConfigurationCardData.number(Kind.PARALLEL, parallel.parallelism());
     } else if (target instanceof MachinePortBlockEntity port && port.schemaSupported() && port.canGroupInput()) {
-      copied = ConfigurationCardData.number(
-          port.kind().resource() == PortKind.Resource.ITEM ? Kind.ITEM_GROUP : Kind.FLUID_GROUP,
-          port.inputGroup());
+      copied = ConfigurationCardData
+          .number(port.kind().resource() == ResourceType.ITEM ? Kind.ITEM_GROUP : Kind.FLUID_GROUP, port.inputGroup());
     } else if (target instanceof SmartInterfaceBlockEntity smart && smart.schemaSupported()) {
       var selected = interfaceSelection(player, smart);
       if (selected.entry() == null) {
@@ -180,16 +180,16 @@ public final class ConfigurationCardService {
   private static void paste(ServerPlayer player, BlockEntity target, ConfigurationCardData saved) {
     boolean applied;
     if (saved.kind() == Kind.FACTORY && target instanceof FactoryControllerBlockEntity factory) {
-      var result = factory.pasteThreadConfiguration(
+      var result = factory.threadConfiguration().pastePreset(
           saved.compatibilityMachine().orElseThrow(),
-          factory.configurationRevision(),
+          factory.threadConfiguration().revision(),
           saved.factoryPreset());
-      if (result == FactoryControllerBlockEntity.ConfigurationResult.BUSY) {
+      if (result == FactoryThreadConfiguration.ConfigurationResult.BUSY) {
         message(player, "busy");
         return;
       }
-      applied = result == FactoryControllerBlockEntity.ConfigurationResult.SUCCESS
-          || result == FactoryControllerBlockEntity.ConfigurationResult.NO_CHANGE;
+      applied = result == FactoryThreadConfiguration.ConfigurationResult.SUCCESS
+          || result == FactoryThreadConfiguration.ConfigurationResult.NO_CHANGE;
     } else if (saved.kind() == Kind.PATTERN_PROVIDER && target instanceof PatternMirrorBlockEntity mirror) {
       var reference = saved.patternTarget().orElseThrow();
       if (!reference.dimension().equals(player.serverLevel().dimension().location())) {
@@ -206,7 +206,7 @@ public final class ConfigurationCardService {
     } else if ((saved.kind() == Kind.ITEM_GROUP || saved.kind() == Kind.FLUID_GROUP)
         && target instanceof MachinePortBlockEntity port
         && port.canGroupInput()) {
-      boolean item = port.kind().resource() == PortKind.Resource.ITEM;
+      boolean item = port.kind().resource() == ResourceType.ITEM;
       if (item != (saved.kind() == Kind.ITEM_GROUP)) {
         message(player, "incompatible");
         return;

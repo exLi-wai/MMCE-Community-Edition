@@ -5,11 +5,11 @@ import com.lw.modularmachine.blockentity.MachineControllerBlockEntity;
 import com.lw.modularmachine.blockentity.MachinePortBlockEntity;
 import com.lw.modularmachine.api.orientation.MachineOrientation;
 import com.lw.modularmachine.machine.recipe.AtomicRecipeStarter;
-import com.lw.modularmachine.machine.recipe.FrozenItemRun;
+import com.lw.modularmachine.machine.recipe.FrozenRecipeRun;
 import com.lw.modularmachine.machine.recipe.search.RecipeSearch;
 import com.lw.modularmachine.machine.recipe.MachineRecipeService;
 import com.lw.modularmachine.machine.structure.StructureService;
-import com.lw.modularmachine.machine.structure.VerificationState;
+import com.lw.modularmachine.api.controller.VerificationState;
 import com.lw.modularmachine.registry.MachineRegistries;
 import java.io.IOException;
 import java.nio.file.Files;
@@ -234,7 +234,7 @@ public final class PaidRunRestartGameTests {
     }
   }
 
-  private static boolean containsOutput(FrozenItemRun run, String itemId) {
+  private static boolean containsOutput(FrozenRecipeRun run, String itemId) {
     var outputs = run.save().getList("outputs", Tag.TAG_COMPOUND);
     for (int i = 0; i < outputs.size(); i++) {
       if (outputs.getCompound(i).getCompound("stack").getString("id").equals(itemId)) {

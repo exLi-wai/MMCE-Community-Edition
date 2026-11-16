@@ -1,5 +1,6 @@
 package com.lw.modularmachine.block;
 
+import com.lw.modularmachine.api.component.ResourceType;
 import com.lw.modularmachine.blockentity.MachinePortBlockEntity;
 import com.lw.modularmachine.config.MachineConfig;
 import com.lw.modularmachine.machine.HatchTier;
@@ -8,6 +9,8 @@ import com.lw.modularmachine.machine.chemical.ChemicalPlatform;
 import com.lw.modularmachine.util.minecraft.energy.EnergyDisplay;
 import com.mojang.serialization.MapCodec;
 import java.util.List;
+import java.util.Map;
+import java.util.function.BiConsumer;
 import net.minecraft.core.BlockPos;
 import net.minecraft.ChatFormatting;
 import net.minecraft.server.level.ServerPlayer;
@@ -28,6 +31,15 @@ import net.minecraft.world.phys.BlockHitResult;
 import net.neoforged.neoforge.fluids.FluidUtil;
 
 public class MachinePortBlock extends BaseEntityBlock {
+  private static final Map<ResourceType, BiConsumer<MachinePortBlock, List<Component>>> TOOLTIPS = Map.of(
+      ResourceType.ITEM,
+      MachinePortBlock::appendItemTooltip,
+      ResourceType.FLUID,
+      MachinePortBlock::appendFluidTooltip,
+      ResourceType.ENERGY,
+      MachinePortBlock::appendEnergyTooltip,
+      ResourceType.CHEMICAL,
+      MachinePortBlock::appendChemicalTooltip);
   private final PortKind kind;
   private final HatchTier tier;
   private final MapCodec<MachinePortBlock> codec;
@@ -63,7 +75,7 @@ public class MachinePortBlock extends BaseEntityBlock {
   }
 
   public int itemSlots() {
-    return kind.resource() == PortKind.Resource.ITEM ? (int) tier.capacity() : 0;
+    return kind.resource() == ResourceType.ITEM ? (int) tier.capacity() : 0;
   }
 
   public int itemSlotLimit() {
@@ -71,66 +83,72 @@ public class MachinePortBlock extends BaseEntityBlock {
   }
 
   public int fluidCapacity() {
-    return kind.resource() == PortKind.Resource.FLUID ? (int) MachineConfig.fluidHatchCapacity(tier) : 0;
+    return kind.resource() == ResourceType.FLUID ? (int) MachineConfig.fluidHatchCapacity(tier) : 0;
   }
 
   public long chemicalCapacity() {
-    return kind.resource() == PortKind.Resource.CHEMICAL ? MachineConfig.chemicalHatchCapacity(tier) : 0;
+    return kind.resource() == ResourceType.CHEMICAL ? MachineConfig.chemicalHatchCapacity(tier) : 0;
   }
 
   @Override
   public void appendHoverText(ItemStack stack, Item.TooltipContext context, List<Component> tooltip, TooltipFlag flag) {
-    switch (kind.resource()) {
-      case ITEM -> {
-        tooltip.add(
-            Component.translatable(
-                tier.capacity() == 1 ? "tooltip.mmcece.item_bus.slot" : "tooltip.mmcece.item_bus.slots",
-                tier.capacity()).withStyle(ChatFormatting.GRAY));
-        if (kind.isInput()) {
-          tooltip.add(Component.translatable("tooltip.mmcece.input_group").withStyle(ChatFormatting.GRAY));
-        }
-      }
-      case FLUID -> {
-        tooltip.add(
-            Component.translatable("tooltip.mmcece.fluid_hatch.capacity", tier.capacity())
-                .withStyle(ChatFormatting.GRAY));
-        if (kind.isInput()) {
-          tooltip.add(Component.translatable("tooltip.mmcece.input_group").withStyle(ChatFormatting.GRAY));
-        }
-      }
-      case ENERGY -> {
-        long capacity = MachineConfig.energyHatchCapacity(tier);
-        long transfer = MachineConfig.energyHatchTransfer(tier);
-        for (var unit : EnergyDisplay.hatchTooltipUnits()) {
-          String suffix = unit.converted() ? "_converted" : "_unit";
-          tooltip.add(
-              Component.translatable(
-                  "tooltip.mmcece.energy_hatch.capacity" + suffix,
-                  EnergyDisplay.format(capacity, unit),
-                  unit.component()).withStyle(ChatFormatting.GRAY));
-          tooltip.add(
-              Component.translatable(
-                  (kind
-                      .isInput() ? "tooltip.mmcece.energy_hatch.input" : "tooltip.mmcece.energy_hatch.output") + suffix,
-                  EnergyDisplay.format(transfer, unit),
-                  unit.component()).withStyle(ChatFormatting.GRAY));
-        }
-      }
-      case CHEMICAL -> {
-        tooltip.add(
-            Component.translatable("tooltip.mmcece.chemical_hatch.capacity", MachineConfig.chemicalHatchCapacity(tier))
-                .withStyle(ChatFormatting.GRAY));
-        if (kind.isInput()) {
-          tooltip.add(Component.translatable("tooltip.mmcece.input_group").withStyle(ChatFormatting.GRAY));
-        }
-      }
+    var writer = TOOLTIPS.get(kind.resource());
+    if (writer == null) {
+      tooltip.add(Component.literal(kind.resource().id().toString()).withStyle(ChatFormatting.GRAY));
+      return;
+    }
+    writer.accept(this, tooltip);
+  }
+
+  private void appendItemTooltip(List<Component> tooltip) {
+    tooltip.add(
+        Component.translatable(
+            tier.capacity() == 1 ? "tooltip.mmcece.item_bus.slot" : "tooltip.mmcece.item_bus.slots",
+            tier.capacity()).withStyle(ChatFormatting.GRAY));
+    appendInputGroupTooltip(tooltip);
+  }
+
+  private void appendFluidTooltip(List<Component> tooltip) {
+    tooltip.add(
+        Component.translatable("tooltip.mmcece.fluid_hatch.capacity", tier.capacity()).withStyle(ChatFormatting.GRAY));
+    appendInputGroupTooltip(tooltip);
+  }
+
+  private void appendEnergyTooltip(List<Component> tooltip) {
+    long capacity = MachineConfig.energyHatchCapacity(tier);
+    long transfer = MachineConfig.energyHatchTransfer(tier);
+    for (var unit : EnergyDisplay.hatchTooltipUnits()) {
+      String suffix = unit.converted() ? "_converted" : "_unit";
+      tooltip.add(
+          Component.translatable(
+              "tooltip.mmcece.energy_hatch.capacity" + suffix,
+              EnergyDisplay.format(capacity, unit),
+              unit.component()).withStyle(ChatFormatting.GRAY));
+      tooltip.add(
+          Component.translatable(
+              (kind.isInput() ? "tooltip.mmcece.energy_hatch.input" : "tooltip.mmcece.energy_hatch.output") + suffix,
+              EnergyDisplay.format(transfer, unit),
+              unit.component()).withStyle(ChatFormatting.GRAY));
+    }
+  }
+
+  private void appendChemicalTooltip(List<Component> tooltip) {
+    tooltip.add(
+        Component.translatable("tooltip.mmcece.chemical_hatch.capacity", MachineConfig.chemicalHatchCapacity(tier))
+            .withStyle(ChatFormatting.GRAY));
+    appendInputGroupTooltip(tooltip);
+  }
+
+  private void appendInputGroupTooltip(List<Component> tooltip) {
+    if (kind.isInput()) {
+      tooltip.add(Component.translatable("tooltip.mmcece.input_group").withStyle(ChatFormatting.GRAY));
     }
   }
 
   @Override
   protected InteractionResult useWithoutItem(BlockState state, Level level, BlockPos pos, Player player, BlockHitResult hit) {
     if (!level.isClientSide && level.getBlockEntity(pos) instanceof MachinePortBlockEntity port) {
-      if (port.schemaSupported() && kind.resource() == PortKind.Resource.ITEM) {
+      if (port.schemaSupported() && kind.resource() == ResourceType.ITEM) {
         ((ServerPlayer) player).openMenu(port, pos);
       } else if (port.schemaSupported()) {
         ((ServerPlayer) player).openMenu(port, pos);
@@ -144,7 +162,7 @@ public class MachinePortBlock extends BaseEntityBlock {
   @Override
   protected ItemInteractionResult useItemOn(ItemStack stack, BlockState state, Level level, BlockPos pos, Player player, InteractionHand hand, BlockHitResult hit) {
     if (!player.isSecondaryUseActive()
-        && kind.resource() == PortKind.Resource.CHEMICAL
+        && kind.resource() == ResourceType.CHEMICAL
         && ChemicalPlatform.hasContainer(stack)) {
       if (level.isClientSide) {
         return ItemInteractionResult.SUCCESS;
@@ -156,7 +174,7 @@ public class MachinePortBlock extends BaseEntityBlock {
       }
     }
     if (!player.isSecondaryUseActive()
-        && kind.resource() == PortKind.Resource.FLUID
+        && kind.resource() == ResourceType.FLUID
         && FluidUtil.getFluidHandler(stack).isPresent()) {
       if (level.isClientSide) {
         return ItemInteractionResult.SUCCESS;
@@ -176,7 +194,7 @@ public class MachinePortBlock extends BaseEntityBlock {
         && !isMoving
         && !level.isClientSide
         && dropContentsOnRemoval()
-        && kind.resource() == PortKind.Resource.ITEM
+        && kind.resource() == ResourceType.ITEM
         && level.getBlockEntity(pos) instanceof MachinePortBlockEntity port) {
       for (int slot = 0; slot < port.inventory().getSlots(); slot++) {
         ItemStack stack = port.inventory().getStackInSlot(slot);

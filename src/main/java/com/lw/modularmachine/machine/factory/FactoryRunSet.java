@@ -1,6 +1,7 @@
 package com.lw.modularmachine.machine.factory;
 
-import com.lw.modularmachine.machine.recipe.FrozenItemRun;
+import com.lw.modularmachine.api.recipe.RecipeRunState;
+import com.lw.modularmachine.machine.recipe.FrozenRecipeRun;
 import java.util.ArrayList;
 import java.util.HashSet;
 import java.util.List;
@@ -12,9 +13,9 @@ import java.util.UUID;
 
 /** Immutable collection of independent paid factory runs. */
 public final class FactoryRunSet {
-  private final List<FrozenItemRun> runs;
+  private final List<FrozenRecipeRun> runs;
 
-  private FactoryRunSet(List<FrozenItemRun> runs) {
+  private FactoryRunSet(List<FrozenRecipeRun> runs) {
     this.runs = List.copyOf(runs);
   }
 
@@ -22,7 +23,7 @@ public final class FactoryRunSet {
     return new FactoryRunSet(List.of());
   }
 
-  public static FactoryRunSet ofRuns(List<FrozenItemRun> runs) {
+  public static FactoryRunSet ofRuns(List<FrozenRecipeRun> runs) {
     Objects.requireNonNull(runs, "runs");
     var ids = new HashSet<UUID>();
     for (var run : runs) {
@@ -33,20 +34,20 @@ public final class FactoryRunSet {
     return new FactoryRunSet(runs);
   }
 
-  public List<FrozenItemRun> runs() {
+  public List<FrozenRecipeRun> runs() {
     return runs;
   }
 
-  public Optional<FrozenItemRun> find(UUID runId) {
+  public Optional<FrozenRecipeRun> find(UUID runId) {
     Objects.requireNonNull(runId, "runId");
     return runs.stream().filter(run -> run.runId().equals(runId)).findFirst();
   }
 
-  public FactoryRunSet add(FrozenItemRun run) {
+  public FactoryRunSet add(FrozenRecipeRun run) {
     return addAll(List.of(Objects.requireNonNull(run, "run")));
   }
 
-  public FactoryRunSet addAll(List<FrozenItemRun> additions) {
+  public FactoryRunSet addAll(List<FrozenRecipeRun> additions) {
     Objects.requireNonNull(additions, "additions");
     var ids = new HashSet<UUID>();
     for (var run : runs) {
@@ -60,13 +61,13 @@ public final class FactoryRunSet {
     if (additions.isEmpty()) {
       return this;
     }
-    var next = new ArrayList<FrozenItemRun>(Math.addExact(runs.size(), additions.size()));
+    var next = new ArrayList<FrozenRecipeRun>(Math.addExact(runs.size(), additions.size()));
     next.addAll(runs);
     next.addAll(additions);
     return new FactoryRunSet(next);
   }
 
-  public FactoryRunSet replaceAll(Map<UUID, FrozenItemRun> replacements) {
+  public FactoryRunSet replaceAll(Map<UUID, FrozenRecipeRun> replacements) {
     Objects.requireNonNull(replacements, "replacements");
     if (replacements.isEmpty()) {
       return this;
@@ -90,7 +91,7 @@ public final class FactoryRunSet {
     return new FactoryRunSet(next);
   }
 
-  public FactoryRunSet replace(FrozenItemRun run) {
+  public FactoryRunSet replace(FrozenRecipeRun run) {
     Objects.requireNonNull(run, "run");
     var next = new ArrayList<>(runs);
     for (int i = 0; i < next.size(); i++) {
@@ -111,7 +112,7 @@ public final class FactoryRunSet {
     return new FactoryRunSet(next);
   }
 
-  public FactoryRunSet applyFailureDecisions(Map<UUID, FrozenItemRun> replacements, Set<UUID> discarded) {
+  public FactoryRunSet applyFailureDecisions(Map<UUID, FrozenRecipeRun> replacements, Set<UUID> discarded) {
     Objects.requireNonNull(replacements, "replacements");
     Objects.requireNonNull(discarded, "discarded");
     if (replacements.isEmpty() && discarded.isEmpty()) {
@@ -120,11 +121,11 @@ public final class FactoryRunSet {
     if (replacements.keySet().stream().anyMatch(discarded::contains)) {
       throw new IllegalArgumentException("A failed run cannot be both replaced and discarded");
     }
-    var next = new ArrayList<FrozenItemRun>(runs.size());
+    var next = new ArrayList<FrozenRecipeRun>(runs.size());
     var resolved = new HashSet<UUID>();
     for (var current : runs) {
       if (discarded.contains(current.runId())) {
-        if (current.pendingOutput() || current.state() != FrozenItemRun.State.RUNNING) {
+        if (current.pendingOutput() || current.state() != RecipeRunState.RUNNING) {
           throw new IllegalArgumentException("Only active paid runs may be discarded");
         }
         resolved.add(current.runId());
@@ -133,8 +134,8 @@ public final class FactoryRunSet {
       var replacement = replacements.get(current.runId());
       if (replacement != null) {
         if (!current.sameRecipe(replacement)
-            || current.state() != FrozenItemRun.State.RUNNING
-            || replacement.state() != FrozenItemRun.State.RUNNING
+            || current.state() != RecipeRunState.RUNNING
+            || replacement.state() != RecipeRunState.RUNNING
             || replacement.progress() > current.progress()
             || replacement.lastProgressTick() <= current.lastProgressTick()) {
           throw new IllegalArgumentException("Invalid resource failure run replacement");

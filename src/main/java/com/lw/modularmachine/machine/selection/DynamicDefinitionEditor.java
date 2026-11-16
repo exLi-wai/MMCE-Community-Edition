@@ -1,5 +1,6 @@
 package com.lw.modularmachine.machine.selection;
 
+import com.lw.modularmachine.machine.structure.MachineDefinitionParser;
 import com.google.gson.JsonArray;
 import com.google.gson.JsonElement;
 import com.google.gson.JsonObject;
@@ -137,7 +138,7 @@ public final class DynamicDefinitionEditor {
     var references = new ArrayList<StateOrientationAdapters.BlockReference>();
     if (input.original() != null) {
       references.addAll(
-          MachineDefinition.blockReferences(
+          MachineDefinitionParser.blockReferences(
               Map.of(input.machine(), input.variables().expand(input.original(), input.machine().toString()))));
       // An edited existing declaration may keep a variable/multi-block candidate
       // list.
@@ -158,7 +159,7 @@ public final class DynamicDefinitionEditor {
         var root = new JsonObject();
         root.add("parts", edited);
         references.addAll(
-            MachineDefinition
+            MachineDefinitionParser
                 .blockReferences(Map.of(input.machine(), input.variables().expand(root, input.machine().toString()))));
       }
     }
@@ -178,7 +179,7 @@ public final class DynamicDefinitionEditor {
       }
       root.add("parts", parts);
       references.addAll(
-          MachineDefinition
+          MachineDefinitionParser
               .blockReferences(Map.of(input.machine(), input.variables().expand(root, input.machine().toString()))));
     }
     var grouped = new LinkedHashMap<ResourceLocation, Map<String, StateOrientationAdapters.PropertyReference>>();
@@ -305,7 +306,7 @@ public final class DynamicDefinitionEditor {
     if (!appliedEdits.containsAll(input.edits().keySet())) {
       throw RangedSelectionMessages.invalid("unused_part_edits");
     }
-    var definition = MachineDefinition
+    var definition = MachineDefinitionParser
         .parse(input.machine(), input.variables().expand(root, input.machine().toString()), registry);
     if (!definition.allows(input.orientation())) {
       throw new IllegalArgumentException(
@@ -329,7 +330,7 @@ public final class DynamicDefinitionEditor {
   }
 
   private void readOriginal(StateOrientationAdapters.RegistrySnapshot registry) {
-    original = MachineDefinition
+    original = MachineDefinitionParser
         .parse(input.machine(), input.variables().expand(input.original(), input.machine().toString()), registry);
     if (!original.allows(input.orientation())) {
       throw new IllegalArgumentException("The selected controller orientation is not allowed by the original file");
@@ -461,19 +462,11 @@ public final class DynamicDefinitionEditor {
     if (box.volume() > RangedSelectionData.MAX_CAPTURE) {
       throw new IllegalArgumentException("Selection exceeds the editor capture budget");
     }
-    if (dynamic && contains(box, input.controller())) {
+    if (dynamic && box.contains(input.controller())) {
       throw new IllegalArgumentException("A dynamic selection cannot contain the controller");
     }
     var result = new ArrayList<Captured>();
-    var first = box.first();
-    var second = box.second();
-    for (var position : BlockPos.betweenClosed(
-        Math.min(first.getX(), second.getX()),
-        Math.min(first.getY(), second.getY()),
-        Math.min(first.getZ(), second.getZ()),
-        Math.max(first.getX(), second.getX()),
-        Math.max(first.getY(), second.getY()),
-        Math.max(first.getZ(), second.getZ()))) {
+    for (var position : box.positions()) {
       checkWork();
       var value = captured.get(position);
       if (value == null) {
@@ -485,15 +478,6 @@ public final class DynamicDefinitionEditor {
     }
     result.sort(ORDER);
     return result;
-  }
-
-  private static boolean contains(Box box, BlockPos position) {
-    return position.getX() >= Math.min(box.first().getX(), box.second().getX())
-        && position.getX() <= Math.max(box.first().getX(), box.second().getX())
-        && position.getY() >= Math.min(box.first().getY(), box.second().getY())
-        && position.getY() <= Math.max(box.first().getY(), box.second().getY())
-        && position.getZ() >= Math.min(box.first().getZ(), box.second().getZ())
-        && position.getZ() <= Math.max(box.first().getZ(), box.second().getZ());
   }
 
   private static BlockPos vector(JsonElement value) {

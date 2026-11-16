@@ -1,6 +1,6 @@
 package com.lw.modularmachine.integration.kubejs;
 
-import com.lw.modularmachine.machine.factory.FactoryUpgradeKubeJSHandlers;
+import com.lw.modularmachine.machine.upgrade.UpgradeScriptHandlers;
 import java.util.ArrayList;
 import java.util.List;
 import org.junit.jupiter.api.Test;
@@ -56,7 +56,7 @@ class KubeJSServerHandlersTest {
     var next = new KubeJSServerHandlers.Snapshot(
         1,
         machines,
-        FactoryUpgradeKubeJSHandlers.Snapshot.EMPTY,
+        UpgradeScriptHandlers.Snapshot.EMPTY,
         List.of(),
         List.of(),
         List.of(),
@@ -71,7 +71,7 @@ class KubeJSServerHandlersTest {
     return new KubeJSServerHandlers.Snapshot(
         generation,
         List.of(),
-        FactoryUpgradeKubeJSHandlers.Snapshot.EMPTY,
+        UpgradeScriptHandlers.Snapshot.EMPTY,
         List.of(),
         List.of(),
         List.of(),

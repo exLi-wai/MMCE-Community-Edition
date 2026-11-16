@@ -1,0 +1,255 @@
+package com.lw.modularmachine.machine.factory;
+
+import com.lw.modularmachine.machine.upgrade.UpgradeRecipeCheckHandlers;
+import com.lw.modularmachine.config.MachineConfig;
+import com.lw.modularmachine.machine.recipe.MachineRecipe;
+import com.lw.modularmachine.machine.recipe.RecipeStartPlan;
+import com.lw.modularmachine.machine.recipe.FactoryRecipeStarter;
+import com.lw.modularmachine.machine.recipe.FactoryParallelStarter;
+import com.lw.modularmachine.machine.recipe.search.RecipeCatalog;
+import com.lw.modularmachine.machine.recipe.search.RecipeSearch;
+import com.lw.modularmachine.machine.recipe.search.RecipeResourceRequirements;
+import java.util.HashMap;
+import java.util.Map;
+import java.util.Set;
+import org.jetbrains.annotations.ApiStatus;
+
+/**
+ * Owns bounded factory searches and retry state; paid runs and scheduler stay
+ * with their owners.
+ */
+@ApiStatus.Internal
+public final class FactorySearchCoordinator {
+  private static final int SEARCH_RETRY_INITIAL = 5;
+  private static final int SEARCH_RETRY_MAX = 80;
+  private final FactoryThreadConfiguration threadConfiguration;
+  private final Host host;
+  private final Map<String, RecipeSearch> searches = new HashMap<>();
+  private final Map<String, Long> searchRetryAfter = new HashMap<>();
+  private final Map<String, Integer> searchRetryInterval = new HashMap<>();
+
+  public interface Host {
+    boolean available();
+    long gameTime();
+    RecipeCatalog catalog();
+    boolean hasRuns(String threadId);
+    boolean startAllowed(String threadId);
+    RecipeSearch beginSearch(String threadId, RecipeCatalog catalog, Set<String> allowed);
+    int parallelLimit(String threadId);
+    int maximumUpgradeRuns();
+    MachineRecipe definitionForStart(RecipeStartPlan plan);
+    FactoryRecipeStarter.Result startSingle(String threadId, RecipeStartPlan plan, int workBudget);
+    FactoryParallelStarter.Result startParallel(String threadId, RecipeStartPlan plan, int count, int workBudget);
+    void updateThreadState(FactoryThreadState previous, FactoryThreadState.State state, FactoryThreadState.Reason reason);
+  }
+
+  public FactorySearchCoordinator(FactoryThreadConfiguration threadConfiguration, Host host) {
+    this.threadConfiguration = java.util.Objects.requireNonNull(threadConfiguration, "threadConfiguration");
+    this.host = java.util.Objects.requireNonNull(host, "host");
+  }
+
+  public void advance() {
+    if (!host.available()) {
+      invalidate();
+      return;
+    }
+    var catalog = host.catalog();
+    if (catalog == null) {
+      invalidate();
+      updateWaitingThreads(FactoryThreadState.Reason.CONTROLLER_UNAVAILABLE);
+      return;
+    }
+    var channels = threadConfiguration.scheduler().channels();
+    if (channels.isEmpty()) {
+      return;
+    }
+    int visitBudget = Math.min(MachineConfig.FACTORY_THREADS_PER_TICK.get(), channels.size());
+    long now = host.gameTime();
+    var window = threadConfiguration.visitWindow(visitBudget);
+    for (var visited : window) {
+      advanceThread(visited.threadId(), catalog, now);
+    }
+  }
+
+  private void advanceThread(String threadId, RecipeCatalog catalog, long now) {
+    var thread = threadConfiguration.scheduler().channel(threadId);
+    if (thread == null
+        || !thread.enabled()
+        || host.hasRuns(thread.threadId())
+        || thread.state() == FactoryThreadState.State.INVALID) {
+      return;
+    }
+    if (!host.startAllowed(thread.threadId())) {
+      invalidateThread(thread.threadId(), now);
+      host.updateThreadState(thread, FactoryThreadState.State.WAITING, FactoryThreadState.Reason.THREAD_LIMIT);
+      return;
+    }
+    var search = searches.get(thread.threadId());
+    if (search != null && !search.dependenciesCurrent()) {
+      invalidateThread(thread.threadId(), now);
+      search = null;
+    }
+    if (search == null) {
+      if (now < searchRetryAfter.getOrDefault(thread.threadId(), 0L)) {
+        return;
+      }
+      var allowed = thread.lockedRecipe() == null ? null : Set.of(thread.lockedRecipe().toString());
+      try {
+        search = host.beginSearch(thread.threadId(), catalog, allowed);
+      } catch (UpgradeRecipeCheckHandlers.FailedException invalid) {
+        host.updateThreadState(thread, FactoryThreadState.State.WAITING, FactoryThreadState.Reason.CHECK_ERROR);
+        backoffSearch(thread.threadId(), now);
+        recordSearchAttempt(thread.threadId());
+        return;
+      }
+      if (search == null) {
+        var reason = thread.upgradeSnapshot().recipeModifiers()
+            .isEmpty() ? FactoryThreadState.Reason.STALE_RESOURCES : FactoryThreadState.Reason.SEARCH_BUDGET;
+        host.updateThreadState(thread, FactoryThreadState.State.WAITING, reason);
+        backoffSearch(thread.threadId(), now);
+        recordSearchAttempt(thread.threadId());
+        return;
+      }
+      searches.put(thread.threadId(), search);
+    }
+    try {
+      var activeSearch = search;
+      int budget = MachineConfig.FACTORY_SEARCH_WORK.get();
+      var result = search.advance(budget);
+      switch (result.status()) {
+        case SELECTED -> {
+          result.plan().ifPresent(plan -> {
+            startSelected(thread, activeSearch, plan, now, budget - result.workUsed());
+          });
+        }
+        case BUDGET_EXHAUSTED ->
+          host.updateThreadState(thread, FactoryThreadState.State.WAITING, FactoryThreadState.Reason.SEARCH_BUDGET);
+        case NO_MATCH -> {
+          var missing = search.missingResource();
+          FactoryThreadState.Reason reason;
+          if (missing.isPresent()) {
+            reason = RecipeResourceRequirements.factoryReason(missing.orElseThrow());
+          } else if (thread.lockedRecipe() == null) {
+            reason = FactoryThreadState.Reason.NO_RECIPE;
+          } else {
+            reason = FactoryThreadState.Reason.INPUT_MISSING;
+          }
+          host.updateThreadState(thread, FactoryThreadState.State.WAITING, reason);
+          invalidateThread(thread.threadId(), now);
+          backoffSearch(thread.threadId(), now);
+        }
+        default -> {
+        }
+      }
+    } catch (RuntimeException failure) {
+      invalidateThread(thread.threadId(), now);
+      backoffSearch(thread.threadId(), now);
+      var reason = failure instanceof UpgradeRecipeCheckHandlers.StaleException ? FactoryThreadState.Reason.STALE_RESOURCES : FactoryThreadState.Reason.CHECK_ERROR;
+      host.updateThreadState(thread, FactoryThreadState.State.WAITING, reason);
+    }
+    recordSearchAttempt(thread.threadId());
+  }
+
+  private void startSelected(FactoryThreadState thread, RecipeSearch activeSearch, RecipeStartPlan plan, long now, int workBudget) {
+    int resourceLimit = Math
+        .min(host.parallelLimit(thread.threadId()), Math.min(plan.maxRepeatableInputs(), plan.maxRepeatableOutputs()));
+    int upper = Math.min(resourceLimit, host.maximumUpgradeRuns());
+    var nativeRecipe = host.definitionForStart(plan);
+    if (nativeRecipe == null) {
+      invalidateThread(thread.threadId(), now);
+      backoffSearch(thread.threadId(), now);
+      return;
+    }
+    int maxInstances = upper == 0 ? 0 : plan.prepareParallel(nativeRecipe, upper, workBudget);
+    if (maxInstances < 0) {
+      host.updateThreadState(thread, FactoryThreadState.State.WAITING, FactoryThreadState.Reason.SEARCH_BUDGET);
+      return;
+    }
+    var startResult = FactoryRecipeStarter.Result.STALE;
+    if (maxInstances == 0 && plan.modifiedOutputsRejected()) {
+      startResult = FactoryRecipeStarter.Result.CHECK_REJECTED;
+    } else if (maxInstances == 0 && resourceLimit > 0) {
+      startResult = FactoryRecipeStarter.Result.UPGRADE_COST_MISSING;
+    }
+    if (maxInstances > 1) {
+      var parallelResult = host.startParallel(thread.threadId(), plan, maxInstances, plan.parallelBudgetRemaining());
+      startResult = switch (parallelResult) {
+        case STARTED -> FactoryRecipeStarter.Result.STARTED;
+        case CHECK_REJECTED -> FactoryRecipeStarter.Result.CHECK_REJECTED;
+        case CHECK_PENDING -> FactoryRecipeStarter.Result.CHECK_PENDING;
+        case CHECK_ERROR -> FactoryRecipeStarter.Result.CHECK_ERROR;
+        case UPGRADE_COST_MISSING -> FactoryRecipeStarter.Result.UPGRADE_COST_MISSING;
+        default -> FactoryRecipeStarter.Result.STALE;
+      };
+    } else if (maxInstances == 1) {
+      startResult = host.startSingle(thread.threadId(), plan, plan.parallelBudgetRemaining());
+    }
+    if (startResult == FactoryRecipeStarter.Result.STARTED) {
+      host.updateThreadState(thread, FactoryThreadState.State.RUNNING, FactoryThreadState.Reason.NONE);
+      resetSearchRetry(thread.threadId(), now);
+    } else {
+      var reason = switch (startResult) {
+        case CHECK_REJECTED -> FactoryThreadState.Reason.NO_RECIPE;
+        case CHECK_PENDING -> FactoryThreadState.Reason.SEARCH_BUDGET;
+        case CHECK_ERROR -> FactoryThreadState.Reason.CHECK_ERROR;
+        case UPGRADE_COST_MISSING -> FactoryThreadState.Reason.UPGRADE_COST_MISSING;
+        default -> FactoryThreadState.Reason.STALE_RESOURCES;
+      };
+      host.updateThreadState(thread, FactoryThreadState.State.WAITING, reason);
+      if (startResult == FactoryRecipeStarter.Result.CHECK_REJECTED && activeSearch.rejectSelected(plan)) {
+        resetSearchRetry(thread.threadId(), now);
+        return;
+      }
+      if (startResult != FactoryRecipeStarter.Result.CHECK_PENDING) {
+        invalidateThread(thread.threadId(), now);
+        backoffSearch(thread.threadId(), now);
+      }
+    }
+  }
+
+  private void recordSearchAttempt(String threadId) {
+    threadConfiguration.recordAttempt(threadId, host.hasRuns(threadId));
+  }
+
+  public void invalidate() {
+    searches.clear();
+    wakeRetries();
+  }
+
+  public void invalidateThread(String threadId, long now) {
+    searches.remove(threadId);
+    resetSearchRetry(threadId, now);
+  }
+
+  private void resetSearchRetry(String threadId, long now) {
+    searchRetryInterval.put(threadId, SEARCH_RETRY_INITIAL);
+    searchRetryAfter.put(threadId, now);
+  }
+
+  private void backoffSearch(String threadId, long now) {
+    int interval = searchRetryInterval.getOrDefault(threadId, SEARCH_RETRY_INITIAL);
+    searchRetryAfter.put(threadId, now + interval);
+    searchRetryInterval.put(threadId, Math.min(SEARCH_RETRY_MAX, interval << 1));
+  }
+
+  private void updateWaitingThreads(FactoryThreadState.Reason reason) {
+    var channels = threadConfiguration.scheduler().channels();
+    if (channels.isEmpty()) {
+      return;
+    }
+    int visitBudget = Math.min(MachineConfig.FACTORY_THREADS_PER_TICK.get(), channels.size());
+    for (var thread : threadConfiguration.visitWindow(visitBudget)) {
+      if (thread.enabled() && thread.state() != FactoryThreadState.State.RUNNING) {
+        host.updateThreadState(thread, FactoryThreadState.State.WAITING, reason);
+      }
+    }
+  }
+
+  /**
+   * Resource changes wake idle retries without discarding an in-flight search.
+   */
+  public void wakeRetries() {
+    searchRetryAfter.clear();
+    searchRetryInterval.clear();
+  }
+}

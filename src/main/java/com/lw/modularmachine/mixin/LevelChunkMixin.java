@@ -1,6 +1,6 @@
 package com.lw.modularmachine.mixin;
 
-import com.lw.modularmachine.machine.structure.StructureService;
+import com.lw.modularmachine.machine.structure.StructureChangeRouter;
 import net.minecraft.core.BlockPos;
 import net.minecraft.server.level.ServerLevel;
 import net.minecraft.world.level.block.state.BlockState;
@@ -21,7 +21,7 @@ public abstract class LevelChunkMixin {
     if (callback.getReturnValue() != null
         && ((LevelChunk) (Object) this).getLevel() instanceof ServerLevel level
         && level.getServer().isSameThread()) {
-      StructureService.blockChanged(level, pos);
+      StructureChangeRouter.blockChanged(level, pos);
     }
   }
 }

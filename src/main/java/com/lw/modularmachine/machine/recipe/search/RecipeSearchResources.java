@@ -1,5 +1,7 @@
 package com.lw.modularmachine.machine.recipe.search;
 
+import com.lw.modularmachine.machine.recipe.RecipePortSnapshot;
+import com.lw.modularmachine.api.component.ResourceType;
 import org.jetbrains.annotations.ApiStatus;
 import com.lw.modularmachine.machine.recipe.ItemResourceKey;
 import com.lw.modularmachine.machine.recipe.ItemSlotRef;
@@ -21,26 +23,26 @@ import net.neoforged.neoforge.fluids.FluidStack;
  * Never reuse this cache for a newly captured ticket or another search attempt.
  */
 @ApiStatus.Internal
-final class RecipeSearchResources {
+public final class RecipeSearchResources {
   private final RecipeCatalog catalog;
-  private final Map<RecipeExecutionTicket.PortSnapshot, List<ItemSlot>> items = new IdentityHashMap<>();
-  private final Map<RecipeExecutionTicket.PortSnapshot, StoredFluid> fluids = new IdentityHashMap<>();
-  private final Map<RecipeExecutionTicket.PortSnapshot, ChemicalResourceKey> chemicals = new IdentityHashMap<>();
+  private final Map<RecipePortSnapshot, List<ItemSlot>> items = new IdentityHashMap<>();
+  private final Map<RecipePortSnapshot, StoredFluid> fluids = new IdentityHashMap<>();
+  private final Map<RecipePortSnapshot, ChemicalResourceKey> chemicals = new IdentityHashMap<>();
   private final Map<ItemSlotDomain, Map<ItemResourceKey, Long>> limits = new HashMap<>();
 
   RecipeSearchResources(RecipeCatalog catalog) {
     this.catalog = Objects.requireNonNull(catalog, "catalog");
   }
 
-  List<ItemSlot> items(RecipeExecutionTicket.PortSnapshot port) {
-    if (port.kind().resource() != PortKind.Resource.ITEM) {
+  List<ItemSlot> items(RecipePortSnapshot port) {
+    if (port.kind().resource() != ResourceType.ITEM) {
       throw new IllegalArgumentException("Not an item port");
     }
 
     return items.computeIfAbsent(port, this::captureItems);
   }
 
-  private List<ItemSlot> captureItems(RecipeExecutionTicket.PortSnapshot port) {
+  private List<ItemSlot> captureItems(RecipePortSnapshot port) {
     var stacks = port.items();
     var result = new ArrayList<ItemSlot>(stacks.size());
     for (int slot = 0; slot < stacks.size(); slot++) {
@@ -65,7 +67,7 @@ final class RecipeSearchResources {
     var inputs = new HashMap<FluidRecipeIndex.Key, List<StoredFluid>>();
     var outputs = new HashMap<String, List<StoredFluid>>();
     for (var port : ticket.ports()) {
-      if (port.kind().resource() != PortKind.Resource.FLUID) {
+      if (port.kind().resource() != ResourceType.FLUID) {
         continue;
       }
       var stored = fluids.computeIfAbsent(
@@ -86,9 +88,6 @@ final class RecipeSearchResources {
 
   Set<ChemicalResourceKey> chemicalInputKeys(RecipeExecutionTicket ticket) {
     ticket.requireServerThread();
-    if (!catalog.hasChemicalInputAnchors()) {
-      return Set.of();
-    }
     var keys = new HashSet<ChemicalResourceKey>();
     for (var port : ticket.ports()) {
       if (port.kind() == PortKind.CHEMICAL_INPUT && !port.chemical().isEmpty()) {

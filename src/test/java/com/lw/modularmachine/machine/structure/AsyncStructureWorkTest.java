@@ -1,5 +1,6 @@
 package com.lw.modularmachine.machine.structure;
 
+import com.lw.modularmachine.api.controller.VerificationFailure;
 import com.google.gson.JsonParser;
 import com.lw.modularmachine.api.orientation.MachineOrientation;
 import com.lw.modularmachine.machine.orientation.StateOrientationAdapters.RegistrySnapshot;
@@ -70,7 +71,7 @@ class AsyncStructureWorkTest {
           "start_offset":[0,0,1],"step":[0,0,1],
           "parts":[{"offset":[0,0,0],"block":"item_input"}]}]}
         """).getAsJsonObject();
-    return MachineDefinition
+    return MachineDefinitionParser
         .parse(ResourceLocation.parse("mmcece:dynamic_cache"), json, new RegistrySnapshot(Map.of()));
   }
 
@@ -78,7 +79,7 @@ class AsyncStructureWorkTest {
   void layoutPreparationAndRelocationNeedNoWorldAndPreserveIdentity() throws Exception {
     var json = JsonParser.parseString("{\"parts\":[{\"offset\":[1,0,0],\"block\":\"energy_input\"}]}")
         .getAsJsonObject();
-    var definition = MachineDefinition
+    var definition = MachineDefinitionParser
         .parse(ResourceLocation.parse("mmcece:async_unit"), json, new RegistrySnapshot(Map.of()));
     var origin = new BlockPos(31, 70, -17);
     var orientation = MachineOrientation.IDENTITY;

@@ -2,13 +2,15 @@ package com.lw.modularmachine.machine.recipe.search;
 
 import com.lw.modularmachine.machine.recipe.ItemResourceKey;
 import com.lw.modularmachine.machine.recipe.MachineRecipe;
-import com.lw.modularmachine.machine.recipe.search.index.chemical.ChemicalRecipeIndex;
-import com.lw.modularmachine.machine.recipe.search.index.fluid.FluidRecipeIndex;
 import com.lw.modularmachine.machine.recipe.search.index.item.ItemRecipeIndex;
+import com.lw.modularmachine.machine.recipe.RecipeExecutionTicket;
+import com.lw.modularmachine.machine.recipe.search.index.RequiredInputQuery;
+import com.lw.modularmachine.machine.recipe.search.index.ResourceInputQuery;
+import com.lw.modularmachine.machine.recipe.search.index.ResourceCandidateSelection;
 import com.lw.modularmachine.api.recipe.RecipeModifier;
-import com.lw.modularmachine.api.recipe.ChemicalRequirement;
 import com.lw.modularmachine.api.recipe.RecipeSelectors;
 import java.util.Collection;
+import java.util.ArrayList;
 import java.util.BitSet;
 import java.util.HashMap;
 import java.util.List;
@@ -36,8 +38,7 @@ public final class RecipeCatalog {
   private final List<RecipeModifier> contextRules;
   private final Map<String, RecipeSelectors> selectors;
   private final ItemRecipeIndex itemIndex;
-  private final FluidRecipeIndex fluidIndex;
-  private final ChemicalRecipeIndex chemicalIndex;
+  private final List<RecipeSearchResource> resourceSearches;
   private final BitSet dynamicInputRanks;
 
   public RecipeCatalog(ResourceLocation machineId, Collection<RecipeCandidate<ItemResourceKey>> candidates) {
@@ -75,15 +76,6 @@ public final class RecipeCatalog {
     this.contextRules = List.copyOf(contextRules);
     this.selectors = Map.copyOf(selectors);
     itemIndex = new ItemRecipeIndex(recipes);
-    var recipeIds = recipes.candidates().stream().map(RecipeCandidate::id).toList();
-    fluidIndex = new FluidRecipeIndex(recipeIds, this.fluidInputs, this.selectors);
-    var chemicalInputs = new HashMap<String, List<ChemicalRequirement>>();
-    this.definitions.forEach((id, definition) -> {
-      if (!definition.chemicals().inputs().isEmpty()) {
-        chemicalInputs.put(id, definition.chemicals().inputs());
-      }
-    });
-    chemicalIndex = new ChemicalRecipeIndex(recipeIds, chemicalInputs);
     dynamicInputRanks = new BitSet(recipes.size());
     for (int rank = 0; rank < recipes.candidates().size(); rank++) {
       var definition = this.definitions.get(recipes.candidates().get(rank).id());
@@ -93,14 +85,38 @@ public final class RecipeCatalog {
         dynamicInputRanks.set(rank);
       }
     }
+    resourceSearches = RecipeSearchResourceRegistry.compile(this);
+  }
+
+  private RecipeCatalog(RecipeCatalog prepared, BooleanSupplier authority) {
+    machineId = prepared.machineId;
+    recipes = prepared.recipes;
+    fluidInputs = prepared.fluidInputs;
+    fluidOutputs = prepared.fluidOutputs;
+    this.authority = Objects.requireNonNull(authority, "authority");
+    root = this;
+    definitions = prepared.definitions;
+    contextRules = prepared.contextRules;
+    selectors = prepared.selectors;
+    itemIndex = prepared.itemIndex;
+    resourceSearches = prepared.resourceSearches;
+    dynamicInputRanks = prepared.dynamicInputRanks;
+  }
+
+  /** Fresh publication identity over immutable, already compiled base data. */
+  public RecipeCatalog publish(BooleanSupplier authority) {
+    if (root != this || !contextRules.isEmpty()) {
+      throw new IllegalStateException("Only a base recipe catalog can be published");
+    }
+    return new RecipeCatalog(this, authority);
   }
 
   boolean hasDynamicInputRecipes() {
     return !dynamicInputRanks.isEmpty();
   }
 
-  List<RecipeCandidate<ItemResourceKey>> candidatesForPreparation(Map<ItemResourceKey, Long> items, Set<FluidRecipeIndex.Key> fluids, Set<ChemicalResourceKey> chemicals, Set<String> allowedIds) {
-    var indexed = candidatesForInputs(items, fluids, chemicals, allowedIds);
+  List<RecipeCandidate<ItemResourceKey>> candidatesForPreparation(Map<ItemResourceKey, Long> items, List<RecipeSearchResource.Captured> resources, Set<String> allowedIds) {
+    var indexed = candidatesForInputs(items, resources, allowedIds);
     if (dynamicInputRanks.isEmpty()) {
       return indexed;
     }
@@ -117,55 +133,18 @@ public final class RecipeCatalog {
     return itemIndex.aliases();
   }
 
-  boolean hasChemicalInputAnchors() {
-    return chemicalIndex.inputs().hasAnchors();
+  List<RecipeSearchResource.Captured> captureResources(RecipeExecutionTicket ticket, RecipeSearchResources resources) {
+    return resourceSearches.stream().map(resource -> resource.capture(ticket, resources)).toList();
   }
 
-  List<RecipeCandidate<ItemResourceKey>> candidatesForInputs(Map<ItemResourceKey, Long> items, Set<FluidRecipeIndex.Key> fluids, Set<ChemicalResourceKey> chemicals, Set<String> allowedIds) {
-    var itemInputs = itemIndex.inputs();
-    var fluidInputs = fluidIndex.inputs();
-    var chemicalInputs = chemicalIndex.inputs();
-    var itemKeys = items.keySet();
-    if (!fluidInputs.hasAnchors() && !chemicalInputs.hasAnchors()) {
-      return recipes.candidatesAt(itemInputs.select(itemKeys, allowedIds));
-    }
-    // Start with the narrowest active index, without materializing larger fallback
-    // sets. Empty/single ID restrictions use direct lookup without count scans.
-    int itemCount = recipes.size();
-    int fluidCount = Integer.MAX_VALUE;
-    int chemicalCount = Integer.MAX_VALUE;
-    if (allowedIds == null || allowedIds.size() > 1) {
-      itemCount = itemInputs.candidateCount(itemKeys);
-      if (fluidInputs.hasAnchors()) {
-        fluidCount = fluidInputs.candidateCount(fluids);
-      }
-      if (chemicalInputs.hasAnchors()) {
-        chemicalCount = chemicalInputs.candidateCount(chemicals);
-      }
-    }
-    BitSet selected;
-    if (fluidCount < itemCount && fluidCount <= chemicalCount) {
-      selected = fluidInputs.select(fluids, allowedIds);
-      itemInputs.retainMatches(selected, itemKeys);
-      chemicalInputs.retainMatches(selected, chemicals);
-    } else if (chemicalCount < itemCount) {
-      selected = chemicalInputs.select(chemicals, allowedIds);
-      itemInputs.retainMatches(selected, itemKeys);
-      fluidInputs.retainMatches(selected, fluids);
-    } else {
-      selected = itemInputs.select(itemKeys, allowedIds);
-      fluidInputs.retainMatches(selected, fluids);
-      chemicalInputs.retainMatches(selected, chemicals);
+  List<RecipeCandidate<ItemResourceKey>> candidatesForInputs(Map<ItemResourceKey, Long> items, List<RecipeSearchResource.Captured> resources, Set<String> allowedIds) {
+    var queries = new ArrayList<ResourceInputQuery>(resources.size() + 1);
+    queries.add(new RequiredInputQuery<>(itemIndex.inputs(), items.keySet()));
+    for (var resource : resources) {
+      queries.add(resource.inputs());
     }
 
-    return recipes.candidatesAt(selected);
-  }
-
-  boolean fluidsAvailable(String recipeId, RecipeSearchResources.Fluids resources) {
-    var selector = selectors(recipeId);
-
-    return resources.inputsAvailable(fluidInputs.getOrDefault(recipeId, List.of()), selector.fluidInput())
-        && resources.outputsAvailable(fluidOutputs.getOrDefault(recipeId, List.of()), selector.fluidOutput());
+    return recipes.candidatesAt(ResourceCandidateSelection.select(queries, allowedIds));
   }
 
   public RecipeSelectors selectors(String recipeId) {

@@ -1,6 +1,6 @@
 package com.lw.modularmachine.machine.orientation;
 
-import com.lw.modularmachine.machine.recipe.FrozenItemRun;
+import com.lw.modularmachine.machine.recipe.FrozenRecipeRun;
 import java.util.Set;
 import net.minecraft.core.component.DataComponents;
 import net.minecraft.nbt.CompoundTag;
@@ -47,7 +47,7 @@ public record ControllerPlacementData(ResourceLocation machineId, boolean opaque
         return new ControllerPlacementData(null, true);
       }
       try {
-        var run = FrozenItemRun.read(data.getCompound("run"));
+        var run = FrozenRecipeRun.read(data.getCompound("run"));
         if (!run.machineId().toString().equals(data.getString("machine"))) {
           return new ControllerPlacementData(null, true);
         }

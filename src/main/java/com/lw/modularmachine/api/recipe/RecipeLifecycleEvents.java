@@ -1,10 +1,10 @@
 package com.lw.modularmachine.api.recipe;
 
 import com.lw.modularmachine.api.controller.ControllerOwnership;
-import com.lw.modularmachine.machine.recipe.FrozenItemRun;
+import com.lw.modularmachine.api.component.ResourceType;
 import com.lw.modularmachine.machine.recipe.RecipeLifecyclePublisher;
-import com.lw.modularmachine.machine.structure.VerificationFailure;
-import com.lw.modularmachine.machine.structure.VerificationState;
+import com.lw.modularmachine.api.controller.VerificationFailure;
+import com.lw.modularmachine.api.controller.VerificationState;
 import java.util.HashSet;
 import java.util.List;
 import java.util.Objects;
@@ -25,10 +25,35 @@ public final class RecipeLifecycleEvents {
     MACHINE_TICK
   }
 
-  public enum ResourceFailure {
-    ENERGY,
-    FLUID,
-    CHEMICAL
+  public record ResourceFailure(ResourceType type) {
+    public static final ResourceFailure ENERGY = new ResourceFailure(ResourceType.ENERGY);
+    public static final ResourceFailure FLUID = new ResourceFailure(ResourceType.FLUID);
+    public static final ResourceFailure CHEMICAL = new ResourceFailure(ResourceType.CHEMICAL);
+
+    public ResourceFailure {
+      Objects.requireNonNull(type, "type");
+    }
+
+    public static ResourceFailure of(ResourceType type) {
+      if (type == ResourceType.ENERGY) {
+        return ENERGY;
+      }
+      if (type == ResourceType.FLUID) {
+        return FLUID;
+      }
+      if (type == ResourceType.CHEMICAL) {
+        return CHEMICAL;
+      }
+      return new ResourceFailure(type);
+    }
+
+    public ResourceLocation id() {
+      return type.id();
+    }
+
+    public String name() {
+      return type.name();
+    }
   }
 
   @FunctionalInterface
@@ -71,7 +96,7 @@ public final class RecipeLifecycleEvents {
       if (tick < 0
           || factory != threadId.isPresent()
           || threadId.isPresent() && threadId.orElseThrow().isBlank()
-          || run.state() != FrozenItemRun.State.RUNNING
+          || run.state() != RecipeRunState.RUNNING
           || run.lastProgressTick() >= tick) {
         throw new IllegalArgumentException("Invalid recipe failure policy context");
       }
@@ -81,7 +106,7 @@ public final class RecipeLifecycleEvents {
   public record RunSnapshot(
       UUID runId,
       ResourceLocation recipeId,
-      FrozenItemRun.State state,
+      RecipeRunState state,
       int parallelInstances,
       int progress,
       int duration,
@@ -94,7 +119,7 @@ public final class RecipeLifecycleEvents {
           || duration < 1
           || progress < 0
           || progress > duration
-          || state == FrozenItemRun.State.OUTPUT_PENDING && progress != duration) {
+          || state == RecipeRunState.OUTPUT_PENDING && progress != duration) {
         throw new IllegalArgumentException("Invalid recipe event run snapshot");
       }
     }
@@ -138,15 +163,15 @@ public final class RecipeLifecycleEvents {
           || type == Type.STARTED
               && (!before.isEmpty()
                   || after.isEmpty()
-                  || after.stream().anyMatch(run -> run.progress() != 0 || run.state() != FrozenItemRun.State.RUNNING))
+                  || after.stream().anyMatch(run -> run.progress() != 0 || run.state() != RecipeRunState.RUNNING))
           || type == Type.FINISHED
               && (!after.isEmpty()
                   || before.isEmpty()
-                  || before.stream().anyMatch(run -> run.state() != FrozenItemRun.State.OUTPUT_PENDING))
+                  || before.stream().anyMatch(run -> run.state() != RecipeRunState.OUTPUT_PENDING))
           || type == Type.DISCARDED
               && (!after.isEmpty()
                   || before.isEmpty()
-                  || before.stream().anyMatch(run -> run.state() != FrozenItemRun.State.RUNNING))) {
+                  || before.stream().anyMatch(run -> run.state() != RecipeRunState.RUNNING))) {
         throw new IllegalArgumentException("Invalid recipe event boundary");
       }
       if (type == Type.TICK || type == Type.RESOURCE_FAILURE) {
@@ -160,12 +185,12 @@ public final class RecipeLifecycleEvents {
               || !previous.recipeId().equals(current.recipeId())
               || previous.parallelInstances() != current.parallelInstances()
               || previous.duration() != current.duration()
-              || previous.state() != FrozenItemRun.State.RUNNING
+              || previous.state() != RecipeRunState.RUNNING
               || current.lastProgressTick() != tick
               || previous.lastProgressTick() >= current.lastProgressTick()
               || type == Type.TICK && current.progress() <= previous.progress()
               || type == Type.RESOURCE_FAILURE
-                  && (current.progress() > previous.progress() || current.state() != FrozenItemRun.State.RUNNING)) {
+                  && (current.progress() > previous.progress() || current.state() != RecipeRunState.RUNNING)) {
             throw new IllegalArgumentException("Invalid recipe event transition");
           }
         }

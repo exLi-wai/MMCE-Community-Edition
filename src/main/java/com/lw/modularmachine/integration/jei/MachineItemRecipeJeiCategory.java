@@ -1,5 +1,6 @@
 package com.lw.modularmachine.integration.jei;
 
+import com.lw.modularmachine.client.preview.ClientMachineCatalog;
 import com.lw.modularmachine.machine.recipe.MachineRecipe;
 import com.lw.modularmachine.client.recipe.MachineRecipeDisplay;
 import com.lw.modularmachine.client.recipe.MachineRecipeLayout;
@@ -51,7 +52,7 @@ final class MachineItemRecipeJeiCategory implements IRecipeCategory<MachineRecip
   }
   @Override
   public Component getTitle() {
-    return Component.translatable(ClientMachineJeiCatalog.translation(machine));
+    return Component.translatable(ClientMachineCatalog.translation(machine));
   }
   @Override
   public IDrawable getIcon() {

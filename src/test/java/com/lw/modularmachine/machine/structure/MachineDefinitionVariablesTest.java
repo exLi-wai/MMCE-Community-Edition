@@ -91,7 +91,7 @@ class MachineDefinitionVariablesTest {
   void unifiedBlockFieldRecognizesPortNames() {
     var root = JsonParser.parseString("{\"parts\":[{\"offset\":[1,0,0],\"block\":\"item_input_bus\"}]}")
         .getAsJsonObject();
-    var definition = MachineDefinition.parse(
+    var definition = MachineDefinitionParser.parse(
         ResourceLocation.fromNamespaceAndPath("test", "unified"),
         root,
         new StateOrientationAdapters.RegistrySnapshot(Map.of()));
@@ -106,7 +106,7 @@ class MachineDefinitionVariablesTest {
           .getAsJsonObject();
       assertThrows(
           RuntimeException.class,
-          () -> MachineDefinition.parse(
+          () -> MachineDefinitionParser.parse(
               ResourceLocation.fromNamespaceAndPath("test", "non_canonical_" + field),
               root,
               new StateOrientationAdapters.RegistrySnapshot(Map.of())));

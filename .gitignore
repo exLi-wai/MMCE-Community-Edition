@@ -42,3 +42,6 @@ docs/*
 logs
 *.md
 output/
+
+### Local development scripts ###
+/tools/

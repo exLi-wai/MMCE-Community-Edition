@@ -3,10 +3,10 @@ package com.lw.modularmachine.network;
 import com.lw.modularmachine.ModularMachine;
 import com.lw.modularmachine.blockentity.UpgradeBusBlockEntity;
 import com.lw.modularmachine.machine.UpgradeBusTier;
-import com.lw.modularmachine.machine.factory.FactoryUpgradeCatalog;
-import com.lw.modularmachine.api.upgrade.FactoryUpgradeEntry;
-import com.lw.modularmachine.machine.factory.FactoryUpgradeRestrictions;
-import com.lw.modularmachine.machine.factory.UpgradeBusBinding;
+import com.lw.modularmachine.machine.upgrade.UpgradeCatalog;
+import com.lw.modularmachine.api.upgrade.UpgradeEntry;
+import com.lw.modularmachine.machine.upgrade.UpgradeRestrictions;
+import com.lw.modularmachine.machine.upgrade.UpgradeBusBinding;
 import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.HashSet;
@@ -42,7 +42,7 @@ public final class UpgradeBusPayloads {
       ResourceLocation machine,
       boolean valid,
       boolean active,
-      List<FactoryUpgradeEntry> entries,
+      List<UpgradeEntry> entries,
       List<ResourceLocation> incompatible,
       int conflictCount,
       List<ResourceLocation> conflicts) {
@@ -51,7 +51,7 @@ public final class UpgradeBusPayloads {
       if (machine == null
           || machine.getPath().isEmpty()
           || machine.toString().length() > 256
-          || (long) entries.size() + incompatible.size() > FactoryUpgradeCatalog.MAX_SLOTS
+          || (long) entries.size() + incompatible.size() > UpgradeCatalog.MAX_SLOTS
           || !valid && (!entries.isEmpty() || !incompatible.isEmpty())
           || active && !valid
           || conflictCount < 0) {
@@ -61,7 +61,7 @@ public final class UpgradeBusPayloads {
       incompatible = List.copyOf(incompatible);
       conflicts = List.copyOf(conflicts);
       validateIdentifiers(entries, incompatible, conflicts);
-      if (conflictCount == 0 && !conflicts.isEmpty() || conflicts.size() > FactoryUpgradeRestrictions.MAX_DIAGNOSTICS) {
+      if (conflictCount == 0 && !conflicts.isEmpty() || conflicts.size() > UpgradeRestrictions.MAX_DIAGNOSTICS) {
         throw new IllegalArgumentException("Invalid bound upgrade conflicts");
       }
     }
@@ -72,23 +72,23 @@ public final class UpgradeBusPayloads {
       BlockPos position,
       long revision,
       boolean valid,
-      List<FactoryUpgradeEntry> entries,
+      List<UpgradeEntry> entries,
       ResourceLocation machine,
       List<ResourceLocation> incompatible,
       int conflictCount,
       List<ResourceLocation> conflicts,
       long bindingRevision,
       List<BindingView> bindings) implements CustomPacketPayload {
-    public Status(int containerId, BlockPos position, long revision, boolean valid, List<FactoryUpgradeEntry> entries, ResourceLocation machine, List<ResourceLocation> incompatible, int conflictCount, List<ResourceLocation> conflicts) {
+    public Status(int containerId, BlockPos position, long revision, boolean valid, List<UpgradeEntry> entries, ResourceLocation machine, List<ResourceLocation> incompatible, int conflictCount, List<ResourceLocation> conflicts) {
       this(containerId, position, revision, valid, entries, machine, incompatible, conflictCount, conflicts, 0,
           List.of());
     }
 
-    public Status(int containerId, BlockPos position, long revision, boolean valid, List<FactoryUpgradeEntry> entries, ResourceLocation machine, List<ResourceLocation> incompatible) {
+    public Status(int containerId, BlockPos position, long revision, boolean valid, List<UpgradeEntry> entries, ResourceLocation machine, List<ResourceLocation> incompatible) {
       this(containerId, position, revision, valid, entries, machine, incompatible, 0, List.of());
     }
 
-    public Status(int containerId, BlockPos position, long revision, boolean valid, List<FactoryUpgradeEntry> entries) {
+    public Status(int containerId, BlockPos position, long revision, boolean valid, List<UpgradeEntry> entries) {
       this(containerId, position, revision, valid, entries, null, List.of());
     }
 
@@ -96,7 +96,7 @@ public final class UpgradeBusPayloads {
       if (containerId < 0
           || revision < 0
           || bindingRevision < 0
-          || (long) entries.size() + incompatible.size() > FactoryUpgradeCatalog.MAX_SLOTS
+          || (long) entries.size() + incompatible.size() > UpgradeCatalog.MAX_SLOTS
           || !valid && (!entries.isEmpty() || !incompatible.isEmpty())
           || machine != null && (machine.getPath().isEmpty() || machine.toString().length() > 256)) {
         throw new IllegalArgumentException("Invalid upgrade bus status");
@@ -109,12 +109,11 @@ public final class UpgradeBusPayloads {
       validateIdentifiers(entries, incompatible, conflicts);
       if (conflictCount < 0
           || (conflictCount == 0) != conflicts.isEmpty()
-          || conflicts.size() > FactoryUpgradeRestrictions.MAX_DIAGNOSTICS
+          || conflicts.size() > UpgradeRestrictions.MAX_DIAGNOSTICS
           || bindings.size() > UpgradeBusBinding.MAX_BINDINGS
           || bindings.stream().mapToLong(view -> (long) view.entries().size() + view.incompatible().size())
               .sum() > MAX_BOUND_SLOTS
-          || bindings.stream().mapToLong(view -> view.conflicts().size())
-              .sum() > FactoryUpgradeRestrictions.MAX_DIAGNOSTICS) {
+          || bindings.stream().mapToLong(view -> view.conflicts().size()).sum() > UpgradeRestrictions.MAX_DIAGNOSTICS) {
         throw new IllegalArgumentException("Upgrade status description budget exceeded");
       }
       var owners = new HashSet<BlockPos>();
@@ -129,7 +128,7 @@ public final class UpgradeBusPayloads {
     }
   }
 
-  private static void validateIdentifiers(List<FactoryUpgradeEntry> entries, List<ResourceLocation> incompatible, List<ResourceLocation> conflicts) {
+  private static void validateIdentifiers(List<UpgradeEntry> entries, List<ResourceLocation> incompatible, List<ResourceLocation> conflicts) {
     if (entries.stream().anyMatch(entry -> entry.id().toString().length() > 256)
         || incompatible.stream().anyMatch(id -> id.toString().length() > 256)
         || conflicts.stream().anyMatch(id -> id.toString().length() > 256)
@@ -153,7 +152,7 @@ public final class UpgradeBusPayloads {
     boolean valid = bus.schemaSupported() && bus.upgradeCatalogValid();
     var restrictions = bus.upgradeRestrictionStatus();
     var bindings = new ArrayList<BindingView>();
-    int remainingIds = FactoryUpgradeRestrictions.MAX_DIAGNOSTICS;
+    int remainingIds = UpgradeRestrictions.MAX_DIAGNOSTICS;
     for (var binding : bus.bindings()) {
       var description = bus.description(binding);
       boolean readable = bus.descriptionValid(binding);
@@ -185,7 +184,7 @@ public final class UpgradeBusPayloads {
         bindings);
   }
 
-  private static void writeEntries(RegistryFriendlyByteBuf buffer, List<FactoryUpgradeEntry> entries) {
+  private static void writeEntries(RegistryFriendlyByteBuf buffer, List<UpgradeEntry> entries) {
     buffer.writeVarInt(entries.size());
     for (var entry : entries) {
       buffer.writeUtf(entry.id().toString(), 256);
@@ -199,12 +198,12 @@ public final class UpgradeBusPayloads {
     }
   }
 
-  private static List<FactoryUpgradeEntry> readEntries(RegistryFriendlyByteBuf buffer, int limit) {
+  private static List<UpgradeEntry> readEntries(RegistryFriendlyByteBuf buffer, int limit) {
     int size = readSize(buffer, limit);
-    var entries = new ArrayList<FactoryUpgradeEntry>();
+    var entries = new ArrayList<UpgradeEntry>();
     for (int index = 0; index < size; index++) {
       entries.add(
-          new FactoryUpgradeEntry(
+          new UpgradeEntry(
               ResourceLocation.parse(buffer.readUtf(256)),
               buffer.readVarInt(),
               buffer.readVarInt(),
@@ -273,25 +272,25 @@ public final class UpgradeBusPayloads {
     var position = buffer.readBlockPos();
     long revision = buffer.readVarLong();
     boolean valid = buffer.readBoolean();
-    var entries = readEntries(buffer, FactoryUpgradeCatalog.MAX_SLOTS);
+    var entries = readEntries(buffer, UpgradeCatalog.MAX_SLOTS);
     var machine = buffer.readBoolean() ? ResourceLocation.parse(buffer.readUtf(256)) : null;
-    var incompatible = readIds(buffer, FactoryUpgradeCatalog.MAX_SLOTS - entries.size());
+    var incompatible = readIds(buffer, UpgradeCatalog.MAX_SLOTS - entries.size());
     int conflictCount = buffer.readVarInt();
-    var conflicts = readIds(buffer, FactoryUpgradeRestrictions.MAX_DIAGNOSTICS);
+    var conflicts = readIds(buffer, UpgradeRestrictions.MAX_DIAGNOSTICS);
     long bindingRevision = buffer.readVarLong();
     int count = readSize(buffer, UpgradeBusBinding.MAX_BINDINGS);
     var bindings = new ArrayList<BindingView>();
     int remainingSlots = MAX_BOUND_SLOTS;
-    int remainingIds = FactoryUpgradeRestrictions.MAX_DIAGNOSTICS;
+    int remainingIds = UpgradeRestrictions.MAX_DIAGNOSTICS;
     for (int index = 0; index < count; index++) {
       var owner = buffer.readBlockPos();
       var ownerMachine = ResourceLocation.parse(buffer.readUtf(256));
       boolean ownerValid = buffer.readBoolean();
       boolean active = buffer.readBoolean();
-      var ownerEntries = readEntries(buffer, Math.min(remainingSlots, FactoryUpgradeCatalog.MAX_SLOTS));
+      var ownerEntries = readEntries(buffer, Math.min(remainingSlots, UpgradeCatalog.MAX_SLOTS));
       var ownerIncompatible = readIds(
           buffer,
-          Math.min(remainingSlots - ownerEntries.size(), FactoryUpgradeCatalog.MAX_SLOTS - ownerEntries.size()));
+          Math.min(remainingSlots - ownerEntries.size(), UpgradeCatalog.MAX_SLOTS - ownerEntries.size()));
       remainingSlots -= ownerEntries.size() + ownerIncompatible.size();
       int ownerConflictCount = buffer.readVarInt();
       var ownerConflicts = readIds(buffer, remainingIds);

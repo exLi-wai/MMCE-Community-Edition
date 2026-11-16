@@ -1,14 +1,14 @@
 package com.lw.modularmachine.gametest;
 
-import com.lw.modularmachine.machine.factory.UpgradeLifecyclePublisher;
+import com.lw.modularmachine.machine.upgrade.UpgradeLifecyclePublisher;
 import com.lw.modularmachine.blockentity.FactoryControllerBlockEntity;
 import com.lw.modularmachine.blockentity.MachinePortBlockEntity;
 import com.lw.modularmachine.blockentity.UpgradeBusBlockEntity;
 import com.lw.modularmachine.config.MachineConfig;
 import com.lw.modularmachine.machine.factory.FactoryThreadState;
-import com.lw.modularmachine.machine.factory.FactoryUpgradeDefinition;
-import com.lw.modularmachine.api.upgrade.FactoryUpgradeRecipeChecks;
-import com.lw.modularmachine.machine.factory.FactoryUpgradeService;
+import com.lw.modularmachine.machine.upgrade.UpgradeDefinition;
+import com.lw.modularmachine.api.upgrade.UpgradeRecipeChecks;
+import com.lw.modularmachine.machine.upgrade.UpgradeCatalogService;
 import com.lw.modularmachine.machine.recipe.FactoryParallelStarter;
 import com.lw.modularmachine.machine.recipe.FactoryRecipeStarter;
 import com.lw.modularmachine.machine.recipe.RecipeStartPlan;
@@ -45,7 +45,7 @@ public final class UpgradeRecipeCheckGameTests {
   private static final ResourceLocation A = id("mmcece/test_upgrade_check_a");
   private static final ResourceLocation B = id("mmcece/test_upgrade_check_b");
   private static final String THREAD = "upgrade_thread";
-  private static List<FactoryUpgradeDefinition> savedDefinitions;
+  private static List<UpgradeDefinition> savedDefinitions;
 
   private record Fixture(
       FactoryControllerBlockEntity factory,
@@ -65,9 +65,9 @@ public final class UpgradeRecipeCheckGameTests {
   }
 
   private static void cleanup() {
-    FactoryUpgradeRecipeChecks.remove(HANDLER);
+    UpgradeRecipeChecks.remove(HANDLER);
     if (savedDefinitions != null) {
-      FactoryUpgradeService.replaceDefinitions(savedDefinitions);
+      UpgradeCatalogService.replaceDefinitions(savedDefinitions);
       savedDefinitions = null;
     }
   }
@@ -92,7 +92,7 @@ public final class UpgradeRecipeCheckGameTests {
     fixture.input().inventory().setStackInSlot(0, ItemStack.EMPTY);
     var mode = new AtomicInteger();
     var calls = new ArrayList<ResourceLocation>();
-    FactoryUpgradeRecipeChecks.Checker checker = (context, upgrade) -> {
+    UpgradeRecipeChecks.Checker checker = (context, upgrade) -> {
       calls.add(context.recipeId());
       helper.assertTrue(
           context.machine().equals(MACHINE)
@@ -112,10 +112,9 @@ public final class UpgradeRecipeCheckGameTests {
       }
 
       return mode.get() != 0
-          && context.recipeId()
-              .equals(B) ? FactoryUpgradeRecipeChecks.Decision.ALLOW : FactoryUpgradeRecipeChecks.Decision.REJECT;
+          && context.recipeId().equals(B) ? UpgradeRecipeChecks.Decision.ALLOW : UpgradeRecipeChecks.Decision.REJECT;
     };
-    FactoryUpgradeRecipeChecks.register(HANDLER, checker);
+    UpgradeRecipeChecks.register(HANDLER, checker);
     synchronizeUpgrades(helper, fixture);
     fixture.input().inventory().setStackInSlot(0, new ItemStack(Items.DIRT, 2));
     var rejected = RecipeSearch.beginFactory(fixture.factory(), THREAD).orElseThrow();
@@ -131,7 +130,7 @@ public final class UpgradeRecipeCheckGameTests {
     helper.assertTrue(
         calls.size() == 2 && fixture.input().inventory().getStackInSlot(0).getCount() == 2,
         "Cached rejections reran callbacks or consumed input");
-    FactoryUpgradeRecipeChecks.invalidate(HANDLER);
+    UpgradeRecipeChecks.invalidate(HANDLER);
     synchronizeUpgrades(helper, fixture);
     helper.assertTrue(!rejected.dependenciesCurrent(), "Invalidation retained negative search proof");
 
@@ -178,14 +177,14 @@ public final class UpgradeRecipeCheckGameTests {
             && fixture.input().inventory().getStackInSlot(0).getCount() == 1,
         "Admitted plan reran callbacks or failed atomic startup");
     fixture.input().inventory().setStackInSlot(0, ItemStack.EMPTY);
-    FactoryUpgradeRecipeChecks.register(HANDLER, (context, upgrade) -> {
+    UpgradeRecipeChecks.register(HANDLER, (context, upgrade) -> {
       calls.add(context.recipeId());
-      return FactoryUpgradeRecipeChecks.Decision.REJECT;
+      return UpgradeRecipeChecks.Decision.REJECT;
     });
     int frozenCalls = calls.size();
     awaitOutput(helper, fixture, 1, 120, () -> {
       helper.assertTrue(calls.size() == frozenCalls, "Paid run was rechecked against a replacement policy");
-      FactoryUpgradeRecipeChecks.register(HANDLER, checker);
+      UpgradeRecipeChecks.register(HANDLER, checker);
       fixture.bus().inventory().setStackInSlot(0, new ItemStack(Items.SUGAR));
       fixture.bus().inventory().setStackInSlot(1, ItemStack.EMPTY);
       synchronizeUpgrades(helper, fixture);
@@ -230,24 +229,24 @@ public final class UpgradeRecipeCheckGameTests {
             "Earlier invalid slot hid a required checker in the next slot");
     fixture.bus().inventory().setStackInSlot(0, new ItemStack(Items.SUGAR));
     var count = new AtomicInteger();
-    FactoryUpgradeRecipeChecks.Checker throwing = (context, upgrade) -> {
+    UpgradeRecipeChecks.Checker throwing = (context, upgrade) -> {
       count.incrementAndGet();
       throw new IllegalStateException("expected recipe check failure");
     };
-    FactoryUpgradeRecipeChecks.register(HANDLER, throwing);
-    var published = FactoryUpgradeService.snapshot();
-    FactoryUpgradeRecipeChecks.register(HANDLER, throwing);
-    FactoryUpgradeRecipeChecks.remove(id("unknown_recipe_checker"));
+    UpgradeRecipeChecks.register(HANDLER, throwing);
+    var published = UpgradeCatalogService.snapshot();
+    UpgradeRecipeChecks.register(HANDLER, throwing);
+    UpgradeRecipeChecks.remove(id("unknown_recipe_checker"));
     boolean workerRejected = CompletableFuture.supplyAsync(() -> {
       try {
-        FactoryUpgradeRecipeChecks.register(HANDLER, throwing);
+        UpgradeRecipeChecks.register(HANDLER, throwing);
         return false;
       } catch (IllegalStateException expected) {
         return true;
       }
     }).join();
     helper.assertTrue(
-        workerRejected && FactoryUpgradeService.snapshot() == published,
+        workerRejected && UpgradeCatalogService.snapshot() == published,
         "Worker or no-op registration changed checker catalog");
     synchronizeUpgrades(helper, fixture);
     for (int attempt = 0; attempt < 100; attempt++) {
@@ -261,22 +260,22 @@ public final class UpgradeRecipeCheckGameTests {
                 && fixture.factory().scheduler().channels().getFirst()
                     .reason() == FactoryThreadState.Reason.CHECK_ERROR,
             "Checker exception retried every tick, fell back, or consumed input");
-    FactoryUpgradeRecipeChecks.invalidate(HANDLER);
+    UpgradeRecipeChecks.invalidate(HANDLER);
     synchronizeUpgrades(helper, fixture);
     fixture.factory().serverTick();
     helper.assertTrue(
         count.get() == 2 && fixture.factory().run(THREAD).isEmpty(),
         "Explicit invalidation did not retry failed check");
-    FactoryUpgradeRecipeChecks.register(HANDLER, (context, upgrade) -> null);
+    UpgradeRecipeChecks.register(HANDLER, (context, upgrade) -> null);
     synchronizeUpgrades(helper, fixture);
     fixture.factory().serverTick();
     helper.assertTrue(
         fixture.factory().run(THREAD).isEmpty()
             && fixture.factory().scheduler().channels().getFirst().reason() == FactoryThreadState.Reason.CHECK_ERROR,
         "Null check result was treated as acceptance");
-    FactoryUpgradeRecipeChecks.register(HANDLER, (context, upgrade) -> {
+    UpgradeRecipeChecks.register(HANDLER, (context, upgrade) -> {
       fixture.input().inventory().setStackInSlot(0, new ItemStack(Items.DIRT));
-      return FactoryUpgradeRecipeChecks.Decision.ALLOW;
+      return UpgradeRecipeChecks.Decision.ALLOW;
     });
     synchronizeUpgrades(helper, fixture);
     fixture.factory().serverTick();
@@ -287,22 +286,21 @@ public final class UpgradeRecipeCheckGameTests {
                 .reason() == FactoryThreadState.Reason.STALE_RESOURCES,
         "Resource mutation inside checker retained a start proof");
     fixture.input().inventory().setStackInSlot(0, new ItemStack(Items.DIRT, 2));
-    FactoryUpgradeRecipeChecks.Checker stable = (context, upgrade) -> {
+    UpgradeRecipeChecks.Checker stable = (context, upgrade) -> {
       count.incrementAndGet();
       try {
         fixture.bus().inventory().setStackInSlot(0, new ItemStack(Items.DIAMOND));
         helper.fail("Checker modified owned upgrade inventory");
       } catch (IllegalStateException expected) {
       }
-      helper.assertTrue(!fixture.factory().beginRunStart(THREAD), "Checker reentered factory startup");
+      helper.assertTrue(!fixture.factory().runState().beginRunStart(THREAD), "Checker reentered factory startup");
       fixture.factory().serverTick();
 
-      return context.recipeId()
-          .equals(B) ? FactoryUpgradeRecipeChecks.Decision.ALLOW : FactoryUpgradeRecipeChecks.Decision.REJECT;
+      return context.recipeId().equals(B) ? UpgradeRecipeChecks.Decision.ALLOW : UpgradeRecipeChecks.Decision.REJECT;
     };
-    FactoryUpgradeRecipeChecks.register(HANDLER, (context, upgrade) -> {
-      FactoryUpgradeRecipeChecks.register(HANDLER, stable);
-      return FactoryUpgradeRecipeChecks.Decision.ALLOW;
+    UpgradeRecipeChecks.register(HANDLER, (context, upgrade) -> {
+      UpgradeRecipeChecks.register(HANDLER, stable);
+      return UpgradeRecipeChecks.Decision.ALLOW;
     });
     synchronizeUpgrades(helper, fixture);
     fixture.factory().serverTick();
@@ -353,12 +351,12 @@ public final class UpgradeRecipeCheckGameTests {
             return;
           }
           GameTestUpgradeFixtures.install();
-          savedDefinitions = FactoryUpgradeService.snapshot().definitions();
+          savedDefinitions = UpgradeCatalogService.snapshot().definitions();
           var definition = savedDefinitions.stream()
               .filter(value -> value.effect().id().equals(id("test_recipe_check_upgrade"))).findFirst().orElseThrow();
           helper.assertTrue(HANDLER.equals(definition.recipeCheckHandler()), "Recipe check declaration was not loaded");
-          FactoryUpgradeService.replaceDefinitions(List.of(definition));
-          FactoryUpgradeRecipeChecks.remove(HANDLER);
+          UpgradeCatalogService.replaceDefinitions(List.of(definition));
+          UpgradeRecipeChecks.remove(HANDLER);
           var origin = helper.absolutePos(new BlockPos(7, 5, 7));
           var factory = UpgradeBusGameTests.buildUpgradeFactory(helper, origin, MACHINE);
           helper.getLevel().setBlockAndUpdate(
@@ -382,9 +380,10 @@ public final class UpgradeRecipeCheckGameTests {
 
   private static void synchronizeUpgrades(GameTestHelper helper, Fixture fixture) {
     fixture.bus().serverTick();
-    helper
-        .assertTrue(fixture.factory().beginRunStart(THREAD), "Checker fixture could not synchronize upgrade snapshot");
-    fixture.factory().finishRunStart(THREAD, false);
+    helper.assertTrue(
+        fixture.factory().runState().beginRunStart(THREAD),
+        "Checker fixture could not synchronize upgrade snapshot");
+    fixture.factory().runState().finishRunStart(THREAD, false);
   }
 
   private static RecipeSearch.Result budgeted(GameTestHelper helper, RecipeSearch search, List<ResourceLocation> calls) {

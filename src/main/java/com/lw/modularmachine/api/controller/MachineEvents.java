@@ -2,8 +2,6 @@ package com.lw.modularmachine.api.controller;
 
 import com.lw.modularmachine.api.recipe.RecipeModifier;
 import com.lw.modularmachine.machine.controller.MachineEventPublisher;
-import com.lw.modularmachine.machine.structure.VerificationFailure;
-import com.lw.modularmachine.machine.structure.VerificationState;
 import java.util.Map;
 import java.util.Objects;
 import java.util.Optional;

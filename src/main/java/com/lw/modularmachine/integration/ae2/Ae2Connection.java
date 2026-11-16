@@ -1,5 +1,8 @@
 package com.lw.modularmachine.integration.ae2;
 
+import com.lw.modularmachine.api.component.ResourceType;
+import static com.lw.modularmachine.integration.ae2.Ae2NodePersistence.NODE_TAG;
+import static com.lw.modularmachine.integration.ae2.Ae2NodePersistence.OWNER_TAG;
 import appeng.api.features.IPlayerRegistry;
 import appeng.api.networking.GridFlags;
 import appeng.api.networking.GridHelper;
@@ -16,7 +19,6 @@ import appeng.api.storage.StorageHelper;
 import appeng.api.util.AECableType;
 import com.lw.modularmachine.api.component.ChemicalStackData;
 import com.lw.modularmachine.blockentity.NetworkPortBlockEntity;
-import com.lw.modularmachine.machine.PortKind;
 import com.lw.modularmachine.machine.network.MachineNetworkPlatform;
 import java.util.EnumSet;
 import java.util.function.Function;
@@ -37,8 +39,6 @@ import org.jetbrains.annotations.ApiStatus;
  */
 @ApiStatus.Internal
 final class Ae2Connection implements MachineNetworkPlatform.Connection, IInWorldGridNodeHost, IActionHost {
-  private static final String NODE_TAG = "node";
-  private static final String OWNER_TAG = "owner_id";
   private static final IGridNodeListener<Ae2Connection> LISTENER = new IGridNodeListener<>() {
     @Override
     public void onSaveChanges(Ae2Connection owner, IGridNode node) {
@@ -125,15 +125,7 @@ final class Ae2Connection implements MachineNetworkPlatform.Connection, IInWorld
 
   @Override
   public void save(CompoundTag tag, HolderLookup.Provider registries) {
-    if (node != null) {
-      node.saveToNBT(tag);
-    } else if (retained.contains(NODE_TAG, Tag.TAG_COMPOUND)) {
-      tag.put(NODE_TAG, retained.getCompound(NODE_TAG).copy());
-    }
-    int owner = node != null && node.getNode() != null ? node.getNode().getOwningPlayerId() : owningPlayerId;
-    if (owner >= 0) {
-      tag.putInt(OWNER_TAG, owner);
-    }
+    Ae2NodePersistence.save(tag, node, retained, owningPlayerId);
   }
 
   @Override
@@ -189,42 +181,42 @@ final class Ae2Connection implements MachineNetworkPlatform.Connection, IInWorld
 
   @Override
   public long extractItem(ItemStack prototype, long maximum) {
-    requireResource(PortKind.Resource.ITEM);
+    requireResource(ResourceType.ITEM);
 
     return transfer(prototype.isEmpty() ? null : AEItemKey.of(prototype), maximum, false);
   }
 
   @Override
   public long insertItem(ItemStack prototype, long maximum) {
-    requireResource(PortKind.Resource.ITEM);
+    requireResource(ResourceType.ITEM);
 
     return transfer(prototype.isEmpty() ? null : AEItemKey.of(prototype), maximum, true);
   }
 
   @Override
   public long extractFluid(FluidStack prototype, long maximum) {
-    requireResource(PortKind.Resource.FLUID);
+    requireResource(ResourceType.FLUID);
 
     return transfer(prototype.isEmpty() ? null : AEFluidKey.of(prototype), maximum, false);
   }
 
   @Override
   public long insertFluid(FluidStack prototype, long maximum) {
-    requireResource(PortKind.Resource.FLUID);
+    requireResource(ResourceType.FLUID);
 
     return transfer(prototype.isEmpty() ? null : AEFluidKey.of(prototype), maximum, true);
   }
 
   @Override
   public long extractChemical(ChemicalStackData prototype, long maximum) {
-    requireResource(PortKind.Resource.CHEMICAL);
+    requireResource(ResourceType.CHEMICAL);
 
     return transfer(chemicalKey(prototype), maximum, false);
   }
 
   @Override
   public long insertChemical(ChemicalStackData prototype, long maximum) {
-    requireResource(PortKind.Resource.CHEMICAL);
+    requireResource(ResourceType.CHEMICAL);
 
     return transfer(chemicalKey(prototype), maximum, true);
   }
@@ -233,7 +225,7 @@ final class Ae2Connection implements MachineNetworkPlatform.Connection, IInWorld
     return chemicalKeys == null || prototype.isEmpty() ? null : chemicalKeys.apply(prototype);
   }
 
-  private void requireResource(PortKind.Resource resource) {
+  private void requireResource(ResourceType resource) {
     requireServerThread();
     if (port.kind().resource() != resource) {
       throw new IllegalArgumentException("Network port resource type mismatch");

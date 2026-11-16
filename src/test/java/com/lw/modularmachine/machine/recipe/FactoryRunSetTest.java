@@ -16,7 +16,7 @@ import static org.junit.jupiter.api.Assertions.assertThrows;
 class FactoryRunSetTest {
   @Test
   void emptySetIsImmutableAndRejectsDuplicateOrMissingRuns() {
-    var run = FrozenItemRun.read(FrozenItemRunTest.valid());
+    var run = FrozenRecipeRun.read(FrozenRecipeRunTest.valid());
     var set = FactoryRunSet.empty().add(run);
     assertEquals(1, set.runs().size());
     assertEquals(run.runId(), set.find(run.runId()).orElseThrow().runId());
@@ -26,14 +26,14 @@ class FactoryRunSetTest {
 
   @Test
   void supportsUncappedRunSetsAndBulkReplacement() {
-    var runs = new ArrayList<FrozenItemRun>();
+    var runs = new ArrayList<FrozenRecipeRun>();
     for (int index = 0; index < 300; index++) {
-      var data = FrozenItemRunTest.valid();
+      var data = FrozenRecipeRunTest.valid();
       data.putUUID("run_id", new UUID(1, index + 1));
-      runs.add(FrozenItemRun.read(data));
+      runs.add(FrozenRecipeRun.read(data));
     }
     var set = FactoryRunSet.ofRuns(runs);
-    var replacements = new HashMap<UUID, FrozenItemRun>();
+    var replacements = new HashMap<UUID, FrozenRecipeRun>();
     for (int index = 0; index < 300; index++) {
       var run = runs.get(index);
       replacements.put(run.runId(), index == 299 ? run.advanced(300L, 20) : run.advanced(index + 1L));
@@ -88,13 +88,13 @@ class FactoryRunSetTest {
     assertEquals(List.of(first, second), set.runs());
   }
 
-  private static FrozenItemRun failureRun(UUID id, int progress, long lastTick) {
-    var data = FrozenItemRunTest.valid();
+  private static FrozenRecipeRun failureRun(UUID id, int progress, long lastTick) {
+    var data = FrozenRecipeRunTest.valid();
     data.putUUID("run_id", id);
     data.putInt("progress", progress);
     data.putLong("last_progress_tick", lastTick);
     data.getCompound("definition").putString("failure_action", "still");
 
-    return FrozenItemRun.read(data);
+    return FrozenRecipeRun.read(data);
   }
 }

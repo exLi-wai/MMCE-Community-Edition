@@ -9,8 +9,8 @@ import com.lw.modularmachine.machine.controller.ControllerOwnershipSubject;
 import com.lw.modularmachine.machine.controller.MachineEventPublisher;
 import com.lw.modularmachine.machine.recipe.command.RecipeCommandService;
 import com.lw.modularmachine.machine.structure.StructureService;
-import com.lw.modularmachine.machine.structure.VerificationFailure;
-import com.lw.modularmachine.machine.structure.VerificationState;
+import com.lw.modularmachine.api.controller.VerificationFailure;
+import com.lw.modularmachine.api.controller.VerificationState;
 import com.lw.modularmachine.util.callback.ServerCallbackRegistry;
 import com.lw.modularmachine.util.thread.ServerThreadGuard;
 import java.util.EnumMap;
@@ -162,43 +162,43 @@ public final class RecipeLifecyclePublisher {
         || RecipeItemCallbackService.isPreparing();
   }
 
-  public static void started(MachineControllerBlockEntity owner, FrozenItemRun run) {
+  public static void started(MachineControllerBlockEntity owner, FrozenRecipeRun run) {
     dispatch(owner, Optional.empty(), Type.STARTED, List.of(), List.of(run), Optional.empty());
   }
 
-  public static void finished(MachineControllerBlockEntity owner, FrozenItemRun run) {
+  public static void finished(MachineControllerBlockEntity owner, FrozenRecipeRun run) {
     dispatch(owner, Optional.empty(), Type.FINISHED, List.of(run), List.of(), Optional.empty());
   }
 
-  public static void advanced(MachineControllerBlockEntity owner, FrozenItemRun before, FrozenItemRun after) {
+  public static void advanced(MachineControllerBlockEntity owner, FrozenRecipeRun before, FrozenRecipeRun after) {
     dispatch(owner, Optional.empty(), Type.TICK, List.of(before), List.of(after), Optional.empty());
   }
 
-  public static void resourceFailed(MachineControllerBlockEntity owner, FrozenItemRun before, FrozenItemRun after, ResourceFailure failure) {
+  public static void resourceFailed(MachineControllerBlockEntity owner, FrozenRecipeRun before, FrozenRecipeRun after, ResourceFailure failure) {
     dispatch(owner, Optional.empty(), Type.RESOURCE_FAILURE, List.of(before), List.of(after), Optional.of(failure));
   }
 
-  public static void resourceDiscarded(MachineControllerBlockEntity owner, FrozenItemRun run, ResourceFailure failure) {
+  public static void resourceDiscarded(MachineControllerBlockEntity owner, FrozenRecipeRun run, ResourceFailure failure) {
     dispatch(owner, Optional.empty(), Type.DISCARDED, List.of(run), List.of(), Optional.of(failure));
   }
 
-  public static void started(FactoryControllerBlockEntity owner, String threadId, List<FrozenItemRun> runs) {
+  public static void started(FactoryControllerBlockEntity owner, String threadId, List<FrozenRecipeRun> runs) {
     dispatch(owner, Optional.of(threadId), Type.STARTED, List.of(), runs, Optional.empty());
   }
 
-  public static void finished(FactoryControllerBlockEntity owner, String threadId, List<FrozenItemRun> runs) {
+  public static void finished(FactoryControllerBlockEntity owner, String threadId, List<FrozenRecipeRun> runs) {
     dispatch(owner, Optional.of(threadId), Type.FINISHED, runs, List.of(), Optional.empty());
   }
 
-  public static void advanced(FactoryControllerBlockEntity owner, String threadId, List<FrozenItemRun> before, List<FrozenItemRun> after) {
+  public static void advanced(FactoryControllerBlockEntity owner, String threadId, List<FrozenRecipeRun> before, List<FrozenRecipeRun> after) {
     dispatch(owner, Optional.of(threadId), Type.TICK, before, after, Optional.empty());
   }
 
-  public static void resourceFailed(FactoryControllerBlockEntity owner, String threadId, List<FrozenItemRun> before, List<FrozenItemRun> after, ResourceFailure failure) {
+  public static void resourceFailed(FactoryControllerBlockEntity owner, String threadId, List<FrozenRecipeRun> before, List<FrozenRecipeRun> after, ResourceFailure failure) {
     dispatch(owner, Optional.of(threadId), Type.RESOURCE_FAILURE, before, after, Optional.of(failure));
   }
 
-  public static void resourceDiscarded(FactoryControllerBlockEntity owner, String threadId, List<FrozenItemRun> runs, ResourceFailure failure) {
+  public static void resourceDiscarded(FactoryControllerBlockEntity owner, String threadId, List<FrozenRecipeRun> runs, ResourceFailure failure) {
     if (!runs.isEmpty()) {
       dispatch(owner, Optional.of(threadId), Type.DISCARDED, runs, List.of(), Optional.of(failure));
     }
@@ -208,7 +208,7 @@ public final class RecipeLifecyclePublisher {
    * Runs before applying the frozen recipe action; policies only choose a bounded
    * decision.
    */
-  public static FailureDecision decideResourceFailure(StructureService.StructureSubject owner, Optional<String> threadId, FrozenItemRun run, ResourceFailure resource) {
+  public static FailureDecision decideResourceFailure(StructureService.StructureSubject owner, Optional<String> threadId, FrozenRecipeRun run, ResourceFailure resource) {
     if (FAILURE_POLICIES.isEmpty() || isDispatching() || !(owner.structureLevel() instanceof ServerLevel level)) {
       return FailureDecision.DEFAULT;
     }
@@ -265,7 +265,7 @@ public final class RecipeLifecyclePublisher {
     return FailureDecision.DEFAULT;
   }
 
-  public static FrozenItemRun applyFailureDecision(FrozenItemRun run, long tick, FailureDecision decision) {
+  public static FrozenRecipeRun applyFailureDecision(FrozenRecipeRun run, long tick, FailureDecision decision) {
     return switch (decision) {
       case DEFAULT -> run.afterResourceFailure(tick);
       case RESET -> run.afterResourceFailure(tick, RecipeFailureAction.RESET);
@@ -288,7 +288,7 @@ public final class RecipeLifecyclePublisher {
     dispatch(owner, Optional.empty(), Type.MACHINE_TICK, List.of(), List.of(), Optional.empty());
   }
 
-  private static void dispatch(StructureService.StructureSubject owner, Optional<String> threadId, Type type, List<FrozenItemRun> before, List<FrozenItemRun> after, Optional<ResourceFailure> failure) {
+  private static void dispatch(StructureService.StructureSubject owner, Optional<String> threadId, Type type, List<FrozenRecipeRun> before, List<FrozenRecipeRun> after, Optional<ResourceFailure> failure) {
     var deliveries = DELIVERIES.getOrDefault(type, List.of());
     if (deliveries.isEmpty() && !RecipeCommandService.wantsCapture(owner, type)
         || isDispatching()
@@ -356,7 +356,7 @@ public final class RecipeLifecyclePublisher {
     }
   }
 
-  private static RunSnapshot snapshot(FrozenItemRun run) {
+  private static RunSnapshot snapshot(FrozenRecipeRun run) {
     return new RunSnapshot(
         run.runId(),
         run.recipeId(),

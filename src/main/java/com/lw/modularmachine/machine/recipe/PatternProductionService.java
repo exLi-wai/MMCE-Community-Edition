@@ -1,6 +1,6 @@
 package com.lw.modularmachine.machine.recipe;
 
-import com.lw.modularmachine.api.upgrade.FactoryUpgradeSnapshot;
+import com.lw.modularmachine.api.upgrade.UpgradeSnapshot;
 import com.lw.modularmachine.blockentity.FactoryControllerBlockEntity;
 import com.lw.modularmachine.blockentity.MachineControllerBlockEntity;
 import com.lw.modularmachine.blockentity.PatternMirrorBlockEntity;
@@ -72,7 +72,7 @@ public final class PatternProductionService {
       String selector,
       String lockedRecipe,
       String thread,
-      FactoryUpgradeSnapshot upgrades) {
+      UpgradeSnapshot upgrades) {
   }
 
   private record Declaration(Map<String, Map<PatternResourceKey, Long>> inputs, Map<PatternResourceKey, Long> outputs) {
@@ -326,7 +326,7 @@ public final class PatternProductionService {
     return false;
   }
 
-  private static FactoryUpgradeSnapshot currentUpgrades(StructureService.StructureSubject owner, String threadId) {
+  private static UpgradeSnapshot currentUpgrades(StructureService.StructureSubject owner, String threadId) {
     if (owner instanceof MachineControllerBlockEntity ordinary) {
       var upgrades = ordinary.upgradeSnapshot();
       return ordinary.upgradeSnapshotCurrent(upgrades) ? upgrades : null;
@@ -345,7 +345,7 @@ public final class PatternProductionService {
     return null;
   }
 
-  private static boolean contextCurrent(StructureService.StructureSubject owner, RecipeCatalog catalog, FactoryUpgradeSnapshot upgrades, ServerLevel level) {
+  private static boolean contextCurrent(StructureService.StructureSubject owner, RecipeCatalog catalog, UpgradeSnapshot upgrades, ServerLevel level) {
     var expected = new ArrayList<>(owner.structureRegistration().activeRecipeModifiers(level));
     expected.addAll(upgrades.recipeModifiers());
     expected.addAll(MachineControllerScriptDataService.modifiers(owner));
@@ -411,7 +411,7 @@ public final class PatternProductionService {
     return fixed ? Math.min(limit, 1) : limit;
   }
 
-  private static boolean matches(PatternRecipeDefinition pattern, String selector, MachineRecipe recipe, FactoryUpgradeSnapshot upgrades, ServerLevel level) {
+  private static boolean matches(PatternRecipeDefinition pattern, String selector, MachineRecipe recipe, UpgradeSnapshot upgrades, ServerLevel level) {
     ExecutionCosts costs;
     try {
       costs = PatternRecipeDefinition.executionCosts(recipe.duration(), recipe.fluidPerTick().getAmount(), upgrades);

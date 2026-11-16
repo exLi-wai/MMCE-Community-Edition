@@ -4,14 +4,14 @@ import com.lw.modularmachine.blockentity.FactoryControllerBlockEntity;
 import com.lw.modularmachine.blockentity.MachinePortBlockEntity;
 import com.lw.modularmachine.blockentity.UpgradeBusBlockEntity;
 import com.lw.modularmachine.machine.factory.FactoryThreadState;
-import com.lw.modularmachine.machine.factory.FactoryUpgradeCompatibility;
-import com.lw.modularmachine.machine.factory.FactoryUpgradeDefinition;
-import com.lw.modularmachine.api.upgrade.FactoryUpgradeEntry;
-import com.lw.modularmachine.api.upgrade.FactoryUpgradeEvents;
-import com.lw.modularmachine.machine.factory.FactoryUpgradeService;
-import com.lw.modularmachine.api.upgrade.FactoryUpgradeSnapshot;
-import com.lw.modularmachine.api.upgrade.FactoryUpgradeStartCost;
-import com.lw.modularmachine.machine.factory.FactoryUpgradeStartCosts;
+import com.lw.modularmachine.machine.upgrade.UpgradeCompatibility;
+import com.lw.modularmachine.machine.upgrade.UpgradeDefinition;
+import com.lw.modularmachine.api.upgrade.UpgradeEntry;
+import com.lw.modularmachine.api.upgrade.UpgradeEvents;
+import com.lw.modularmachine.machine.upgrade.UpgradeCatalogService;
+import com.lw.modularmachine.api.upgrade.UpgradeSnapshot;
+import com.lw.modularmachine.api.upgrade.UpgradeStartCost;
+import com.lw.modularmachine.machine.upgrade.UpgradeStartCosts;
 import com.lw.modularmachine.machine.recipe.FactoryParallelStarter;
 import com.lw.modularmachine.machine.recipe.FactoryRecipeStarter;
 import com.lw.modularmachine.machine.recipe.RecipeStartPlan;
@@ -48,8 +48,8 @@ public final class UpgradeStartCostGameTests {
   private static final ResourceLocation MACHINE = id("test_upgrade_start_costs");
   private static final ResourceLocation OBSERVER = id("start_cost_observer");
   private static final String THREAD = "upgrade_thread";
-  private static List<FactoryUpgradeDefinition> savedDefinitions;
-  private static List<FactoryUpgradeDefinition> definitions;
+  private static List<UpgradeDefinition> savedDefinitions;
+  private static List<UpgradeDefinition> definitions;
 
   private record Fixture(
       FactoryControllerBlockEntity factory,
@@ -61,9 +61,9 @@ public final class UpgradeStartCostGameTests {
 
   @AfterBatch(batch = "upgrade_start_costs")
   public static void cleanup(ServerLevel level) {
-    FactoryUpgradeEvents.remove(OBSERVER);
+    UpgradeEvents.remove(OBSERVER);
     if (savedDefinitions != null) {
-      FactoryUpgradeService.replaceDefinitions(savedDefinitions);
+      UpgradeCatalogService.replaceDefinitions(savedDefinitions);
       savedDefinitions = null;
     }
     definitions = null;
@@ -79,11 +79,11 @@ public final class UpgradeStartCostGameTests {
             return;
           }
           GameTestUpgradeFixtures.install();
-          savedDefinitions = FactoryUpgradeService.snapshot().definitions();
+          savedDefinitions = UpgradeCatalogService.snapshot().definitions();
           var current = new AtomicReference<Fixture>();
           var observations = new AtomicInteger();
-          FactoryUpgradeEvents.register(OBSERVER, (context, upgrade) -> {
-            if (context.type() == FactoryUpgradeEvents.Type.STARTED) {
+          UpgradeEvents.register(OBSERVER, (context, upgrade) -> {
+            if (context.type() == UpgradeEvents.Type.STARTED) {
               var fixture = current.get();
               helper.assertTrue(
                   fixture.input().inventory().getStackInSlot(0).isEmpty()
@@ -96,9 +96,9 @@ public final class UpgradeStartCostGameTests {
             }
           });
           definitions = List.of(
-              definition("sugar", 1, 1, null, new FactoryUpgradeStartCost(0, 1)),
-              definition("iron_pickaxe", 1, 1, OBSERVER, new FactoryUpgradeStartCost(2, 0)));
-          FactoryUpgradeService.replaceDefinitions(definitions);
+              definition("sugar", 1, 1, null, new UpgradeStartCost(0, 1)),
+              definition("iron_pickaxe", 1, 1, OBSERVER, new UpgradeStartCost(2, 0)));
+          UpgradeCatalogService.replaceDefinitions(definitions);
           var fixture = build(helper);
           current.set(fixture);
           verifyArithmetic(helper);
@@ -108,7 +108,7 @@ public final class UpgradeStartCostGameTests {
   }
 
   private static void verifyArithmetic(GameTestHelper helper) {
-    var cost = new FactoryUpgradeStartCost(2, 0);
+    var cost = new UpgradeStartCost(2, 0);
     var tool = tool(247);
     helper.assertTrue(
         cost.maxRuns(tool) == 2 && cost.apply(tool, 2).isEmpty() && tool.getDamageValue() == 247,
@@ -120,7 +120,7 @@ public final class UpgradeStartCostGameTests {
     }
     var huge = tool(0);
     huge.set(DataComponents.MAX_DAMAGE, Integer.MAX_VALUE);
-    var unit = new FactoryUpgradeStartCost(1, 0);
+    var unit = new UpgradeStartCost(1, 0);
     helper.assertTrue(
         unit.maxRuns(huge) == Integer.MAX_VALUE && unit.apply(huge, Integer.MAX_VALUE).isEmpty(),
         "Durability arithmetic overflowed or introduced a fixed parallel cap");
@@ -137,7 +137,7 @@ public final class UpgradeStartCostGameTests {
     long revisionA = fixture.busA().upgradeRevision();
     long revisionB = fixture.busB().upgradeRevision();
     var leases = new ArrayList<UpgradeBusBlockEntity.StartCostLease>();
-    var prepared = FactoryUpgradeStartCosts.prepare(fixture.factory(), 2);
+    var prepared = UpgradeStartCosts.prepare(fixture.factory(), 2);
     try {
       prepared.acquireInto(leases);
       helper.assertTrue(
@@ -151,7 +151,7 @@ public final class UpgradeStartCostGameTests {
     } finally {
       leases.forEach(lease -> lease.resolve(false));
     }
-    FactoryUpgradeStartCosts.publish(fixture.factory(), leases);
+    UpgradeStartCosts.publish(fixture.factory(), leases);
     helper.assertTrue(
         fixture.busA().upgradeRevision() == revisionA
             && fixture.busB().upgradeRevision() == revisionB
@@ -159,10 +159,10 @@ public final class UpgradeStartCostGameTests {
             && fixture.busB().inventory().getStackInSlot(0).getDamageValue() == 10,
         "Rolling back costs changed items or published a new revision");
     leases.clear();
-    FactoryUpgradeStartCosts.prepare(fixture.factory(), 2).acquireInto(leases);
+    UpgradeStartCosts.prepare(fixture.factory(), 2).acquireInto(leases);
     leases.forEach(lease -> lease.resolve(true));
-    FactoryUpgradeStartCosts.publish(fixture.factory(), leases);
-    FactoryUpgradeStartCosts.publish(fixture.factory(), leases);
+    UpgradeStartCosts.publish(fixture.factory(), leases);
+    UpgradeStartCosts.publish(fixture.factory(), leases);
     helper.assertTrue(
         fixture.busA().upgradeRevision() == revisionA + 1
             && fixture.busB().upgradeRevision() == revisionB + 1
@@ -170,7 +170,7 @@ public final class UpgradeStartCostGameTests {
             && fixture.busB().inventory().getStackInSlot(0).getDamageValue() == 14,
         "Cost commit repeated revision publication or lost a source payment");
 
-    var partial = FactoryUpgradeStartCosts.prepare(fixture.factory(), 1);
+    var partial = UpgradeStartCosts.prepare(fixture.factory(), 1);
     var same = NonNullList.withSize(fixture.busB().inventory().getSlots(), ItemStack.EMPTY);
     for (int slot = 0; slot < same.size(); slot++) {
       same.set(slot, fixture.busB().inventory().getStackInSlot(slot).copy());
@@ -193,8 +193,8 @@ public final class UpgradeStartCostGameTests {
         fixture.busA().inventory().getStackInSlot(0).getCount() == 2
             && fixture.busB().inventory().getStackInSlot(0).getDamageValue() == 14,
         "Failure at a later cost source did not roll back the first");
-    var stale = FactoryUpgradeStartCosts.prepare(fixture.factory(), 1);
-    FactoryUpgradeService.replaceDefinitions(definitions);
+    var stale = UpgradeStartCosts.prepare(fixture.factory(), 1);
+    UpgradeCatalogService.replaceDefinitions(definitions);
     helper.assertTrue(!stale.current(), "Definition reload retained a prepared cost payment");
     try {
       stale.acquireInto(new ArrayList<>());
@@ -223,7 +223,7 @@ public final class UpgradeStartCostGameTests {
     fixture.busA().inventory().setStackInSlot(1, invalid);
     synchronize(helper, fixture);
     helper.assertTrue(
-        FactoryUpgradeStartCosts.maxRuns(fixture.factory()) == 0
+        UpgradeStartCosts.maxRuns(fixture.factory()) == 0
             && FactoryRecipeStarter
                 .start(fixture.factory(), THREAD, plan(fixture)) == FactoryRecipeStarter.Result.UPGRADE_COST_MISSING
             && fixture.input().inventory().getStackInSlot(0).getCount() == 2,
@@ -295,9 +295,9 @@ public final class UpgradeStartCostGameTests {
 
   private static void beginSharedThreads(GameTestHelper helper, Fixture fixture) {
     clearOutput(fixture);
-    definitions = List.of(definition("sugar", 0, 2, null, new FactoryUpgradeStartCost(0, 1)));
-    FactoryUpgradeService.replaceDefinitions(definitions);
-    fixture.factory().replaceThreads(List.of(thread("alpha"), thread("beta")));
+    definitions = List.of(definition("sugar", 0, 2, null, new UpgradeStartCost(0, 1)));
+    UpgradeCatalogService.replaceDefinitions(definitions);
+    fixture.factory().threadConfiguration().replaceThreads(List.of(thread("alpha"), thread("beta")));
     fixture.busA().inventory().setStackInSlot(0, new ItemStack(Items.SUGAR, 2));
     fixture.input().inventory().setStackInSlot(0, new ItemStack(Items.DIRT, 2));
     awaitSharedThreads(helper, fixture, new HashMap<>(), 120);
@@ -359,8 +359,8 @@ public final class UpgradeStartCostGameTests {
     if (fixture.factory().upgradeCallbackBuses().isEmpty()) {
       fixture.factory().serverTick();
     }
-    helper.assertTrue(fixture.factory().beginRunStart(THREAD), "Could not synchronize upgrade cost fixture");
-    fixture.factory().finishRunStart(THREAD, false);
+    helper.assertTrue(fixture.factory().runState().beginRunStart(THREAD), "Could not synchronize upgrade cost fixture");
+    fixture.factory().runState().finishRunStart(THREAD, false);
   }
 
   private static void awaitBatch(GameTestHelper helper, Fixture fixture, int expected, int remaining, Runnable complete) {
@@ -431,14 +431,14 @@ public final class UpgradeStartCostGameTests {
         FactoryThreadState.State.IDLE,
         FactoryThreadState.Reason.NONE,
         0,
-        FactoryUpgradeSnapshot.identity(0));
+        UpgradeSnapshot.identity(0));
   }
 
-  private static FactoryUpgradeDefinition definition(String item, int parallel, int speed, ResourceLocation observer, FactoryUpgradeStartCost cost) {
-    return new FactoryUpgradeDefinition(
+  private static UpgradeDefinition definition(String item, int parallel, int speed, ResourceLocation observer, UpgradeStartCost cost) {
+    return new UpgradeDefinition(
         ResourceLocation.fromNamespaceAndPath("minecraft", item),
-        new FactoryUpgradeEntry(id("cost_" + item), parallel, speed, 1, 1, 1, 1, 1),
-        new FactoryUpgradeCompatibility(Set.of(MACHINE), Set.of()),
+        new UpgradeEntry(id("cost_" + item), parallel, speed, 1, 1, 1, 1, 1),
+        new UpgradeCompatibility(Set.of(MACHINE), Set.of()),
         null,
         null,
         observer,

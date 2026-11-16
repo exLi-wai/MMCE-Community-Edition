@@ -1,5 +1,7 @@
 package com.lw.modularmachine.integration.kubejs;
 
+import com.lw.modularmachine.machine.recipe.RecipeScriptCallbacks;
+import com.lw.modularmachine.machine.recipe.RecipeScriptSources;
 import com.google.gson.JsonElement;
 import com.google.gson.JsonObject;
 import com.google.gson.JsonParseException;
@@ -23,13 +25,25 @@ public final class MachineItemRecipeKubeJSSources {
   private static final int MAX_RECIPES = 16_384;
   private static Map<ResourceLocation, JsonElement> captured = Map.of();
   private static Map<ResourceLocation, JsonElement> originalMachineRecipes = Map.of();
+  private static final RecipeScriptSources.Capture SOURCE = new RecipeScriptSources.Capture() {
+    @Override
+    public Map<ResourceLocation, JsonElement> snapshot() {
+      return MachineItemRecipeKubeJSSources.snapshot();
+    }
+
+    @Override
+    public void clear() {
+      MachineItemRecipeKubeJSSources.clearCaptured();
+    }
+  };
 
   private MachineItemRecipeKubeJSSources() {
   }
 
   public static synchronized void capture(Map<ResourceLocation, JsonElement> recipes) {
-    KubeJSRecipeItemCallbacks.begin();
+    RecipeScriptCallbacks.begin();
     captured = recipes;
+    RecipeScriptSources.capture(SOURCE);
     var originals = new LinkedHashMap<ResourceLocation, JsonElement>();
     for (var entry : recipes.entrySet()) {
       if (isMachineRecipe(entry.getValue())) {
@@ -66,8 +80,7 @@ public final class MachineItemRecipeKubeJSSources {
     return Map.copyOf(result);
   }
 
-  public static synchronized void clear() {
-    KubeJSRecipeItemCallbacks.end();
+  private static synchronized void clearCaptured() {
     captured = Map.of();
     originalMachineRecipes = Map.of();
   }

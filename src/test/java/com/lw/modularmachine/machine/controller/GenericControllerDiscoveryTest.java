@@ -1,5 +1,6 @@
 package com.lw.modularmachine.machine.controller;
 
+import com.lw.modularmachine.machine.structure.MachineDefinitionParser;
 import com.google.gson.JsonParser;
 import com.lw.modularmachine.api.orientation.MachineOrientation;
 import com.lw.modularmachine.machine.orientation.StateOrientationAdapters.RegistrySnapshot;
@@ -24,7 +25,7 @@ class GenericControllerDiscoveryTest {
            "parts":[{"offset":[0,0,0],"block":"item_input"}]}]}
         """).getAsJsonObject();
 
-    return MachineDefinition
+    return MachineDefinitionParser
         .parse(ResourceLocation.parse("mmcece:discovery_test"), source, new RegistrySnapshot(Map.of()));
   }
 

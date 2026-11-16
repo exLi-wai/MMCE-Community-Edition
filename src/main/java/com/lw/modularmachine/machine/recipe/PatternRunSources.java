@@ -114,7 +114,7 @@ public final class PatternRunSources {
    * Null means an ordinary source; an unavailable frozen source must pause the
    * run.
    */
-  public static PatternInputSource source(StructureSubject owner, FrozenItemRun run) {
+  public static PatternInputSource source(StructureSubject owner, FrozenRecipeRun run) {
     var state = of(owner);
     if (!state.valid()) {
       throw new IllegalStateException("Unsupported pattern run sources");
@@ -139,7 +139,7 @@ public final class PatternRunSources {
   }
 
   /** Lightweight loaded-source gate for runs without fluid or chemical fees. */
-  public static boolean available(StructureSubject owner, FrozenItemRun run) {
+  public static boolean available(StructureSubject owner, FrozenRecipeRun run) {
     var state = of(owner);
     if (!state.valid()) {
       return false;
@@ -161,7 +161,7 @@ public final class PatternRunSources {
         && (binding.container == null || provider.state().contains(binding.container));
   }
 
-  public static Optional<RecipeExecutionTicket> forRun(RecipeExecutionTicket ticket, FrozenItemRun run) {
+  public static Optional<RecipeExecutionTicket> forRun(RecipeExecutionTicket ticket, FrozenRecipeRun run) {
     try {
       var source = source(ticket.owner(), run);
       return Optional.of(ticket.withInputGroup(run.inputGroup()).withPatternSource(source));

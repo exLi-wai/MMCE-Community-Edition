@@ -1,18 +1,16 @@
 package com.lw.modularmachine.network;
 
+import com.lw.modularmachine.api.component.ResourceType;
+import static com.lw.modularmachine.network.MachinePayloadText.requireText;
 import com.lw.modularmachine.ModularMachine;
 import com.lw.modularmachine.api.component.ChemicalStackData;
 import com.lw.modularmachine.api.controller.MachineControllerApi;
 import com.lw.modularmachine.blockentity.FactoryControllerBlockEntity;
 import com.lw.modularmachine.blockentity.MachinePortBlockEntity;
 import com.lw.modularmachine.machine.PortKind;
-import com.lw.modularmachine.machine.chemical.ChemicalPlatform;
 import com.lw.modularmachine.machine.factory.FactoryThreadState;
 import com.lw.modularmachine.machine.factory.FactoryThreadStateCodec;
 import com.lw.modularmachine.machine.recipe.ControllerMetrics;
-import com.lw.modularmachine.machine.recipe.FrozenItemRun;
-import com.lw.modularmachine.menu.FactoryControllerMenu;
-import com.lw.modularmachine.menu.MachineResourceMenu;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.UUID;
@@ -22,13 +20,9 @@ import net.minecraft.network.RegistryFriendlyByteBuf;
 import net.minecraft.network.codec.StreamCodec;
 import net.minecraft.network.protocol.common.custom.CustomPacketPayload;
 import net.minecraft.resources.ResourceLocation;
-import net.minecraft.server.level.ServerPlayer;
 import net.minecraft.world.InteractionHand;
 import net.neoforged.neoforge.fluids.FluidStack;
-import net.neoforged.neoforge.fluids.FluidUtil;
-import net.neoforged.neoforge.network.PacketDistributor;
 import net.neoforged.neoforge.network.event.RegisterPayloadHandlersEvent;
-import net.neoforged.neoforge.network.handling.IPayloadContext;
 
 /** Versioned, bounded controller state payloads for menus and observers. */
 public final class MachinePayloads {
@@ -41,31 +35,31 @@ public final class MachinePayloads {
   public static final CustomPacketPayload.Type<ControllerStatusPayload> STATUS_TYPE = new CustomPacketPayload.Type<>(
       STATUS_ID);
   public static final StreamCodec<RegistryFriendlyByteBuf, ControllerStatusPayload> STATUS_CODEC = StreamCodec
-      .of(MachinePayloads::writeStatus, MachinePayloads::readStatus);
+      .of(ControllerPayloadCodec::writeStatus, ControllerPayloadCodec::readStatus);
   public static final ResourceLocation RESOURCE_STATUS_ID = ResourceLocation
       .fromNamespaceAndPath(ModularMachine.MODID, "resource_port_status");
   public static final CustomPacketPayload.Type<ResourcePortStatusPayload> RESOURCE_STATUS_TYPE = new CustomPacketPayload.Type<>(
       RESOURCE_STATUS_ID);
   public static final StreamCodec<RegistryFriendlyByteBuf, ResourcePortStatusPayload> RESOURCE_STATUS_CODEC = StreamCodec
-      .of(MachinePayloads::writeResourceStatus, MachinePayloads::readResourceStatus);
+      .of(ResourcePortPayloadCodec::writeResourceStatus, ResourcePortPayloadCodec::readResourceStatus);
   public static final ResourceLocation RESOURCE_ACTION_ID = ResourceLocation
       .fromNamespaceAndPath(ModularMachine.MODID, "resource_port_action");
   public static final CustomPacketPayload.Type<ResourcePortActionPayload> RESOURCE_ACTION_TYPE = new CustomPacketPayload.Type<>(
       RESOURCE_ACTION_ID);
   public static final StreamCodec<RegistryFriendlyByteBuf, ResourcePortActionPayload> RESOURCE_ACTION_CODEC = StreamCodec
-      .of(MachinePayloads::writeResourceAction, MachinePayloads::readResourceAction);
+      .of(ResourcePortPayloadCodec::writeResourceAction, ResourcePortPayloadCodec::readResourceAction);
   public static final ResourceLocation FACTORY_STATUS_ID = ResourceLocation
       .fromNamespaceAndPath(ModularMachine.MODID, "factory_status");
   public static final CustomPacketPayload.Type<FactoryStatusPayload> FACTORY_STATUS_TYPE = new CustomPacketPayload.Type<>(
       FACTORY_STATUS_ID);
   public static final StreamCodec<RegistryFriendlyByteBuf, FactoryStatusPayload> FACTORY_STATUS_CODEC = StreamCodec
-      .of(MachinePayloads::writeFactoryStatus, MachinePayloads::readFactoryStatus);
+      .of(FactoryPayloadCodec::writeFactoryStatus, FactoryPayloadCodec::readFactoryStatus);
   public static final ResourceLocation FACTORY_ACTION_ID = ResourceLocation
       .fromNamespaceAndPath(ModularMachine.MODID, "factory_action");
   public static final CustomPacketPayload.Type<FactoryThreadActionPayload> FACTORY_ACTION_TYPE = new CustomPacketPayload.Type<>(
       FACTORY_ACTION_ID);
   public static final StreamCodec<RegistryFriendlyByteBuf, FactoryThreadActionPayload> FACTORY_ACTION_CODEC = StreamCodec
-      .of(MachinePayloads::writeFactoryAction, MachinePayloads::readFactoryAction);
+      .of(FactoryPayloadCodec::writeFactoryAction, FactoryPayloadCodec::readFactoryAction);
   public static final int MAX_FACTORY_THREADS = FactoryThreadStateCodec.MAX_THREADS;
   private static volatile Consumer<ControllerStatusPayload> clientReceiver = ignored -> {
   };
@@ -88,7 +82,7 @@ public final class MachinePayloads {
     event.registrar(String.valueOf(RESOURCE_PROTOCOL_VERSION)).playToServer(
         RESOURCE_ACTION_TYPE,
         RESOURCE_ACTION_CODEC,
-        (payload, context) -> context.enqueueWork(() -> handleResourceAction(payload, context)));
+        (payload, context) -> context.enqueueWork(() -> MachinePayloadActions.handleResourceAction(payload, context)));
     event.registrar(String.valueOf(PROTOCOL_VERSION)).playToClient(
         FACTORY_STATUS_TYPE,
         FACTORY_STATUS_CODEC,
@@ -96,7 +90,7 @@ public final class MachinePayloads {
     event.registrar(String.valueOf(PROTOCOL_VERSION)).playToServer(
         FACTORY_ACTION_TYPE,
         FACTORY_ACTION_CODEC,
-        (payload, context) -> context.enqueueWork(() -> handleFactoryAction(payload, context)));
+        (payload, context) -> context.enqueueWork(() -> MachinePayloadActions.handleFactoryAction(payload, context)));
   }
 
   public static void setClientReceiver(Consumer<ControllerStatusPayload> receiver) {
@@ -115,85 +109,11 @@ public final class MachinePayloads {
   }
 
   public static FactoryStatusPayload factoryStatus(FactoryControllerBlockEntity factory) {
-    var threads = factory.scheduler().channels().stream().limit(MAX_FACTORY_THREADS)
-        .map(thread -> FactoryStatusThread.from(thread, factory.run(thread.threadId()).orElse(null))).toList();
-    return new FactoryStatusPayload(
-        PROTOCOL_VERSION,
-        factory.getBlockPos(),
-        factory.machineId(),
-        factory.scheduler().cursor(),
-        factory.persistentStateValid(),
-        factory.verificationState().name(),
-        factory.verificationFailure().name(),
-        ControllerMetrics.averageTickMicros(),
-        ControllerMetrics.averageSearchMicros(),
-        threads);
-  }
-
-  private static void handleResourceAction(ResourcePortActionPayload payload, IPayloadContext context) {
-    if (!(context.player() instanceof ServerPlayer player)
-        || !(player.containerMenu instanceof MachineResourceMenu menu)
-        || !menu.stillValid(player)
-        || !menu.port().getBlockPos().equals(payload.position())) {
-      return;
-    }
-    if (menu.port().kind().resource() == PortKind.Resource.FLUID) {
-      FluidUtil.interactWithFluidHandler(player, payload.hand(), menu.port().fluidTank());
-    } else if (menu.port().kind().resource() == PortKind.Resource.CHEMICAL) {
-      ChemicalPlatform.interact(player, payload.hand(), menu.port());
-    } else {
-      return;
-    }
-    PacketDistributor.sendToPlayer(player, resourceStatus(menu.port()));
-  }
-
-  private static void handleFactoryAction(FactoryThreadActionPayload payload, IPayloadContext context) {
-    if (!(context.player() instanceof ServerPlayer player)
-        || !(player.containerMenu instanceof FactoryControllerMenu menu)
-        || !menu.stillValid(player)
-        || !menu.factory().getBlockPos().equals(payload.position())) {
-      return;
-    }
-    boolean changed = menu.factory().updateThread(
-        payload.threadId(),
-        payload.expectedRevision(),
-        payload.action() == FactoryAction.SET_LOCKED_RECIPE,
-        payload.lockedRecipe(),
-        payload.action() == FactoryAction.SET_ENABLED ? payload.enabled() : null,
-        payload.action() == FactoryAction.SET_PARALLEL_LIMIT ? payload.parallelLimit() : null,
-        payload.action() == FactoryAction.SET_PARALLEL_LIMIT ? payload.upgradeRevision() : null);
-    if (changed) {
-      PacketDistributor.sendToPlayer(player, factoryStatus(menu.factory()));
-    }
+    return MachineStatusSnapshots.factoryStatus(factory);
   }
 
   public static ResourcePortStatusPayload resourceStatus(MachinePortBlockEntity port) {
-    var fluid = port.kind().resource() == PortKind.Resource.FLUID ? port.fluidTank().getFluid()
-        .copy() : FluidStack.EMPTY;
-    var chemical = port.kind().resource() == PortKind.Resource.CHEMICAL ? port.chemicalTank()
-        .getStack() : ChemicalStackData.EMPTY;
-    long amount = switch (port.kind().resource()) {
-      case ITEM -> 0;
-      case FLUID -> fluid.getAmount();
-      case CHEMICAL -> chemical.amount();
-      case ENERGY -> port.energy().stored();
-    };
-    long capacity = switch (port.kind().resource()) {
-      case ITEM -> 0;
-      case FLUID -> port.fluidTank().getCapacity();
-      case CHEMICAL -> port.chemicalTank().getCapacity();
-      case ENERGY -> port.energy().capacity();
-    };
-    return new ResourcePortStatusPayload(
-        RESOURCE_PROTOCOL_VERSION,
-        port.getBlockPos(),
-        port.kind(),
-        port.tier().name(),
-        amount,
-        capacity,
-        port.kind().resource() == PortKind.Resource.ENERGY ? port.energy().transferLimit() : 0,
-        fluid,
-        chemical);
+    return MachineStatusSnapshots.resourceStatus(port);
   }
 
   public record ResourcePortStatusPayload(
@@ -210,19 +130,19 @@ public final class MachinePayloads {
       if (version != RESOURCE_PROTOCOL_VERSION
           || position == null
           || kind == null
-          || kind.resource() == PortKind.Resource.ITEM
+          || kind.resource() == ResourceType.ITEM
           || tier == null
           || !tier.matches("[a-z_]{1,32}")
           || amount < 0
           || capacity <= 0
-          || amount > capacity && kind.resource() != PortKind.Resource.CHEMICAL
+          || amount > capacity && kind.resource() != ResourceType.CHEMICAL
           || transferLimit < 0
           || fluid == null
           || chemical == null
-          || kind.resource() != PortKind.Resource.FLUID && !fluid.isEmpty()
-          || kind.resource() == PortKind.Resource.FLUID && fluid.getAmount() != amount
-          || kind.resource() != PortKind.Resource.CHEMICAL && !chemical.isEmpty()
-          || kind.resource() == PortKind.Resource.CHEMICAL && chemical.amount() != amount) {
+          || kind.resource() != ResourceType.FLUID && !fluid.isEmpty()
+          || kind.resource() == ResourceType.FLUID && fluid.getAmount() != amount
+          || kind.resource() != ResourceType.CHEMICAL && !chemical.isEmpty()
+          || kind.resource() == ResourceType.CHEMICAL && chemical.amount() != amount) {
         throw new IllegalArgumentException("Invalid resource port status payload");
       }
       position = position.immutable();
@@ -375,29 +295,6 @@ public final class MachinePayloads {
       }
     }
 
-    private static FactoryStatusThread from(FactoryThreadState state, FrozenItemRun run) {
-      return new FactoryStatusThread(
-          state.threadId(),
-          state.machineId(),
-          state.lockedRecipe(),
-          state.enabled(),
-          state.priority(),
-          state.parallelLimit(),
-          state.upgradeRevision(),
-          state.upgradeSnapshot().speedNumerator(),
-          state.upgradeSnapshot().speedDenominator(),
-          state.upgradeSnapshot().energyNumerator(),
-          state.upgradeSnapshot().energyDenominator(),
-          state.upgradeSnapshot().fluidNumerator(),
-          state.upgradeSnapshot().fluidDenominator(),
-          state.state().name(),
-          state.reason().name(),
-          state.revision(),
-          run == null ? new UUID(0, 0) : run.runId(),
-          run == null ? "" : run.state().name(),
-          run == null ? 0 : run.progress(),
-          run == null ? 0 : run.duration());
-    }
   }
 
   public record ControllerStatusPayload(
@@ -487,273 +384,4 @@ public final class MachinePayloads {
     }
   }
 
-  private static void writeStatus(RegistryFriendlyByteBuf buffer, ControllerStatusPayload payload) {
-    buffer.writeVarInt(payload.version());
-    buffer.writeBlockPos(payload.position());
-    buffer.writeResourceLocation(payload.machineId());
-    buffer.writeVarLong(payload.definitionEpoch());
-    writeText(buffer, payload.structureState());
-    writeText(buffer, payload.structureFailure());
-    writeText(buffer, payload.front());
-    buffer.writeVarInt(payload.roll());
-    buffer.writeBoolean(payload.productionAllowed());
-    buffer.writeVarLong(payload.successfulTransfers());
-    buffer.writeVarLong(payload.bindingRebuilds());
-    writeText(buffer, payload.recipeStatus());
-    writeText(buffer, payload.recipeId());
-    writeText(buffer, payload.runState());
-    buffer.writeVarInt(payload.progress());
-    buffer.writeVarInt(payload.duration());
-    buffer.writeVarInt(payload.averageTickMicros());
-    buffer.writeVarInt(payload.averageSearchMicros());
-    buffer.writeVarInt(payload.shortages().size());
-    for (var shortage : payload.shortages()) {
-      writeText(buffer, shortage.key());
-      buffer.writeVarLong(shortage.required());
-      buffer.writeVarLong(shortage.available());
-      buffer.writeVarLong(shortage.missing());
-    }
-  }
-
-  private static ControllerStatusPayload readStatus(RegistryFriendlyByteBuf buffer) {
-    int version = buffer.readVarInt();
-    var position = buffer.readBlockPos();
-    var machineId = buffer.readResourceLocation();
-    long epoch = buffer.readVarLong();
-    String structureState = readText(buffer);
-    String structureFailure = readText(buffer);
-    String front = readText(buffer);
-    int roll = buffer.readVarInt();
-    boolean productionAllowed = buffer.readBoolean();
-    long successfulTransfers = buffer.readVarLong();
-    long bindingRebuilds = buffer.readVarLong();
-    String recipeStatus = readText(buffer);
-    String recipeId = readText(buffer);
-    String runState = readText(buffer);
-    int progress = buffer.readVarInt();
-    int duration = buffer.readVarInt();
-    int averageTickMicros = buffer.readVarInt();
-    int averageSearchMicros = buffer.readVarInt();
-    int size = buffer.readVarInt();
-    if (size < 0 || size > MAX_SHORTAGES) {
-      throw new IllegalArgumentException("Too many status shortages");
-    }
-    var shortages = new ArrayList<Shortage>(size);
-    for (int i = 0; i < size; i++) {
-      shortages.add(new Shortage(readText(buffer), buffer.readVarLong(), buffer.readVarLong(), buffer.readVarLong()));
-    }
-    return new ControllerStatusPayload(
-        version,
-        position,
-        machineId,
-        epoch,
-        structureState,
-        structureFailure,
-        front,
-        roll,
-        productionAllowed,
-        successfulTransfers,
-        bindingRebuilds,
-        recipeStatus,
-        recipeId,
-        runState,
-        progress,
-        duration,
-        averageTickMicros,
-        averageSearchMicros,
-        shortages);
-  }
-
-  private static void writeResourceStatus(RegistryFriendlyByteBuf buffer, ResourcePortStatusPayload payload) {
-    buffer.writeVarInt(payload.version());
-    buffer.writeBlockPos(payload.position());
-    buffer.writeVarInt(payload.kind().ordinal());
-    writeText(buffer, payload.tier());
-    buffer.writeVarLong(payload.amount());
-    buffer.writeVarLong(payload.capacity());
-    buffer.writeVarLong(payload.transferLimit());
-    FluidStack.OPTIONAL_STREAM_CODEC.encode(buffer, payload.fluid());
-    buffer.writeResourceLocation(payload.chemical().chemical());
-    buffer.writeVarLong(payload.chemical().amount());
-  }
-
-  private static void writeFactoryStatus(RegistryFriendlyByteBuf buffer, FactoryStatusPayload payload) {
-    buffer.writeVarInt(payload.version());
-    buffer.writeBlockPos(payload.position());
-    buffer.writeResourceLocation(payload.machineId());
-    buffer.writeVarInt(payload.schedulerCursor());
-    buffer.writeBoolean(payload.persistentStateValid());
-    writeText(buffer, payload.structureState());
-    writeText(buffer, payload.structureFailure());
-    buffer.writeVarInt(payload.averageTickMicros());
-    buffer.writeVarInt(payload.averageSearchMicros());
-    buffer.writeVarInt(payload.threads().size());
-    for (var thread : payload.threads()) {
-      writeText(buffer, thread.threadId());
-      buffer.writeResourceLocation(thread.machineId());
-      buffer.writeBoolean(thread.lockedRecipe() != null);
-      if (thread.lockedRecipe() != null) {
-        buffer.writeResourceLocation(thread.lockedRecipe());
-      }
-      buffer.writeBoolean(thread.enabled());
-      buffer.writeVarInt(thread.priority());
-      buffer.writeVarInt(thread.parallelLimit());
-      buffer.writeVarLong(thread.upgradeRevision());
-      buffer.writeVarInt(thread.speedNumerator());
-      buffer.writeVarInt(thread.speedDenominator());
-      buffer.writeVarInt(thread.energyNumerator());
-      buffer.writeVarInt(thread.energyDenominator());
-      buffer.writeVarInt(thread.fluidNumerator());
-      buffer.writeVarInt(thread.fluidDenominator());
-      writeText(buffer, thread.state());
-      writeText(buffer, thread.reason());
-      buffer.writeVarLong(thread.revision());
-      buffer.writeUUID(thread.runId());
-      writeText(buffer, thread.runState());
-      buffer.writeVarInt(thread.progress());
-      buffer.writeVarInt(thread.duration());
-    }
-  }
-
-  private static void writeFactoryAction(RegistryFriendlyByteBuf buffer, FactoryThreadActionPayload payload) {
-    buffer.writeVarInt(payload.version());
-    buffer.writeBlockPos(payload.position());
-    writeText(buffer, payload.threadId());
-    buffer.writeVarLong(payload.expectedRevision());
-    buffer.writeVarInt(payload.action().ordinal());
-    buffer.writeBoolean(payload.lockedRecipe() != null);
-    if (payload.lockedRecipe() != null) {
-      buffer.writeResourceLocation(payload.lockedRecipe());
-    }
-    buffer.writeBoolean(payload.enabled());
-    buffer.writeVarInt(payload.parallelLimit());
-    buffer.writeVarLong(payload.upgradeRevision());
-  }
-
-  private static FactoryThreadActionPayload readFactoryAction(RegistryFriendlyByteBuf buffer) {
-    int version = buffer.readVarInt();
-    var position = buffer.readBlockPos();
-    String threadId = readText(buffer);
-    long revision = buffer.readVarLong();
-    int ordinal = buffer.readVarInt();
-    if (ordinal < 0 || ordinal >= FactoryAction.values().length) {
-      throw new IllegalArgumentException("Invalid factory action");
-    }
-    var locked = buffer.readBoolean() ? buffer.readResourceLocation() : null;
-    return new FactoryThreadActionPayload(
-        version,
-        position,
-        threadId,
-        revision,
-        FactoryAction.values()[ordinal],
-        locked,
-        buffer.readBoolean(),
-        buffer.readVarInt(),
-        buffer.readVarLong());
-  }
-
-  private static FactoryStatusPayload readFactoryStatus(RegistryFriendlyByteBuf buffer) {
-    int version = buffer.readVarInt();
-    var position = buffer.readBlockPos();
-    var machineId = buffer.readResourceLocation();
-    int cursor = buffer.readVarInt();
-    boolean valid = buffer.readBoolean();
-    String structureState = readText(buffer);
-    String structureFailure = readText(buffer);
-    int averageTickMicros = buffer.readVarInt();
-    int averageSearchMicros = buffer.readVarInt();
-    int size = buffer.readVarInt();
-    if (size < 0 || size > MAX_FACTORY_THREADS) {
-      throw new IllegalArgumentException("Too many factory status threads");
-    }
-    var threads = new ArrayList<FactoryStatusThread>(size);
-    for (int i = 0; i < size; i++) {
-      var id = readText(buffer);
-      var machine = buffer.readResourceLocation();
-      var locked = buffer.readBoolean() ? buffer.readResourceLocation() : null;
-      threads.add(
-          new FactoryStatusThread(
-              id,
-              machine,
-              locked,
-              buffer.readBoolean(),
-              buffer.readVarInt(),
-              buffer.readVarInt(),
-              buffer.readVarLong(),
-              buffer.readVarInt(),
-              buffer.readVarInt(),
-              buffer.readVarInt(),
-              buffer.readVarInt(),
-              buffer.readVarInt(),
-              buffer.readVarInt(),
-              readText(buffer),
-              readText(buffer),
-              buffer.readVarLong(),
-              buffer.readUUID(),
-              readText(buffer),
-              buffer.readVarInt(),
-              buffer.readVarInt()));
-    }
-    return new FactoryStatusPayload(
-        version,
-        position,
-        machineId,
-        cursor,
-        valid,
-        structureState,
-        structureFailure,
-        averageTickMicros,
-        averageSearchMicros,
-        threads);
-  }
-
-  private static ResourcePortStatusPayload readResourceStatus(RegistryFriendlyByteBuf buffer) {
-    int version = buffer.readVarInt();
-    var position = buffer.readBlockPos();
-    int ordinal = buffer.readVarInt();
-    if (ordinal < 0 || ordinal >= PortKind.values().length) {
-      throw new IllegalArgumentException("Invalid resource port kind");
-    }
-    return new ResourcePortStatusPayload(
-        version,
-        position,
-        PortKind.values()[ordinal],
-        readText(buffer),
-        buffer.readVarLong(),
-        buffer.readVarLong(),
-        buffer.readVarLong(),
-        FluidStack.OPTIONAL_STREAM_CODEC.decode(buffer),
-        new ChemicalStackData(buffer.readResourceLocation(), buffer.readVarLong()));
-  }
-
-  private static void writeResourceAction(RegistryFriendlyByteBuf buffer, ResourcePortActionPayload payload) {
-    buffer.writeVarInt(payload.version());
-    buffer.writeBlockPos(payload.position());
-    buffer.writeVarInt(payload.hand().ordinal());
-  }
-
-  private static ResourcePortActionPayload readResourceAction(RegistryFriendlyByteBuf buffer) {
-    int version = buffer.readVarInt();
-    var position = buffer.readBlockPos();
-    int ordinal = buffer.readVarInt();
-    if (ordinal < 0 || ordinal >= InteractionHand.values().length) {
-      throw new IllegalArgumentException("Invalid resource action hand");
-    }
-    return new ResourcePortActionPayload(version, position, InteractionHand.values()[ordinal]);
-  }
-
-  private static void writeText(RegistryFriendlyByteBuf buffer, String value) {
-    requireText(value);
-    buffer.writeUtf(value, MAX_TEXT_LENGTH);
-  }
-
-  private static String readText(RegistryFriendlyByteBuf buffer) {
-    return buffer.readUtf(MAX_TEXT_LENGTH);
-  }
-
-  private static void requireText(String value) {
-    if (value == null || value.length() > MAX_TEXT_LENGTH) {
-      throw new IllegalArgumentException("Invalid payload text");
-    }
-  }
 }

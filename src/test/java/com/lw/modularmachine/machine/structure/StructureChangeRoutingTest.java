@@ -15,7 +15,7 @@ class StructureChangeRoutingTest {
         {"parts":[{"offset":[-1,0,0],"block":"energy_input"},
                   {"offset":[1,0,0],"block":"energy_output"}]}
         """).getAsJsonObject();
-    var definition = MachineDefinition
+    var definition = MachineDefinitionParser
         .parse(ResourceLocation.parse("mmcece:origin_routing"), source, new RegistrySnapshot(Map.of()));
 
     return new CompiledStructure(definition, origin, MachineOrientation.IDENTITY);
@@ -26,9 +26,9 @@ class StructureChangeRoutingTest {
     var origin = new BlockPos(164, 69, 175);
     var pattern = enclosingPattern(origin);
     assertTrue(pattern.contains(origin), "The bounding box contains the undeclared controller anchor");
-    assertFalse(StructureService.observesComponentChange(pattern, origin));
-    assertTrue(StructureService.observesComponentChange(pattern, origin.west()));
-    assertTrue(StructureService.observesComponentChange(pattern, origin.east()));
+    assertFalse(StructureChangeRouter.observesComponentChange(pattern, origin));
+    assertTrue(StructureChangeRouter.observesComponentChange(pattern, origin.west()));
+    assertTrue(StructureChangeRouter.observesComponentChange(pattern, origin.east()));
   }
 
   @Test
@@ -36,8 +36,8 @@ class StructureChangeRoutingTest {
     var controller = BlockPos.ZERO;
     var other = enclosingPattern(controller.east());
     assertEquals(controller, other.position(0));
-    assertTrue(StructureService.observesComponentChange(other, controller));
-    assertFalse(StructureService.observesComponentChange(other, other.origin));
+    assertTrue(StructureChangeRouter.observesComponentChange(other, controller));
+    assertFalse(StructureChangeRouter.observesComponentChange(other, other.origin));
   }
 
   @Test
@@ -49,7 +49,7 @@ class StructureChangeRoutingTest {
            "start_offset":[-1,0,0],"step":[1,0,0],
            "parts":[{"offset":[0,0,0],"block":"energy_input"}]}]}
         """).getAsJsonObject();
-    var definition = MachineDefinition
+    var definition = MachineDefinitionParser
         .parse(ResourceLocation.parse("mmcece:origin_boundary"), source, new RegistrySnapshot(Map.of()));
     var matcher = new DynamicStructureMatcher(definition, origin, MachineOrientation.IDENTITY);
     var watches = new DynamicStructureWatches();
@@ -62,10 +62,10 @@ class StructureChangeRoutingTest {
         0L,
         watches.affected(origin, false),
         "The reserved owner anchor is not a repeated-component dependency");
-    if (StructureService.observesDynamicChange(origin, origin)) {
+    if (StructureChangeRouter.observesDynamicChange(origin, origin)) {
       matcher.invalidate(watches.affected(origin, false));
     }
     assertTrue(matcher.matched(), "The owner's visual state must not invalidate its own boundary proof");
-    assertTrue(StructureService.observesDynamicChange(origin.east(), origin));
+    assertTrue(StructureChangeRouter.observesDynamicChange(origin.east(), origin));
   }
 }

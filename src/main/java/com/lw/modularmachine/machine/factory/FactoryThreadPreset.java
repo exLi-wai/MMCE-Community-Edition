@@ -1,6 +1,6 @@
 package com.lw.modularmachine.machine.factory;
 
-import com.lw.modularmachine.api.upgrade.FactoryUpgradeSnapshot;
+import com.lw.modularmachine.api.upgrade.UpgradeSnapshot;
 import com.lw.modularmachine.config.MachineConfig;
 import com.google.gson.JsonElement;
 import com.google.gson.JsonObject;
@@ -41,7 +41,7 @@ public record FactoryThreadPreset(List<Thread> threads) {
           FactoryThreadState.State.IDLE,
           FactoryThreadState.Reason.NONE,
           0,
-          new FactoryUpgradeSnapshot(0, parallelLimit, 1, 1, 1, 1, 1, 1));
+          new UpgradeSnapshot(0, parallelLimit, 1, 1, 1, 1, 1, 1));
     }
   }
 

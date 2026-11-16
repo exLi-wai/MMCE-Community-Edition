@@ -1,6 +1,9 @@
 package com.lw.modularmachine.item;
 
 import com.lw.modularmachine.block.NetworkPortBlock;
+import com.lw.modularmachine.api.component.ResourceType;
+import java.util.Map;
+import java.util.function.Predicate;
 import net.minecraft.core.BlockPos;
 import net.minecraft.core.component.DataComponents;
 import net.minecraft.nbt.CompoundTag;
@@ -19,6 +22,16 @@ import net.minecraft.world.level.block.state.BlockState;
  * network node.
  */
 public final class NetworkPortBlockItem extends BlockItem {
+  private static final Map<ResourceType, Predicate<CompoundTag>> PORTABLE_BUFFERS = Map.of(
+      ResourceType.ITEM,
+      physical -> physical.contains("items", Tag.TAG_COMPOUND)
+          && physical.getCompound("items").contains("Size", Tag.TAG_INT)
+          && physical.getCompound("items").contains("BulkItems", Tag.TAG_LIST),
+      ResourceType.FLUID,
+      physical -> physical.contains("fluid", Tag.TAG_COMPOUND),
+      ResourceType.CHEMICAL,
+      physical -> physical.contains("chemical", Tag.TAG_COMPOUND));
+
   public NetworkPortBlockItem(Block block, Properties properties) {
     super(block, properties);
   }
@@ -53,14 +66,9 @@ public final class NetworkPortBlockItem extends BlockItem {
         || physical.getInt("schema") != 1) {
       return false;
     }
-    return switch (kind.resource()) {
-      case ITEM -> physical.contains("items", Tag.TAG_COMPOUND)
-          && physical.getCompound("items").contains("Size", Tag.TAG_INT)
-          && physical.getCompound("items").contains("BulkItems", Tag.TAG_LIST);
-      case FLUID -> physical.contains("fluid", Tag.TAG_COMPOUND);
-      case CHEMICAL -> physical.contains("chemical", Tag.TAG_COMPOUND);
-      case ENERGY -> false;
-    };
+    var buffers = PORTABLE_BUFFERS.get(kind.resource());
+
+    return buffers != null && buffers.test(physical);
   }
 
   @Override

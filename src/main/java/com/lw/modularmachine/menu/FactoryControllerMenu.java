@@ -73,11 +73,7 @@ public final class FactoryControllerMenu extends ControllerBlueprintMenu {
   }
 
   public void sendParallelLimitAction(String threadId, int parallelLimit, long upgradeRevision) {
-    if (viewer.level() == null || !viewer.level().isClientSide || status == null || threadId == null) {
-      return;
-    }
-    var thread = status.threads().stream().filter(candidate -> candidate.threadId().equals(threadId)).findFirst()
-        .orElse(null);
+    var thread = actionThread(threadId);
     if (thread == null) {
       return;
     }
@@ -94,12 +90,16 @@ public final class FactoryControllerMenu extends ControllerBlueprintMenu {
             upgradeRevision));
   }
 
-  private void sendThreadAction(String threadId, MachinePayloads.FactoryAction action, ResourceLocation recipeId, boolean enabled) {
+  private MachinePayloads.FactoryStatusThread actionThread(String threadId) {
     if (viewer.level() == null || !viewer.level().isClientSide || status == null || threadId == null) {
-      return;
+      return null;
     }
-    var thread = status.threads().stream().filter(candidate -> candidate.threadId().equals(threadId)).findFirst()
+    return status.threads().stream().filter(candidate -> candidate.threadId().equals(threadId)).findFirst()
         .orElse(null);
+  }
+
+  private void sendThreadAction(String threadId, MachinePayloads.FactoryAction action, ResourceLocation recipeId, boolean enabled) {
+    var thread = actionThread(threadId);
     if (thread == null) {
       return;
     }

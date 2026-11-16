@@ -2,8 +2,8 @@ package com.lw.modularmachine.gametest;
 
 import net.minecraft.resources.ResourceLocation;
 import com.google.gson.JsonParser;
-import com.lw.modularmachine.machine.factory.FactoryUpgradeDefinition;
-import com.lw.modularmachine.machine.factory.FactoryUpgradeService;
+import com.lw.modularmachine.machine.upgrade.UpgradeDefinition;
+import com.lw.modularmachine.machine.upgrade.UpgradeCatalogService;
 import java.io.InputStreamReader;
 import java.nio.charset.StandardCharsets;
 import java.util.ArrayList;
@@ -31,7 +31,7 @@ final class GameTestUpgradeFixtures {
   }
 
   static void install() {
-    var definitions = new ArrayList<FactoryUpgradeDefinition>();
+    var definitions = new ArrayList<UpgradeDefinition>();
     for (var file : FILES) {
       var resource = GameTestUpgradeFixtures.class.getResourceAsStream("/data/mmcece/mmcece/upgrades/" + file);
       if (resource == null) {
@@ -40,12 +40,12 @@ final class GameTestUpgradeFixtures {
       try (var reader = new InputStreamReader(resource, StandardCharsets.UTF_8)) {
         var id = file.substring(0, file.length() - ".json".length());
         definitions.add(
-            FactoryUpgradeDefinition
+            UpgradeDefinition
                 .parse(ResourceLocation.fromNamespaceAndPath("mmcece", id), JsonParser.parseReader(reader)));
       } catch (Exception failure) {
         throw new IllegalStateException("Invalid upgrade fixture " + file, failure);
       }
     }
-    FactoryUpgradeService.replaceDefinitions(List.copyOf(definitions));
+    UpgradeCatalogService.replaceDefinitions(List.copyOf(definitions));
   }
 }

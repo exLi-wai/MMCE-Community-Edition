@@ -245,6 +245,7 @@ public final class NetworkPortScreen extends AbstractContainerScreen<NetworkPort
         var appearance = ChemicalDisplay.describe(new ChemicalStackData(chemical.id(), 1));
         drawSprite(graphics, appearance.texture(), appearance.tint(), x, y);
       }
+      default -> graphics.drawString(font, "?", x + 5, y + 4, 0xFFFFFF, true);
     }
     if (!showQuantity) {
       return;
@@ -313,6 +314,7 @@ public final class NetworkPortScreen extends AbstractContainerScreen<NetworkPort
       case NetworkPortResource.Fluid fluid -> fluid.stack().getHoverName();
       case NetworkPortResource.Chemical chemical ->
         ChemicalDisplay.describe(new ChemicalStackData(chemical.id(), 1)).name();
+      default -> Component.literal(value.kind().name());
     };
   }
 

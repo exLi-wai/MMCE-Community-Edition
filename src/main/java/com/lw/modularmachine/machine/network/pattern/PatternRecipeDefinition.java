@@ -1,6 +1,6 @@
 package com.lw.modularmachine.machine.network.pattern;
 
-import com.lw.modularmachine.api.upgrade.FactoryUpgradeSnapshot;
+import com.lw.modularmachine.api.upgrade.UpgradeSnapshot;
 import java.util.Map;
 import java.util.Objects;
 import org.jetbrains.annotations.ApiStatus;
@@ -48,7 +48,7 @@ public record PatternRecipeDefinition(
     return matchesDeclaredAmounts(inputs, outputs, nativeInputs, nativeOutputs);
   }
 
-  public static ExecutionCosts executionCosts(int baseDuration, int baseFluidPerTick, FactoryUpgradeSnapshot upgrades) {
+  public static ExecutionCosts executionCosts(int baseDuration, int baseFluidPerTick, UpgradeSnapshot upgrades) {
     Objects.requireNonNull(upgrades);
 
     return new ExecutionCosts(

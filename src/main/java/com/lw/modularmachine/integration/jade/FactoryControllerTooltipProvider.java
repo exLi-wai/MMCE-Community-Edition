@@ -4,10 +4,8 @@ import com.lw.modularmachine.api.controller.MachineControllerApi;
 import com.lw.modularmachine.blockentity.FactoryControllerBlockEntity;
 import com.lw.modularmachine.machine.recipe.ControllerMetrics;
 import com.lw.modularmachine.machine.structure.StructureService;
-import com.lw.modularmachine.presentation.MachineDiagnosticText;
 import java.util.Locale;
 import net.minecraft.ChatFormatting;
-import net.minecraft.core.BlockPos;
 import net.minecraft.nbt.CompoundTag;
 import net.minecraft.network.chat.Component;
 import net.minecraft.resources.ResourceLocation;
@@ -45,12 +43,8 @@ final class FactoryControllerTooltipProvider implements IBlockComponentProvider,
     data.putString(PREFIX + "failure", factory.verificationFailure().name());
     if (factory.getLevel() instanceof ServerLevel level) {
       ControllerOwnershipTooltip.appendServerData(data, level, factory.getBlockPos());
-      MachineControllerApi.structureDiagnostic(level, factory.getBlockPos()).ifPresent(diagnostic -> {
-        data.putLong(DIAGNOSTIC + "_position", diagnostic.position().asLong());
-        data.putString(DIAGNOSTIC + "_part", diagnostic.partId());
-        data.putString(DIAGNOSTIC + "_expected", diagnostic.expected());
-        data.putString(DIAGNOSTIC + "_actual", diagnostic.actual());
-      });
+      MachineControllerApi.structureDiagnostic(level, factory.getBlockPos())
+          .ifPresent(diagnostic -> ControllerDiagnosticTooltip.capture(data, DIAGNOSTIC, diagnostic));
     }
     data.putInt(PREFIX + "tick_micros", ControllerMetrics.averageTickMicros());
     data.putInt(PREFIX + "search_micros", ControllerMetrics.averageSearchMicros());
@@ -96,21 +90,7 @@ final class FactoryControllerTooltipProvider implements IBlockComponentProvider,
       tooltip.add(
           Component.translatable("jade.mmcece.failure." + data.getString(PREFIX + "failure").toLowerCase(Locale.ROOT)));
     }
-    if (data.contains(DIAGNOSTIC + "_position")) {
-      tooltip.add(
-          Component.translatable(
-              "jade.mmcece.diagnostic.position",
-              data.getString(DIAGNOSTIC + "_part"),
-              BlockPos.of(data.getLong(DIAGNOSTIC + "_position")).toShortString()));
-      tooltip.add(
-          Component.translatable(
-              "jade.mmcece.diagnostic.expected",
-              MachineDiagnosticText.localized(data.getString(DIAGNOSTIC + "_expected"))));
-      tooltip.add(
-          Component.translatable(
-              "jade.mmcece.diagnostic.actual",
-              MachineDiagnosticText.localized(data.getString(DIAGNOSTIC + "_actual"))));
-    }
+    ControllerDiagnosticTooltip.append(tooltip, data, DIAGNOSTIC);
     int count = Math.min(data.getInt(PREFIX + "count"), 8);
     for (int i = 0; i < count; i++) {
       String key = PREFIX + i + "_";

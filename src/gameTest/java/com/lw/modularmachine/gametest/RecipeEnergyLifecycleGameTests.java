@@ -1,12 +1,13 @@
 package com.lw.modularmachine.gametest;
 
+import com.lw.modularmachine.api.recipe.RecipeRunStatus;
 import com.lw.modularmachine.block.MachineControllerBlock;
 import com.lw.modularmachine.blockentity.MachineControllerBlockEntity;
 import com.lw.modularmachine.blockentity.MachinePortBlockEntity;
 import com.lw.modularmachine.api.orientation.MachineOrientation;
 import com.lw.modularmachine.machine.recipe.AtomicRecipeStarter;
 import com.lw.modularmachine.machine.recipe.search.RecipeSearch;
-import com.lw.modularmachine.machine.recipe.ItemRunEngine;
+import com.lw.modularmachine.machine.recipe.RecipeRunEngine;
 import com.lw.modularmachine.machine.recipe.search.RecipePlanner;
 import com.lw.modularmachine.machine.structure.StructureService;
 import com.lw.modularmachine.registry.MachineRegistries;
@@ -83,7 +84,7 @@ public final class RecipeEnergyLifecycleGameTests {
     reload(helper, () -> {
       try {
         var reset = buildFailureActionFixture(helper);
-        var resetEngine = new ItemRunEngine();
+        var resetEngine = new RecipeRunEngine();
         var resetEnergy = RecipeResourceTicketGameTests.port(helper, reset, "energy_a");
         resetEnergy.energy().receiveEnergy(5, false);
         start(helper, reset, Items.DIRT);
@@ -99,7 +100,7 @@ public final class RecipeEnergyLifecycleGameTests {
                 helper.assertTrue(
                     resetRun.progress() == 0
                         && resetEnergy.energy().stored() == 0
-                        && resetEngine.status() == ItemRunEngine.Result.WAITING_ENERGY,
+                        && resetEngine.status() == RecipeRunStatus.WAITING_ENERGY,
                     "reset did not clear progress: progress=" + resetRun.progress() + ", energy=" + resetEnergy.energy()
                         .stored() + ", status=" + resetEngine.status());
                 startDecreaseFailureAction(helper);
@@ -128,10 +129,10 @@ public final class RecipeEnergyLifecycleGameTests {
         plan.recipe().id().endsWith("/test_energy_paid_sand_decrease"),
         "Decrease fixture selected unexpected recipe: " + plan.recipe().id());
     helper.assertTrue(plan.start() == AtomicRecipeStarter.Result.STARTED, "Decrease fixture did not start");
-    advanceDecreaseFixture(helper, decrease, energy, new ItemRunEngine(), 1);
+    advanceDecreaseFixture(helper, decrease, energy, new RecipeRunEngine(), 1);
   }
 
-  private static void advanceDecreaseFixture(GameTestHelper helper, MachineControllerBlockEntity decrease, MachinePortBlockEntity energy, ItemRunEngine engine, int attempt) {
+  private static void advanceDecreaseFixture(GameTestHelper helper, MachineControllerBlockEntity decrease, MachinePortBlockEntity energy, RecipeRunEngine engine, int attempt) {
     afterWorldTick(helper, helper.getLevel().getGameTime(), () -> {
       try {
         engine.tick(decrease, helper.getLevel());
@@ -146,7 +147,7 @@ public final class RecipeEnergyLifecycleGameTests {
         helper.assertTrue(
             waiting.progress() == 2
                 && energy.energy().stored() == 0
-                && engine.status() == ItemRunEngine.Result.WAITING_ENERGY,
+                && engine.status() == RecipeRunStatus.WAITING_ENERGY,
             "decrease did not reduce progress once or charged the missing tick: progress=" + waiting
                 .progress() + ", energy=" + energy.energy().stored() + ", status=" + engine.status());
         helper.succeed();

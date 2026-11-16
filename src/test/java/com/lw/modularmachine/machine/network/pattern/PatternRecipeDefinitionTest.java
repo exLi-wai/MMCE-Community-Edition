@@ -4,7 +4,7 @@ import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
-import com.lw.modularmachine.api.upgrade.FactoryUpgradeSnapshot;
+import com.lw.modularmachine.api.upgrade.UpgradeSnapshot;
 import java.util.Map;
 import org.junit.jupiter.api.Test;
 
@@ -78,7 +78,7 @@ class PatternRecipeDefinitionTest {
 
   @Test
   void appliesUpgradeDurationAndRoundedFluidFeeBeforeMatching() {
-    var upgrades = new FactoryUpgradeSnapshot(0, 1, 2, 1, 1, 1, 3, 2);
+    var upgrades = new UpgradeSnapshot(0, 1, 2, 1, 1, 1, 3, 2);
     var costs = PatternRecipeDefinition.executionCosts(7, 3, upgrades);
     assertEquals(4, costs.duration());
     assertEquals(5, costs.fluidPerTick());
@@ -91,13 +91,13 @@ class PatternRecipeDefinitionTest {
 
   @Test
   void rejectsUpgradeCostsThatCannotBeFrozenOrSummedExactly() {
-    var slower = new FactoryUpgradeSnapshot(0, 1, 1, 2, 1, 1, 1, 1);
-    var costlyFluid = new FactoryUpgradeSnapshot(0, 1, 1, 1, 1, 1, 2, 1);
+    var slower = new UpgradeSnapshot(0, 1, 1, 2, 1, 1, 1, 1);
+    var costlyFluid = new UpgradeSnapshot(0, 1, 1, 1, 1, 1, 2, 1);
     assertThrows(ArithmeticException.class, () -> PatternRecipeDefinition.executionCosts(Integer.MAX_VALUE, 0, slower));
     assertThrows(
         ArithmeticException.class,
         () -> PatternRecipeDefinition.executionCosts(1, Integer.MAX_VALUE, costlyFluid));
-    var costs = PatternRecipeDefinition.executionCosts(2, 0, FactoryUpgradeSnapshot.identity(0));
+    var costs = PatternRecipeDefinition.executionCosts(2, 0, UpgradeSnapshot.identity(0));
     assertThrows(ArithmeticException.class, () -> costs.totalPerTick(Long.MAX_VALUE));
   }
 

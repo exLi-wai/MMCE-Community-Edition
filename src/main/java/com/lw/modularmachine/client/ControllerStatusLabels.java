@@ -43,6 +43,8 @@ final class ControllerStatusLabels {
       case "ADVANCED", "WAITING_TICK" -> tr(STATE + "crafting");
       case "WAITING_ENERGY" -> tr(STATE + "missing_energy");
       case "WAITING_FLUID" -> tr(STATE + "missing_fluid");
+      case "WAITING_RESOURCE" -> tr(STATE + "waiting_resource");
+      case "MISSING_RESOURCE_INPUT" -> tr(STATE + "missing_resource_input");
       case "WAITING_CHEMICAL" -> tr(STATE + "waiting_chemical");
       case "MISSING_ITEM_INPUT" -> tr(STATE + "missing_item_input");
       case "MISSING_ITEM_OUTPUT" -> tr(STATE + "missing_item_output");

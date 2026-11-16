@@ -32,7 +32,7 @@ class CompiledStructurePreparationTest {
         part.getAsJsonObject().remove("part_id");
       }
     }
-    return MachineDefinition.parse(
+    return MachineDefinitionParser.parse(
         ResourceLocation.fromNamespaceAndPath("mmcece", "preparation_unit"),
         root,
         new StateOrientationAdapters.RegistrySnapshot(Map.of()));

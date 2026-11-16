@@ -21,7 +21,7 @@ class KubeJSRecipeTooltipRhinoTest {
 
   @Test
   void adapterTooltipMethodsResolveStringsVarargsAndJavascriptArrays() throws ReflectiveOperationException {
-    assertTooltipMethodsResolve(KubeJSRecipeAdapterRegistration.RecipeAdapterBuilder.class);
+    assertTooltipMethodsResolve(KubeJSRecipeAdapterBuilder.class);
   }
 
   private static void assertTooltipMethodsResolve(Class<?> builderClass) throws ReflectiveOperationException {

@@ -1,9 +1,9 @@
 package com.lw.modularmachine.machine.appearance;
 
+import com.lw.modularmachine.api.recipe.RecipeRunStatus;
 import com.lw.modularmachine.machine.factory.FactoryRunSet;
 import com.lw.modularmachine.machine.factory.FactoryThreadState;
-import com.lw.modularmachine.machine.recipe.ItemRunEngine;
-import com.lw.modularmachine.machine.structure.VerificationState;
+import com.lw.modularmachine.api.controller.VerificationState;
 import com.lw.modularmachine.util.thread.ServerThreadGuard;
 import java.util.List;
 import java.util.Map;
@@ -26,13 +26,13 @@ public final class ControllerAppearance {
   private ControllerAppearance() {
   }
 
-  public static ControllerAppearanceState ordinary(VerificationState verification, boolean hasRun, ItemRunEngine.Result result, boolean signalPaused, boolean transferred, ControllerAppearanceState idleAppearance) {
+  public static ControllerAppearanceState ordinary(VerificationState verification, boolean hasRun, RecipeRunStatus result, boolean signalPaused, boolean transferred, ControllerAppearanceState idleAppearance) {
     if (verification != VerificationState.CONFIRMED) {
       return ControllerAppearanceState.UNFORMED;
     }
-    if (result == ItemRunEngine.Result.UPGRADE_CONFLICT
-        || result == ItemRunEngine.Result.UPGRADE_ERROR
-        || hasRun && result == ItemRunEngine.Result.ERROR) {
+    if (result == RecipeRunStatus.UPGRADE_CONFLICT
+        || result == RecipeRunStatus.UPGRADE_ERROR
+        || hasRun && result == RecipeRunStatus.ERROR) {
       return ControllerAppearanceState.ERROR;
     }
     if (signalPaused) {

@@ -1,6 +1,7 @@
 package com.lw.modularmachine.machine.recipe.search;
 
-import com.lw.modularmachine.machine.recipe.ChemicalTransactions;
+import com.lw.modularmachine.api.component.ResourceType;
+import com.lw.modularmachine.api.recipe.resource.RecipeResourcePlanning;
 import com.lw.modularmachine.machine.recipe.PatternProductionService;
 import com.lw.modularmachine.machine.recipe.RecipeStartPlan;
 import com.lw.modularmachine.machine.recipe.ItemResourceKey;
@@ -13,11 +14,11 @@ import com.lw.modularmachine.machine.recipe.RecipeItemPreparation;
 import com.lw.modularmachine.api.recipe.RecipeModifier;
 import com.mojang.serialization.JsonOps;
 import net.minecraft.resources.ResourceLocation;
-import com.lw.modularmachine.machine.factory.UpgradeRecipeChecks;
+import com.lw.modularmachine.machine.upgrade.UpgradeRecipeCheckHandlers;
 import com.lw.modularmachine.blockentity.FactoryControllerBlockEntity;
 import com.lw.modularmachine.blockentity.MachineControllerBlockEntity;
 import com.lw.modularmachine.machine.PortKind;
-import com.lw.modularmachine.machine.factory.UpgradeBusOwner;
+import com.lw.modularmachine.machine.upgrade.UpgradeBusOwner;
 import com.lw.modularmachine.machine.structure.StructureService;
 import java.util.ArrayList;
 import java.util.HashMap;
@@ -28,8 +29,8 @@ import java.util.Map;
 import java.util.Objects;
 import java.util.Optional;
 import java.util.Set;
+import java.util.function.Supplier;
 import org.jetbrains.annotations.ApiStatus;
-import net.minecraft.resources.ResourceLocation;
 
 /**
  * Server-owned multi-resource search with resumable candidate and output
@@ -56,11 +57,10 @@ public final class RecipeSearch {
   private record PreparedInputs(MachineRecipe definition, RecipeCandidate<ItemResourceKey> original, long epoch) {
   }
   private RecipeStartPlan selected;
-  private FluidOutputLayout fluidLayout;
-  private FluidOutputLayout.Planning fluidPlan;
-  private ChemicalOutputLayout.Planning chemicalPlan;
-  private long fluidWork;
-  private final UpgradeRecipeChecks.Scope factoryScope;
+  private final List<RecipeSearchResource.Captured> resourceSearches;
+  private ResourcePlanningSequence resourcePlans;
+  private long resourceWork;
+  private final UpgradeRecipeCheckHandlers.Scope factoryScope;
   private final UpgradeBusOwner factory;
   private final String factoryThread;
   private RecipeStartPlan pendingFactoryPlan;
@@ -91,11 +91,11 @@ public final class RecipeSearch {
     this.factoryThread = startThread(ticket, factoryThread);
     this.groups = List.copyOf(groups);
     factory = this.factoryThread != null && ticket.owner() instanceof UpgradeBusOwner owner ? owner : null;
-    factoryScope = factory == null ? null : UpgradeRecipeChecks.capture(factory, this.factoryThread);
+    factoryScope = factory == null ? null : UpgradeRecipeCheckHandlers.capture(factory, this.factoryThread);
     inputs = List.of();
     outputs = List.of();
     session = null;
-    fluidLayout = null;
+    resourceSearches = List.of();
   }
 
   private RecipeSearch(RecipeExecutionTicket ticket, RecipeCatalog catalog, Set<String> allowedIds, String factoryThread, RecipeSearchResources resources) {
@@ -105,13 +105,13 @@ public final class RecipeSearch {
     this.allowedIds = allowedIds == null ? null : Set.copyOf(allowedIds);
     this.factoryThread = startThread(ticket, factoryThread);
     factory = this.factoryThread != null && ticket.owner() instanceof UpgradeBusOwner owner ? owner : null;
-    factoryScope = factory == null ? null : UpgradeRecipeChecks.capture(factory, this.factoryThread);
+    factoryScope = factory == null ? null : UpgradeRecipeCheckHandlers.capture(factory, this.factoryThread);
     var inputSlots = new ArrayList<InputSlot>();
     var outputSlots = new ArrayList<OutputSlot>();
     var counts = new LinkedHashMap<ItemResourceKey, Long>();
     var spaces = new ArrayList<ResourceSnapshot.OutputSlot<ItemResourceKey>>();
     for (var port : ticket.ports()) {
-      if (port.kind().resource() != PortKind.Resource.ITEM) {
+      if (port.kind().resource() != ResourceType.ITEM) {
         continue;
       }
       for (var slot : resources.items(port)) {
@@ -138,9 +138,8 @@ public final class RecipeSearch {
     var resourceCandidates = new HashSet<String>();
     var preparingCandidates = new ArrayList<RecipeCandidate<ItemResourceKey>>();
     var requirements = RecipeResourceRequirements.capture(ticket);
-    var fluids = resources.fluids(ticket);
-    var chemicals = resources.chemicalInputKeys(ticket);
-    for (var candidate : catalog.candidatesForPreparation(counts, fluids.inputKeys(), chemicals, allowedIds)) {
+    resourceSearches = catalog.captureResources(ticket, resources);
+    for (var candidate : catalog.candidatesForPreparation(counts, resourceSearches, allowedIds)) {
       var definition = catalog.definition(candidate.id());
       boolean transformsInput = definition != null
           && definition.scriptOptions().itemCallbacks().stream()
@@ -159,11 +158,7 @@ public final class RecipeSearch {
               && !definition.executionOptions().threadName().isEmpty()) {
         continue;
       }
-      if (ticket.interfacesMatch(candidate.interfaceInputs())
-          && (definition == null
-              || definition.chemicals().inputs().isEmpty()
-              || ChemicalTransactions.inputsAvailable(ticket, definition.chemicals().inputs()))
-          && catalog.fluidsAvailable(candidate.id(), fluids)) {
+      if (ticket.interfacesMatch(candidate.interfaceInputs()) && resourcesAvailable(candidate.id(), definition)) {
         if (transformsInput) {
           preparingCandidates.add(candidate);
         } else {
@@ -182,6 +177,16 @@ public final class RecipeSearch {
       inputPreparationCandidates = List.copyOf(preparingCandidates);
       inputPreparationEpoch = RecipeItemCallbackService.epoch();
     }
+  }
+
+  private boolean resourcesAvailable(String recipeId, MachineRecipe definition) {
+    for (var resource : resourceSearches) {
+      if (!resource.available(recipeId, definition)) {
+        return false;
+      }
+    }
+
+    return true;
   }
 
   private int advanceInputPreparations(int budget) {
@@ -306,13 +311,13 @@ public final class RecipeSearch {
       throw new IllegalArgumentException("Negative planning budget");
     }
     if (factoryScope != null && !factoryScope.current()) {
-      throw new UpgradeRecipeChecks.StaleException();
+      throw new UpgradeRecipeCheckHandlers.StaleException();
     }
     if (inputPreparationEpoch >= 0 && !RecipeItemCallbackService.isCurrent(inputPreparationEpoch)) {
-      throw new UpgradeRecipeChecks.StaleException();
+      throw new UpgradeRecipeCheckHandlers.StaleException();
     }
     if (!RecipeItemCallbackService.isCurrent(itemCallbackEpoch)) {
-      throw new UpgradeRecipeChecks.StaleException();
+      throw new UpgradeRecipeCheckHandlers.StaleException();
     }
     if (groups != null) {
       return advanceGroups(budget);
@@ -334,43 +339,22 @@ public final class RecipeSearch {
         return new Result(result.status(), Optional.empty(), used);
       }
       var generic = result.plan().orElseThrow();
-      if (fluidPlan == null) {
-        if (fluidLayout == null) {
-          fluidLayout = new FluidOutputLayout(ticket, ticket.level().registryAccess());
-        }
-        fluidPlan = fluidLayout.plan(
-            catalog.fluidOutputs(generic.candidate().id()),
-            catalog.selectors(generic.candidate().id()).fluidOutput());
-      }
-      if (fluidPlan.status() == RecipePlanner.Status.BUDGET_EXHAUSTED) {
-        var fluidResult = fluidPlan.advance(budget - used);
-        used += fluidResult.workUsed();
-        fluidWork += fluidResult.workUsed();
-      }
-      if (fluidPlan.status() == RecipePlanner.Status.BUDGET_EXHAUSTED) {
-        return new Result(RecipePlanner.Status.BUDGET_EXHAUSTED, Optional.empty(), used);
-      }
-      if (fluidPlan.status() == RecipePlanner.Status.NO_MATCH) {
-        fluidPlan = null;
-        session.rejectSelected();
-        continue;
-      }
-      if (chemicalPlan == null) {
+      if (resourcePlans == null) {
         var definition = catalog.definition(generic.candidate().id());
-        chemicalPlan = new ChemicalOutputLayout(ticket)
-            .plan(definition == null ? List.of() : definition.chemicals().outputs());
+        var steps = new ArrayList<Supplier<RecipeResourcePlanning>>(resourceSearches.size());
+        for (var resource : resourceSearches) {
+          steps.add(() -> resource.outputs(generic.candidate().id(), definition));
+        }
+        resourcePlans = new ResourcePlanningSequence(steps);
       }
-      if (chemicalPlan.status() == RecipePlanner.Status.BUDGET_EXHAUSTED) {
-        var chemicalResult = chemicalPlan.advance(budget - used);
-        used += chemicalResult.workUsed();
-        fluidWork += chemicalResult.workUsed();
-      }
-      if (chemicalPlan.status() == RecipePlanner.Status.BUDGET_EXHAUSTED) {
+      var planned = resourcePlans.advance(budget - used);
+      used += planned.workUsed();
+      resourceWork += planned.workUsed();
+      if (planned.status() == RecipeResourcePlanning.Status.PENDING) {
         return new Result(RecipePlanner.Status.BUDGET_EXHAUSTED, Optional.empty(), used);
       }
-      if (chemicalPlan.status() == RecipePlanner.Status.NO_MATCH) {
-        chemicalPlan = null;
-        fluidPlan = null;
+      if (planned.status() == RecipeResourcePlanning.Status.REJECTED) {
+        resourcePlans = null;
         session.rejectSelected();
         continue;
       }
@@ -421,13 +405,12 @@ public final class RecipeSearch {
           }
           case REJECTED -> {
             pendingFactoryPlan = null;
-            fluidPlan = null;
-            chemicalPlan = null;
+            resourcePlans = null;
             session.rejectSelected();
             continue;
           }
-          case STALE -> throw new UpgradeRecipeChecks.StaleException();
-          case ERROR -> throw new UpgradeRecipeChecks.FailedException();
+          case STALE -> throw new UpgradeRecipeCheckHandlers.StaleException();
+          case ERROR -> throw new UpgradeRecipeCheckHandlers.FailedException();
           case ALLOWED -> {
           }
         }
@@ -442,7 +425,7 @@ public final class RecipeSearch {
     if (groups != null) {
       return completedGroupWork + (groupSearch == null ? 0 : groupSearch.totalWork());
     }
-    return (session == null ? 0 : session.totalWork()) + inputPreparationWork + fluidWork + checkWork;
+    return (session == null ? 0 : session.totalWork()) + inputPreparationWork + resourceWork + checkWork;
   }
 
   /**
@@ -456,8 +439,7 @@ public final class RecipeSearch {
     if (groups == null) {
       session.rejectSelected();
       pendingFactoryPlan = null;
-      fluidPlan = null;
-      chemicalPlan = null;
+      resourcePlans = null;
     } else {
       // At most one rejection per captured context/catalog ID pair. A rejection
       // in one numeric or pattern group must not suppress another group's input.

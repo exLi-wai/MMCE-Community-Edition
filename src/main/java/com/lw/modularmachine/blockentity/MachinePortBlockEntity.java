@@ -1,5 +1,8 @@
 package com.lw.modularmachine.blockentity;
 
+import com.lw.modularmachine.machine.structure.StructureChangeRouter;
+import com.lw.modularmachine.api.component.ResourceType;
+import com.lw.modularmachine.machine.component.PortResourceAccess;
 import com.lw.modularmachine.api.component.MachineColorable;
 import com.lw.modularmachine.api.component.ChemicalStackData;
 import com.lw.modularmachine.block.MachinePortBlock;
@@ -9,7 +12,6 @@ import com.lw.modularmachine.machine.PortKind;
 import com.lw.modularmachine.machine.chemical.ChemicalPlatform;
 import com.lw.modularmachine.machine.recipe.InputGroup;
 import com.lw.modularmachine.machine.recipe.RecipeLifecyclePublisher;
-import com.lw.modularmachine.machine.structure.StructureService;
 import com.lw.modularmachine.menu.MachinePortMenu;
 import com.lw.modularmachine.menu.MachineResourceMenu;
 import com.lw.modularmachine.network.MachinePayloads;
@@ -85,8 +87,8 @@ public class MachinePortBlockEntity extends BlockEntity implements MenuProvider,
         this::beforeResourceWrite,
         this::changed);
     energy = new LongEnergyBuffer(
-        kind.resource() == PortKind.Resource.ENERGY ? MachineConfig.energyHatchCapacity(tier) : 1,
-        kind.resource() == PortKind.Resource.ENERGY ? MachineConfig.energyHatchTransfer(tier) : 1,
+        kind.resource() == ResourceType.ENERGY ? MachineConfig.energyHatchCapacity(tier) : 1,
+        kind.resource() == ResourceType.ENERGY ? MachineConfig.energyHatchTransfer(tier) : 1,
         kind.isInput(),
         () -> level == null ? 0 : level.getGameTime(),
         this::beforeResourceWrite,
@@ -198,7 +200,7 @@ public class MachinePortBlockEntity extends BlockEntity implements MenuProvider,
       }
       resourceRevision = Math.incrementExact(resourceRevision);
       setChanged();
-      StructureService.resourceChanged(server, worldPosition);
+      StructureChangeRouter.resourceChanged(server, worldPosition);
     }
   }
 
@@ -231,7 +233,7 @@ public class MachinePortBlockEntity extends BlockEntity implements MenuProvider,
     if (!(level instanceof ServerLevel)
         || isRemoved()
         || !schemaSupported()
-        || kind.resource() != PortKind.Resource.ITEM
+        || kind.resource() != ResourceType.ITEM
         || resourceRevision != expectedRevision
         || resourceRevision == Long.MAX_VALUE) {
       throw new IllegalStateException("Stale or unavailable item bus");
@@ -369,7 +371,7 @@ public class MachinePortBlockEntity extends BlockEntity implements MenuProvider,
       if (notify && !published) {
         published = true;
         setChanged();
-        StructureService.resourceChanged((ServerLevel) level, worldPosition);
+        StructureChangeRouter.resourceChanged((ServerLevel) level, worldPosition);
       }
     }
 
@@ -431,7 +433,7 @@ public class MachinePortBlockEntity extends BlockEntity implements MenuProvider,
       if (notify && !published) {
         published = true;
         setChanged();
-        StructureService.resourceChanged((ServerLevel) level, worldPosition);
+        StructureChangeRouter.resourceChanged((ServerLevel) level, worldPosition);
       }
     }
 
@@ -503,7 +505,7 @@ public class MachinePortBlockEntity extends BlockEntity implements MenuProvider,
       if (notify && !published) {
         published = true;
         setChanged();
-        StructureService.resourceChanged((ServerLevel) level, worldPosition);
+        StructureChangeRouter.resourceChanged((ServerLevel) level, worldPosition);
       }
     }
 
@@ -553,7 +555,7 @@ public class MachinePortBlockEntity extends BlockEntity implements MenuProvider,
       if (notify && !published) {
         published = true;
         setChanged();
-        StructureService.resourceChanged((ServerLevel) level, worldPosition);
+        StructureChangeRouter.resourceChanged((ServerLevel) level, worldPosition);
       }
     }
 
@@ -569,14 +571,14 @@ public class MachinePortBlockEntity extends BlockEntity implements MenuProvider,
   public void onLoad() {
     super.onLoad();
     if (level instanceof ServerLevel server) {
-      StructureService.blockChanged(server, worldPosition);
+      StructureChangeRouter.blockChanged(server, worldPosition);
     }
   }
 
   @Override
   public void setRemoved() {
     if (level instanceof ServerLevel server) {
-      StructureService.blockChanged(server, worldPosition);
+      StructureChangeRouter.blockChanged(server, worldPosition);
     }
     super.setRemoved();
   }
@@ -584,7 +586,7 @@ public class MachinePortBlockEntity extends BlockEntity implements MenuProvider,
   @Override
   public void onChunkUnloaded() {
     if (level instanceof ServerLevel server) {
-      StructureService.blockChanged(server, worldPosition);
+      StructureChangeRouter.blockChanged(server, worldPosition);
     }
     super.onChunkUnloaded();
   }
@@ -759,16 +761,16 @@ public class MachinePortBlockEntity extends BlockEntity implements MenuProvider,
     data.putInt("schema", 1);
     data.putInt("input_group", inputGroup);
     data.putInt("preferred_input_group", preferredInputGroup);
-    if (kind.resource() == PortKind.Resource.ITEM) {
+    if (kind.resource() == ResourceType.ITEM) {
       data.put("items", items.serializeNBT(registries));
     }
-    if (kind.resource() == PortKind.Resource.FLUID) {
+    if (kind.resource() == ResourceType.FLUID) {
       data.put("fluid", tank.writeToNBT(registries, new CompoundTag()));
     }
-    if (kind.resource() == PortKind.Resource.CHEMICAL) {
+    if (kind.resource() == ResourceType.CHEMICAL) {
       data.put("chemical", chemicalTank.save());
     }
-    if (kind.resource() == PortKind.Resource.ENERGY) {
+    if (kind.resource() == ResourceType.ENERGY) {
       data.putLong("energy", energy.stored());
     }
     tag.put("mmcece", data);
@@ -800,7 +802,7 @@ public class MachinePortBlockEntity extends BlockEntity implements MenuProvider,
         || !canGroupInput() && data.contains("input_group") && data.getInt("input_group") != -1) {
       unsupportedData = data.copy();
       if (level instanceof ServerLevel server) {
-        StructureService.blockChanged(server, worldPosition);
+        StructureChangeRouter.blockChanged(server, worldPosition);
       }
       return;
     }
@@ -813,21 +815,21 @@ public class MachinePortBlockEntity extends BlockEntity implements MenuProvider,
       return;
     }
     groupRevision++;
-    if (kind.resource() == PortKind.Resource.ITEM && data.contains("items")) {
+    if (kind.resource() == ResourceType.ITEM && data.contains("items")) {
       CompoundTag inventoryData = data.getCompound("items");
       if (inventoryData.getInt("Size") != items.getSlots()) {
         unsupportedData = data.copy();
         if (level instanceof ServerLevel server) {
-          StructureService.blockChanged(server, worldPosition);
+          StructureChangeRouter.blockChanged(server, worldPosition);
         }
         return;
       }
       items.deserializeNBT(registries, inventoryData);
     }
-    if (kind.resource() == PortKind.Resource.FLUID && data.contains("fluid")) {
+    if (kind.resource() == ResourceType.FLUID && data.contains("fluid")) {
       tank.readFromNBT(registries, data.getCompound("fluid"));
     }
-    if (kind.resource() == PortKind.Resource.CHEMICAL) {
+    if (kind.resource() == ResourceType.CHEMICAL) {
       try {
         if (data.contains("chemical") && !data.contains("chemical", Tag.TAG_COMPOUND)) {
           throw new IllegalArgumentException("Invalid chemical storage tag");
@@ -840,18 +842,18 @@ public class MachinePortBlockEntity extends BlockEntity implements MenuProvider,
       } catch (IllegalArgumentException invalid) {
         unsupportedData = data.copy();
         if (level instanceof ServerLevel server) {
-          StructureService.blockChanged(server, worldPosition);
+          StructureChangeRouter.blockChanged(server, worldPosition);
         }
         return;
       }
     }
-    if (kind.resource() == PortKind.Resource.ENERGY) {
+    if (kind.resource() == ResourceType.ENERGY) {
       energy.load(data.getLong("energy"));
     }
     if (level instanceof ServerLevel server) {
       changed();
       if (!previouslySupported) {
-        StructureService.blockChanged(server, worldPosition);
+        StructureChangeRouter.blockChanged(server, worldPosition);
       }
     }
   }
@@ -865,14 +867,7 @@ public class MachinePortBlockEntity extends BlockEntity implements MenuProvider,
     if (!schemaSupported()) {
       return Component.translatable("message.mmcece.unsupported_schema");
     }
-    return switch (kind.resource()) {
-      case ITEM -> Component.translatable("message.mmcece.item_port", items.getSlots());
-      case FLUID -> Component.translatable("message.mmcece.fluid_port", tank.getFluidAmount(), tank.getCapacity());
-      case CHEMICAL ->
-        Component.translatable("message.mmcece.chemical_port", chemicalTank.getAmount(), chemicalTank.getCapacity());
-      case ENERGY -> Component
-          .translatable("message.mmcece.energy_port", energy.stored(), energy.capacity(), energy.transferLimit());
-    };
+    return PortResourceAccess.require(kind.resource()).status().apply(this);
   }
 
   @Override
@@ -885,12 +880,12 @@ public class MachinePortBlockEntity extends BlockEntity implements MenuProvider,
     if (!schemaSupported()) {
       return null;
     }
-    if (kind.resource() != PortKind.Resource.ITEM && player instanceof ServerPlayer serverPlayer) {
+    if (kind.resource() != ResourceType.ITEM && player instanceof ServerPlayer serverPlayer) {
       PacketDistributor.sendToPlayer(serverPlayer, MachinePayloads.resourceStatus(this));
     }
-    return kind.resource() == PortKind.Resource.ITEM ? new MachinePortMenu(
+    return kind.resource() == ResourceType.ITEM ? new MachinePortMenu(id, inventory, this) : new MachineResourceMenu(
         id,
         inventory,
-        this) : new MachineResourceMenu(id, inventory, this);
+        this);
   }
 }

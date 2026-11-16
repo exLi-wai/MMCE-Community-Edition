@@ -1,5 +1,6 @@
 package com.lw.modularmachine.api.client.preview;
 
+import com.lw.modularmachine.util.minecraft.state.BlockStateValues;
 import java.util.List;
 import java.util.Objects;
 import net.minecraft.core.BlockPos;
@@ -32,23 +33,7 @@ public record PreviewSceneData(int machineColor, List<Entry> entries) {
     /** Tests declared constraints without consulting a live world. */
     public boolean matches(BlockState actual) {
       Objects.requireNonNull(actual, "actual");
-      for (var state : states) {
-        if (state.getBlock() != actual.getBlock()) {
-          continue;
-        }
-        boolean matches = true;
-        for (String name : properties) {
-          var property = state.getBlock().getStateDefinition().getProperty(name);
-          if (property == null || !state.getValue(property).equals(actual.getValue(property))) {
-            matches = false;
-            break;
-          }
-        }
-        if (matches) {
-          return true;
-        }
-      }
-      return false;
+      return BlockStateValues.matchesAny(states, properties, actual);
     }
   }
 

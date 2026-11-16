@@ -1,6 +1,6 @@
 package com.lw.modularmachine.machine.factory;
 
-import com.lw.modularmachine.machine.recipe.FrozenItemRun;
+import com.lw.modularmachine.machine.recipe.FrozenRecipeRun;
 import java.util.ArrayList;
 import java.util.HashSet;
 import java.util.UUID;
@@ -32,13 +32,13 @@ public final class FactoryRunSetCodec {
       throw new IllegalArgumentException("Invalid factory run set list");
     }
     var ids = new HashSet<UUID>();
-    var runs = new ArrayList<FrozenItemRun>(list.size());
+    var runs = new ArrayList<FrozenRecipeRun>(list.size());
     for (int i = 0; i < list.size(); i++) {
       var entry = list.getCompound(i);
       if (!entry.contains("run", Tag.TAG_COMPOUND)) {
         throw new IllegalArgumentException("Invalid factory run set entry");
       }
-      var run = FrozenItemRun.read(entry.getCompound("run"), registries);
+      var run = FrozenRecipeRun.read(entry.getCompound("run"), registries);
       if (!ids.add(run.runId())) {
         throw new IllegalArgumentException("Duplicate factory run UUID");
       }

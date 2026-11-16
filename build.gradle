@@ -226,6 +226,10 @@ spotless {
             '(?m)^([ \\t]*(?:(?:public|protected|private|abstract|final|static|sealed|non-sealed)\\s+)*(?:class|interface)\\s+[A-Za-z_$][A-Za-z0-9_$]*[^\\r\\n]*)\\r?\\n[ \\t]+(?=(?:extends|implements)\\b)',
             '$1 ')
         removeUnusedImports()
+        replaceRegex(
+            'keep imports contiguous',
+            '(?m)^(import [^\\r\\n]+;)\\r?\\n(?:[ \\t]*\\r?\\n)+(?=import )',
+            '$1\n')
         trimTrailingWhitespace()
     }
 }

@@ -1,6 +1,6 @@
 package com.lw.modularmachine.menu;
 
-import com.lw.modularmachine.api.controller.MachineControllerApi;
+import com.lw.modularmachine.machine.controller.ControllerInspection;
 import com.lw.modularmachine.blockentity.MachineControllerBlockEntity;
 import com.lw.modularmachine.network.MachinePayloads;
 import com.lw.modularmachine.network.ControllerGuiDataPayloads;
@@ -83,7 +83,7 @@ public final class MachineControllerMenu extends ControllerBlueprintMenu {
     if (!(viewer instanceof ServerPlayer serverPlayer) || !stillValid(viewer)) {
       return;
     }
-    var current = MachineControllerApi.inspectForMenu(controller).map(MachinePayloads.ControllerStatusPayload::from)
+    var current = ControllerInspection.inspectForMenu(controller).map(MachinePayloads.ControllerStatusPayload::from)
         .orElse(null);
     if (current != null && !current.equals(lastSentStatus)) {
       lastSentStatus = current;

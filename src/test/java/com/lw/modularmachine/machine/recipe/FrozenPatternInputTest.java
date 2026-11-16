@@ -28,7 +28,7 @@ class FrozenPatternInputTest {
   }
 
   private static CompoundTag patternRun(String selector, String... roles) {
-    var data = FrozenItemRunTest.valid();
+    var data = FrozenRecipeRunTest.valid();
     // This machine has a physical output bus but no ordinary input bus.
     data.getList("ports", Tag.TAG_COMPOUND).removeFirst();
     var pattern = binding(selector).save();
@@ -43,19 +43,19 @@ class FrozenPatternInputTest {
 
   @Test
   void itemPatternInputSurvivesFreezeProgressAndRestoreWithoutAddingStructuralPorts() {
-    var run = FrozenItemRun.read(patternRun("", "ITEM_INPUT", "FLUID_INPUT"));
+    var run = FrozenRecipeRun.read(patternRun("", "ITEM_INPUT", "FLUID_INPUT"));
     assertEquals(Map.of("out", PortKind.ITEM_OUTPUT), run.logicalPorts());
     assertTrue(run.matchesPatternSource(binding("")));
-    var restored = FrozenItemRun.read(run.advanced(1).save());
+    var restored = FrozenRecipeRun.read(run.advanced(1).save());
     assertTrue(run.sameRecipe(restored));
     assertEquals(run.logicalPorts(), restored.logicalPorts());
     assertTrue(restored.matchesPatternSource(binding("")));
-    assertTrue(FrozenItemRun.read(restored.advanced(2, 20).finished().save()).matchesPatternSource(binding("")));
+    assertTrue(FrozenRecipeRun.read(restored.advanced(2, 20).finished().save()).matchesPatternSource(binding("")));
   }
 
   @Test
   void missingOrReboundSourceCannotTurnPatternRunIntoOrdinaryRun() {
-    var run = FrozenItemRun.read(patternRun("feed", "ITEM_INPUT"));
+    var run = FrozenRecipeRun.read(patternRun("feed", "ITEM_INPUT"));
     assertFalse(run.matchesPatternSource(null));
     assertFalse(run.matchesPatternSource(binding("other")));
     var original = binding("feed");
@@ -65,7 +65,7 @@ class FrozenPatternInputTest {
         original.job(),
         original.selector());
     assertFalse(run.matchesPatternSource(replacement));
-    assertFalse(FrozenItemRun.read(FrozenItemRunTest.valid()).matchesPatternSource(original));
+    assertFalse(FrozenRecipeRun.read(FrozenRecipeRunTest.valid()).matchesPatternSource(original));
   }
 
   @Test
@@ -80,21 +80,23 @@ class FrozenPatternInputTest {
     var chemicals = new CompoundTag();
     chemicals.put("per_tick", rows);
     data.getCompound("definition").put("chemicals", chemicals);
-    var restored = FrozenItemRun.read(FrozenItemRun.read(data).save());
+    var restored = FrozenRecipeRun.read(FrozenRecipeRun.read(data).save());
     assertEquals("feed", restored.chemicalPerTick().getFirst().selector());
     fee.putString("selector", "other");
-    assertThrows(IllegalArgumentException.class, () -> FrozenItemRun.read(data));
+    assertThrows(IllegalArgumentException.class, () -> FrozenRecipeRun.read(data));
   }
 
   @Test
   void patternInputsNeverSatisfyOutputRolesOrPermitDuplicateKinds() {
-    assertThrows(IllegalArgumentException.class, () -> FrozenItemRun.read(patternRun("", "ITEM_OUTPUT")));
-    assertThrows(IllegalArgumentException.class, () -> FrozenItemRun.read(patternRun("", "ITEM_INPUT", "ITEM_INPUT")));
+    assertThrows(IllegalArgumentException.class, () -> FrozenRecipeRun.read(patternRun("", "ITEM_OUTPUT")));
+    assertThrows(
+        IllegalArgumentException.class,
+        () -> FrozenRecipeRun.read(patternRun("", "ITEM_INPUT", "ITEM_INPUT")));
     var data = patternRun("", "ITEM_INPUT");
     data.put("ports", new ListTag());
-    assertThrows(IllegalArgumentException.class, () -> FrozenItemRun.read(data));
+    assertThrows(IllegalArgumentException.class, () -> FrozenRecipeRun.read(data));
     var missing = patternRun("", "ITEM_INPUT");
     missing.getCompound("pattern_inputs").remove("provider");
-    assertThrows(IllegalArgumentException.class, () -> FrozenItemRun.read(missing));
+    assertThrows(IllegalArgumentException.class, () -> FrozenRecipeRun.read(missing));
   }
 }

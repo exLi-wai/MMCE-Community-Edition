@@ -3,6 +3,7 @@ package com.lw.modularmachine.integration.kubejs;
 import com.google.gson.JsonElement;
 import com.google.gson.JsonParseException;
 import com.google.gson.JsonParser;
+import com.lw.modularmachine.machine.recipe.RecipeScriptSources;
 import java.util.LinkedHashMap;
 import java.util.Map;
 import net.minecraft.resources.ResourceLocation;
@@ -19,7 +20,7 @@ class MachineItemRecipeKubeJSSourcesTest {
 
   @AfterEach
   void clear() {
-    MachineItemRecipeKubeJSSources.clear();
+    RecipeScriptSources.clear();
   }
 
   @Test
@@ -28,9 +29,12 @@ class MachineItemRecipeKubeJSSourcesTest {
     MachineItemRecipeKubeJSSources.capture(live);
     live.put(ResourceLocation.fromNamespaceAndPath("kubejs", "ae/gold_ingot"), JsonParser.parseString(RECIPE));
 
-    var snapshot = MachineItemRecipeKubeJSSources.snapshot();
+    var snapshot = RecipeScriptSources.snapshot();
     assertEquals(1, snapshot.size());
     assertTrue(snapshot.containsKey(ResourceLocation.fromNamespaceAndPath("kubejs", "ae/gold_ingot")));
+    RecipeScriptSources.clear();
+    assertTrue(RecipeScriptSources.snapshot().isEmpty());
+    assertTrue(MachineItemRecipeKubeJSSources.snapshot().isEmpty());
   }
 
   @Test

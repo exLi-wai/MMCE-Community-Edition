@@ -8,7 +8,6 @@ import net.minecraft.server.level.ServerPlayer;
 import net.minecraft.world.entity.player.Inventory;
 import net.minecraft.world.entity.player.Player;
 import net.minecraft.world.inventory.AbstractContainerMenu;
-import net.minecraft.world.inventory.Slot;
 import net.minecraft.world.item.ItemStack;
 import net.neoforged.neoforge.items.SlotItemHandler;
 import net.neoforged.neoforge.network.PacketDistributor;
@@ -37,14 +36,7 @@ public final class UpgradeBusMenu extends AbstractContainerMenu {
     for (int i = 0; i < bus.slotCount(); i++) {
       addSlot(new SlotItemHandler(bus.inventory(), i, 8 + i % 3 * 18, 17 + i / 3 * 18));
     }
-    for (int row = 0; row < 3; row++) {
-      for (int col = 0; col < 9; col++) {
-        addSlot(new Slot(inventory, col + row * 9 + 9, 8 + col * 18, 131 + row * 18));
-      }
-    }
-    for (int col = 0; col < 9; col++) {
-      addSlot(new Slot(inventory, col, 8 + col * 18, 189));
-    }
+    PlayerInventorySlots.add(inventory, this::addSlot, 8, 131, 189);
   }
 
   public UpgradeBusBlockEntity bus() {

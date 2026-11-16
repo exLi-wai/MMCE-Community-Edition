@@ -4,6 +4,7 @@ import com.lw.modularmachine.api.recipe.RecipeModifier;
 import com.lw.modularmachine.api.recipe.RecipeSelectors;
 import com.lw.modularmachine.api.recipe.RecipeFailureAction;
 import com.lw.modularmachine.api.recipe.ChemicalRecipeData;
+import com.lw.modularmachine.machine.recipe.resource.RecipeResourceDefinitions;
 import com.mojang.serialization.JsonOps;
 import com.lw.modularmachine.config.MachineConfig;
 import com.google.gson.JsonElement;
@@ -17,6 +18,7 @@ import com.lw.modularmachine.api.recipe.RecipeScriptOptions;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Set;
+import java.util.HashSet;
 
 /**
  * Pure structural validation. Registry/component resolution belongs to the
@@ -58,6 +60,13 @@ public final class MachineRecipeJson {
   private MachineRecipeJson() {
   }
 
+  public static Set<String> fields() {
+    var fields = new HashSet<>(FIELDS);
+    fields.addAll(RecipeResourceDefinitions.Fields.names());
+
+    return Set.copyOf(fields);
+  }
+
   public record Header(
       String machine,
       int priority,
@@ -75,7 +84,7 @@ public final class MachineRecipeJson {
 
   public static Header validate(JsonElement root) {
     var object = object(root, "$");
-    fields(object, FIELDS, "$");
+    fields(object, fields(), "$");
     if (object.has("type") && !TYPE.equals(string(object.get("type"), "$.type"))) {
       throw error("$.type", "Expected " + TYPE);
     }
@@ -117,30 +126,7 @@ public final class MachineRecipeJson {
         throw error("$.fluid_per_tick.components", "Expected component map");
       }
     }
-    if (object.has("fluid_inputs")) {
-      if (!object.get("fluid_inputs").isJsonArray()) {
-        throw error("$.fluid_inputs", "Fluid inputs require schema 2 and an array");
-      }
-      var inputs = object.getAsJsonArray("fluid_inputs");
-      if (inputs.isEmpty() || inputs.size() > MAX_DEMANDS) {
-        throw error("$.fluid_inputs", "Expected 1.." + MAX_DEMANDS + " requirements");
-      }
-      for (int i = 0; i < inputs.size(); i++) {
-        String path = "$.fluid_inputs[" + i + "]";
-        var fluid = object(inputs.get(i), path);
-        fields(fluid, Set.of("id", "amount", "components", "chance", "parallel_unaffected"), path);
-        fixedFlag(fluid, path);
-        identifier(fluid.get("id"), path + ".id");
-        long amount = integer(fluid.get("amount"), path + ".amount");
-        if (amount <= 0 || amount > Integer.MAX_VALUE) {
-          throw error(path + ".amount", "Expected positive int millibuckets");
-        }
-        if (fluid.has("components") && !fluid.get("components").isJsonObject()) {
-          throw error(path + ".components", "Expected component map");
-        }
-        probability(fluid, path);
-      }
-    }
+    validateFluidList(object, "fluid_inputs", "Fluid inputs require schema 2 and an array");
     validateFluidList(object, "fluid_outputs", "Fluid outputs require an array");
     String failureAction = object
         .has("failure_action") ? string(object.get("failure_action"), "$.failure_action") : "still";
@@ -168,16 +154,17 @@ public final class MachineRecipeJson {
     demands(object.get("outputs"), "$.outputs", false);
     validateScriptOptions(object);
     var chemicals = validateChemicals(object);
-    if (object.getAsJsonArray("inputs").isEmpty()
-        && !object.has("fluid_inputs")
-        && !object.has("fluid_per_tick")
-        && energyPerTick == 0
-        && chemicals.inputs().isEmpty()
-        && chemicals.perTick().isEmpty()
-        || object.getAsJsonArray("outputs").isEmpty()
-            && !object.has("fluid_outputs")
-            && chemicals.outputs().isEmpty()
-            && energyOutputPerTick == 0) {
+    if (!RecipeResourceDefinitions.Fields.hasExtensions(object.keySet())
+        && (object.getAsJsonArray("inputs").isEmpty()
+            && !object.has("fluid_inputs")
+            && !object.has("fluid_per_tick")
+            && energyPerTick == 0
+            && chemicals.inputs().isEmpty()
+            && chemicals.perTick().isEmpty()
+            || object.getAsJsonArray("outputs").isEmpty()
+                && !object.has("fluid_outputs")
+                && chemicals.outputs().isEmpty()
+                && energyOutputPerTick == 0)) {
       throw error("$", "A machine recipe requires resource input and output");
     }
     if (object.has("interface_inputs")) {

@@ -1,5 +1,6 @@
 package com.lw.modularmachine.machine.structure;
 
+import com.lw.modularmachine.api.controller.VerificationFailure;
 import com.lw.modularmachine.block.ParallelControllerBlock;
 import com.lw.modularmachine.block.PatternProviderBlock;
 import com.lw.modularmachine.block.PatternMirrorBlock;

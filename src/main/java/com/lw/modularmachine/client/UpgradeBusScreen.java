@@ -1,6 +1,6 @@
 package com.lw.modularmachine.client;
 
-import com.lw.modularmachine.api.upgrade.FactoryUpgradeEntry;
+import com.lw.modularmachine.api.upgrade.UpgradeEntry;
 import com.lw.modularmachine.menu.UpgradeBusMenu;
 import com.lw.modularmachine.network.UpgradeBusPayloads;
 import java.util.ArrayList;
@@ -129,7 +129,7 @@ public final class UpgradeBusScreen extends AbstractContainerScreen<UpgradeBusMe
     return cachedDescription;
   }
 
-  private void appendDescription(List<FormattedCharSequence> lines, boolean valid, ResourceLocation machine, List<FactoryUpgradeEntry> entries, List<ResourceLocation> incompatible, int conflictCount, List<ResourceLocation> conflicts, int width) {
+  private void appendDescription(List<FormattedCharSequence> lines, boolean valid, ResourceLocation machine, List<UpgradeEntry> entries, List<ResourceLocation> incompatible, int conflictCount, List<ResourceLocation> conflicts, int width) {
     if (conflictCount > 0) {
       lines.addAll(font.split(Component.translatable("menu.mmcece.upgrade_bus.conflicts", conflictCount), width));
       for (var id : conflicts) {
@@ -154,7 +154,7 @@ public final class UpgradeBusScreen extends AbstractContainerScreen<UpgradeBusMe
     }
   }
 
-  private void appendEntry(List<FormattedCharSequence> lines, FactoryUpgradeEntry entry, int width) {
+  private void appendEntry(List<FormattedCharSequence> lines, UpgradeEntry entry, int width) {
     lines.addAll(font.split(Component.literal(entry.id().toString()), width));
     lines.addAll(
         font.split(

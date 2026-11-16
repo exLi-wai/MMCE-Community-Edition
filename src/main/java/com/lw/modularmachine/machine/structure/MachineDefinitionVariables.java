@@ -60,7 +60,7 @@ final class MachineDefinitionVariables {
         throw new JsonParseException(source + ": variable " + entry.getKey() + " contains a blank descriptor");
       }
       totalValues += values.size();
-      if (totalValues > MachineDefinition.ALTERNATIVE_RESOURCE_BUDGET) {
+      if (totalValues > MachinePartParser.ALTERNATIVE_RESOURCE_BUDGET) {
         throw new JsonParseException(source + ": variable values exceed the shared alternative resource budget");
       }
       result.put(entry.getKey(), List.copyOf(values));
@@ -155,7 +155,7 @@ final class MachineDefinitionVariables {
   }
 
   private static final class ExpansionBudget {
-    private long remaining = MachineDefinition.ALTERNATIVE_RESOURCE_BUDGET;
+    private long remaining = MachinePartParser.ALTERNATIVE_RESOURCE_BUDGET;
 
     void take(String path) {
       if (--remaining < 0) {

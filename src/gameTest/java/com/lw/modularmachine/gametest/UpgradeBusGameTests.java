@@ -4,7 +4,7 @@ import com.lw.modularmachine.blockentity.FactoryControllerBlockEntity;
 import com.lw.modularmachine.blockentity.UpgradeBusBlockEntity;
 import com.lw.modularmachine.machine.factory.FactoryThreadState.State;
 import com.lw.modularmachine.machine.factory.FactoryThreadState;
-import com.lw.modularmachine.api.upgrade.FactoryUpgradeSnapshot;
+import com.lw.modularmachine.api.upgrade.UpgradeSnapshot;
 import com.lw.modularmachine.machine.structure.StructureService;
 import com.lw.modularmachine.registry.MachineRegistries;
 import java.util.List;
@@ -42,7 +42,7 @@ public final class UpgradeBusGameTests {
     level.setBlockAndUpdate(framePos, Blocks.STONE_BRICKS.defaultBlockState());
     var factory = (FactoryControllerBlockEntity) level.getBlockEntity(origin);
     factory.bindMachine(MACHINE);
-    factory.replaceThreads(
+    factory.threadConfiguration().replaceThreads(
         List.of(
             new FactoryThreadState(
                 "upgrade_thread",
@@ -55,22 +55,22 @@ public final class UpgradeBusGameTests {
                 State.IDLE,
                 FactoryThreadState.Reason.NONE,
                 0,
-                FactoryUpgradeSnapshot.identity(0))));
+                UpgradeSnapshot.identity(0))));
     confirm(helper, factory);
 
     var unrelated = placeBus(helper, origin.east(3), "normal");
-    helper.assertTrue(!unrelated.bindFactory(factory), "Nearby bus outside the pattern was allowed to bind");
-    helper.assertTrue(bus.bindFactory(factory), "Structure member upgrade bus could not bind");
-    helper.assertTrue(factory.upgradeSources().size() == 1, "Bound bus did not publish a source");
+    helper.assertTrue(!unrelated.bindOwner(factory), "Nearby bus outside the pattern was allowed to bind");
+    helper.assertTrue(bus.bindOwner(factory), "Structure member upgrade bus could not bind");
+    helper.assertTrue(factory.upgrades().sources().size() == 1, "Bound bus did not publish a source");
     helper.assertTrue(
-        bus.upgradeCatalog().snapshot().equals(FactoryUpgradeSnapshot.identity(bus.upgradeRevision())),
+        bus.upgradeCatalog().snapshot().equals(UpgradeSnapshot.identity(bus.upgradeRevision())),
         "Empty bus did not publish identity");
 
     var marked = markedUpgrade();
     var before = marked.copy();
     bus.inventory().setStackInSlot(0, marked);
     long revision = bus.upgradeRevision();
-    var source = factory.upgradeSources().get(0);
+    var source = factory.upgrades().sources().get(0);
     helper.assertTrue(
         source.catalog().entries().size() == 1
             && source.catalog().snapshot().revision() == revision
@@ -84,24 +84,25 @@ public final class UpgradeBusGameTests {
             && upgradedThread.upgradeSnapshot().speedNumerator() == 9
             && upgradedThread.upgradeSnapshot().speedDenominator() == 4,
         "Published upgrade catalog was not applied: " + upgradedThread.upgradeSnapshot() + ", sources=" + factory
-            .upgradeSources().size() + ", state=" + upgradedThread.state() + ", revision=" + upgradedThread.revision());
+            .upgrades().sources()
+            .size() + ", state=" + upgradedThread.state() + ", revision=" + upgradedThread.revision());
     var malformed = markedUpgrade();
     var malformedData = malformed.get(DataComponents.CUSTOM_DATA).copyTag();
     malformedData.putInt("parallel_add", -1);
     malformed.set(DataComponents.CUSTOM_DATA, CustomData.of(malformedData));
     bus.inventory().setStackInSlot(0, malformed);
     helper.assertTrue(
-        !bus.upgradeCatalogValid() && factory.upgradeSources().isEmpty(),
+        !bus.upgradeCatalogValid() && factory.upgrades().sources().isEmpty(),
         "Malformed effect kept publishing an old catalog");
     bus.inventory().setStackInSlot(0, markedUpgrade());
     helper.assertTrue(
-        bus.upgradeCatalogValid() && factory.upgradeSources().size() == 1,
+        bus.upgradeCatalogValid() && factory.upgrades().sources().size() == 1,
         "Corrected upgrade did not republish");
     revision = bus.upgradeRevision();
     bus.inventory().extractItem(0, 2, false);
     helper.assertTrue(
-        factory.upgradeSources().get(0).catalog().entries().isEmpty()
-            && bus.upgradeCatalog().snapshot().equals(FactoryUpgradeSnapshot.identity(revision + 1)),
+        factory.upgrades().sources().get(0).catalog().entries().isEmpty()
+            && bus.upgradeCatalog().snapshot().equals(UpgradeSnapshot.identity(revision + 1)),
         "Removing the last upgrade retained a stale catalog");
     factory.serverTick();
     helper.assertTrue(
@@ -111,17 +112,17 @@ public final class UpgradeBusGameTests {
     level.setBlockAndUpdate(framePos, Blocks.AIR.defaultBlockState());
     bus.refreshBinding();
     helper.assertTrue(
-        factory.upgradeSources().isEmpty() && bus.boundFactory().isPresent(),
+        factory.upgrades().sources().isEmpty() && bus.boundOwner().isPresent(),
         "Broken or pending proof retained authority or erased the binding intent");
     level.setBlockAndUpdate(framePos, Blocks.STONE_BRICKS.defaultBlockState());
     confirm(helper, factory);
     bus.refreshBinding();
-    helper.assertTrue(factory.upgradeSources().size() == 1, "Structure repair did not restore the source");
+    helper.assertTrue(factory.upgrades().sources().size() == 1, "Structure repair did not restore the source");
 
     bus.onChunkUnloaded();
-    helper.assertTrue(factory.upgradeSources().isEmpty(), "Bus unload retained a published source");
+    helper.assertTrue(factory.upgrades().sources().isEmpty(), "Bus unload retained a published source");
     bus.onLoad();
-    helper.assertTrue(factory.upgradeSources().size() == 1, "Bus load did not revalidate the source");
+    helper.assertTrue(factory.upgrades().sources().size() == 1, "Bus load did not revalidate the source");
 
     bus.inventory().setStackInSlot(0, markedUpgrade());
     var saved = bus.saveWithFullMetadata(level.registryAccess());
@@ -134,14 +135,14 @@ public final class UpgradeBusGameTests {
     helper.assertTrue(
         restored.schemaSupported()
             && restored.upgradeRevision() == savedRevision
-            && restored.boundFactory().orElseThrow().equals(origin)
-            && factory.upgradeSources().get(0).catalog().entries().size() == 1,
+            && restored.boundOwner().orElseThrow().equals(origin)
+            && factory.upgrades().sources().get(0).catalog().entries().size() == 1,
         "Bus rebuild changed revision, lost binding, or retained an old source");
 
     factory.bindMachine(ResourceLocation.fromNamespaceAndPath("mmcece", "missing_upgrade_machine"));
     restored.refreshBinding();
     helper.assertTrue(
-        restored.boundFactory().isEmpty() && factory.upgradeSources().isEmpty(),
+        restored.boundOwner().isEmpty() && factory.upgrades().sources().isEmpty(),
         "Factory rebind retained an upgrade source");
     helper.succeed();
   }
@@ -225,7 +226,7 @@ public final class UpgradeBusGameTests {
     bus.loadWithComponents(saved, level.registryAccess());
     bus.refreshBinding();
     helper.assertTrue(
-        !level.hasChunkAt(unavailable) && bus.boundFactory().orElseThrow().equals(unavailable),
+        !level.hasChunkAt(unavailable) && bus.boundOwner().orElseThrow().equals(unavailable),
         "Binding refresh force-loaded an unavailable chunk or lost its suspended intent");
     helper.succeed();
   }
@@ -238,13 +239,13 @@ public final class UpgradeBusGameTests {
     var bus = placeBus(helper, origin.south(), "normal");
     level.setBlockAndUpdate(origin.south().east(), Blocks.STONE_BRICKS.defaultBlockState());
     confirm(helper, factory);
-    helper.assertTrue(bus.bindFactory(factory), "Could not bind rebuild fixture");
+    helper.assertTrue(bus.bindOwner(factory), "Could not bind rebuild fixture");
     bus.inventory().setStackInSlot(0, markedUpgrade());
     factory.serverTick();
     helper.assertTrue(factory.scheduler().channels().getFirst().parallelLimit() == 3, "Upgrade was not applied");
     var saved = factory.saveWithFullMetadata(level.registryAccess());
     var state = factory.getBlockState();
-    bus.unbindFactory();
+    bus.unbindOwner();
     level.setBlockAndUpdate(bus.getBlockPos(), Blocks.STONE_BRICKS.defaultBlockState());
     level.removeBlockEntity(origin);
     var restored = (FactoryControllerBlockEntity) BlockEntity.loadStatic(origin, state, saved, level.registryAccess());
@@ -254,8 +255,8 @@ public final class UpgradeBusGameTests {
     restored.serverTick();
     var snapshot = restored.scheduler().channels().getFirst().upgradeSnapshot();
     helper.assertTrue(
-        restored.upgradeSources().isEmpty()
-            && snapshot.equals(FactoryUpgradeSnapshot.identity(snapshot.revision()))
+        restored.upgrades().sources().isEmpty()
+            && snapshot.equals(UpgradeSnapshot.identity(snapshot.revision()))
             && snapshot.revision() > factory.scheduler().channels().getFirst().upgradeRevision(),
         "Rebuild retained a withdrawn upgrade source or rolled back its revision");
     helper.succeed();
@@ -269,7 +270,7 @@ public final class UpgradeBusGameTests {
     var first = placeBus(helper, origin.south(), "normal");
     var second = placeBus(helper, origin.south().east(), "normal");
     confirm(helper, factory);
-    helper.assertTrue(first.bindFactory(factory) && second.bindFactory(factory), "Could not bind both sources");
+    helper.assertTrue(first.bindOwner(factory) && second.bindOwner(factory), "Could not bind both sources");
     var stack = markedUpgrade().copyWithCount(1);
     var data = stack.get(DataComponents.CUSTOM_DATA).copyTag();
     data.putInt("speed_numerator", 128);
@@ -280,7 +281,7 @@ public final class UpgradeBusGameTests {
     factory.serverTick();
     helper.assertTrue(
         factory.scheduler().channels().getFirst().reason() == FactoryThreadState.Reason.CHECK_ERROR
-            && !factory.beginRunStart("upgrade_thread"),
+            && !factory.runState().beginRunStart("upgrade_thread"),
         "Invalid composed speed did not gate new starts");
     second.inventory().setStackInSlot(0, ItemStack.EMPTY);
     factory.serverTick();
@@ -288,9 +289,9 @@ public final class UpgradeBusGameTests {
     helper.assertTrue(
         recovered.upgradeSnapshot().speedNumerator() == 128
             && recovered.reason() != FactoryThreadState.Reason.CHECK_ERROR
-            && factory.beginRunStart("upgrade_thread"),
+            && factory.runState().beginRunStart("upgrade_thread"),
         "Correcting the source did not recover publication");
-    factory.finishRunStart("upgrade_thread", false);
+    factory.runState().finishRunStart("upgrade_thread", false);
     helper.succeed();
   }
 
@@ -305,13 +306,13 @@ public final class UpgradeBusGameTests {
     level.setBlockAndUpdate(frame, Blocks.STONE_BRICKS.defaultBlockState());
     bus.inventory().setStackInSlot(0, markedUpgrade());
     factory.serverTick();
-    helper.assertTrue(bus.boundFactory().isEmpty(), "Pending structure acquired an upgrade source");
+    helper.assertTrue(bus.boundOwner().isEmpty(), "Pending structure acquired an upgrade source");
     confirm(helper, factory);
     factory.serverTick();
     helper.assertTrue(
-        bus.boundFactory().orElseThrow().equals(origin)
-            && unrelated.boundFactory().isEmpty()
-            && factory.upgradeSources().size() == 1
+        bus.boundOwner().orElseThrow().equals(origin)
+            && unrelated.boundOwner().isEmpty()
+            && factory.upgrades().sources().size() == 1
             && factory.scheduler().channels().getFirst().parallelLimit() == 3,
         "Confirmed factory did not discover and apply only its own upgrade bus");
     long revision = factory.scheduler().channels().getFirst().upgradeRevision();
@@ -324,12 +325,12 @@ public final class UpgradeBusGameTests {
     level.setBlockAndUpdate(frame, Blocks.AIR.defaultBlockState());
     factory.serverTick();
     helper.assertTrue(
-        factory.upgradeSources().isEmpty() && bus.boundFactory().isPresent(),
+        factory.upgrades().sources().isEmpty() && bus.boundOwner().isPresent(),
         "Pending proof retained a source or discarded its repairable binding");
     level.setBlockAndUpdate(frame, Blocks.STONE_BRICKS.defaultBlockState());
     confirm(helper, factory);
     factory.serverTick();
-    helper.assertTrue(factory.upgradeSources().size() == 1, "Repair did not rediscover the upgrade bus");
+    helper.assertTrue(factory.upgrades().sources().size() == 1, "Repair did not rediscover the upgrade bus");
     var saved = factory.saveWithFullMetadata(level.registryAccess());
     var state = factory.getBlockState();
     level.removeBlockEntity(origin);
@@ -339,7 +340,7 @@ public final class UpgradeBusGameTests {
     confirm(helper, restored);
     restored.serverTick();
     helper.assertTrue(
-        restored.upgradeSources().size() == 1
+        restored.upgrades().sources().size() == 1
             && bus.isBoundTo(restored)
             && restored.scheduler().channels().getFirst().parallelLimit() == 3,
         "Factory rebuild did not revalidate and rediscover its upgrade source");
@@ -362,14 +363,14 @@ public final class UpgradeBusGameTests {
     confirm(helper, second);
     second.serverTick();
     helper.assertTrue(
-        bus.isBoundTo(first) && first.upgradeSources().size() == 1 && second.upgradeSources().isEmpty(),
+        bus.isBoundTo(first) && first.upgrades().sources().size() == 1 && second.upgrades().sources().isEmpty(),
         "Automatic discovery stole a valid source from another factory");
-    helper.assertTrue(bus.bindFactory(second), "Trusted explicit binding could not change source ownership");
+    helper.assertTrue(bus.bindOwner(second), "Trusted explicit binding could not change source ownership");
     helper.runAfterDelay(21, () -> {
       first.serverTick();
       second.serverTick();
       helper.assertTrue(
-          bus.isBoundTo(second) && first.upgradeSources().isEmpty() && second.upgradeSources().size() == 1,
+          bus.isBoundTo(second) && first.upgrades().sources().isEmpty() && second.upgrades().sources().size() == 1,
           "Periodic discovery oscillated the explicitly rebound source");
       helper.succeed();
     });
@@ -379,7 +380,7 @@ public final class UpgradeBusGameTests {
     helper.getLevel().setBlockAndUpdate(origin, MachineRegistries.FACTORY_CONTROLLER.get().defaultBlockState());
     var factory = (FactoryControllerBlockEntity) helper.getLevel().getBlockEntity(origin);
     factory.bindMachine(machine);
-    factory.replaceThreads(
+    factory.threadConfiguration().replaceThreads(
         List.of(
             new FactoryThreadState(
                 "upgrade_thread",
@@ -392,7 +393,7 @@ public final class UpgradeBusGameTests {
                 State.IDLE,
                 FactoryThreadState.Reason.NONE,
                 0,
-                FactoryUpgradeSnapshot.identity(0))));
+                UpgradeSnapshot.identity(0))));
 
     return factory;
   }

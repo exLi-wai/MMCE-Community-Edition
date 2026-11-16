@@ -1,15 +1,15 @@
 package com.lw.modularmachine.blockentity;
 
+import com.lw.modularmachine.machine.structure.StructureChangeRouter;
 import com.lw.modularmachine.api.component.MachineColorable;
 import com.lw.modularmachine.config.MachineConfig;
-import com.lw.modularmachine.machine.factory.UpgradeLifecyclePublisher;
+import com.lw.modularmachine.machine.upgrade.UpgradeLifecyclePublisher;
 import com.lw.modularmachine.machine.network.pattern.PatternDefinition;
 import com.lw.modularmachine.machine.network.pattern.PatternNetworkPlatform;
 import com.lw.modularmachine.machine.network.pattern.PatternProviderState;
 import com.lw.modularmachine.machine.recipe.RecipeLifecyclePublisher;
 import com.lw.modularmachine.machine.recipe.PatternProductionService;
 import com.lw.modularmachine.machine.smart.SmartInterfaceEventPublisher;
-import com.lw.modularmachine.machine.structure.StructureService;
 import com.lw.modularmachine.menu.PatternProviderMenu;
 import com.lw.modularmachine.registry.MachineRegistries;
 import com.lw.modularmachine.storage.TransactionalFluidTank;
@@ -238,7 +238,7 @@ public final class PatternProviderBlockEntity extends BlockEntity implements Men
   }
   private void notifyStructure() {
     if (level instanceof ServerLevel server) {
-      StructureService.blockChanged(server, worldPosition);
+      StructureChangeRouter.blockChanged(server, worldPosition);
       PatternProductionService.resourcesChanged(this);
     }
   }

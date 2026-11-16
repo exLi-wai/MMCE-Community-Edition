@@ -1,6 +1,8 @@
 package com.lw.modularmachine.machine.recipe;
 
 import com.lw.modularmachine.ModularMachine;
+import com.lw.modularmachine.api.recipe.resource.RecipeResourceParticipant;
+import com.lw.modularmachine.machine.recipe.resource.RecipeResourceTransaction;
 import com.lw.modularmachine.blockentity.MachinePortBlockEntity;
 import com.lw.modularmachine.machine.PortKind;
 import com.lw.modularmachine.machine.structure.StructureService;
@@ -19,14 +21,16 @@ final class EnergyOutputTransactions {
     BLOCKED
   }
 
-  private record Credit(RecipeExecutionTicket.PortSnapshot port, long amount) {
+  private record Credit(RecipePortSnapshot port, long amount) {
   }
 
-  static final class Batch {
+  static final class Batch implements RecipeResourceParticipant {
     private final Status status;
     private final RecipeExecutionTicket ticket;
     private final List<Credit> credits;
     private final List<MachinePortBlockEntity.EnergyStartLease> leases = new ArrayList<>();
+    private final RecipeResourceTransaction resources = new RecipeResourceTransaction();
+    private final RecipeResourceTransaction.Phase outputs = resources.phase();
 
     private Batch(Status status, RecipeExecutionTicket ticket, List<Credit> credits) {
       this.status = status;
@@ -45,32 +49,31 @@ final class EnergyOutputTransactions {
     void acquire() {
       for (var credit : credits) {
         var lease = credit.port().identity().acquireEnergyStart(credit.port().revision());
-        leases.add(lease);
+        leases.add(outputs.enlist(lease, MachinePortBlockEntity.EnergyStartLease::resolve));
         if (!lease.insertExact(credit.amount())) {
           throw new IllegalStateException("Energy output capacity or throughput changed before commit");
         }
       }
     }
 
-    void resolve(boolean commit) {
-      leases.forEach(lease -> lease.resolve(commit));
+    @Override
+    public void resolve(boolean commit) {
+      resources.resolve(commit);
     }
 
-    void publish() {
-      for (var lease : leases) {
-        try {
-          lease.publish();
-        } catch (RuntimeException failed) {
-          ModularMachine.LOGGER.warn("Committed recipe energy output notification failed", failed);
-        }
-      }
+    @Override
+    public void publish() {
+      RecipeResourceTransaction.publishAll(
+          leases,
+          MachinePortBlockEntity.EnergyStartLease::publish,
+          failed -> ModularMachine.LOGGER.warn("Committed recipe energy output notification failed", failed));
     }
   }
 
   private EnergyOutputTransactions() {
   }
 
-  static Batch prepare(StructureService.StructureSubject owner, List<FrozenItemRun> runs) {
+  static Batch prepare(StructureService.StructureSubject owner, List<FrozenRecipeRun> runs) {
     var required = new LinkedHashMap<String, Long>();
     try {
       for (var run : runs) {

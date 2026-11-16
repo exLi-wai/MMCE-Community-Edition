@@ -70,7 +70,7 @@ class ChemicalRecipeStateTest {
 
   @Test
   void paidChemicalRunSurvivesFailureProgressAndPendingRecoveryWithoutItemPorts() {
-    var source = FrozenItemRunTest.valid();
+    var source = FrozenRecipeRunTest.valid();
     source.put("definition", JsonOps.INSTANCE.convertTo(NbtOps.INSTANCE, declaration()));
     source.putInt("input_group", 7);
     var ports = new ListTag();
@@ -78,20 +78,20 @@ class ChemicalRecipeStateTest {
     ports.add(port("product", "CHEMICAL_OUTPUT", "product", InputGroup.SHARED));
     source.put("ports", ports);
 
-    var run = FrozenItemRun.read(source);
+    var run = FrozenRecipeRun.read(source);
     source.getCompound("definition").getCompound("chemicals").getList("per_tick", Tag.TAG_COMPOUND).getCompound(0)
         .putLong("amount", 1);
     assertEquals(2147483648L, run.chemicalPerTick().getFirst().amount());
     assertThrows(UnsupportedOperationException.class, () -> run.chemicalPerTick().clear());
     var progressed = run.advanced(1, 12).afterResourceFailure(2, RecipeFailureAction.DECREASE);
-    var restored = FrozenItemRun.read(progressed.save());
+    var restored = FrozenRecipeRun.read(progressed.save());
     assertEquals(11, restored.progress());
     assertEquals(run.runId(), restored.runId());
     assertEquals(7, restored.inputGroup());
     assertEquals(run.chemicalPerTick(), restored.chemicalPerTick());
 
     var pending = restored.advanced(3, 9).finished();
-    var recovered = FrozenItemRun.read(pending.save());
+    var recovered = FrozenRecipeRun.read(pending.save());
     assertEquals(pending.save(), recovered.save());
     assertEquals(9007199254740995L, recovered.chemicalOutputs().getFirst().amount());
     assertEquals("product", recovered.chemicalOutputs().getFirst().selector());
@@ -99,7 +99,7 @@ class ChemicalRecipeStateTest {
 
     var changedGroup = recovered.save();
     changedGroup.getList("ports", Tag.TAG_COMPOUND).getCompound(0).putInt("input_group", 8);
-    assertThrows(IllegalArgumentException.class, () -> FrozenItemRun.read(changedGroup));
+    assertThrows(IllegalArgumentException.class, () -> FrozenRecipeRun.read(changedGroup));
   }
 
   private static CompoundTag port(String id, String kind, String selector, int group) {

@@ -1,15 +1,13 @@
 package com.lw.modularmachine.integration.jade;
 
+import com.lw.modularmachine.api.recipe.RecipeRunState;
 import com.lw.modularmachine.api.controller.MachineControllerApi;
 import com.lw.modularmachine.machine.recipe.ControllerMetrics;
 import com.lw.modularmachine.machine.structure.StructureService;
 import com.lw.modularmachine.blockentity.MachineControllerBlockEntity;
-import com.lw.modularmachine.machine.recipe.FrozenItemRun;
-import com.lw.modularmachine.machine.structure.VerificationState;
-import com.lw.modularmachine.presentation.MachineDiagnosticText;
+import com.lw.modularmachine.api.controller.VerificationState;
 import java.util.Locale;
 import net.minecraft.ChatFormatting;
-import net.minecraft.core.BlockPos;
 import net.minecraft.nbt.CompoundTag;
 import net.minecraft.network.chat.Component;
 import net.minecraft.resources.ResourceLocation;
@@ -49,25 +47,20 @@ final class MachineControllerTooltipProvider implements IBlockComponentProvider,
 
   @Override
   public void appendServerData(CompoundTag data, BlockAccessor accessor) {
-    if (!(accessor.getBlockEntity() instanceof MachineControllerBlockEntity controller)) {
+    if (!(accessor.getBlockEntity() instanceof MachineControllerBlockEntity controller)
+        || !(controller.getLevel() instanceof ServerLevel level)) {
       return;
     }
-    if (controller.getLevel() instanceof ServerLevel level) {
-      ControllerOwnershipTooltip.appendServerData(data, level, controller.getBlockPos());
-    }
-    MachineControllerApi.inspect(controller).ifPresent(snapshot -> {
+    ControllerOwnershipTooltip.appendServerData(data, level, controller.getBlockPos());
+    MachineControllerApi.inspect(level, controller.getBlockPos()).ifPresent(snapshot -> {
       data.putString(STRUCTURE, snapshot.structureState().name());
       data.putString(FAILURE, snapshot.structureFailure().name());
       data.putBoolean(PRODUCTION, snapshot.productionAllowed());
       data.putString(RUN_STATUS, snapshot.recipeRunStatus().name());
       data.putInt(PERFORMANCE + "_tick", ControllerMetrics.averageTickMicros());
       data.putInt(PERFORMANCE + "_search", ControllerMetrics.averageSearchMicros());
-      snapshot.structureDiagnostic().ifPresent(diagnostic -> {
-        data.putLong(DIAGNOSTIC + "_position", diagnostic.position().asLong());
-        data.putString(DIAGNOSTIC + "_part", diagnostic.partId());
-        data.putString(DIAGNOSTIC + "_expected", diagnostic.expected());
-        data.putString(DIAGNOSTIC + "_actual", diagnostic.actual());
-      });
+      snapshot.structureDiagnostic()
+          .ifPresent(diagnostic -> ControllerDiagnosticTooltip.capture(data, DIAGNOSTIC, diagnostic));
       snapshot.recipeInputDiagnostic().ifPresent(diagnostic -> {
         data.putString(INPUT_DIAGNOSTIC + "_recipe", diagnostic.recipeId().toString());
         var shortages = diagnostic.shortages();
@@ -108,21 +101,7 @@ final class MachineControllerTooltipProvider implements IBlockComponentProvider,
             data.getBoolean(PRODUCTION) ? "jade.mmcece.production.ready" : "jade.mmcece.production.paused"));
     if (structure == VerificationState.INVALID) {
       tooltip.add(Component.translatable("jade.mmcece.failure." + data.getString(FAILURE).toLowerCase(Locale.ROOT)));
-      if (data.contains(DIAGNOSTIC + "_position")) {
-        tooltip.add(
-            Component.translatable(
-                "jade.mmcece.diagnostic.position",
-                data.getString(DIAGNOSTIC + "_part"),
-                BlockPos.of(data.getLong(DIAGNOSTIC + "_position")).toShortString()));
-        tooltip.add(
-            Component.translatable(
-                "jade.mmcece.diagnostic.expected",
-                MachineDiagnosticText.localized(data.getString(DIAGNOSTIC + "_expected"))));
-        tooltip.add(
-            Component.translatable(
-                "jade.mmcece.diagnostic.actual",
-                MachineDiagnosticText.localized(data.getString(DIAGNOSTIC + "_actual"))));
-      }
+      ControllerDiagnosticTooltip.append(tooltip, data, DIAGNOSTIC);
     }
     if (data.contains(INPUT_DIAGNOSTIC + "_count")) {
       tooltip.add(Component.translatable("jade.mmcece.input.recipe", data.getString(INPUT_DIAGNOSTIC + "_recipe")));
@@ -141,7 +120,7 @@ final class MachineControllerTooltipProvider implements IBlockComponentProvider,
       }
     }
     if (data.getBoolean("mmcece:has_run")) {
-      var runState = enumValue(FrozenItemRun.State.class, data.getString(RUN_STATE));
+      var runState = enumValue(RecipeRunState.class, data.getString(RUN_STATE));
       if (runState != null) {
         tooltip.add(Component.translatable("jade.mmcece.recipe", data.getString(RECIPE)));
         tooltip.add(Component.translatable("jade.mmcece.run." + runState.name().toLowerCase(Locale.ROOT)));
@@ -181,9 +160,9 @@ final class MachineControllerTooltipProvider implements IBlockComponentProvider,
 
   private static boolean resourceWait(String status) {
     return switch (status) {
-      case "WAITING_ENERGY", "WAITING_FLUID", "WAITING_CHEMICAL", "OUTPUT_BLOCKED", "OUTPUT_PLANNING",
-          "MISSING_ITEM_INPUT", "MISSING_ITEM_OUTPUT", "MISSING_ENERGY_INPUT", "MISSING_FLUID_INPUT",
-          "MISSING_FLUID_OUTPUT", "MISSING_CHEMICAL_INPUT", "MISSING_CHEMICAL_OUTPUT" ->
+      case "WAITING_RESOURCE", "MISSING_RESOURCE_INPUT", "WAITING_ENERGY", "WAITING_FLUID", "WAITING_CHEMICAL",
+          "OUTPUT_BLOCKED", "OUTPUT_PLANNING", "MISSING_ITEM_INPUT", "MISSING_ITEM_OUTPUT", "MISSING_ENERGY_INPUT",
+          "MISSING_FLUID_INPUT", "MISSING_FLUID_OUTPUT", "MISSING_CHEMICAL_INPUT", "MISSING_CHEMICAL_OUTPUT" ->
         true;
       default -> false;
     };

@@ -5,7 +5,6 @@ import com.lw.modularmachine.api.client.preview.PreviewRenderer;
 import com.lw.modularmachine.api.client.preview.PreviewSceneData;
 import com.lw.modularmachine.api.client.preview.PreviewViewport;
 import com.lw.modularmachine.api.orientation.MachineOrientation;
-import com.lw.modularmachine.integration.jei.ClientMachineJeiCatalog;
 import com.lw.modularmachine.item.MachineBlueprintItem;
 import com.lw.modularmachine.block.MachineControllerBlock;
 import com.lw.modularmachine.block.FactoryControllerBlock;
@@ -41,7 +40,7 @@ public final class BlueprintPreviewScreen extends Screen {
   private long previewRequest = -1;
   private BlueprintPreviewPayloads.Snapshot previewHeader;
   private final ArrayList<ProjectionPayloads.Entry> incoming = new ArrayList<>();
-  private ClientMachineJeiCatalog.Machine catalogDefinition;
+  private ClientMachineCatalog.Machine catalogDefinition;
   private boolean awaitingPreview, previewFailed, dynamic;
   private int dynamicSize = -1, dynamicMinimum, dynamicMaximum;
   private final PreviewRenderer renderer = PreviewRenderer.create();
@@ -60,7 +59,7 @@ public final class BlueprintPreviewScreen extends Screen {
   private long lastCycle;
 
   public BlueprintPreviewScreen(ResourceLocation machine, InteractionHand hand) {
-    super(Component.translatable(ClientMachineJeiCatalog.translation(machine)));
+    super(Component.translatable(ClientMachineCatalog.translation(machine)));
     this.machine = machine;
     this.hand = hand;
   }
@@ -71,7 +70,7 @@ public final class BlueprintPreviewScreen extends Screen {
     if (scene != null || minecraft.level == null) {
       return;
     }
-    var definition = ClientMachineJeiCatalog.machines().get(machine);
+    var definition = ClientMachineCatalog.machines().get(machine);
     if (definition == null) {
       return;
     }
@@ -217,7 +216,7 @@ public final class BlueprintPreviewScreen extends Screen {
       onClose();
       return;
     }
-    var currentDefinition = ClientMachineJeiCatalog.machines().get(machine);
+    var currentDefinition = ClientMachineCatalog.machines().get(machine);
     if (catalogDefinition != null && currentDefinition != catalogDefinition) {
       catalogDefinition = currentDefinition;
       scene = null;

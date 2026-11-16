@@ -1,11 +1,10 @@
 package com.lw.modularmachine.machine.network;
 
-import com.lw.modularmachine.machine.PortKind;
+import com.lw.modularmachine.api.component.ResourceType;
+import com.lw.modularmachine.machine.network.codec.NetworkResourceCodecs;
 import java.util.Objects;
 import net.minecraft.core.HolderLookup;
 import net.minecraft.nbt.CompoundTag;
-import net.minecraft.nbt.NbtOps;
-import net.minecraft.nbt.Tag;
 import net.minecraft.network.RegistryFriendlyByteBuf;
 import net.minecraft.network.codec.StreamCodec;
 import net.minecraft.resources.ResourceLocation;
@@ -18,11 +17,11 @@ import org.jetbrains.annotations.ApiStatus;
  * adapters.
  */
 @ApiStatus.Internal
-public sealed interface NetworkPortResource {
+public interface NetworkPortResource {
   StreamCodec<RegistryFriendlyByteBuf, NetworkPortResource> STREAM_CODEC = StreamCodec
-      .of(NetworkPortResource::write, NetworkPortResource::read);
+      .of(NetworkResourceCodecs::write, NetworkResourceCodecs::read);
 
-  PortKind.Resource kind();
+  ResourceType kind();
 
   record Item(ItemStack stack) implements NetworkPortResource {
     public Item {
@@ -38,8 +37,8 @@ public sealed interface NetworkPortResource {
     }
 
     @Override
-    public PortKind.Resource kind() {
-      return PortKind.Resource.ITEM;
+    public ResourceType kind() {
+      return ResourceType.ITEM;
     }
 
     @Override
@@ -67,8 +66,8 @@ public sealed interface NetworkPortResource {
     }
 
     @Override
-    public PortKind.Resource kind() {
-      return PortKind.Resource.FLUID;
+    public ResourceType kind() {
+      return ResourceType.FLUID;
     }
 
     @Override
@@ -88,53 +87,16 @@ public sealed interface NetworkPortResource {
     }
 
     @Override
-    public PortKind.Resource kind() {
-      return PortKind.Resource.CHEMICAL;
+    public ResourceType kind() {
+      return ResourceType.CHEMICAL;
     }
   }
 
   default CompoundTag save(HolderLookup.Provider registries) {
-    var result = new CompoundTag();
-    result.putString("kind", kind().name());
-    var ops = registries.createSerializationContext(NbtOps.INSTANCE);
-    switch (this) {
-      case Item item -> result.put("value", ItemStack.CODEC.encodeStart(ops, item.stack()).getOrThrow());
-      case Fluid fluid -> result.put("value", FluidStack.CODEC.encodeStart(ops, fluid.stack()).getOrThrow());
-      case Chemical chemical -> result.putString("value", chemical.id().toString());
-    }
-
-    return result;
+    return NetworkResourceCodecs.save(registries, this);
   }
 
   static NetworkPortResource load(HolderLookup.Provider registries, CompoundTag tag) {
-    if (!tag.contains("kind", Tag.TAG_STRING) || !tag.contains("value")) {
-      throw new IllegalArgumentException("Missing network resource identity");
-    }
-    var ops = registries.createSerializationContext(NbtOps.INSTANCE);
-
-    return switch (PortKind.Resource.valueOf(tag.getString("kind"))) {
-      case ITEM -> new Item(ItemStack.CODEC.parse(ops, tag.get("value")).getOrThrow());
-      case FLUID -> new Fluid(FluidStack.CODEC.parse(ops, tag.get("value")).getOrThrow());
-      case CHEMICAL -> new Chemical(ResourceLocation.parse(tag.getString("value")));
-      case ENERGY -> throw new IllegalArgumentException("Unsupported network resource identity");
-    };
-  }
-
-  private static void write(RegistryFriendlyByteBuf buffer, NetworkPortResource value) {
-    buffer.writeEnum(value.kind());
-    switch (value) {
-      case Item item -> ItemStack.STREAM_CODEC.encode(buffer, item.stack());
-      case Fluid fluid -> FluidStack.STREAM_CODEC.encode(buffer, fluid.stack());
-      case Chemical chemical -> buffer.writeResourceLocation(chemical.id());
-    }
-  }
-
-  private static NetworkPortResource read(RegistryFriendlyByteBuf buffer) {
-    return switch (buffer.readEnum(PortKind.Resource.class)) {
-      case ITEM -> new Item(ItemStack.STREAM_CODEC.decode(buffer));
-      case FLUID -> new Fluid(FluidStack.STREAM_CODEC.decode(buffer));
-      case CHEMICAL -> new Chemical(buffer.readResourceLocation());
-      case ENERGY -> throw new IllegalArgumentException("Unsupported network resource identity");
-    };
+    return NetworkResourceCodecs.load(registries, tag);
   }
 }

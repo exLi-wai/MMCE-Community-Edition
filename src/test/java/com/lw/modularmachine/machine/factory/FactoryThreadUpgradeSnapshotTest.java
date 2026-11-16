@@ -1,6 +1,6 @@
 package com.lw.modularmachine.machine.factory;
 
-import com.lw.modularmachine.api.upgrade.FactoryUpgradeSnapshot;
+import com.lw.modularmachine.api.upgrade.UpgradeSnapshot;
 import java.util.List;
 import net.minecraft.resources.ResourceLocation;
 import org.junit.jupiter.api.Test;
@@ -21,7 +21,7 @@ class FactoryThreadUpgradeSnapshotTest {
         FactoryThreadState.State.IDLE,
         FactoryThreadState.Reason.NONE,
         2,
-        new FactoryUpgradeSnapshot(9, 12, 1, 1, 1, 1, 1, 1));
+        new UpgradeSnapshot(9, 12, 1, 1, 1, 1, 1, 1));
     assertEquals(12, state.upgradeSnapshot().parallelLimit());
     assertEquals(9, state.upgradeSnapshot().revision());
   }
@@ -39,14 +39,14 @@ class FactoryThreadUpgradeSnapshotTest {
         FactoryThreadState.State.IDLE,
         FactoryThreadState.Reason.NONE,
         0,
-        FactoryUpgradeSnapshot.identity(0));
-    var upgraded = state.withUpgradeSnapshot(new FactoryUpgradeSnapshot(1, 8, 3, 2, 2, 1, 1, 1));
+        UpgradeSnapshot.identity(0));
+    var upgraded = state.withUpgradeSnapshot(new UpgradeSnapshot(1, 8, 3, 2, 2, 1, 1, 1));
     assertEquals(8, upgraded.parallelLimit());
     assertEquals(3, upgraded.upgradeSnapshot().speedNumerator());
     var restored = FactoryThreadStateCodec.read(FactoryThreadStateCodec.write(List.of(upgraded))).get(0);
     assertEquals(upgraded.upgradeSnapshot(), restored.upgradeSnapshot());
     assertThrows(
         IllegalArgumentException.class,
-        () -> upgraded.withUpgradeSnapshot(new FactoryUpgradeSnapshot(1, 9, 4, 1, 1, 1, 1, 1)));
+        () -> upgraded.withUpgradeSnapshot(new UpgradeSnapshot(1, 9, 4, 1, 1, 1, 1, 1)));
   }
 }

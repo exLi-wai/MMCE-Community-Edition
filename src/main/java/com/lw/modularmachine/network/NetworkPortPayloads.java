@@ -1,7 +1,7 @@
 package com.lw.modularmachine.network;
 
 import com.lw.modularmachine.ModularMachine;
-import com.lw.modularmachine.machine.PortKind;
+import com.lw.modularmachine.api.component.ResourceType;
 import com.lw.modularmachine.machine.network.NetworkPortResource;
 import com.lw.modularmachine.machine.network.NetworkPortSnapshot;
 import com.lw.modularmachine.menu.NetworkPortMenu;
@@ -53,6 +53,9 @@ public final class NetworkPortPayloads {
       Objects.requireNonNull(snapshot, "snapshot");
       if (containerId < 0 || sequence < 0) {
         throw new IllegalArgumentException("Invalid network port status");
+      }
+      if (editable && snapshot.resource().ordinal() < 0) {
+        throw new IllegalArgumentException("Unsupported physical network port configuration");
       }
     }
 
@@ -153,7 +156,7 @@ public final class NetworkPortPayloads {
     buffer.writeVarLong(value.sequence());
     buffer.writeBoolean(value.editable());
     var snapshot = value.snapshot();
-    buffer.writeEnum(snapshot.resource());
+    snapshot.resource().write(buffer);
     buffer.writeBoolean(snapshot.input());
     buffer.writeVarLong(snapshot.configRevision());
     buffer.writeBoolean(snapshot.active());
@@ -173,7 +176,7 @@ public final class NetworkPortPayloads {
     var session = buffer.readUUID();
     long sequence = buffer.readVarLong();
     boolean editable = buffer.readBoolean();
-    var resource = buffer.readEnum(PortKind.Resource.class);
+    var resource = ResourceType.read(buffer);
     boolean input = buffer.readBoolean();
     long revision = buffer.readVarLong();
     boolean active = buffer.readBoolean();

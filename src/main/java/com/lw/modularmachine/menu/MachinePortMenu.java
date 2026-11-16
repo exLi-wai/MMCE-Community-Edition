@@ -35,14 +35,7 @@ public final class MachinePortMenu extends AbstractContainerMenu {
       int[] position = itemPosition(port.tier().name(), i);
       addSlot(new SlotItemHandler(port.inventory(), i, position[0], position[1]));
     }
-    for (int row = 0; row < 3; row++) {
-      for (int col = 0; col < 9; col++) {
-        addSlot(new Slot(inventory, col + row * 9 + 9, 8 + col * 18, 84 + row * 18));
-      }
-    }
-    for (int col = 0; col < 9; col++) {
-      addSlot(new Slot(inventory, col, 8 + col * 18, 142));
-    }
+    PlayerInventorySlots.add(inventory, this::addSlot, 8, 84, 142);
   }
 
   public int rows() {
@@ -81,14 +74,7 @@ public final class MachinePortMenu extends AbstractContainerMenu {
 
   @Override
   public boolean stillValid(Player player) {
-    return !port.isRemoved()
-        && port.schemaSupported()
-        && port.getLevel() == player.level()
-        && player.level().getBlockEntity(port.getBlockPos()) == port
-        && player.distanceToSqr(
-            port.getBlockPos().getX() + .5,
-            port.getBlockPos().getY() + .5,
-            port.getBlockPos().getZ() + .5) <= 64;
+    return !port.isRemoved() && port.schemaSupported() && PlayerInventorySlots.withinReach(player, port);
   }
 
   @Override

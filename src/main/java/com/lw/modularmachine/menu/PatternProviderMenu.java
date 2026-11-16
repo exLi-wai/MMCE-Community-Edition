@@ -54,14 +54,7 @@ public final class PatternProviderMenu extends AbstractContainerMenu {
     }
     addSlot(physicalSlot(provider.independentItems(), 0, 181, 172));
     addSlot(physicalSlot(provider.independentItems(), 1, 199, 172));
-    for (int row = 0; row < 3; row++) {
-      for (int col = 0; col < 9; col++) {
-        addSlot(new Slot(inventory, 9 + row * 9 + col, 8 + col * 18, 114 + row * 18));
-      }
-    }
-    for (int col = 0; col < 9; col++) {
-      addSlot(new Slot(inventory, col, 8 + col * 18, 172));
-    }
+    PlayerInventorySlots.add(inventory, this::addSlot, 8, 114, 172);
   }
 
   private Slot physicalSlot(IItemHandler handler, int slot, int x, int y) {

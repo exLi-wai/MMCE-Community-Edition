@@ -1,17 +1,18 @@
 package com.lw.modularmachine.machine.recipe;
 
-import com.lw.modularmachine.machine.recipe.search.ChemicalOutputLayout;
+import com.lw.modularmachine.api.recipe.resource.RecipeResourcePlanning;
+import com.lw.modularmachine.api.upgrade.UpgradeSnapshot;
+import com.lw.modularmachine.blockentity.FactoryControllerBlockEntity;
 import com.lw.modularmachine.machine.recipe.search.RecipeCatalog;
 import com.lw.modularmachine.machine.recipe.search.ResourceSnapshot;
 import com.lw.modularmachine.machine.recipe.search.ItemSlotDomain;
 import com.lw.modularmachine.machine.recipe.search.RecipeCandidate;
-import com.lw.modularmachine.machine.recipe.search.RecipePlanner;
-import com.lw.modularmachine.machine.factory.UpgradeRecipeChecks;
+import com.lw.modularmachine.machine.upgrade.UpgradeRecipeCheckHandlers;
 import com.lw.modularmachine.blockentity.MachineControllerBlockEntity;
 import com.lw.modularmachine.machine.PortKind;
 import com.lw.modularmachine.machine.controller.MachineControllerScriptDataService;
-import com.lw.modularmachine.machine.factory.FactoryUpgradeStartCosts;
-import com.lw.modularmachine.machine.factory.UpgradeBusOwner;
+import com.lw.modularmachine.machine.upgrade.UpgradeStartCosts;
+import com.lw.modularmachine.machine.upgrade.UpgradeBusOwner;
 import java.util.ArrayList;
 import java.util.HashMap;
 import java.util.List;
@@ -34,14 +35,14 @@ public final class RecipeStartPlan {
   private final List<Deduction> deductions;
   private final List<Placement> placements;
   private final long inputChanceSeed;
-  private UpgradeRecipeChecks.Scope factoryScope;
-  private UpgradeRecipeChecks.Session factoryChecks;
-  private FactoryUpgradeStartCosts.Preparation factoryStartup;
+  private UpgradeRecipeCheckHandlers.Scope factoryScope;
+  private UpgradeRecipeCheckHandlers.Session factoryChecks;
+  private UpgradeStartCosts.Preparation factoryStartup;
   private int startupInstances;
   private ParallelRecipeAdmission parallelAdmission;
+  private UpgradeSnapshot parallelUpgrades;
   private int parallelRequest;
-  private ChemicalOutputLayout.Planning chemicalOutputAdmission;
-  private int chemicalOutputInstances;
+  private FactoryOutputAdmission factoryOutputAdmission;
   private MachineRecipe inputPreparedDefinition;
   private RecipeCandidate<ItemResourceKey> originalCandidate;
   private long inputPreparedEpoch = -1;
@@ -49,7 +50,7 @@ public final class RecipeStartPlan {
   private PreparedRecipeOutputs outputPreparation;
   private int parallelBudgetRemaining;
 
-  RecipeStartPlan(RecipeExecutionTicket source, RecipeCatalog catalog, RecipeCandidate<ItemResourceKey> recipe, List<Deduction> deductions, List<Placement> placements, long inputChanceSeed, UpgradeRecipeChecks.Scope factoryScope) {
+  RecipeStartPlan(RecipeExecutionTicket source, RecipeCatalog catalog, RecipeCandidate<ItemResourceKey> recipe, List<Deduction> deductions, List<Placement> placements, long inputChanceSeed, UpgradeRecipeCheckHandlers.Scope factoryScope) {
     this.source = source;
     this.catalog = catalog;
     this.recipe = recipe;
@@ -67,12 +68,17 @@ public final class RecipeStartPlan {
   }
 
   public RecipeStartPlan withOutputPreparationContext(String thread) {
+    if (!java.util.Objects.equals(outputPreparationThread, thread)) {
+      parallelAdmission = null;
+      parallelUpgrades = null;
+      outputPreparation = null;
+    }
     outputPreparationThread = thread;
     return this;
   }
 
   /** Internal read-only admission assembled by the resource search. */
-  public static RecipeStartPlan prepared(RecipeExecutionTicket source, RecipeCatalog catalog, RecipeCandidate<ItemResourceKey> recipe, List<Deduction> deductions, List<Placement> placements, long inputChanceSeed, UpgradeRecipeChecks.Scope factoryScope) {
+  public static RecipeStartPlan prepared(RecipeExecutionTicket source, RecipeCatalog catalog, RecipeCandidate<ItemResourceKey> recipe, List<Deduction> deductions, List<Placement> placements, long inputChanceSeed, UpgradeRecipeCheckHandlers.Scope factoryScope) {
     return new RecipeStartPlan(source, catalog, recipe, deductions, placements, inputChanceSeed, factoryScope);
   }
 
@@ -151,28 +157,28 @@ public final class RecipeStartPlan {
     return mixed & Long.MAX_VALUE;
   }
 
-  public UpgradeRecipeChecks.Result advanceFactoryChecks(UpgradeBusOwner factory, String threadId, int budget) {
+  public UpgradeRecipeCheckHandlers.Result advanceFactoryChecks(UpgradeBusOwner factory, String threadId, int budget) {
     source.requireServerThread();
     if (source.owner() != factory
         || !source.dependenciesCurrent()
         || !catalog.isCurrent()
         || !inputPreparationCurrent()
         || !modifierContextCurrent(factory, threadId)) {
-      return new UpgradeRecipeChecks.Result(UpgradeRecipeChecks.Status.STALE, 0);
+      return new UpgradeRecipeCheckHandlers.Result(UpgradeRecipeCheckHandlers.Status.STALE, 0);
     }
     if (factoryScope == null) {
-      factoryScope = UpgradeRecipeChecks.capture(factory, threadId);
+      factoryScope = UpgradeRecipeCheckHandlers.capture(factory, threadId);
     }
     if (!factoryScope.matches(factory, threadId) || !factoryScope.current()) {
-      return new UpgradeRecipeChecks.Result(UpgradeRecipeChecks.Status.STALE, 0);
+      return new UpgradeRecipeCheckHandlers.Result(UpgradeRecipeCheckHandlers.Status.STALE, 0);
     }
     if (factoryChecks == null) {
       factoryChecks = factoryScope.begin(this);
     }
     var result = factoryChecks.advance(budget);
 
-    return source.dependenciesCurrent() && catalog.isCurrent() ? result : new UpgradeRecipeChecks.Result(
-        UpgradeRecipeChecks.Status.STALE,
+    return source.dependenciesCurrent() && catalog.isCurrent() ? result : new UpgradeRecipeCheckHandlers.Result(
+        UpgradeRecipeCheckHandlers.Status.STALE,
         result.workUsed());
   }
 
@@ -204,7 +210,7 @@ public final class RecipeStartPlan {
     return actual.equals(expected);
   }
 
-  public FactoryUpgradeStartCosts.Preparation prepareFactoryStartup(UpgradeBusOwner factory, String threadId, int instances) {
+  public UpgradeStartCosts.Preparation prepareFactoryStartup(UpgradeBusOwner factory, String threadId, int instances) {
     source.requireServerThread();
     if (source.owner() != factory) {
       throw new IllegalArgumentException("Startup plan belongs to a different controller");
@@ -214,8 +220,7 @@ public final class RecipeStartPlan {
       throw new IllegalArgumentException("Recipe does not allow the requested parallel instances");
     }
     if (factoryStartup == null || startupInstances != instances) {
-      factoryStartup = FactoryUpgradeStartCosts
-          .prepare(factory, threadId, ResourceLocation.parse(recipe.id()), instances);
+      factoryStartup = UpgradeStartCosts.prepare(factory, threadId, ResourceLocation.parse(recipe.id()), instances);
       startupInstances = instances;
     }
 
@@ -336,18 +341,29 @@ public final class RecipeStartPlan {
   }
 
   public int prepareParallel(MachineRecipe definition, int limit, int budget) {
+    source.requireServerThread();
+    boolean aggregate = source.owner() instanceof MachineControllerBlockEntity;
+    var upgrades = source.ordinaryUpgrades();
+    if (!aggregate) {
+      if (outputPreparationThread == null) {
+        throw new UpgradeRecipeCheckHandlers.StaleException();
+      }
+      var thread = ((FactoryControllerBlockEntity) source.owner()).scheduler().channel(outputPreparationThread);
+      if (thread == null) {
+        throw new UpgradeRecipeCheckHandlers.StaleException();
+      }
+      upgrades = thread.upgradeSnapshot();
+    }
     limit = definition.parallelized() ? limit : Math.min(limit, 1);
     limit = PatternProductionService.parallelLimit(source, definition, limit);
-    if (parallelAdmission == null || parallelRequest != limit) {
-      if (outputPreparation != null && !outputPreparation.admittedWithin(limit)) {
+    boolean upgradesChanged = !upgrades.equals(parallelUpgrades);
+    if (parallelAdmission == null || parallelRequest != limit || upgradesChanged) {
+      if (outputPreparation != null && (upgradesChanged || !outputPreparation.admittedWithin(limit))) {
         outputPreparation = null;
       }
-      parallelAdmission = new ParallelRecipeAdmission(
-          this,
-          definition,
-          limit,
-          source.owner() instanceof MachineControllerBlockEntity);
+      parallelAdmission = new ParallelRecipeAdmission(this, definition, limit, aggregate, upgrades);
       parallelRequest = limit;
+      parallelUpgrades = upgrades;
     }
 
     int admitted = parallelAdmission.advance(budget);
@@ -363,12 +379,16 @@ public final class RecipeStartPlan {
     return result;
   }
 
-  int parallelBudgetRemaining() {
+  public int parallelBudgetRemaining() {
     return parallelBudgetRemaining;
   }
 
-  List<FrozenItemRun> preparedOutputRuns(int instances) {
+  List<FrozenRecipeRun> preparedOutputRuns(int instances) {
     return outputPreparation == null ? List.of() : outputPreparation.runs(instances);
+  }
+
+  boolean hasPreparedOutputRuns(int instances) {
+    return outputPreparation != null && outputPreparation.current(instances);
   }
 
   boolean preparedOutputsCurrent(int instances) {
@@ -379,20 +399,22 @@ public final class RecipeStartPlan {
     return outputPreparation != null && outputPreparation.rejected();
   }
 
-  record ChemicalOutputCheck(RecipePlanner.Status status, int workUsed) {
+  RecipeResourcePlanning.Progress prepareFactoryOutputs(MachineRecipe definition, RecipeExecutionTicket ticket, int instances, int budget) {
+    source.requireServerThread();
+    if (ticket.owner() != source.owner() || instances < 1) {
+      throw new IllegalArgumentException("Invalid factory output admission");
+    }
+    if (factoryOutputAdmission == null || !factoryOutputAdmission.matches(definition, instances)) {
+      factoryOutputAdmission = new FactoryOutputAdmission(this, definition, ticket, instances);
+    }
+
+    return factoryOutputAdmission.advance(budget);
   }
 
-  ChemicalOutputCheck prepareChemicalOutputs(MachineRecipe definition, int instances, int budget) {
-    if (chemicalOutputAdmission == null || chemicalOutputInstances != instances) {
-      chemicalOutputAdmission = new ChemicalOutputLayout(source)
-          .plan(ChemicalTransactions.scaled(definition.chemicals().outputs(), instances));
-      chemicalOutputInstances = instances;
-    }
-    int used = 0;
-    if (chemicalOutputAdmission.status() == RecipePlanner.Status.BUDGET_EXHAUSTED) {
-      used = chemicalOutputAdmission.advance(budget).workUsed();
-    }
-    return new ChemicalOutputCheck(chemicalOutputAdmission.status(), used);
+  boolean factoryOutputsCurrent(MachineRecipe definition, int instances) {
+    return factoryOutputAdmission != null
+        && factoryOutputAdmission.matches(definition, instances)
+        && factoryOutputAdmission.current();
   }
 
   public int maxRepeatableInputs() {

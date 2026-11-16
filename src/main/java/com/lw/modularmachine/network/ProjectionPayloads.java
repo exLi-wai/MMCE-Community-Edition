@@ -1,5 +1,6 @@
 package com.lw.modularmachine.network;
 
+import com.lw.modularmachine.util.minecraft.state.BlockStateValues;
 import com.lw.modularmachine.machine.assembly.AssemblyPattern;
 import com.lw.modularmachine.machine.assembly.AssemblyService;
 import java.util.ArrayList;
@@ -54,23 +55,7 @@ public final class ProjectionPayloads {
     }
 
     public boolean matches(BlockState actual) {
-      for (var state : states) {
-        if (state.getBlock() != actual.getBlock()) {
-          continue;
-        }
-        boolean matches = true;
-        for (String name : properties) {
-          var property = state.getBlock().getStateDefinition().getProperty(name);
-          if (property == null || !state.getValue(property).equals(actual.getValue(property))) {
-            matches = false;
-            break;
-          }
-        }
-        if (matches) {
-          return true;
-        }
-      }
-      return false;
+      return BlockStateValues.matchesAny(states, properties, actual);
     }
   }
 

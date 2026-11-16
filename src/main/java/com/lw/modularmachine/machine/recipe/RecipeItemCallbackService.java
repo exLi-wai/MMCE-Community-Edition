@@ -256,11 +256,11 @@ public final class RecipeItemCallbackService {
    * One sealed KubeJS generation; Java host handlers retain precedence over equal
    * script IDs.
    */
-  public static void installKubeJS(long generation, Map<ResourceLocation, RecipeItemCallbacks.Checker> checkers, Map<ResourceLocation, RecipeItemCallbacks.Modifier> modifiers) {
-    installKubeJS(generation, checkers, modifiers, Map.of());
+  public static void installScriptCallbacks(long generation, Map<ResourceLocation, RecipeItemCallbacks.Checker> checkers, Map<ResourceLocation, RecipeItemCallbacks.Modifier> modifiers) {
+    installScriptCallbacks(generation, checkers, modifiers, Map.of());
   }
 
-  public static void installKubeJS(long generation, Map<ResourceLocation, RecipeItemCallbacks.Checker> checkers, Map<ResourceLocation, RecipeItemCallbacks.Modifier> modifiers, Map<ResourceLocation, RecipeItemCallbacks.InputModifier> inputModifiers) {
+  public static void installScriptCallbacks(long generation, Map<ResourceLocation, RecipeItemCallbacks.Checker> checkers, Map<ResourceLocation, RecipeItemCallbacks.Modifier> modifiers, Map<ResourceLocation, RecipeItemCallbacks.InputModifier> inputModifiers) {
     ServerCallbackRegistry.requireServer();
     if (generation < scriptGeneration) {
       return;

@@ -13,7 +13,7 @@ import static org.junit.jupiter.api.Assertions.assertThrows;
 class FactoryRunSetCodecTest {
   @Test
   void roundTripsFrozenRuns() {
-    var run = FrozenItemRun.read(FrozenItemRunTest.valid());
+    var run = FrozenRecipeRun.read(FrozenRecipeRunTest.valid());
     var restored = FactoryRunSetCodec.read(FactoryRunSetCodec.write(FactoryRunSet.empty().add(run)), null);
     assertEquals(run.runId(), restored.runs().get(0).runId());
     assertEquals(run.save(), restored.runs().get(0).save());
@@ -21,11 +21,11 @@ class FactoryRunSetCodecTest {
 
   @Test
   void persistsMoreThanTheFormerRunLimit() {
-    var runs = new ArrayList<FrozenItemRun>();
+    var runs = new ArrayList<FrozenRecipeRun>();
     for (int index = 0; index < 300; index++) {
-      var data = FrozenItemRunTest.valid();
+      var data = FrozenRecipeRunTest.valid();
       data.putUUID("run_id", new UUID(2, index + 1));
-      runs.add(FrozenItemRun.read(data));
+      runs.add(FrozenRecipeRun.read(data));
     }
 
     var restored = FactoryRunSetCodec.read(FactoryRunSetCodec.write(FactoryRunSet.ofRuns(runs)), null);

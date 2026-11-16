@@ -1,5 +1,6 @@
 package com.lw.modularmachine.integration.jei;
 
+import com.lw.modularmachine.client.preview.ClientMachineCatalog;
 import com.lw.modularmachine.registry.MachineRegistries;
 import com.lw.modularmachine.util.minecraft.registry.RegisteredMachineItems;
 import java.util.List;
@@ -17,14 +18,14 @@ import net.minecraft.network.chat.Component;
 import net.minecraft.resources.ResourceLocation;
 import net.minecraft.world.item.ItemStack;
 
-final class MachineStructureJeiCategory implements IRecipeCategory<ClientMachineJeiCatalog.Machine> {
-  static final RecipeType<ClientMachineJeiCatalog.Machine> TYPE = new RecipeType<>(
+final class MachineStructureJeiCategory implements IRecipeCategory<ClientMachineCatalog.Machine> {
+  static final RecipeType<ClientMachineCatalog.Machine> TYPE = new RecipeType<>(
       ResourceLocation.fromNamespaceAndPath("mmcece", "preview"),
-      ClientMachineJeiCatalog.Machine.class);
+      ClientMachineCatalog.Machine.class);
   MachineStructureJeiCategory(IJeiHelpers helpers) {
   }
   @Override
-  public RecipeType<ClientMachineJeiCatalog.Machine> getRecipeType() {
+  public RecipeType<ClientMachineCatalog.Machine> getRecipeType() {
     return TYPE;
   }
   @Override
@@ -48,19 +49,19 @@ final class MachineStructureJeiCategory implements IRecipeCategory<ClientMachine
     return false;
   }
   @Override
-  public ResourceLocation getRegistryName(ClientMachineJeiCatalog.Machine machine) {
+  public ResourceLocation getRegistryName(ClientMachineCatalog.Machine machine) {
     return ResourceLocation.fromNamespaceAndPath(machine.id().getNamespace(), "/structure/" + machine.id().getPath());
   }
   @Override
-  public List<ResourceLocation> getSourceRecipeIds(ClientMachineJeiCatalog.Machine machine) {
+  public List<ResourceLocation> getSourceRecipeIds(ClientMachineCatalog.Machine machine) {
     return List.of();
   }
   @Override
-  public void draw(ClientMachineJeiCatalog.Machine machine, IRecipeSlotsView slots, GuiGraphics graphics, double mouseX, double mouseY) {
+  public void draw(ClientMachineCatalog.Machine machine, IRecipeSlotsView slots, GuiGraphics graphics, double mouseX, double mouseY) {
     // The structure view intentionally uses the JEI page background directly.
   }
   @Override
-  public void setRecipe(IRecipeLayoutBuilder builder, ClientMachineJeiCatalog.Machine machine, IFocusGroup focuses) {
+  public void setRecipe(IRecipeLayoutBuilder builder, ClientMachineCatalog.Machine machine, IFocusGroup focuses) {
     // Focus ingredients drive "uses" lookups: the generic controllers are part
     // of every preview (so their lookup pages through all machines), while a
     // dedicated controller/blueprint only matches its own machine.
@@ -82,7 +83,7 @@ final class MachineStructureJeiCategory implements IRecipeCategory<ClientMachine
   }
 
   @Override
-  public void createRecipeExtras(IRecipeExtrasBuilder builder, ClientMachineJeiCatalog.Machine machine, IFocusGroup focuses) {
+  public void createRecipeExtras(IRecipeExtrasBuilder builder, ClientMachineCatalog.Machine machine, IFocusGroup focuses) {
     var preview = new LegacyStructureJeiWidget(machine);
     builder.addWidget(preview);
     builder.addGuiEventListener(preview);
