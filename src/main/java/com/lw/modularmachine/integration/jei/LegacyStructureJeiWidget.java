@@ -1,6 +1,7 @@
 package com.lw.modularmachine.integration.jei;
 
 import com.lw.modularmachine.client.preview.ClientMachineCatalog;
+import com.lw.modularmachine.client.preview.MachineDetailsScreen;
 import com.lw.modularmachine.api.client.preview.PreviewCamera;
 import com.lw.modularmachine.api.client.preview.PreviewRenderer;
 import com.lw.modularmachine.api.client.preview.PreviewSceneData;

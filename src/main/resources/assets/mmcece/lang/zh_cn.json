@@ -141,10 +141,6 @@
   "emi.category.mmcece.recipe": "机器配方：%s",
   "emi.category.mmcece.structure": "机器结构预览",
 
-  "gui.mmcece.blueprint.controls": "左键拖动旋转，右键拖动平移，滚轮缩放或切层；世界投影请使用投影仪。",
-  "gui.mmcece.blueprint.dynamic_invalid": "长度无效，保留原预览。",
-  "gui.mmcece.blueprint.dynamic_selection": "选择本次会话投影与搭建的长度；未选择时，已成型机器默认沿用已确认长度。",
-  "gui.mmcece.blueprint.dynamic_waiting": "正在准备所选结构…",
   "gui.mmcece.factory_thread.applied": "配置已应用",
   "gui.mmcece.factory_thread.apply": "应用",
   "gui.mmcece.factory_thread.busy": "线程已有任务，暂不能修改锁定与并行设置",

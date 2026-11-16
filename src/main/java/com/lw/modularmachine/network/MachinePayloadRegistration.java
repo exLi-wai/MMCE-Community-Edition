@@ -12,7 +12,6 @@ public final class MachinePayloadRegistration {
   public static void registerListeners(IEventBus modEventBus) {
     modEventBus.addListener(ProjectionPayloads::register);
     modEventBus.addListener(ProjectionLengthPayloads::register);
-    modEventBus.addListener(BlueprintPreviewPayloads::register);
     modEventBus.addListener(MachinePayloads::register);
     modEventBus.addListener(ControllerGuiDataPayloads::register);
     modEventBus.addListener(UpgradeBusPayloads::register);

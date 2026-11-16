@@ -141,10 +141,6 @@
   "emi.category.mmcece.recipe": "Machine Recipe: %s",
   "emi.category.mmcece.structure": "Machine Structure",
 
-  "gui.mmcece.blueprint.controls": "Left-drag to rotate, right-drag to pan, scroll to zoom or change layer. Use the projector for world projection.",
-  "gui.mmcece.blueprint.dynamic_invalid": "Invalid length; preview unchanged.",
-  "gui.mmcece.blueprint.dynamic_selection": "Choose the length for this session's projection and assembly. Without a selection, formed machines use their confirmed lengths.",
-  "gui.mmcece.blueprint.dynamic_waiting": "Preparing the selected structure...",
   "gui.mmcece.factory_thread.applied": "Settings applied",
   "gui.mmcece.factory_thread.apply": "Apply",
   "gui.mmcece.factory_thread.busy": "This thread has work in progress; recipe lock and parallel limit are unavailable.",

@@ -309,19 +309,6 @@ final class AssemblyConstructionCoordinator implements SurvivalAssembly.Host {
     }
   }
 
-  void invalidateSelectedLengths(UUID player, MachineDefinition definition, Map<String, Integer> selected) {
-    var job = jobs.get(player);
-    if (job != null
-        && job.pattern.machine().equals(definition.id())
-        && !job.pattern.dynamicLengths().equals(selected)) {
-      removeJob(player);
-    }
-    var building = pendingConstructions.get(player);
-    if (building != null && building.definition == definition && !building.lengths.equals(selected)) {
-      removePending(player);
-    }
-  }
-
   void clearJobsAndWarnings() {
     jobs.values().forEach(AssemblyJob::cancel);
     jobs.clear();

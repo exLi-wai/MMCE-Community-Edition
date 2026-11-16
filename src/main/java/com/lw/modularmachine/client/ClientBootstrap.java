@@ -1,7 +1,7 @@
 package com.lw.modularmachine.client;
 
 import com.lw.modularmachine.client.network.ClientPayloadReceivers;
-import com.lw.modularmachine.client.preview.BlueprintPreviewScreen;
+import com.lw.modularmachine.client.preview.MachineDetailsScreen;
 import com.lw.modularmachine.client.selection.RangedSelectionClient;
 import com.lw.modularmachine.config.MachineClientConfig;
 import com.lw.modularmachine.machine.blueprint.BlueprintPreviewActions;
@@ -31,7 +31,7 @@ public final class ClientBootstrap {
 
   private static void registerToolActions() {
     RangedConstructToolActions.setClientUse(RangedSelectionClient::use);
-    BlueprintPreviewActions.setClientOpener(
-        (machine, hand) -> Minecraft.getInstance().setScreen(new BlueprintPreviewScreen(machine, hand)));
+    BlueprintPreviewActions
+        .setClientOpener(machine -> Minecraft.getInstance().setScreen(new MachineDetailsScreen(machine)));
   }
 }

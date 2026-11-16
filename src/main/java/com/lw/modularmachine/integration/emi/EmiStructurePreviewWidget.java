@@ -5,7 +5,7 @@ import com.lw.modularmachine.api.client.preview.PreviewRenderer;
 import com.lw.modularmachine.api.client.preview.PreviewSceneData;
 import com.lw.modularmachine.api.client.preview.PreviewViewport;
 import com.lw.modularmachine.client.preview.ClientMachineCatalog;
-import com.lw.modularmachine.integration.jei.MachineDetailsScreen;
+import com.lw.modularmachine.client.preview.MachineDetailsScreen;
 import com.lw.modularmachine.util.client.gui.GuiTextures;
 import dev.emi.emi.api.widget.Bounds;
 import dev.emi.emi.api.widget.Widget;

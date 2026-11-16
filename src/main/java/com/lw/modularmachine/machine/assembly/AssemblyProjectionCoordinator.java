@@ -182,19 +182,6 @@ final class AssemblyProjectionCoordinator {
     return Optional.of(new AssemblyPage(expectedRequest, start, total, parts));
   }
 
-  void invalidateLengths(ServerPlayer player, MachineDefinition definition, Map<String, Integer> selected) {
-    var projection = projections.get(player.getUUID());
-    var preparing = pendingProjections.get(player.getUUID());
-    if (projection != null
-        && projection.pattern.machine().equals(definition.id())
-        && !projection.pattern.dynamicLengths().equals(selected)
-        || preparing != null && preparing.definition == definition && !preparing.lengths.equals(selected)) {
-      projections.remove(player.getUUID());
-      removePending(player.getUUID());
-      ProjectionPayloads.clear(player, request = Math.incrementExact(request));
-    }
-  }
-
   void cancel(ServerPlayer player) {
     if (!AssemblyService.canEdit(player)) {
       return;

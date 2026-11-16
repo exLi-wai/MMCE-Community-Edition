@@ -46,7 +46,7 @@ public final class ClientMachineCatalog {
   }
   private static Map<ResourceLocation, Machine> active = Map.of();
   private static final Map<ResourceLocation, Pending> pending = new LinkedHashMap<>();
-  private static boolean receiving;
+  private static boolean receiving, published;
   private static long epoch = -1;
   private static int expected;
   private static int positions;
@@ -58,6 +58,11 @@ public final class ClientMachineCatalog {
   }
   public static Map<ResourceLocation, Machine> machines() {
     return active;
+  }
+
+  /** An empty, completely received generation is still a published catalog. */
+  public static boolean hasPublishedGeneration() {
+    return published;
   }
   public static void receive(MachineJeiPayloads.Snapshot packet) {
     if (packet.start() == -1) {
@@ -78,6 +83,7 @@ public final class ClientMachineCatalog {
       var complete = new LinkedHashMap<ResourceLocation, Machine>();
       pending.forEach((id, value) -> complete.put(id, value.finish()));
       active = Map.copyOf(complete);
+      published = true;
       receiving = false;
       pending.clear();
       return;
@@ -111,6 +117,7 @@ public final class ClientMachineCatalog {
     active = Map.of();
     pending.clear();
     receiving = false;
+    published = false;
     epoch = -1;
   }
 }

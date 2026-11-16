@@ -6,7 +6,6 @@ import com.lw.modularmachine.client.controller.ControllerClientPublisher;
 import com.lw.modularmachine.client.MachineControllerStatusClient;
 import com.lw.modularmachine.client.NetworkPortScreen;
 import com.lw.modularmachine.client.PatternProviderScreen;
-import com.lw.modularmachine.client.preview.BlueprintPreviewScreen;
 import com.lw.modularmachine.client.preview.WorldProjection;
 import com.lw.modularmachine.client.preview.ClientMachineCatalog;
 import com.lw.modularmachine.integration.kubejs.KubeJSControllerClientBridge;
@@ -15,7 +14,6 @@ import com.lw.modularmachine.menu.GroupInputMenu;
 import com.lw.modularmachine.menu.MachineControllerMenu;
 import com.lw.modularmachine.menu.ParallelControllerMenu;
 import com.lw.modularmachine.menu.SmartInterfaceMenu;
-import com.lw.modularmachine.network.BlueprintPreviewPayloads;
 import com.lw.modularmachine.network.ControllerGuiDataPayloads;
 import com.lw.modularmachine.network.GroupInputPayloads;
 import com.lw.modularmachine.network.MachineColorPayloads;
@@ -88,10 +86,5 @@ public final class ClientPayloadReceivers {
   public static void registerCatalogReceivers() {
     MachineJeiPayloads.setReceiver(ClientMachineCatalog::receive);
     ProjectionPayloads.setReceiver(WorldProjection::receive);
-    BlueprintPreviewPayloads.setReceiver(packet -> {
-      if (Minecraft.getInstance().screen instanceof BlueprintPreviewScreen screen) {
-        screen.receive(packet);
-      }
-    });
   }
 }

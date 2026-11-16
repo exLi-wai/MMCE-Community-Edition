@@ -19,8 +19,7 @@ import net.minecraft.world.item.context.UseOnContext;
 import net.minecraft.world.level.Level;
 
 /**
- * Registered identity with the original blueprint right-click preview
- * interaction.
+ * Registered identity with the shared machine detail preview interaction.
  */
 public final class MachineBlueprintItem extends Item {
   private final DedicatedControllerCatalog.Machine machine;
@@ -50,14 +49,14 @@ public final class MachineBlueprintItem extends Item {
   @Override
   public InteractionResult useOn(UseOnContext context) {
     if (context.getLevel().isClientSide) {
-      BlueprintPreviewActions.openClient(machineId(), context.getHand());
+      BlueprintPreviewActions.openClient(machineId());
     }
     return InteractionResult.SUCCESS;
   }
   @Override
   public InteractionResultHolder<ItemStack> use(Level level, Player player, InteractionHand hand) {
     if (level.isClientSide) {
-      BlueprintPreviewActions.openClient(machineId(), hand);
+      BlueprintPreviewActions.openClient(machineId());
     }
     return InteractionResultHolder.pass(player.getItemInHand(hand));
   }
