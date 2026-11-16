@@ -317,10 +317,11 @@ final class RangedSelectionPreviewCompiler {
   private LocalState localState(BlockState state) {
     var values = new LinkedHashMap<Property<?>, Comparable<?>>();
     for (var entry : state.getValues().entrySet()) {
-      var value = entry.getValue();
-      if (value instanceof Direction direction) {
+      Comparable<?> value = entry.getValue();
+      Object capturedValue = value;
+      if (capturedValue instanceof Direction direction) {
         value = orientation.toLocalDirection(direction);
-      } else if (value instanceof Direction.Axis axis) {
+      } else if (capturedValue instanceof Direction.Axis axis) {
         value = orientation.toLocalAxis(axis);
       }
       if (!entry.getKey().getPossibleValues().contains(value)) {
