@@ -1,6 +1,8 @@
 package com.lw.modularmachine.integration.kubejs;
 
 import com.lw.modularmachine.machine.recipe.RecipeDeclaredObservers;
+import com.lw.modularmachine.machine.recipe.RecipePreparationHandlers;
+import com.lw.modularmachine.api.recipe.RecipePreparationEvents;
 import com.lw.modularmachine.integration.kubejs.KubeJSRecipeRows.ItemRow;
 import com.lw.modularmachine.integration.kubejs.KubeJSRecipeRows.FluidRow;
 import com.lw.modularmachine.integration.kubejs.KubeJSRecipeRows.ChemicalRow;
@@ -136,6 +138,7 @@ public final class KubeJSRecipeBuilder {
     private final Map<ResourceLocation, RecipeResources.Entry<?>> resourceDeclarations = new LinkedHashMap<>();
     private final List<String> tooltips = new ArrayList<>();
     private final List<RecipeDeclaredObservers.Handler> lifecycleHandlers = new ArrayList<>();
+    private final List<RecipePreparationHandlers.Handler> preparationHandlers = new ArrayList<>();
     private final List<IngredientArrayData.Group> ingredientArrays = new ArrayList<>();
     private final List<IngredientArrayData.Group> randomItemOutputs = new ArrayList<>();
     private final List<KubeJSIngredientArrayBuilder.IngredientArrayPrimer> ingredientArrayCallbacks = new ArrayList<>();
@@ -763,6 +766,7 @@ public final class KubeJSRecipeBuilder {
       addChemical(rows, chemical.chemical().toString(), chemical.amount());
       lastChemical.selector = chemical.selector();
       lastChemical.chance = chemical.chance();
+      lastChemical.ignoreOutputCheck = chemical.ignoreOutputCheck();
 
       return this;
     }
@@ -877,6 +881,14 @@ public final class KubeJSRecipeBuilder {
     public RecipeBuilder setTriggerTime(Number ticks) {
       requireMutable();
       int tick = (int) KubeJSRecipeArguments.integer(ticks, "trigger time", 0, duration);
+      if (tick > 0
+          && (last == LastRequirement.ITEM && lastItem != null && lastItem.ignoreOutputCheck
+              || (last == LastRequirement.FLUID_INPUT || last == LastRequirement.FLUID_OUTPUT)
+                  && lastFluid != null
+                  && lastFluid.ignoreOutputCheck
+              || last == LastRequirement.CHEMICAL && lastChemical != null && lastChemical.ignoreOutputCheck)) {
+        throw new IllegalStateException("Triggered outputs require complete output space");
+      }
       switch (last) {
         case ITEM -> lastItem.triggerTime = tick;
         case FLUID_INPUT, FLUID_OUTPUT -> lastFluid.triggerTime = tick;
@@ -988,6 +1000,42 @@ public final class KubeJSRecipeBuilder {
       } else {
         throw new IllegalStateException("Fixed parallel quantities require the last item or start/output fluid row");
       }
+      return this;
+    }
+
+    public RecipeBuilder setIgnoreOutputCheck(boolean ignored) {
+      requireMutable();
+      if (last == LastRequirement.ITEM && lastItem != null) {
+        if (outputs.contains(lastItem)) {
+          if (lastItem.triggerTime > 0 && ignored) {
+            throw new IllegalStateException("Triggered outputs require complete output space");
+          }
+          lastItem.ignoreOutputCheck = ignored;
+        }
+      } else if (last == LastRequirement.FLUID_OUTPUT && lastFluid != null) {
+        if (lastFluid.triggerTime > 0 && ignored) {
+          throw new IllegalStateException("Triggered outputs require complete output space");
+        }
+        lastFluid.ignoreOutputCheck = ignored;
+      } else if (last == LastRequirement.CHEMICAL && lastChemical != null) {
+        if (chemicalOutputs.contains(lastChemical)) {
+          if (lastChemical.triggerTime > 0 && ignored) {
+            throw new IllegalStateException("Triggered outputs require complete output space");
+          }
+          lastChemical.ignoreOutputCheck = ignored;
+        } else if (chemicalPerTickOutputs.contains(lastChemical) && ignored) {
+          throw new IllegalStateException("Per-tick outputs require complete output space");
+        }
+      } else if (last == LastRequirement.ENERGY_OUTPUT
+          || last == LastRequirement.FLUID_PER_TICK_OUTPUT
+          || last == LastRequirement.RANDOM_OUTPUT
+          || last == LastRequirement.NONE) {
+        if (ignored) {
+          throw new IllegalStateException(
+              "Ignoring output capacity requires one completion item, fluid or chemical row");
+        }
+      }
+
       return this;
     }
 
@@ -1210,6 +1258,45 @@ public final class KubeJSRecipeBuilder {
       return addLifecycleHandler(RecipeLifecycleEvents.Type.STARTED, false, handler);
     }
 
+    public RecipeBuilder addPreCheckHandler(RecipePreparationEvents.Handler handler) {
+      return addPreparationHandler(RecipePreparationEvents.Type.PRE_CHECK, false, handler);
+    }
+
+    public RecipeBuilder addPostCheckHandler(RecipePreparationEvents.Handler handler) {
+      return addPreparationHandler(RecipePreparationEvents.Type.POST_CHECK, false, handler);
+    }
+
+    /** Original deprecated entry receives both check phases. */
+    @Deprecated
+    public RecipeBuilder addCheckHandler(RecipePreparationEvents.Handler handler) {
+      addPreCheckHandler(handler);
+      return addPostCheckHandler(handler);
+    }
+
+    public RecipeBuilder addPreTickHandler(RecipePreparationEvents.Handler handler) {
+      return addPreparationHandler(RecipePreparationEvents.Type.PRE_TICK, false, handler);
+    }
+
+    public RecipeBuilder addFactoryPreTickHandler(RecipePreparationEvents.Handler handler) {
+      return addPreparationHandler(RecipePreparationEvents.Type.PRE_TICK, true, handler);
+    }
+
+    private RecipeBuilder addPreparationHandler(RecipePreparationEvents.Type type, boolean factoryOnly, RecipePreparationEvents.Handler handler) {
+      requireMutable();
+      if (preparationHandlers.size() >= 256) {
+        throw new IllegalArgumentException("Too many inline recipe preparation handlers");
+      }
+      preparationHandlers.add(
+          new RecipePreparationHandlers.Handler(
+              KubeJSCallbackIds.identity(id, "preparation/" + preparationHandlers.size()),
+              machine,
+              id,
+              type,
+              factoryOnly,
+              Objects.requireNonNull(handler, "recipe preparation handler")));
+      return this;
+    }
+
     public RecipeBuilder addPostTickHandler(RecipeLifecycleEvents.Listener handler) {
       return addLifecycleHandler(RecipeLifecycleEvents.Type.TICK, false, handler);
     }
@@ -1351,6 +1438,7 @@ public final class KubeJSRecipeBuilder {
 
     private void captureCallbacks() {
       lifecycleHandlers.forEach(RecipeScriptCallbacks::lifecycle);
+      preparationHandlers.forEach(RecipeScriptCallbacks::preparation);
       ingredientArrayCallbacks.forEach(KubeJSIngredientArrayBuilder.IngredientArrayPrimer::captureCallbacks);
       for (var rows : List.of(inputs, outputs)) {
         for (var row : rows) {
@@ -1513,6 +1601,9 @@ public final class KubeJSRecipeBuilder {
         }
         if (row.parallelUnaffected) {
           json.addProperty("parallel_unaffected", true);
+        }
+        if (row.ignoreOutputCheck) {
+          json.addProperty("ignore_output_check", true);
         }
         if (!row.selector.isEmpty()) {
           json.addProperty("selector", row.selector);

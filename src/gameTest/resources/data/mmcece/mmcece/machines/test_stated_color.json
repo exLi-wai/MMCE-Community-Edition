@@ -1,0 +1,7 @@
+{
+  "color": "#38A6D2",
+  "parts": [
+    {"offset": [1, 0, 0], "block": "mmcece:test_stated_component"},
+    {"offset": [2, 0, 0], "block": "mmcece:test_stated_component"}
+  ]
+}

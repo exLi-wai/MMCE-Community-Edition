@@ -13,6 +13,8 @@ import java.util.HashSet;
 import java.util.List;
 import java.util.Set;
 import net.minecraft.resources.ResourceLocation;
+import java.util.Objects;
+import net.minecraft.world.item.ItemStack;
 
 /**
  * One optional all-of condition group; alternatives remain part of the normal
@@ -24,13 +26,33 @@ public record StructureModifierDefinition(
     List<MachineDefinition.Part> conditions,
     OrientationCompilation compilation,
     boolean allowReplacement,
-    List<RecipeModifier> modifiers) {
+    List<RecipeModifier> modifiers,
+    Display display) {
+  public record Display(String name, String description, ItemStack stack) {
+    public Display {
+      if (name == null || name.length() > 256 || description == null || description.length() > 512 || stack == null) {
+        throw new IllegalArgumentException("Invalid structure modifier display");
+      }
+      stack = stack.copy();
+    }
+
+    @Override
+    public ItemStack stack() {
+      return stack.copy();
+    }
+  }
+
+  public StructureModifierDefinition(String id, List<Integer> partIndices, List<MachineDefinition.Part> conditions, OrientationCompilation compilation, boolean allowReplacement, List<RecipeModifier> modifiers) {
+    this(id, partIndices, conditions, compilation, allowReplacement, modifiers, new Display("", "", ItemStack.EMPTY));
+  }
   public static final int MAX_GROUPS = 256;
   public static final int MAX_CONDITIONS = 4096;
-  private static final Set<String> FIELDS = Set.of("id", "parts", "modifiers", "allow_replacement");
-  private static final Set<String> PART_FIELDS = Set.of("part_id", "block", "properties", "properties_space");
+  private static final Set<String> FIELDS = Set.of("id", "parts", "modifiers", "allow_replacement", "script_display");
+  private static final Set<String> PART_FIELDS = Set
+      .of("part_id", "block", "properties", "properties_space", "script_condition");
 
   public StructureModifierDefinition {
+    Objects.requireNonNull(display, "display");
     partIndices = List.copyOf(partIndices);
     conditions = List.copyOf(conditions);
     modifiers = List.copyOf(modifiers);
@@ -48,7 +70,7 @@ public record StructureModifierDefinition(
     new RecipeModifiers(modifiers);
   }
 
-  private record Source(String id, JsonArray parts, JsonArray modifiers, boolean replace) {
+  private record Source(String id, JsonArray parts, JsonArray modifiers, boolean replace, Display display) {
   }
 
   public static List<StructureModifierDefinition> parse(ResourceLocation id, JsonObject root, List<MachineDefinition.Part> parts, StateOrientationAdapters.RegistrySnapshot snapshot) {
@@ -83,7 +105,8 @@ public record StructureModifierDefinition(
               compiled.parts(),
               compiled.orientationCompilation(),
               source.replace(),
-              rules));
+              rules,
+              source.display()));
     }
     new RecipeModifiers(allRules);
 
@@ -180,7 +203,9 @@ public record StructureModifierDefinition(
         }
         normalized.add(part);
       }
-      result.add(new Source(name, normalized, group.getAsJsonArray("modifiers"), replace));
+      var display = group.has("script_display") ? MachineDefinitionScripts
+          .display(text(group, "script_display", groupPath)) : new Display("", "", ItemStack.EMPTY);
+      result.add(new Source(name, normalized, group.getAsJsonArray("modifiers"), replace, display));
     }
 
     return result;

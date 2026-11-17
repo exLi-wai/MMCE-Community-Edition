@@ -5,6 +5,7 @@ import com.lw.modularmachine.api.recipe.ChemicalRequirement;
 import com.lw.modularmachine.api.recipe.RecipeModifier;
 import com.lw.modularmachine.api.recipe.resource.RecipeResourcePlanning;
 import com.lw.modularmachine.machine.recipe.ChemicalTransactions;
+import com.lw.modularmachine.machine.recipe.RecipeOutputClaims;
 import com.lw.modularmachine.machine.recipe.ChemicalRecipeSampling;
 import com.lw.modularmachine.machine.chemical.ChemicalPlatform;
 import com.lw.modularmachine.machine.recipe.PatternInputTransaction;
@@ -19,7 +20,6 @@ import com.lw.modularmachine.machine.recipe.search.RecipePlanner;
 import com.lw.modularmachine.machine.recipe.search.ResourcePlanningAdapter;
 import com.lw.modularmachine.machine.structure.StructureService;
 import java.util.ArrayList;
-import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.UUID;
@@ -113,8 +113,9 @@ public final class ChemicalResourceExecution {
       ChemicalTransactions.scaled(input.data().perTick(), input.instances());
       ChemicalTransactions.scaled(input.data().perTickOutputs(), input.instances());
       var planning = new ChemicalOutputLayout(input.ticket()).plan(
-          ChemicalTransactions
-              .scaled(input.data().outputs().stream().filter(row -> row.chance() == 1).toList(), input.instances()));
+          ChemicalTransactions.scaled(
+              input.data().outputs().stream().filter(row -> row.chance() == 1 && !row.ignoreOutputCheck()).toList(),
+              input.instances()));
 
       return new ResourcePlanningAdapter<>(planning::status, planning::advance);
     };
@@ -337,15 +338,17 @@ public final class ChemicalResourceExecution {
    * Merge frozen runs before applying the planner's distinct requirement limit.
    */
   public static List<RecipeCandidate.Output<ChemicalResourceKey>> outputClaims(List<List<ChemicalRequirement>> outputs) {
-    var totals = new LinkedHashMap<ChemicalResourceKey, Long>();
+    var totals = new RecipeOutputClaims<ChemicalResourceKey>();
     for (var rows : outputs) {
       for (var output : rows) {
-        totals.merge(new ChemicalResourceKey(output.chemical(), output.selector()), output.amount(), Math::addExact);
+        totals.add(
+            new ChemicalResourceKey(output.chemical(), output.selector()),
+            output.amount(),
+            output.ignoreOutputCheck());
       }
     }
 
-    return totals.entrySet().stream().map(entry -> new RecipeCandidate.Output<>(entry.getKey(), entry.getValue()))
-        .toList();
+    return totals.claims();
   }
 
   private static RecipeResourcePlanning.Status convert(RecipePlanner.Status status) {

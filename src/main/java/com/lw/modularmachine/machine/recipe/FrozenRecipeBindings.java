@@ -142,17 +142,18 @@ final class FrozenRecipeBindings {
     if (!declaration.getAsJsonArray("inputs").isEmpty()
         && !logicalPorts.containsValue(PortKind.ITEM_INPUT)
         && !patternInputs.contains(PortKind.ITEM_INPUT)
-        || !declaration.getAsJsonArray("outputs").isEmpty() && !logicalPorts.containsValue(PortKind.ITEM_OUTPUT)) {
+        || hasRequiredOutputs(declaration, "outputs") && !logicalPorts.containsValue(PortKind.ITEM_OUTPUT)) {
       throw new IllegalArgumentException("Item requirements lack logical item ports");
     }
     chemicals.inputs().forEach(value -> requirePort(PortKind.CHEMICAL_INPUT, value.selector()));
     chemicals.perTick().forEach(value -> requirePort(PortKind.CHEMICAL_INPUT, value.selector()));
-    chemicals.outputs().forEach(value -> requirePort(PortKind.CHEMICAL_OUTPUT, value.selector()));
+    chemicals.outputs().stream().filter(value -> !value.ignoreOutputCheck())
+        .forEach(value -> requirePort(PortKind.CHEMICAL_OUTPUT, value.selector()));
     chemicals.perTickOutputs().forEach(value -> requirePort(PortKind.CHEMICAL_OUTPUT, value.selector()));
     if (declaration.has("fluid_inputs")) {
       requirePort(PortKind.FLUID_INPUT, selectors.fluidInput());
     }
-    if (declaration.has("fluid_outputs")) {
+    if (hasRequiredOutputs(declaration, "fluid_outputs")) {
       requirePort(PortKind.FLUID_OUTPUT, selectors.fluidOutput());
     }
     if (declaration.has("fluid_per_tick")) {
@@ -177,6 +178,20 @@ final class FrozenRecipeBindings {
     if (declaration.has("energy_output_per_tick") && declaration.get("energy_output_per_tick").getAsLong() > 0) {
       requirePort(PortKind.ENERGY_OUTPUT, selectors.energyOutput());
     }
+  }
+
+  private static boolean hasRequiredOutputs(JsonObject declaration, String field) {
+    if (!declaration.has(field)) {
+      return false;
+    }
+    for (var value : declaration.getAsJsonArray(field)) {
+      var row = value.getAsJsonObject();
+      if (!row.has("ignore_output_check") || !row.get("ignore_output_check").getAsBoolean()) {
+        return true;
+      }
+    }
+
+    return false;
   }
 
   private void requirePort(PortKind kind, String selector) {

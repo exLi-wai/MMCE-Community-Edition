@@ -27,6 +27,7 @@ import net.minecraft.world.phys.AABB;
 import com.lw.modularmachine.machine.structure.MachineDefinition.Part;
 import static com.lw.modularmachine.machine.structure.MachineDefinition.validBox;
 import org.jetbrains.annotations.ApiStatus;
+import com.lw.modularmachine.api.recipe.RecipeFailureAction;
 
 /**
  * JSON validation, reference capture and snapshot-only compilation of machine
@@ -121,7 +122,10 @@ public final class MachineDefinitionParser {
         root.has("parallelizable") ? bool(root.get("parallelizable"), path + ".parallelizable") : defaults
             .parallelizable(),
         maximumFactoryThreads,
-        RecipeAdapterDefinitions.parse(root, path));
+        RecipeAdapterDefinitions.parse(root, path),
+        root.has("prefix") ? string(root.get("prefix"), path + ".prefix") : "",
+        root.has("failure_action") ? RecipeFailureAction
+            .parse(string(root.get("failure_action"), path + ".failure_action")) : null);
   }
 
   /**
@@ -251,6 +255,8 @@ public final class MachineDefinitionParser {
         root,
         path,
         "translation_key",
+        "prefix",
+        "failure_action",
         "parts",
         "operation",
         "orientation",
@@ -291,7 +297,26 @@ public final class MachineDefinitionParser {
     } else if (factory != null && factory.has("maximum_threads")) {
       maximum = integer(factory.get("maximum_threads"), path + ".factory.maximum_threads");
     }
-    if (maximum < 1 || maximum > FactoryThreadStateCodec.MAX_THREADS) {
+    if (factory != null && factory.has("maximum_extra_threads")) {
+      if (factory.has("maximum_threads") || root.has("max-threads")) {
+        throw error(path + ".factory", "Use either maximum_extra_threads or total maximum_threads");
+      }
+      maximum = integer(factory.get("maximum_extra_threads"), path + ".factory.maximum_extra_threads");
+      if (maximum < 0 || maximum > FactoryThreadStateCodec.MAX_THREADS) {
+        throw error(path + ".factory.maximum_extra_threads", "Invalid extra thread limit");
+      }
+      if (factory.has("threads")) {
+        for (var value : array(factory.get("threads"), path + ".factory.threads")) {
+          var thread = object(value, path + ".factory.threads");
+          boolean core = thread.has("core") ? bool(thread.get("core"), path + ".factory.threads.core") : thread
+              .has("allowed_recipes");
+          if (core) {
+            maximum++;
+          }
+        }
+      }
+    }
+    if (maximum < 0 || maximum > FactoryThreadStateCodec.MAX_THREADS) {
       throw error(path + ".factory.maximum_threads", "Factory thread limit is outside the supported bounded range");
     }
 

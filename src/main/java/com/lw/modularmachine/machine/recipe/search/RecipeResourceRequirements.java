@@ -79,14 +79,15 @@ public final class RecipeResourceRequirements {
       }
     }
     for (var output : recipe.outputs()) {
-      if (!has(PortKind.ITEM_OUTPUT, output.selector())) {
+      if (!output.ignoreOutputCheck() && !has(PortKind.ITEM_OUTPUT, output.selector())) {
         return Optional.of(PortKind.ITEM_OUTPUT);
       }
     }
     if (!recipe.fluidInputs().isEmpty() && !has(PortKind.FLUID_INPUT, recipe.selectors().fluidInput())) {
       return Optional.of(PortKind.FLUID_INPUT);
     }
-    if (!recipe.fluidOutputs().isEmpty() && !has(PortKind.FLUID_OUTPUT, recipe.selectors().fluidOutput())) {
+    if (recipe.fluidOutputRequirements().stream().anyMatch(output -> !output.ignoreOutputCheck())
+        && !has(PortKind.FLUID_OUTPUT, recipe.selectors().fluidOutput())) {
       return Optional.of(PortKind.FLUID_OUTPUT);
     }
     if (recipe.energyPerTick() > 0 && !has(PortKind.ENERGY_INPUT, recipe.selectors().energyInput())) {
@@ -116,7 +117,7 @@ public final class RecipeResourceRequirements {
       }
     }
     for (var output : recipe.chemicals().outputs()) {
-      if (!has(PortKind.CHEMICAL_OUTPUT, output.selector())) {
+      if (!output.ignoreOutputCheck() && !has(PortKind.CHEMICAL_OUTPUT, output.selector())) {
         return Optional.of(PortKind.CHEMICAL_OUTPUT);
       }
     }

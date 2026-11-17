@@ -21,14 +21,19 @@ public record RecipeExecutionOptions(String threadName, int maxThreads) {
 
   public RecipeExecutionOptions {
     Objects.requireNonNull(threadName, "threadName");
-    if (!threadName.isEmpty() && !threadName.matches("[a-zA-Z0-9_.-]{1,64}")
-        || maxThreads < 0
-        || maxThreads > MAX_THREADS) {
+    if (!threadName.isEmpty() && !validThreadName(threadName) || maxThreads < 0 || maxThreads > MAX_THREADS) {
       throw new IllegalArgumentException("Invalid recipe factory thread selection");
     }
   }
 
   public boolean accepts(String threadId) {
     return threadName.isEmpty() || threadName.equals(threadId);
+  }
+
+  public static boolean validThreadName(String name) {
+    return name != null
+        && !name.isBlank()
+        && name.length() <= 64
+        && name.codePoints().noneMatch(Character::isISOControl);
   }
 }

@@ -10,14 +10,19 @@ import net.minecraft.resources.ResourceLocation;
  * Immutable chemical identity and exact amount, independent of any integration
  * API.
  */
-public record ChemicalRequirement(ResourceLocation chemical, long amount, String selector, double chance) {
+public record ChemicalRequirement(
+    ResourceLocation chemical,
+    long amount,
+    String selector,
+    double chance,
+    boolean ignoreOutputCheck) {
   public static final Codec<ChemicalRequirement> CODEC = RecordCodecBuilder.create(
-      instance -> instance
-          .group(
-              ResourceLocation.CODEC.fieldOf("chemical").forGetter(ChemicalRequirement::chemical),
-              Codec.LONG.fieldOf("amount").forGetter(ChemicalRequirement::amount),
-              Codec.STRING.optionalFieldOf("selector", "").forGetter(ChemicalRequirement::selector),
-              Codec.doubleRange(0, 1).optionalFieldOf("chance", 1.0).forGetter(ChemicalRequirement::chance))
+      instance -> instance.group(
+          ResourceLocation.CODEC.fieldOf("chemical").forGetter(ChemicalRequirement::chemical),
+          Codec.LONG.fieldOf("amount").forGetter(ChemicalRequirement::amount),
+          Codec.STRING.optionalFieldOf("selector", "").forGetter(ChemicalRequirement::selector),
+          Codec.doubleRange(0, 1).optionalFieldOf("chance", 1.0).forGetter(ChemicalRequirement::chance),
+          Codec.BOOL.optionalFieldOf("ignore_output_check", false).forGetter(ChemicalRequirement::ignoreOutputCheck))
           .apply(instance, ChemicalRequirement::new));
 
   public ChemicalRequirement(ResourceLocation chemical, long amount) {
@@ -26,6 +31,10 @@ public record ChemicalRequirement(ResourceLocation chemical, long amount, String
 
   public ChemicalRequirement(ResourceLocation chemical, long amount, String selector) {
     this(chemical, amount, selector, 1);
+  }
+
+  public ChemicalRequirement(ResourceLocation chemical, long amount, String selector, double chance) {
+    this(chemical, amount, selector, chance, false);
   }
 
   public ChemicalRequirement {
@@ -37,7 +46,7 @@ public record ChemicalRequirement(ResourceLocation chemical, long amount, String
   }
 
   public ChemicalRequirement withAmount(long value) {
-    return new ChemicalRequirement(chemical, value, selector, chance);
+    return new ChemicalRequirement(chemical, value, selector, chance, ignoreOutputCheck);
   }
 
   public ChemicalRequirement scaled(int instances) {

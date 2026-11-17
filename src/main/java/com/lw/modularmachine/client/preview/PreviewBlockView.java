@@ -18,6 +18,7 @@ import net.minecraft.world.level.block.state.BlockState;
 import net.minecraft.world.level.lighting.LevelLightEngine;
 import net.minecraft.world.level.material.FluidState;
 import org.jetbrains.annotations.ApiStatus;
+import com.lw.modularmachine.api.client.preview.PreviewBlockData;
 
 /** Render-thread schematic neighbors; never passed to packing workers. */
 @ApiStatus.Internal
@@ -27,7 +28,9 @@ public final class PreviewBlockView implements BlockAndTintGetter {
   private int layer, step;
   private final boolean worldNeighbors;
   private PreviewLevel level;
-  private final LinkedHashMap<Long, BlockEntity> entities = new LinkedHashMap<>(16, .75F, true);
+  private record VisualEntity(BlockEntity entity, PreviewBlockData data) {
+  }
+  private final LinkedHashMap<Long, VisualEntity> entities = new LinkedHashMap<>(16, .75F, true);
   private final Set<BlockState> failedEntities = new HashSet<>();
 
   public PreviewBlockView(PreviewRenderScene scene, int layer, int step) {
@@ -99,19 +102,24 @@ public final class PreviewBlockView implements BlockAndTintGetter {
       return null;
     }
     var cached = entities.get(pos.asLong());
-    if (cached != null && cached.getBlockState() == state) {
-      return cached;
+    var entry = scene.at(pos);
+    var data = entry == null ? PreviewBlockData.EMPTY : entry.previewData(step);
+    if (cached != null && cached.entity().getBlockState() == state && cached.data().equals(data)) {
+      return cached.entity();
     }
     try {
       // Detached visual instances: never inserted into a level, ticked, or fed
-      // live inventory/NBT. Models query schematic neighbors through this view.
+      // live inventory/NBT. Script preview data is a separate defensive copy.
       var entity = factory.newBlockEntity(pos, state);
       if (entity != null) {
         if (level == null) {
           level = new PreviewLevel(this, Minecraft.getInstance().level);
         }
         entity.setLevel(level);
-        entities.put(pos.asLong(), entity);
+        if (!data.isEmpty()) {
+          entity.loadWithComponents(data.compound(), level.registryAccess());
+        }
+        entities.put(pos.asLong(), new VisualEntity(entity, data));
         while (entities.size() > 2048) {
           entities.remove(entities.keySet().iterator().next());
         }

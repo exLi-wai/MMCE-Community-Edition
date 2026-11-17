@@ -38,6 +38,9 @@ final class ControllerStatusLabels {
     if (!"CONFIRMED".equals(status.structureState())) {
       return "PENDING".equals(status.structureState()) ? tr(STATE + "pending") : tr(STATE + "missing_structure");
     }
+    if (!status.recipeFailureMessage().isEmpty()) {
+      return Component.translatable(status.recipeFailureMessage());
+    }
     return switch (status.recipeStatus()) {
       case "IDLE" -> status.recipeId().isEmpty() ? tr(STATE + "no_recipe") : tr(STATE + "idle");
       case "ADVANCED", "WAITING_TICK" -> tr(STATE + "crafting");
@@ -80,6 +83,9 @@ final class ControllerStatusLabels {
       return tr(STATE + "crafting");
     }
     for (var thread : status.threads()) {
+      if (!thread.recipeFailureMessage().isEmpty()) {
+        return Component.translatable(thread.recipeFailureMessage());
+      }
       if (!"IDLE".equals(thread.state()) && !"NONE".equals(thread.reason())) {
         return tr("menu.mmcece.factory.reason." + thread.reason().toLowerCase(Locale.ROOT));
       }

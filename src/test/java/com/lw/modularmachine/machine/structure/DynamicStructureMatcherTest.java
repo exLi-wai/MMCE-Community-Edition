@@ -10,11 +10,40 @@ import java.util.HashSet;
 import java.util.Map;
 import net.minecraft.core.BlockPos;
 import net.minecraft.resources.ResourceLocation;
+import net.minecraft.nbt.CompoundTag;
 import org.junit.jupiter.api.Test;
 import static org.junit.jupiter.api.Assertions.*;
 
 class DynamicStructureMatcherTest {
   private static final BlockPos ORIGIN = new BlockPos(10, 40, 10);
+
+  @Test
+  void scriptNbtSubscribesMatchedPartsAndTheFirstUnmatchedDynamicBoundary() {
+    var source = JsonParser.parseString("""
+        {"parts":[{"offset":[2,0,0],"block":"energy_input"}],
+         "dynamic_patterns":[{"id":"line","minimum":0,"maximum":1,
+           "start_offset":[0,0,1],"step":[0,0,1],
+           "parts":[{"offset":[0,0,0],"block":"item_input","script_condition":"content"}]}]}
+        """).getAsJsonObject();
+    var condition = new StructureScriptChecks.Condition(new CompoundTag(), null, null);
+    var definition = StructureScriptChecks.capture(
+        Map.of("content", condition),
+        () -> MachineDefinitionParser.parse(
+            ResourceLocation.parse("mmcece:dynamic_script_contents"),
+            source,
+            new StateOrientationAdapters.RegistrySnapshot(Map.of())));
+    var matcher = new DynamicStructureMatcher(definition, ORIGIN, MachineOrientation.IDENTITY);
+    var watches = new HashMap<BlockPos, Boolean>();
+    matcher.advance(
+        100,
+        (segment, position, contents) -> watches.put(position, contents),
+        (position, part, rule, inverse) -> position
+            .equals(ORIGIN.offset(0, 0, 1)) ? CheckResult.MATCH : CheckResult.MISMATCH);
+
+    assertTrue(matcher.matched());
+    assertEquals(Boolean.TRUE, watches.get(ORIGIN.offset(0, 0, 1)));
+    assertEquals(Boolean.TRUE, watches.get(ORIGIN.offset(0, 0, 2)));
+  }
 
   @Test
   void maximumLengthAcceptsATailThatAlsoMatchesTheBody() {

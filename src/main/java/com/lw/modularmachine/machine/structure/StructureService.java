@@ -600,6 +600,9 @@ public final class StructureService {
     if (registration != null && registration.visuals.hasVisibility()) {
       registration.visuals.setVisibilityActive(registration.canCommit(level));
     }
+    if (registration != null && used < budget) {
+      used += registration.visuals.advanceWorking(level, budget - used);
+    }
     refreshAppearance(anchor.controller);
     MachineEventPublisher.observeStructure(anchor.controller);
     return used;
@@ -620,6 +623,7 @@ public final class StructureService {
       return;
     }
     registration.valid = false;
+    registration.visuals.working(false);
     registration.visuals.resetVisibility();
     registration.snapshotWork.discard();
     registration.verifier.rejectProof(VerificationFailure.STALE_BINDING, -1, registration.owner.roundStarted);
@@ -641,6 +645,9 @@ public final class StructureService {
 
   static int clean(StructureLevelState state, Registration registration, int budget) {
     int used = 0;
+    if (registration.controller.structureLevel() instanceof ServerLevel level) {
+      used += registration.visuals.advanceWorking(level, budget);
+    }
     while (used < budget && registration.cleaned < registration.subscribed) {
       long section = registration.sections.get(registration.cleaned++);
       Set<Registration> watched = state.sections.get(section);
@@ -666,7 +673,7 @@ public final class StructureService {
       }
       used++;
     }
-    if (registration.cleaned < registration.subscribed) {
+    if (registration.cleaned < registration.subscribed || !registration.visuals.workingComplete()) {
       state.queue.add(registration);
     } else {
       if (registration.owner.retired == registration) {
@@ -704,6 +711,23 @@ public final class StructureService {
       ordinary.refreshAppearanceState();
     } else if (controller instanceof FactoryControllerBlockEntity factory) {
       factory.refreshAppearanceState();
+    }
+  }
+
+  /**
+   * Presentation work uses the existing registration work queue and never grants
+   * production authority.
+   */
+  public static void updateWorkingComponents(StructureSubject controller, boolean working) {
+    if (!(controller.structureLevel() instanceof ServerLevel level)) {
+      return;
+    }
+    ServerThreadGuard.require(level, "Structure working appearance");
+    var registration = controller.structureRegistration();
+    var state = LEVELS.get(level);
+    if (registration != null && state != null && liveController(level, controller)) {
+      registration.visuals.working(working);
+      state.enqueue(registration.owner);
     }
   }
 
@@ -914,7 +938,7 @@ public final class StructureService {
       this.owner = owner;
       controller = owner.controller;
       this.pattern = pattern;
-      visuals = new StructureVisualState(pattern);
+      visuals = new StructureVisualState(this);
       epoch = owner.epoch;
       generation = owner.generation;
       sections = List.copyOf(pattern.sections());
@@ -1008,6 +1032,19 @@ public final class StructureService {
       return modifiers.rules();
     }
 
+    /** Observational snapshot only; it does not acquire production authority. */
+    public List<String> activeModifierIds(ServerLevel level) {
+      if (!currentForObservation(level)) {
+        return List.of();
+      }
+
+      return modifiers.activeIds();
+    }
+
+    public List<RecipeModifier> observedRecipeModifiers(ServerLevel level) {
+      return currentForObservation(level) ? modifiers.rules() : List.of();
+    }
+
     public boolean verifyModifierReference(ServerLevel level, StructureModifierTracker.Reference reference) {
       if (!canCommit(level)
           || !reference.belongsTo(pattern.modifierPlan())
@@ -1066,12 +1103,21 @@ public final class StructureService {
 
     public boolean canCommit(ServerLevel level) {
       ServerThreadGuard.require(level, "Structure state accessed");
+      return !SmartInterfaceEventPublisher.isDispatching(controller)
+          && !RecipeLifecyclePublisher.isDispatching()
+          && currentForObservation(level);
+    }
+
+    /**
+     * Current confirmed proofs for immutable queries, including read-only
+     * callbacks.
+     */
+    public boolean currentForObservation(ServerLevel level) {
+      ServerThreadGuard.require(level, "Structure state accessed");
       StructureLevelState state = LEVELS.get(level);
       return valid
           && published
           && !owner.preparing
-          && !SmartInterfaceEventPublisher.isDispatching(controller)
-          && !RecipeLifecyclePublisher.isDispatching()
           && epoch == catalog.epoch()
           && verifier.canCommit()
           && modifiers.canCommit()

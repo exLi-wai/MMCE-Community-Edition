@@ -120,7 +120,10 @@ public final class MachineRecipeService {
       if (source == null || !source.isJsonObject()) {
         throw new IllegalArgumentException(entry.getKey() + ": Missing original recipe declaration");
       }
-      var template = new RecipeModifierTemplate(source.getAsJsonObject(), machine.recipeModifiers());
+      var template = new RecipeModifierTemplate(
+          source.getAsJsonObject(),
+          machine.recipeModifiers(),
+          machine.failureAction());
       templates.put(entry.getKey(), template);
       if (!machine.recipeModifiers().isEmpty()
           || !source.getAsJsonObject().has("parallelized")

@@ -97,7 +97,7 @@ public final class ChemicalTransactions {
     return new Batch(List.copyOf(changes), true);
   }
 
-  static int arithmeticLimit(MachineRecipe definition, int limit) {
+  static int arithmeticLimit(MachineRecipe definition, int limit, boolean aggregate) {
     for (var category : List.of(
         definition.chemicals().inputs(),
         definition.chemicals().outputs(),
@@ -105,6 +105,12 @@ public final class ChemicalTransactions {
         definition.chemicals().perTickOutputs())) {
       var totals = new LinkedHashMap<ChemicalResourceKey, Long>();
       for (var requirement : category) {
+        if (requirement.ignoreOutputCheck()) {
+          if (aggregate) {
+            limit = (int) Math.min(limit, Long.MAX_VALUE / requirement.amount());
+          }
+          continue;
+        }
         totals.merge(
             new ChemicalResourceKey(requirement.chemical(), requirement.selector()),
             requirement.amount(),

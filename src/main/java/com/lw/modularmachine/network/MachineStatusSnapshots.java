@@ -26,7 +26,12 @@ final class MachineStatusSnapshots {
 
   static FactoryStatusPayload factoryStatus(FactoryControllerBlockEntity factory) {
     var threads = factory.scheduler().channels().stream().limit(MAX_FACTORY_THREADS)
-        .map(thread -> threadStatus(thread, factory.run(thread.threadId()).orElse(null))).toList();
+        .map(
+            thread -> threadStatus(
+                thread,
+                factory.run(thread.threadId()).orElse(null),
+                factory.recipeInterfaceFailure(thread.threadId())))
+        .toList();
     return new FactoryStatusPayload(
         PROTOCOL_VERSION,
         factory.getBlockPos(),
@@ -40,7 +45,7 @@ final class MachineStatusSnapshots {
         threads);
   }
 
-  private static FactoryStatusThread threadStatus(FactoryThreadState state, FrozenRecipeRun run) {
+  private static FactoryStatusThread threadStatus(FactoryThreadState state, FrozenRecipeRun run, String recipeFailureMessage) {
     return new FactoryStatusThread(
         state.threadId(),
         state.machineId(),
@@ -61,7 +66,8 @@ final class MachineStatusSnapshots {
         run == null ? new UUID(0, 0) : run.runId(),
         run == null ? "" : run.state().name(),
         run == null ? 0 : run.progress(),
-        run == null ? 0 : run.duration());
+        run == null ? 0 : run.duration(),
+        recipeFailureMessage);
   }
 
   static ResourcePortStatusPayload resourceStatus(MachinePortBlockEntity port) {

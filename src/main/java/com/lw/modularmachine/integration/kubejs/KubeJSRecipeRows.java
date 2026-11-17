@@ -31,6 +31,7 @@ final class KubeJSRecipeRows {
     double chance = 1;
     int consumeDurability;
     boolean parallelUnaffected;
+    boolean ignoreOutputCheck;
     String selector = "";
     String match = "exact";
     ItemStack preview;
@@ -53,6 +54,7 @@ final class KubeJSRecipeRows {
     final long amount;
     String selector = "";
     double chance = 1;
+    boolean ignoreOutputCheck;
 
     ChemicalRow(ResourceLocation chemical, long amount) {
       this.chemical = chemical;
@@ -60,7 +62,7 @@ final class KubeJSRecipeRows {
     }
 
     ChemicalRequirement requirement() {
-      return new ChemicalRequirement(chemical, amount, selector, chance);
+      return new ChemicalRequirement(chemical, amount, selector, chance, ignoreOutputCheck);
     }
   }
 
@@ -70,6 +72,7 @@ final class KubeJSRecipeRows {
     final FluidStack stack;
     double chance = 1;
     boolean parallelUnaffected;
+    boolean ignoreOutputCheck;
     String selector = "";
 
     FluidRow(FluidStack stack) {
@@ -77,11 +80,11 @@ final class KubeJSRecipeRows {
     }
 
     FluidRequirement requirement() {
-      return new FluidRequirement(stack, chance, parallelUnaffected);
+      return new FluidRequirement(stack, chance, parallelUnaffected).withIgnoreOutputCheck(ignoreOutputCheck);
     }
 
     FluidRequirement tickRequirement() {
-      return new FluidRequirement(stack, chance, parallelUnaffected, selector);
+      return new FluidRequirement(stack, chance, parallelUnaffected, selector).withIgnoreOutputCheck(ignoreOutputCheck);
     }
   }
 

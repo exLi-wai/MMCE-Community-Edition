@@ -24,6 +24,7 @@ final class KubeJSScriptRegistration {
   private final EventHandler smartHandlers;
   private final EventHandler recipeHandlers;
   private final EventHandler recipeAdapters;
+  private KubeJSMachineBuilder.Session machineDeclarations;
 
   KubeJSScriptRegistration(EventHandler machineHandlers, EventHandler upgradeHandlers, EventHandler smartHandlers, EventHandler recipeHandlers, EventHandler recipeAdapters) {
     this.machineHandlers = machineHandlers;
@@ -39,7 +40,23 @@ final class KubeJSScriptRegistration {
       return;
     }
     if (manager.scriptType.isServer()) {
-      stageServer(manager);
+      try {
+        stageServer(manager);
+      } finally {
+        if (machineDeclarations != null) {
+          machineDeclarations.abort();
+          machineDeclarations = null;
+        }
+      }
+    }
+  }
+
+  void beforeScriptsLoaded(ScriptManager manager) {
+    if (manager.scriptType.isServer()) {
+      if (machineDeclarations != null) {
+        machineDeclarations.abort();
+      }
+      machineDeclarations = KubeJSMachineBuilder.begin();
     }
   }
 
@@ -60,7 +77,8 @@ final class KubeJSScriptRegistration {
     var machineSmartHandlers = machineRegistration.smartSnapshot();
     var registrations = new KubeJSUpgradeHandlerRegistration();
     var result = upgradeHandlers.post(manager.scriptType, registrations);
-    var next = registrations.valid() && result.pass() ? registrations.snapshot() : UpgradeScriptHandlers.Snapshot.EMPTY;
+    var upgradeSnapshot = registrations.snapshot();
+    var next = registrations.valid() && result.pass() ? upgradeSnapshot : UpgradeScriptHandlers.Snapshot.EMPTY;
     var smartRegistrations = new KubeJSSmartInterfaceRegistration();
     var smartResult = smartHandlers.post(manager.scriptType, smartRegistrations);
     smartRegistrations.seal();
@@ -100,9 +118,19 @@ final class KubeJSScriptRegistration {
             generation,
             machineNext,
             next,
+            registrations.valid() && result.pass() && manager.scriptType.console.errors.isEmpty(),
             smartNext,
             recipeNext,
             failurePolicies,
             recipeCommands));
+    if (machineDeclarations != null
+        && manager.scriptType.console.errors.isEmpty()
+        && machineResult.pass()
+        && result.pass()
+        && smartResult.pass()
+        && recipeResult.pass()
+        && adapterResult.pass()) {
+      machineDeclarations.closeAndPublish();
+    }
   }
 }

@@ -18,8 +18,18 @@ import net.minecraft.world.item.ItemStack;
 @ApiStatus.Internal
 public final class UpgradeEntryResolver {
   private static final String MARKER = "mmcece:factory_upgrade";
+  public static final String TYPE_MARKER = "mmcece:upgrade_type";
 
   private UpgradeEntryResolver() {
+  }
+
+  public static ResourceLocation typeIdentifier(ItemStack stack) {
+    var data = stack.get(DataComponents.CUSTOM_DATA);
+    if (data == null) {
+      return null;
+    }
+    var tag = data.copyTag();
+    return tag.contains(TYPE_MARKER, Tag.TAG_STRING) ? ResourceLocation.tryParse(tag.getString(TYPE_MARKER)) : null;
   }
 
   public static Optional<UpgradeEntry> resolve(ItemStack stack) {
@@ -67,7 +77,7 @@ public final class UpgradeEntryResolver {
     if (selected != null && !selected.item().equals(stack.getItem().builtInRegistryHolder().key().location())) {
       return Optional.empty();
     }
-    if (!isMarked(stack)) {
+    if (typeIdentifier(stack) != null || !isMarked(stack)) {
       try {
         return selected == null ? Optional.empty() : Optional.of(selected.effect().multipliedBy(stack.getCount()));
       } catch (IllegalArgumentException | ArithmeticException invalid) {
@@ -107,8 +117,9 @@ public final class UpgradeEntryResolver {
     var snapshot = UpgradeCatalogService.snapshot();
     var selected = snapshot.match(stack).orElse(null);
 
-    return selected == null ? !snapshot.byItem().containsKey(
-        stack.getItem().builtInRegistryHolder().key().location()) : selected.compatibility().allows(machine);
+    return selected == null ? typeIdentifier(stack) == null
+        && !snapshot.byItem().containsKey(stack.getItem().builtInRegistryHolder().key().location()) : selected
+            .compatibility().allows(machine);
   }
 
   public static Optional<UpgradeEntry> resolve(ItemStack stack, ResourceLocation machine) {

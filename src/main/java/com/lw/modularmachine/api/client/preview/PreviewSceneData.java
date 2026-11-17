@@ -6,6 +6,8 @@ import java.util.Objects;
 import net.minecraft.core.BlockPos;
 import net.minecraft.world.level.block.state.BlockState;
 import net.minecraft.world.phys.AABB;
+import java.util.Collections;
+import net.minecraft.nbt.CompoundTag;
 
 /**
  * Immutable structure input independent of network payloads and recipe viewers.
@@ -20,14 +22,33 @@ public record PreviewSceneData(int machineColor, List<Entry> entries) {
    * Candidate counts have no per-position cap; producers retain their overall
    * resource budgets.
    */
-  public record Entry(BlockPos position, List<BlockState> states, List<String> properties) {
+  public record Entry(
+      BlockPos position,
+      List<BlockState> states,
+      List<String> properties,
+      List<PreviewBlockData> previewTags) {
+    public Entry(BlockPos position, List<BlockState> states, List<String> properties) {
+      this(position, states, properties, Collections.nCopies(states.size(), PreviewBlockData.EMPTY));
+    }
+
+    public Entry(BlockPos position, List<BlockState> states, List<String> properties, CompoundTag previewData) {
+      this(position, states, properties, Collections.nCopies(states.size(), PreviewBlockData.of(previewData)));
+    }
+
     public Entry {
       position = Objects.requireNonNull(position, "position").immutable();
       states = List.copyOf(states);
       properties = List.copyOf(properties);
-      if (properties.size() > 64) {
+      previewTags = List.copyOf(previewTags);
+      if (properties.size() > 64
+          || previewTags.size() != states.size()
+          || previewTags.stream().mapToLong(PreviewBlockData::sizeInBytes).sum() > 4_194_304L) {
         throw new IllegalArgumentException("Too many preview constraints");
       }
+    }
+
+    public PreviewBlockData previewData(int step) {
+      return previewTags.isEmpty() ? PreviewBlockData.EMPTY : previewTags.get(Math.floorMod(step, previewTags.size()));
     }
 
     /** Tests declared constraints without consulting a live world. */

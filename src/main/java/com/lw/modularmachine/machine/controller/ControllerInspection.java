@@ -88,7 +88,8 @@ public final class ControllerInspection {
             controller.successfulTransfers(),
             controller.bindingRebuilds(),
             controller.recipeRunStatus(),
-            run));
+            run,
+            controller.recipeInterfaceFailure()));
   }
 
   private static Optional<RecipeInputDiagnostic> recipeInputDiagnostic(MachineControllerBlockEntity controller) {

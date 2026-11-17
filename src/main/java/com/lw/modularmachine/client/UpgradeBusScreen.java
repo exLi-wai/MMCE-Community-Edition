@@ -122,6 +122,9 @@ public final class UpgradeBusScreen extends AbstractContainerScreen<UpgradeBusMe
           status.conflicts(),
           textWidth);
     }
+    for (var line : status.descriptions()) {
+      result.addAll(font.split(Component.translatable(line), textWidth));
+    }
     cachedStatus = status;
     cachedLanguage = language;
     cachedDescription = List.copyOf(result);

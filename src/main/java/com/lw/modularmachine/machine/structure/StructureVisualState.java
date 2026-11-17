@@ -3,6 +3,8 @@ package com.lw.modularmachine.machine.structure;
 import com.lw.modularmachine.api.component.MachineColorable;
 import com.lw.modularmachine.machine.appearance.MachineComponentType;
 import com.lw.modularmachine.machine.appearance.MachineComponentVisibility;
+import com.lw.modularmachine.block.StatedMachineComponentBlock;
+import java.util.BitSet;
 import net.minecraft.server.level.ServerLevel;
 import org.jetbrains.annotations.ApiStatus;
 
@@ -12,15 +14,20 @@ import org.jetbrains.annotations.ApiStatus;
  */
 @ApiStatus.Internal
 final class StructureVisualState {
+  private final StructureService.Registration registration;
   private final CompiledStructure pattern;
   private int colorCursor;
   private boolean colorsComplete;
   private int visibilityCursor;
   private boolean visibilityComplete;
   private MachineComponentVisibility.Session visibility;
+  private final BitSet statedParts = new BitSet();
+  private int workingCursor;
+  private boolean working;
 
-  StructureVisualState(CompiledStructure pattern) {
-    this.pattern = pattern;
+  StructureVisualState(StructureService.Registration registration) {
+    this.registration = registration;
+    pattern = registration.pattern;
   }
 
   boolean colorsComplete() {
@@ -35,6 +42,40 @@ final class StructureVisualState {
     return visibility != null;
   }
 
+  boolean workingComplete() {
+    return statedParts.nextSetBit(workingCursor) < 0;
+  }
+
+  void working(boolean value) {
+    if (working != value) {
+      working = value;
+      workingCursor = 0;
+    }
+  }
+
+  int advanceWorking(ServerLevel level, int budget) {
+    int used = 0;
+    int part;
+    while (used < budget && (part = statedParts.nextSetBit(workingCursor)) >= 0) {
+      workingCursor = part + 1;
+      var position = pattern.position(part);
+      used++;
+      if (!level.hasChunkAt(position)) {
+        continue;
+      }
+      var state = level.getBlockState(position);
+      if (state.getBlock() instanceof StatedMachineComponentBlock) {
+        var next = state.setValue(
+            StatedMachineComponentBlock.WORKING_STATE,
+            working ? StatedMachineComponentBlock.WorkingState.WORKING : StatedMachineComponentBlock.WorkingState.IDLE);
+        if (next != state) {
+          StructureChangeRouter.publishWorkingState(level, registration, part, state, next);
+        }
+      }
+    }
+    return used;
+  }
+
   void setVisibilityActive(boolean active) {
     visibility.active(active);
   }
@@ -42,6 +83,9 @@ final class StructureVisualState {
   void resetColors() {
     colorCursor = 0;
     colorsComplete = false;
+    // Keep discovered positions until this generation retires: a rescan must
+    // not forget components whose working appearance still needs clearing.
+    workingCursor = 0;
     resetVisibility();
   }
 
@@ -89,7 +133,14 @@ final class StructureVisualState {
   int advanceColors(ServerLevel level, int budget) {
     int used = 0;
     while (used < budget && colorCursor < pattern.definition.parts().size()) {
-      var position = pattern.position(colorCursor++);
+      int index = colorCursor++;
+      var position = pattern.position(index);
+      if (level.getBlockState(position).getBlock() instanceof StatedMachineComponentBlock) {
+        if (!statedParts.get(index)) {
+          statedParts.set(index);
+          workingCursor = Math.min(workingCursor, index);
+        }
+      }
       if (level.getBlockEntity(position) instanceof MachineColorable colorable
           && (!colorable.machineColorAssigned() || colorable.machineColor() != pattern.definition.color())) {
         colorable.setMachineColor(pattern.definition.color());

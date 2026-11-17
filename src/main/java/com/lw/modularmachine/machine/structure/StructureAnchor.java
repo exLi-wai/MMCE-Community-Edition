@@ -45,7 +45,8 @@ final class StructureAnchor implements StructureWork {
         && (preparing
             || draft != null
             || registration != null
-                && (registration.verifier.state() == VerificationState.PENDING
+                && (!registration.visuals.workingComplete()
+                    || registration.verifier.state() == VerificationState.PENDING
                     || registration.valid
                         && registration.verifier.canCommit()
                         && registration.modifiers.canCommit()

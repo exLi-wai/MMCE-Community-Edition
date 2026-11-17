@@ -209,6 +209,23 @@ public final class RecipeExecutionTicket {
     return true;
   }
 
+  public String interfaceFailureMessage(List<SmartNumberRequirement> requirements) {
+    requireServerThread();
+    var definition = proof.registration.pattern.definition;
+    for (var requirement : requirements) {
+      var values = proof.interfaces.stream().filter(snapshot -> snapshot.binding().type().equals(requirement.type()))
+          .toList();
+      if (!values.isEmpty() && values.stream().noneMatch(snapshot -> requirement.matches(snapshot.binding().value()))) {
+        var type = definition.interfaceTypes().get(requirement.type());
+        if (type != null && !type.notEqualMessage().isEmpty()) {
+          return type.notEqualMessage();
+        }
+      }
+    }
+
+    return "";
+  }
+
   public long structureRevision() {
     return proof.structureRevision;
   }

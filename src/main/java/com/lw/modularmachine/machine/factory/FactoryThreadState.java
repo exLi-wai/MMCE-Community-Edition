@@ -3,6 +3,7 @@ package com.lw.modularmachine.machine.factory;
 import com.lw.modularmachine.api.upgrade.UpgradeSnapshot;
 import java.util.Objects;
 import net.minecraft.resources.ResourceLocation;
+import com.lw.modularmachine.api.recipe.RecipeExecutionOptions;
 
 /**
  * Immutable independent logical recipe-thread state owned by a factory
@@ -25,7 +26,7 @@ public record FactoryThreadState(
 
   public FactoryThreadState {
     if (threadId == null
-        || !threadId.matches("[a-zA-Z0-9_.-]{1,64}")
+        || !RecipeExecutionOptions.validThreadName(threadId)
         || machineId == null
         || priority < MIN_PRIORITY
         || priority > MAX_PRIORITY

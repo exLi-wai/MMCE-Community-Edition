@@ -5,6 +5,7 @@ import com.lw.modularmachine.api.controller.VerificationState;
 import com.lw.modularmachine.block.ParallelControllerBlock;
 import com.lw.modularmachine.block.PatternProviderBlock;
 import com.lw.modularmachine.block.PatternMirrorBlock;
+import com.lw.modularmachine.block.StatedMachineComponentBlock;
 import com.lw.modularmachine.blockentity.PatternProviderBlockEntity;
 import com.lw.modularmachine.blockentity.PatternMirrorBlockEntity;
 import com.lw.modularmachine.blockentity.MachinePortBlockEntity;
@@ -16,6 +17,7 @@ import com.lw.modularmachine.machine.orientation.OrientationCompilation;
 import com.lw.modularmachine.machine.orientation.PropertySpace;
 import java.util.ArrayList;
 import java.util.Arrays;
+import java.util.BitSet;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
@@ -51,6 +53,7 @@ public final class CompiledStructure {
   private final Rotation inverseRotation;
   private final List<MachineDefinition.Rule> resolvedRules;
   private final StructureModifierTracker.Plan modifierPlan;
+  private final BitSet workingSensitiveParts;
 
   public CompiledStructure(MachineDefinition definition, BlockPos origin, Direction facing) {
     this(definition, origin, MachineOrientation.of(facing, 0));
@@ -80,6 +83,7 @@ public final class CompiledStructure {
     rotateProperties = data.rotateProperties;
     resolvedRules = data.rules;
     modifierPlan = data.modifiers;
+    workingSensitiveParts = data.workingSensitiveParts;
     inverseRotation = definition.parts().stream().anyMatch(
         part -> part.propertiesSpace() == PropertySpace.LEGACY
             && part.rule().alternatives().stream()
@@ -142,7 +146,7 @@ public final class CompiledStructure {
       }
       indices.get(group).add(index);
       var part = definition.parts().get(index);
-      if (part.field() != null) {
+      if (watchesContents(part) || modifierPlan.contentParts.contains(index)) {
         contents.put(pos, group);
       }
       if (part.rule().port() == PortKind.ENERGY_INPUT) {
@@ -172,6 +176,7 @@ public final class CompiledStructure {
             rotateProperties,
             resolvedRules,
             modifierPlan,
+            workingSensitiveParts,
             lowX,
             lowY,
             lowZ,
@@ -204,6 +209,7 @@ public final class CompiledStructure {
       boolean[] rotateProperties,
       List<MachineDefinition.Rule> rules,
       StructureModifierTracker.Plan modifiers,
+      BitSet workingSensitiveParts,
       int minX,
       int minY,
       int minZ,
@@ -227,6 +233,7 @@ public final class CompiledStructure {
     private final Map<BlockPos, Integer> contents = new LinkedHashMap<>();
     private final List<List<Integer>> groupIndices = new ArrayList<>();
     private final boolean[] rotateProperties;
+    private final BitSet workingSensitiveParts = new BitSet();
     private int cursor;
     private int minX = Integer.MAX_VALUE, minY = Integer.MAX_VALUE, minZ = Integer.MAX_VALUE;
     private int maxX = Integer.MIN_VALUE, maxY = Integer.MIN_VALUE, maxZ = Integer.MIN_VALUE;
@@ -275,6 +282,10 @@ public final class CompiledStructure {
       used += modifiers.advance(budget - used);
       while (used < budget && cursor < definition.parts().size()) {
         var part = definition.parts().get(cursor);
+        if (watchesWorkingState(rules.result().get(cursor), part.scriptCondition())
+            || modifiers.result().workingSensitiveParts.contains(cursor)) {
+          workingSensitiveParts.set(cursor);
+        }
         BlockPos offset = orientation.toWorldOffset(part.offset());
         BlockPos position = new BlockPos(
             Math.addExact(origin.getX(), offset.getX()),
@@ -289,7 +300,7 @@ public final class CompiledStructure {
           groupIndices.add(new ArrayList<>());
         }
         groupIndices.get(group).add(cursor);
-        if (part.field() != null) {
+        if (watchesContents(part) || modifiers.result().contentParts.contains(cursor)) {
           contents.put(position, group);
         }
         if (part.rule().port() == PortKind.ENERGY_INPUT) {
@@ -328,6 +339,7 @@ public final class CompiledStructure {
             rotateProperties,
             rules.result(),
             modifiers.result(),
+            workingSensitiveParts,
             minX,
             minY,
             minZ,
@@ -370,6 +382,9 @@ public final class CompiledStructure {
       state = state.rotate(inverse);
     }
     if (!rule.matches(state)) {
+      return CheckResult.MISMATCH;
+    }
+    if (part.scriptCondition() != null && !part.scriptCondition().matches(level, pos, level.getBlockState(pos))) {
       return CheckResult.MISMATCH;
     }
     if (part.rule().port() != null) {
@@ -442,6 +457,21 @@ public final class CompiledStructure {
 
   StructureModifierTracker.Plan modifierPlan() {
     return modifierPlan;
+  }
+
+  boolean watchesWorkingState(int part) {
+    return workingSensitiveParts.get(part);
+  }
+
+  static boolean watchesWorkingState(MachineDefinition.Rule rule, StructureScriptChecks.Condition script) {
+    return script != null && script.needsData()
+        || rule != null
+            && rule.alternatives().stream().anyMatch(
+                alternative -> alternative.properties().containsKey(StatedMachineComponentBlock.WORKING_STATE));
+  }
+
+  static boolean watchesContents(MachineDefinition.Part part) {
+    return part.field() != null || part.scriptCondition() != null && part.scriptCondition().needsData();
   }
 
   /**

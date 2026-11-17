@@ -43,6 +43,7 @@ import net.minecraft.nbt.CompoundTag;
 import com.lw.modularmachine.api.recipe.ItemPaymentData;
 import com.lw.modularmachine.api.recipe.RecipeModifier;
 import java.util.stream.IntStream;
+import com.lw.modularmachine.api.recipe.ChemicalRequirement;
 
 /**
  * Native data definition. This recipe cannot assemble through a crafting grid
@@ -82,7 +83,8 @@ public final class MachineRecipe implements Recipe<RecipeInput> {
                     .forGetter(value -> value.preview),
                 Codec.BOOL.optionalFieldOf("parallel_unaffected", false).forGetter(ItemAmount::parallelUnaffected),
                 Codec.LONG.optionalFieldOf("min_amount", 0L).forGetter(value -> value.minAmount),
-                Codec.LONG.optionalFieldOf("max_amount", 0L).forGetter(value -> value.maxAmount))
+                Codec.LONG.optionalFieldOf("max_amount", 0L).forGetter(value -> value.maxAmount),
+                Codec.BOOL.optionalFieldOf("ignore_output_check", false).forGetter(ItemAmount::ignoreOutputCheck))
             .apply(instance, ItemAmount::new));
     private final ItemStack prototype;
     private final long amount;
@@ -93,8 +95,9 @@ public final class MachineRecipe implements Recipe<RecipeInput> {
     private final boolean parallelUnaffected;
     private final long minAmount;
     private final long maxAmount;
+    private final boolean ignoreOutputCheck;
 
-    private ItemAmount(ItemStack prototype, long amount, double chance, String selector, String match, ItemStack preview, boolean parallelUnaffected, long minAmount, long maxAmount) {
+    private ItemAmount(ItemStack prototype, long amount, double chance, String selector, String match, ItemStack preview, boolean parallelUnaffected, long minAmount, long maxAmount, boolean ignoreOutputCheck) {
       if (prototype.isEmpty()
           || prototype.getCount() != 1
           || amount <= 0
@@ -117,6 +120,7 @@ public final class MachineRecipe implements Recipe<RecipeInput> {
       this.parallelUnaffected = parallelUnaffected;
       this.minAmount = minAmount;
       this.maxAmount = maxAmount;
+      this.ignoreOutputCheck = ignoreOutputCheck;
     }
 
     public String match() {
@@ -147,6 +151,10 @@ public final class MachineRecipe implements Recipe<RecipeInput> {
       return parallelUnaffected;
     }
 
+    public boolean ignoreOutputCheck() {
+      return ignoreOutputCheck;
+    }
+
     public ItemStack prototype(HolderLookup.Provider registries) {
       return ItemStackSnapshots.detached(prototype, registries);
     }
@@ -170,6 +178,7 @@ public final class MachineRecipe implements Recipe<RecipeInput> {
               && amount == value.amount
               && chance == value.chance
               && parallelUnaffected == value.parallelUnaffected
+              && ignoreOutputCheck == value.ignoreOutputCheck
               && minAmount == value.minAmount
               && maxAmount == value.maxAmount
               && selector.equals(value.selector)
@@ -191,6 +200,7 @@ public final class MachineRecipe implements Recipe<RecipeInput> {
           preview.getComponents(),
           preview.getCount(),
           parallelUnaffected,
+          ignoreOutputCheck,
           minAmount,
           maxAmount);
     }
@@ -284,6 +294,15 @@ public final class MachineRecipe implements Recipe<RecipeInput> {
     }
     validateAmounts(inputs());
     validateAmounts(outputs());
+    if (inputs().stream().anyMatch(ItemAmount::ignoreOutputCheck)
+        || fluidInputRequirements().stream().anyMatch(FluidRequirement::ignoreOutputCheck)
+        || fluidPerTickInputs().stream().anyMatch(FluidRequirement::ignoreOutputCheck)
+        || fluidPerTickOutputs().stream().anyMatch(FluidRequirement::ignoreOutputCheck)
+        || chemicals().inputs().stream().anyMatch(ChemicalRequirement::ignoreOutputCheck)
+        || chemicals().perTick().stream().anyMatch(ChemicalRequirement::ignoreOutputCheck)
+        || chemicals().perTickOutputs().stream().anyMatch(ChemicalRequirement::ignoreOutputCheck)) {
+      throw new IllegalArgumentException("Ignored output capacity is supported only by completion output rows");
+    }
     if (!resourceData.hasInputs()
         && extras.ingredientArrays().inputs().stream().noneMatch(group -> !group.optional())
         && extras.triggeredResources().rows().stream().noneMatch(row -> row.io() == RecipeModifier.Io.INPUT)
@@ -312,7 +331,9 @@ public final class MachineRecipe implements Recipe<RecipeInput> {
     }
     var totals = new HashMap<StackIdentity, Long>();
     for (var value : values) {
-      totals.merge(new StackIdentity(value.prototype, value.selector), value.amount, Math::addExact);
+      if (!value.ignoreOutputCheck) {
+        totals.merge(new StackIdentity(value.prototype, value.selector), value.amount, Math::addExact);
+      }
     }
   }
 
@@ -392,8 +413,8 @@ public final class MachineRecipe implements Recipe<RecipeInput> {
    * completion.
    */
   List<FluidStack> guaranteedFluidOutputs() {
-    return fluidOutputRequirements().stream().filter(output -> output.chance() == 1.0D).map(FluidRequirement::stack)
-        .toList();
+    return fluidOutputRequirements().stream().filter(output -> output.chance() == 1.0D && !output.ignoreOutputCheck())
+        .map(FluidRequirement::stack).toList();
   }
 
   public List<FluidRequirement> fluidInputRequirements() {
@@ -455,7 +476,8 @@ public final class MachineRecipe implements Recipe<RecipeInput> {
                 value -> new RecipeCandidate.Output<>(
                     ItemResourceKey.of(value.prototype, registries).withSelector(value.selector),
                     value.amount,
-                    value.parallelUnaffected))
+                    value.parallelUnaffected,
+                    value.ignoreOutputCheck))
             .toList(),
         interfaceInputs);
   }
@@ -485,13 +507,13 @@ public final class MachineRecipe implements Recipe<RecipeInput> {
     if (!(encoded instanceof CompoundTag tag)) {
       throw new IllegalArgumentException("Machine recipe codec did not produce a compound");
     }
-    buffer.writeVarInt(16);
+    buffer.writeVarInt(17);
     buffer.writeNbt(tag);
   }
 
   private static MachineRecipe read(RegistryFriendlyByteBuf buffer) {
     try {
-      if (buffer.readVarInt() != 16) {
+      if (buffer.readVarInt() != 17) {
         throw new DecoderException("Unsupported machine recipe wire schema");
       }
       var encoded = buffer.readNbt();

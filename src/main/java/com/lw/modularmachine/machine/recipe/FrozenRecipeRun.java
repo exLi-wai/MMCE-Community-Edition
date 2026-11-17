@@ -28,6 +28,7 @@ import net.minecraft.world.item.ItemStack;
 import net.neoforged.neoforge.fluids.FluidStack;
 import com.lw.modularmachine.api.recipe.TriggeredResourceData;
 import org.jetbrains.annotations.ApiStatus;
+import com.lw.modularmachine.api.recipe.FluidRequirement;
 
 /**
  * Immutable paid-run state. Payload is shared privately between transitions; no
@@ -401,7 +402,9 @@ public final class FrozenRecipeRun {
               ItemResourceKey.of(stack, registries).withSelector(row.getString("selector")),
               MachineRecipeJson.integer(
                   NbtOps.INSTANCE.convertTo(JsonOps.INSTANCE, row.get("amount")),
-                  "$.outputs[" + i + "].amount")));
+                  "$.outputs[" + i + "].amount"),
+              false,
+              row.getBoolean("ignore_output_check")));
     }
     return List.copyOf(result);
   }
@@ -419,7 +422,9 @@ public final class FrozenRecipeRun {
       result.add(
           new RecipeCandidate.Output<>(
               ItemResourceKey.of(stack, registries).withSelector(row.getString("selector")),
-              row.getLong("amount")));
+              row.getLong("amount"),
+              false,
+              row.getBoolean("ignore_output_check")));
     }
     return List.copyOf(result);
   }
@@ -453,14 +458,18 @@ public final class FrozenRecipeRun {
   }
 
   public List<FluidStack> fluidOutputClaims(HolderLookup.Provider registries) {
+    return fluidOutputRequirements(registries).stream().map(FluidRequirement::stack).toList();
+  }
+
+  public List<FluidRequirement> fluidOutputRequirements(HolderLookup.Provider registries) {
     if (!pendingOutput()) {
       throw new IllegalStateException("Outputs have not been generated");
     }
     var rows = data.getList("fluid_outputs", Tag.TAG_COMPOUND);
-    var result = new ArrayList<FluidStack>();
+    var result = new ArrayList<FluidRequirement>();
     for (int i = 0; i < rows.size(); i++) {
       result.add(
-          FluidStack.CODEC.parse(registries.createSerializationContext(NbtOps.INSTANCE), rows.getCompound(i))
+          FluidRequirement.CODEC.parse(registries.createSerializationContext(NbtOps.INSTANCE), rows.getCompound(i))
               .getOrThrow());
     }
     return List.copyOf(result);

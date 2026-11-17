@@ -59,7 +59,8 @@ final class FluidRecipeSearchResource implements RecipeSearchResource {
         var requiredInputs = definition == null ? inputs.getOrDefault(recipeId, List.of()) : definition
             .fluidInputRequirements().stream().map(FluidRequirement::stack).toList();
         var requiredOutputs = definition == null ? outputs.getOrDefault(recipeId, List.of()) : definition
-            .fluidOutputRequirements().stream().filter(row -> row.chance() == 1).map(FluidRequirement::stack).toList();
+            .fluidOutputRequirements().stream().filter(row -> row.chance() == 1 && !row.ignoreOutputCheck())
+            .map(FluidRequirement::stack).toList();
 
         return fluids.inputsAvailable(requiredInputs, selectors.fluidInput())
             && fluids.outputsAvailable(requiredOutputs, selectors.fluidOutput());
@@ -71,7 +72,8 @@ final class FluidRecipeSearchResource implements RecipeSearchResource {
           layout = new FluidOutputLayout(ticket, ticket.level().registryAccess());
         }
         var required = definition == null ? outputs.getOrDefault(recipeId, List.of()) : definition
-            .fluidOutputRequirements().stream().filter(row -> row.chance() == 1).map(FluidRequirement::stack).toList();
+            .fluidOutputRequirements().stream().filter(row -> row.chance() == 1 && !row.ignoreOutputCheck())
+            .map(FluidRequirement::stack).toList();
         var planning = layout.plan(
             required,
             definition == null ? catalog.selectors(recipeId).fluidOutput() : definition.selectors().fluidOutput());

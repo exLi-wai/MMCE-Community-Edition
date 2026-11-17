@@ -15,23 +15,34 @@ import java.util.Map;
 import java.util.function.IntFunction;
 import net.minecraft.server.level.ServerLevel;
 import net.minecraft.world.level.block.state.BlockState;
+import java.util.Set;
+import java.util.function.IntPredicate;
+import java.util.stream.Collectors;
 
 /**
  * Optional predicates share structure subscriptions and budget; their
  * mismatches mean inactive, not invalid.
  */
 public final class StructureModifierTracker {
-  record Condition(int part, int group, MachineDefinition.Rule rule) {
+  record Condition(int part, int group, MachineDefinition.Rule rule, StructureScriptChecks.Condition script) {
   }
 
   static final class Plan {
     final List<StructureModifierDefinition> groups;
     final List<Condition> conditions;
     final Map<Integer, List<Integer>> replacements;
+    final Set<Integer> contentParts;
+    final Set<Integer> workingSensitiveParts;
 
     Plan(List<StructureModifierDefinition> groups, List<Condition> conditions) {
       this.groups = List.copyOf(groups);
       this.conditions = List.copyOf(conditions);
+      contentParts = conditions.stream()
+          .filter(condition -> condition.script() != null && condition.script().needsData()).map(Condition::part)
+          .collect(Collectors.toUnmodifiableSet());
+      workingSensitiveParts = conditions.stream()
+          .filter(condition -> CompiledStructure.watchesWorkingState(condition.rule(), condition.script()))
+          .map(Condition::part).collect(Collectors.toUnmodifiableSet());
       var mutable = new HashMap<Integer, List<Integer>>();
       for (int group = 0; group < groups.size(); group++) {
         if (groups.get(group).allowReplacement()) {
@@ -51,8 +62,11 @@ public final class StructureModifierTracker {
         return CheckResult.UNAVAILABLE;
       }
 
+      var state = level.getBlockState(position);
       return condition.rule() != null
-          && condition.rule().matches(level.getBlockState(position)) ? CheckResult.MATCH : CheckResult.MISMATCH;
+          && condition.rule().matches(state)
+          && (condition.script() == null
+              || condition.script().matches(level, position, state)) ? CheckResult.MATCH : CheckResult.MISMATCH;
     }
 
     Reference reference(ServerLevel level, CompiledStructure pattern) {
@@ -89,10 +103,15 @@ public final class StructureModifierTracker {
     }
 
     Reference referenceSnapshot(IntFunction<BlockState> states) {
+      return referenceSnapshot(states, ignored -> false);
+    }
+
+    Reference referenceSnapshot(IntFunction<BlockState> states, IntPredicate scripts) {
       var active = new boolean[groups.size()];
       Arrays.fill(active, true);
       int checks = 0;
-      for (var condition : conditions) {
+      for (int index = 0; index < conditions.size(); index++) {
+        var condition = conditions.get(index);
         var state = states.apply(condition.part());
         checks++;
         if (state == null) {
@@ -104,7 +123,9 @@ public final class StructureModifierTracker {
               condition.part(),
               checks);
         }
-        active[condition.group()] &= condition.rule() != null && condition.rule().matches(state);
+        active[condition.group()] &= condition.rule() != null
+            && condition.rule().matches(state)
+            && (condition.script() == null || scripts.test(index));
       }
       var rules = new ArrayList<RecipeModifier>();
       for (int index = 0; index < groups.size(); index++) {
@@ -206,7 +227,11 @@ public final class StructureModifierTracker {
           }
         }
         conditions.add(
-            new Condition(current.partIndices().get(part), group, supported ? preparation.result().get(part) : null));
+            new Condition(
+                current.partIndices().get(part),
+                group,
+                supported ? preparation.result().get(part) : null,
+                current.conditions().get(part).scriptCondition()));
         used++;
         if (++part == current.partIndices().size()) {
           part = 0;
@@ -374,5 +399,19 @@ public final class StructureModifierTracker {
     }
 
     return rules;
+  }
+
+  List<String> activeIds() {
+    if (!canCommit()) {
+      throw new IllegalStateException("Structure modifier proof is pending or invalid");
+    }
+    var ids = new ArrayList<String>();
+    for (int index = 0; index < active.length; index++) {
+      if (active[index]) {
+        ids.add(plan.groups.get(index).id());
+      }
+    }
+
+    return List.copyOf(ids);
   }
 }

@@ -51,6 +51,7 @@ public final class DynamicStructureMatcher {
   private final BlockPos origin;
   private final MachineOrientation orientation;
   private final List<Segment> segments;
+  private final long workingSensitiveSegments;
   private final Map<String, Integer> lengths = new LinkedHashMap<>();
   private int segmentIndex, count, cursor;
   private long pendingSegments;
@@ -71,7 +72,26 @@ public final class DynamicStructureMatcher {
               probes(segment.end(), segment.endCompilation(), orientation)));
     }
     segments = List.copyOf(prepared);
+    long sensitive = 0;
+    for (int index = 0; index < segments.size(); index++) {
+      var segment = segments.get(index);
+      if (watchesWorkingState(segment.start())
+          || watchesWorkingState(segment.body())
+          || watchesWorkingState(segment.end())) {
+        sensitive |= 1L << index;
+      }
+    }
+    workingSensitiveSegments = sensitive;
     pendingSegments = segments.isEmpty() ? 0 : -1L >>> (64 - segments.size());
+  }
+
+  private static boolean watchesWorkingState(List<Probe> probes) {
+    return probes.stream()
+        .anyMatch(probe -> CompiledStructure.watchesWorkingState(probe.rule(), probe.part().scriptCondition()));
+  }
+
+  boolean watchesWorkingState(long affected) {
+    return (workingSensitiveSegments & affected) != 0;
   }
 
   private static List<Probe> probes(List<MachineDefinition.Part> parts, OrientationCompilation compilation, MachineOrientation orientation) {
@@ -144,7 +164,7 @@ public final class DynamicStructureMatcher {
         // and orientation use the owner's gate, not visual-state subscriptions.
         result = CheckResult.MISMATCH;
       } else {
-        watch.accept(segmentIndex, position, probe.part().field() != null);
+        watch.accept(segmentIndex, position, CompiledStructure.watchesContents(probe.part()));
         result = check.check(position, probe.part(), probe.rule(), probe.inverse());
       }
       used++;

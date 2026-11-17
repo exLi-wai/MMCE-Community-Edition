@@ -71,6 +71,11 @@ public final class MMCECEKubeJSPlugin implements KubeJSPlugin {
   }
 
   @Override
+  public void beforeScriptsLoaded(ScriptManager manager) {
+    SCRIPT_REGISTRATION.beforeScriptsLoaded(manager);
+  }
+
+  @Override
   public void afterScriptsLoaded(ScriptManager manager) {
     SCRIPT_REGISTRATION.afterScriptsLoaded(manager);
   }

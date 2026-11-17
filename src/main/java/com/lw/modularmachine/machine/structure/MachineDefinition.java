@@ -38,6 +38,7 @@ import net.minecraft.world.phys.AABB;
 import net.minecraft.world.level.block.Block;
 import net.minecraft.world.level.block.state.BlockState;
 import net.minecraft.world.level.block.state.properties.Property;
+import com.lw.modularmachine.api.recipe.RecipeFailureAction;
 
 /**
  * Immutable machine declarations and resolved dynamic layouts. The declared
@@ -69,9 +70,18 @@ public record MachineDefinition(
     boolean hasFactory,
     boolean parallelizable,
     int maximumFactoryThreads,
-    List<RecipeAdapterImport> recipeAdapters) {
+    List<RecipeAdapterImport> recipeAdapters,
+    String prefix,
+    RecipeFailureAction failureAction) {
 
   public static final int MAX_PARTS = Integer.MAX_VALUE;
+
+  public MachineDefinition(ResourceLocation id, String translationKey, List<Part> parts, long energyPerTick, OrientationPolicy orientationPolicy, OrientationCompilation orientationCompilation, FactoryThreadPreset factoryPreset, List<RecipeModifier> recipeModifiers, List<StructureModifierDefinition> structureModifiers, Map<String, SmartInterfaceType> interfaceTypes, int internalParallelism, int maxParallelism, boolean requiresBlueprint, boolean factoryOnly, int color, boolean hideComponentsWhenFormed, AABB controllerBoundingBox, List<DynamicPatternDefinition> dynamicPatterns, Map<String, Integer> dynamicLengths, MachineDefinition source, Set<MachineComponentType> hiddenComponentTypes, boolean hasFactory, boolean parallelizable, int maximumFactoryThreads, List<RecipeAdapterImport> recipeAdapters) {
+    this(id, translationKey, parts, energyPerTick, orientationPolicy, orientationCompilation, factoryPreset,
+        recipeModifiers, structureModifiers, interfaceTypes, internalParallelism, maxParallelism, requiresBlueprint,
+        factoryOnly, color, hideComponentsWhenFormed, controllerBoundingBox, dynamicPatterns, dynamicLengths, source,
+        hiddenComponentTypes, hasFactory, parallelizable, maximumFactoryThreads, recipeAdapters, "", null);
+  }
 
   public MachineDefinition(ResourceLocation id, String translationKey, List<Part> parts, long energyPerTick, OrientationPolicy orientationPolicy, OrientationCompilation orientationCompilation, FactoryThreadPreset factoryPreset, List<RecipeModifier> recipeModifiers, List<StructureModifierDefinition> structureModifiers, Map<String, SmartInterfaceType> interfaceTypes, int internalParallelism, int maxParallelism, boolean requiresBlueprint, boolean factoryOnly, int color, boolean hideComponentsWhenFormed, AABB controllerBoundingBox, List<DynamicPatternDefinition> dynamicPatterns, Map<String, Integer> dynamicLengths, MachineDefinition source, Set<MachineComponentType> hiddenComponentTypes, boolean hasFactory, boolean parallelizable, int maximumFactoryThreads) {
     this(id, translationKey, parts, energyPerTick, orientationPolicy, orientationCompilation, factoryPreset,
@@ -143,6 +153,8 @@ public record MachineDefinition(
   }
 
   public MachineDefinition {
+    if (prefix == null || prefix.length() > 512)
+      throw new IllegalArgumentException("Machine prefix exceeds 512 characters");
     recipeAdapters = List.copyOf(recipeAdapters);
     RecipeAdapterDefinitions.validate(recipeAdapters);
     hiddenComponentTypes = Set.copyOf(hiddenComponentTypes);
@@ -161,7 +173,7 @@ public record MachineDefinition(
     Objects.requireNonNull(orientationPolicy, "orientationPolicy");
     Objects.requireNonNull(orientationCompilation, "orientationCompilation");
     Objects.requireNonNull(factoryPreset, "factoryPreset");
-    if (maximumFactoryThreads < 1
+    if (maximumFactoryThreads < 0
         || maximumFactoryThreads > FactoryThreadStateCodec.MAX_THREADS
         || factoryPreset.threads().size() > maximumFactoryThreads) {
       throw new IllegalArgumentException("Factory thread preset exceeds the machine business thread limit");
@@ -372,7 +384,9 @@ public record MachineDefinition(
         hasFactory,
         parallelizable,
         maximumFactoryThreads,
-        recipeAdapters);
+        recipeAdapters,
+        prefix,
+        failureAction);
   }
 
   private static void appendDynamic(List<Part> target, Set<BlockPos> positions, Set<String> ids, DynamicPatternDefinition pattern, List<Part> template, String group, int repetition) {
@@ -397,7 +411,8 @@ public record MachineDefinition(
               part.field(),
               part.propertiesSpace(),
               part.selector(),
-              part.interfaceType()));
+              part.interfaceType(),
+              part.scriptCondition()));
     }
   }
 
@@ -426,7 +441,11 @@ public record MachineDefinition(
       FieldCondition field,
       PropertySpace propertiesSpace,
       String selector,
-      String interfaceType) {
+      String interfaceType,
+      StructureScriptChecks.Condition scriptCondition) {
+    public Part(String id, BlockPos offset, Rule rule, FieldCondition field, PropertySpace propertiesSpace, String selector, String interfaceType) {
+      this(id, offset, rule, field, propertiesSpace, selector, interfaceType, null);
+    }
     public Part(String id, BlockPos offset, Rule rule, FieldCondition field, PropertySpace propertiesSpace) {
       this(id, offset, rule, field, propertiesSpace, "", "");
     }

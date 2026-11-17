@@ -139,7 +139,10 @@ final class MachinePartParser {
       }
       String selector = part.has("selector") ? string(part.get("selector"), partPath + ".selector") : "";
       String interfaceType = part.has("interface") ? string(part.get("interface"), partPath + ".interface") : "";
-      parts.add(new Part(partId, offset, new Rule(port, alternatives), condition, space, selector, interfaceType));
+      var script = part.has("script_condition") ? StructureScriptChecks
+          .find(string(part.get("script_condition"), partPath + ".script_condition")) : null;
+      parts.add(
+          new Part(partId, offset, new Rule(port, alternatives), condition, space, selector, interfaceType, script));
     }
     if (skippedParts > 0) {
       LOGGER.warn(
@@ -161,7 +164,8 @@ final class MachinePartParser {
         "part_id",
         "properties_space",
         "selector",
-        "interface");
+        "interface",
+        "script_condition");
   }
 
   static List<String> blockNames(JsonObject part, String path) {

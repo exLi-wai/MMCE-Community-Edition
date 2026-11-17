@@ -49,7 +49,9 @@ public final class ChemicalOutputLayout {
             .map(
                 value -> new RecipeCandidate.Output<>(
                     new ChemicalResourceKey(value.chemical(), value.selector()),
-                    value.amount()))
+                    value.amount(),
+                    false,
+                    value.ignoreOutputCheck()))
             .toList());
   }
   public Planning planClaims(List<RecipeCandidate.Output<ChemicalResourceKey>> claims) {

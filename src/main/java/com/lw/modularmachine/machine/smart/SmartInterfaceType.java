@@ -20,10 +20,27 @@ public record SmartInterfaceType(
     String header,
     String valueLabel,
     String footer,
-    int priority) {
+    int priority,
+    String notEqualMessage,
+    String jeiTooltip,
+    int jeiTooltipArgsCount) {
   public static final int MAX_TYPES = 64;
-  private static final Set<String> FIELDS = Set
-      .of("id", "default", "min", "max", "header", "value_label", "footer", "priority");
+  private static final Set<String> FIELDS = Set.of(
+      "id",
+      "default",
+      "min",
+      "max",
+      "header",
+      "value_label",
+      "footer",
+      "priority",
+      "not_equal_message",
+      "jei_tooltip",
+      "jei_tooltip_args");
+
+  public SmartInterfaceType(String id, double defaultValue, double minimum, double maximum, String header, String valueLabel, String footer, int priority) {
+    this(id, defaultValue, minimum, maximum, header, valueLabel, footer, priority, "", "", 2);
+  }
 
   public SmartInterfaceType(String id, double defaultValue, double minimum, double maximum, String header, String valueLabel, String footer) {
     this(id, defaultValue, minimum, maximum, header, valueLabel, footer, 0);
@@ -43,7 +60,13 @@ public record SmartInterfaceType(
         || footer == null
         || header.length() > 256
         || valueLabel.length() > 256
-        || footer.length() > 256) {
+        || footer.length() > 256
+        || notEqualMessage == null
+        || notEqualMessage.length() > 256
+        || jeiTooltip == null
+        || jeiTooltip.length() > 256
+        || jeiTooltipArgsCount < 0
+        || jeiTooltipArgsCount > 2) {
       throw new IllegalArgumentException("Invalid numerical smart interface type");
     }
   }
@@ -70,7 +93,10 @@ public record SmartInterfaceType(
           text(root, "header", ""),
           text(root, "value_label", ""),
           text(root, "footer", ""),
-          priority(root, path + ".priority"));
+          priority(root, "priority", 0, path),
+          text(root, "not_equal_message", ""),
+          text(root, "jei_tooltip", ""),
+          priority(root, "jei_tooltip_args", 2, path));
       if (result.putIfAbsent(type.id(), type) != null) {
         throw new JsonParseException(path + ": Duplicate interface type " + type.id());
       }
@@ -91,11 +117,11 @@ public record SmartInterfaceType(
     return value.getAsString();
   }
 
-  private static int priority(JsonObject root, String path) {
-    if (!root.has("priority")) {
-      return 0;
+  private static int priority(JsonObject root, String field, int fallback, String path) {
+    if (!root.has(field)) {
+      return fallback;
     }
-    var value = root.get("priority");
+    var value = root.get(field);
     if (!value.isJsonPrimitive() || !value.getAsJsonPrimitive().isNumber()) {
       throw new JsonParseException(path + ": Expected signed integer priority");
     }

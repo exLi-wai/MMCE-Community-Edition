@@ -33,7 +33,9 @@ import org.jetbrains.annotations.ApiStatus;
 public final class ControllerClientPublisher {
   public static final int MODEL_VIEW_DISTANCE = 64;
 
-  private record Selection(long tick, Optional<KubeJSControllerClientRegistration.Model> model) {
+  private record Selection(
+      ControllerClientEvents.Context context,
+      Optional<KubeJSControllerClientRegistration.Model> model) {
   }
 
   private static KubeJSControllerClientRegistration.Snapshot snapshot = KubeJSControllerClientRegistration.Snapshot.EMPTY;
@@ -181,9 +183,9 @@ public final class ControllerClientPublisher {
     if (entity.isRemoved() || entity.getLevel() == null || !entity.getLevel().isClientSide) {
       return Optional.empty();
     }
-    var context = context(entity, "{}");
+    var context = context(entity, customData(entity));
     var previous = SELECTIONS.get(entity);
-    if (previous != null && previous.tick() == context.tick()) {
+    if (previous != null && previous.context().equals(context)) {
       return previous.model();
     }
     var event = new ControllerClientEvents.ModelEvent(
@@ -196,7 +198,7 @@ public final class ControllerClientPublisher {
           && resources.getResource(model.texture()).isPresent()
           && resources.getResource(model.animation()).isPresent();
     });
-    SELECTIONS.put(entity, new Selection(context.tick(), selected));
+    SELECTIONS.put(entity, new Selection(context, selected));
     boolean changed = selected.isPresent() ? PUBLISHED_MODELS.add(entity) : PUBLISHED_MODELS.remove(entity);
     if (changed) {
       requestModelUpdate(entity);
@@ -208,10 +210,18 @@ public final class ControllerClientPublisher {
   }
 
   public static ControllerClientEvents.AnimationEvent animation(BlockEntity entity, String modelName) {
-    var context = context(entity, "{}");
+    var context = context(entity, customData(entity));
     var event = new ControllerClientEvents.AnimationEvent(context, modelName);
     notifyHandlers(snapshot.animation(), context.machine(), listener -> listener.animate(event));
     return event;
+  }
+
+  private static String customData(BlockEntity entity) {
+    if (entity instanceof FactoryControllerBlockEntity factory) {
+      return factory.clientCustomData();
+    }
+
+    return ((MachineControllerBlockEntity) entity).clientCustomData();
   }
 
   public static void modelRendered(BlockEntity entity, boolean rendered) {

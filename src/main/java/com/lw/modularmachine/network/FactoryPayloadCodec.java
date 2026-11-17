@@ -52,6 +52,7 @@ final class FactoryPayloadCodec {
       writeText(buffer, thread.runState());
       buffer.writeVarInt(thread.progress());
       buffer.writeVarInt(thread.duration());
+      writeText(buffer, thread.recipeFailureMessage());
     }
   }
 
@@ -95,7 +96,8 @@ final class FactoryPayloadCodec {
               buffer.readUUID(),
               readText(buffer),
               buffer.readVarInt(),
-              buffer.readVarInt()));
+              buffer.readVarInt(),
+              readText(buffer)));
     }
     return new FactoryStatusPayload(
         version,

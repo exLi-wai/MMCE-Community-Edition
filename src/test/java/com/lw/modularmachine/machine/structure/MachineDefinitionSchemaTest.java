@@ -108,6 +108,23 @@ class MachineDefinitionSchemaTest {
   }
 
   @Test
+  void explicitNonCoreThreadDoesNotAddACoreSlotToTheExtraQuota() {
+    var root = json(PORTS);
+    root.add("factory", json("""
+        {"maximum_extra_threads":1,"threads":[
+          {"id":"extra","core":false,"allowed_recipes":["mmcece:extra_recipe"]},
+          {"id":"core","core":true,"allowed_recipes":["mmcece:core_recipe"]}
+        ]}
+        """));
+    var definition = parse(root);
+
+    assertEquals(2, definition.maximumFactoryThreads());
+    assertEquals(1, definition.factoryPreset().maximumExtraThreads());
+    assertFalse(definition.factoryPreset().isCore("extra"));
+    assertTrue(definition.factoryPreset().isCore("core"));
+  }
+
+  @Test
   void formedDisplayAndControllerBoundingBoxAreValidated() {
     JsonObject root = json(PORTS);
     root.addProperty("hide_components_when_formed", true);

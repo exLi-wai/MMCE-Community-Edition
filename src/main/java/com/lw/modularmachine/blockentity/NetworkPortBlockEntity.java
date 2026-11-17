@@ -351,7 +351,7 @@ public final class NetworkPortBlockEntity extends MachinePortBlockEntity {
     configured[slot] = replacement;
     targets[slot] = amount;
     configRevision++;
-    setChanged();
+    changed();
     return true;
   }
 

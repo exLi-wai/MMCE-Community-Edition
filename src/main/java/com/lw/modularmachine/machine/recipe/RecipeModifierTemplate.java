@@ -6,6 +6,7 @@ import com.mojang.serialization.JsonOps;
 import java.util.ArrayList;
 import java.util.List;
 import net.minecraft.core.HolderLookup;
+import com.lw.modularmachine.api.recipe.RecipeFailureAction;
 
 /**
  * Private immutable declaration source; only effective recipes cross
@@ -14,10 +15,16 @@ import net.minecraft.core.HolderLookup;
 final class RecipeModifierTemplate {
   private final JsonObject source;
   private final List<RecipeModifier> machineRules;
+  private final RecipeFailureAction machineFailureAction;
 
   RecipeModifierTemplate(JsonObject source, List<RecipeModifier> machineRules) {
+    this(source, machineRules, null);
+  }
+
+  RecipeModifierTemplate(JsonObject source, List<RecipeModifier> machineRules, RecipeFailureAction machineFailureAction) {
     this.source = source.deepCopy();
     this.machineRules = List.copyOf(machineRules);
+    this.machineFailureAction = machineFailureAction;
   }
 
   MachineRecipe resolve(List<RecipeModifier> upgradeRules, HolderLookup.Provider registries) {
@@ -31,7 +38,10 @@ final class RecipeModifierTemplate {
   MachineRecipe resolve(List<RecipeModifier> upgradeRules, HolderLookup.Provider registries, boolean durationMultiplier, MachineRecipeJson.Defaults defaults) {
     var inherited = new ArrayList<>(machineRules);
     inherited.addAll(upgradeRules);
-    var effective = MachineRecipeJson.normalize(source, inherited, durationMultiplier, defaults);
+    var effectiveDefaults = machineFailureAction == null ? defaults : new MachineRecipeJson.Defaults(
+        defaults.parallelized(),
+        machineFailureAction);
+    var effective = MachineRecipeJson.normalize(source, inherited, durationMultiplier, effectiveDefaults);
 
     return MachineRecipe.CODEC.codec().parse(registries.createSerializationContext(JsonOps.INSTANCE), effective)
         .getOrThrow();

@@ -10,10 +10,38 @@ import java.util.Set;
 import net.minecraft.core.BlockPos;
 import net.minecraft.core.Direction;
 import net.minecraft.resources.ResourceLocation;
+import net.minecraft.nbt.CompoundTag;
 import org.junit.jupiter.api.Test;
 import static org.junit.jupiter.api.Assertions.*;
 
 class CompiledStructurePreparationTest {
+  @Test
+  void scriptNbtAndCheckerSubscribeToContentsButPreviewOnlyDoesNot() {
+    for (var condition : new StructureScriptChecks.Condition[]{
+        new StructureScriptChecks.Condition(new CompoundTag(), null, null),
+        new StructureScriptChecks.Condition(null, null, ignored -> true),
+        new StructureScriptChecks.Condition(null, new CompoundTag(), null)}) {
+      var source = JsonParser.parseString("""
+          {"parts":[{"offset":[1,0,0],"block":"item_input","script_condition":"content"}]}
+          """).getAsJsonObject();
+      var definition = StructureScriptChecks.capture(
+          Map.of("content", condition),
+          () -> MachineDefinitionParser.parse(
+              ResourceLocation.parse("mmcece:script_content_preparation"),
+              source,
+              new StateOrientationAdapters.RegistrySnapshot(Map.of())));
+      var prepared = CompiledStructure.prepare(definition, BlockPos.ZERO, MachineOrientation.IDENTITY);
+      while (!prepared.complete()) {
+        assertTrue(prepared.advance(1) <= 1);
+      }
+      assertEquals(condition.needsData(), prepared.result().watchesContentsAt(new BlockPos(1, 0, 0)));
+      assertEquals(
+          condition.needsData(),
+          new CompiledStructure(definition, BlockPos.ZERO, MachineOrientation.IDENTITY)
+              .watchesContentsAt(new BlockPos(1, 0, 0)));
+    }
+  }
+
   private static final int[][] POINTS = {{2, 3, 5}, {-3, 2, 5}, {-2, -3, 5}, {3, -2, 5}, {-5, 3, 2}, {-5, 2, -3},
       {-5, -3, -2}, {-5, -2, 3}, {-2, 3, -5}, {3, 2, -5}, {2, -3, -5}, {-3, -2, -5}, {5, 3, -2}, {5, 2, 3}, {5, -3, 2},
       {5, -2, -3}, {2, -5, 3}, {-3, -5, 2}, {-2, -5, -3}, {3, -5, -2}, {2, 5, -3}, {-3, 5, -2}, {-2, 5, 3}, {3, 5, 2}};

@@ -70,7 +70,7 @@ public final class RecipeRunEngine {
       }
       layout = new ItemOutputLayout(ticket, keys);
       fluidPlan = new FluidOutputLayout(ticket, level.registryAccess())
-          .plan(run.fluidOutputClaims(level.registryAccess()), run.selectors().fluidOutput());
+          .planRequirements(run.fluidOutputRequirements(level.registryAccess()), run.selectors().fluidOutput());
       resourcePlan = RecipeResourceExecutionRegistry.prepareOutputs(ticket, List.of(run));
       planner = claims.isEmpty() ? null : RecipePlanner.prepareOutputs(layout.snapshot(), candidate);
     }
@@ -135,6 +135,13 @@ public final class RecipeRunEngine {
       if (!run.pendingOutput()) {
         if (run.progress() < run.duration() && run.lastProgressTick() == now) {
           return status = RecipeRunStatus.WAITING_TICK;
+        }
+        var preparation = controller.upgradeRuntimeWork().prepareRecipeTick("main", List.of(run));
+        if (preparation != RecipeTickPreparation.Status.ALLOWED) {
+          return status = preparation == RecipeTickPreparation.Status.PENDING ? RecipeRunStatus.UPGRADE_DATA_PENDING : RecipeRunStatus.PAUSED;
+        }
+        if (!qualified(controller, run) || controller.runningRecipe().orElse(null) != run) {
+          return status = RecipeRunStatus.PAUSED;
         }
         var tickCosts = controller.upgradeRuntimeWork().prepare("main", List.of(run));
         if (tickCosts.status() == Status.INSUFFICIENT) {
@@ -451,13 +458,8 @@ public final class RecipeRunEngine {
         return RecipeRunStatus.OUTPUT_BLOCKED;
       }
       var plan = result.plan().orElseThrow();
-      if (plan.insertions().isEmpty()) {
-        throw new IllegalStateException("Paid output plan contains no insertions");
-      }
+      // A selected plan may discard every optional output when no space remains.
       replacements = active.layout.prepare(plan);
-      if (replacements.isEmpty()) {
-        throw new IllegalStateException("Paid output plan contains no inventory replacements");
-      }
     }
     var runtime = controller.upgradeRuntimeWork().prepare(Phase.FINISHED, "main", List.of(run));
     switch (runtime.status()) {

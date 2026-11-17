@@ -202,6 +202,15 @@ public final class FactoryThreadConfiguration {
     if (preset.threads().size() > definition.maximumFactoryThreads()) {
       return ConfigurationResult.LIMIT_REACHED;
     }
+    if (definition.factoryPreset().threads().stream().anyMatch(
+        core -> core.core() && preset.threads().stream().noneMatch(thread -> thread.id().equals(core.id())))) {
+      return ConfigurationResult.INVALID;
+    }
+    if (definition.factoryPreset().maximumExtraThreads() >= 0
+        && preset.threads().stream().filter(thread -> !definition.factoryPreset().isCore(thread.id()))
+            .count() > definition.factoryPreset().maximumExtraThreads()) {
+      return ConfigurationResult.LIMIT_REACHED;
+    }
     long epoch = StructureService.definitionEpoch();
     long revision = configurationRevision;
     for (var current : scheduler.channels()) {
@@ -246,6 +255,27 @@ public final class FactoryThreadConfiguration {
   }
 
   private void installConfiguration(FactoryScheduler replacement) {
+    var definition = StructureService.definition(host.machineId());
+    if (definition != null) {
+      if (definition.factoryPreset().threads().stream()
+          .anyMatch(core -> core.core() && replacement.channel(core.id()) == null)) {
+        throw new IllegalArgumentException("Factory configuration must retain definition-owned core threads");
+      }
+      int maximumExtra = definition.factoryPreset().maximumExtraThreads();
+      long extra = replacement.channels().stream()
+          .filter(thread -> !definition.factoryPreset().isCore(thread.threadId())).count();
+      if (maximumExtra >= 0 && extra > maximumExtra) {
+        var existing = scheduler.channels().stream()
+            .filter(thread -> !definition.factoryPreset().isCore(thread.threadId())).map(FactoryThreadState::threadId)
+            .collect(Collectors.toSet());
+        if (extra >= existing.size()
+            || replacement.channels().stream().anyMatch(
+                thread -> !definition.factoryPreset().isCore(thread.threadId())
+                    && !existing.contains(thread.threadId()))) {
+          throw new IllegalArgumentException("Factory configuration exceeds its extra thread limit");
+        }
+      }
+    }
     if (replacement.channels().size() > host.maximumThreads()) {
       var existing = scheduler.channels().stream().map(FactoryThreadState::threadId).collect(Collectors.toSet());
       if (replacement.channels().size() >= scheduler.channels().size()
@@ -291,8 +321,7 @@ public final class FactoryThreadConfiguration {
   }
 
   public void initializeIfNeeded() {
-    if (threadsInitialized
-        || !host.persistentStateValid()
+    if (!host.persistentStateValid()
         || host.hasPaidRuns()
         || host.hasStartingThreads()
         || configurationRevision == Long.MAX_VALUE) {
@@ -300,7 +329,23 @@ public final class FactoryThreadConfiguration {
     }
     var definition = StructureService.definition(host.machineId());
     if (definition != null && configurationAllowed()) {
-      installConfiguration(new FactoryScheduler(definition.factoryPreset().instantiate(host.machineId())));
+      if (!threadsInitialized) {
+        installConfiguration(new FactoryScheduler(definition.factoryPreset().instantiate(host.machineId())));
+        return;
+      }
+      var missing = definition.factoryPreset().threads().stream()
+          .filter(thread -> thread.core() && scheduler.channel(thread.id()) == null).toList();
+      if (missing.isEmpty()) {
+        return;
+      }
+      var replacement = new ArrayList<>(scheduler.channels());
+      missing.forEach(thread -> replacement.add(thread.instantiate(host.machineId())));
+      int maximumExtra = definition.factoryPreset().maximumExtraThreads();
+      long extra = scheduler.channels().stream().filter(thread -> !definition.factoryPreset().isCore(thread.threadId()))
+          .count();
+      if (replacement.size() <= host.maximumThreads() && (maximumExtra < 0 || extra <= maximumExtra)) {
+        installConfiguration(new FactoryScheduler(replacement));
+      }
     }
   }
 
@@ -351,6 +396,13 @@ public final class FactoryThreadConfiguration {
     if (scheduler.channels().size() >= host.maximumThreads()) {
       return ConfigurationResult.LIMIT_REACHED;
     }
+    var definition = StructureService.definition(host.machineId());
+    if (definition != null
+        && definition.factoryPreset().maximumExtraThreads() >= 0
+        && scheduler.channels().stream().filter(thread -> !definition.factoryPreset().isCore(thread.threadId()))
+            .count() >= definition.factoryPreset().maximumExtraThreads()) {
+      return ConfigurationResult.LIMIT_REACHED;
+    }
     if (scheduler.channel(id) != null) {
       return ConfigurationResult.INVALID;
     }
@@ -371,6 +423,10 @@ public final class FactoryThreadConfiguration {
     }
     if (scheduler.channel(id) == null) {
       return ConfigurationResult.THREAD_NOT_FOUND;
+    }
+    var definition = StructureService.definition(host.machineId());
+    if (definition != null && definition.factoryPreset().isCore(id)) {
+      return ConfigurationResult.INVALID;
     }
     if (host.hasPaidRuns(id) || host.hasStartingThreads()) {
       return ConfigurationResult.BUSY;
@@ -423,6 +479,11 @@ public final class FactoryThreadConfiguration {
       return false;
     }
     if (changeLock && lockedRecipe != null && !host.recipeBelongsTo(current.machineId(), lockedRecipe)) {
+      return false;
+    }
+    if (changeLock
+        && lockedRecipe != null
+        && !FactoryThreadPreset.accepts(current.machineId(), threadId, lockedRecipe)) {
       return false;
     }
     var next = current;

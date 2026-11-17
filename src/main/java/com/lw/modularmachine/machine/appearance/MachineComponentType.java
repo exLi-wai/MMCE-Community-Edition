@@ -12,6 +12,7 @@ import com.lw.modularmachine.block.UpgradeBusBlock;
 import net.minecraft.util.StringRepresentable;
 import net.minecraft.world.level.block.Block;
 import org.jetbrains.annotations.ApiStatus;
+import com.lw.modularmachine.block.StatedMachineComponentBlock;
 
 /** Internal, explicit model-hiding scope; unrelated to resource selectors. */
 @ApiStatus.Internal
@@ -50,7 +51,7 @@ public enum MachineComponentType implements StringRepresentable {
     if (block instanceof MachineControllerBlock || block instanceof FactoryControllerBlock) {
       return CONTROLLER;
     }
-    if (block instanceof MachineCasingBlock) {
+    if (block instanceof MachineCasingBlock || block instanceof StatedMachineComponentBlock) {
       return CASING;
     }
     if (block instanceof MachinePortBlock port) {

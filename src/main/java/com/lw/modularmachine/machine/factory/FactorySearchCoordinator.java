@@ -28,6 +28,7 @@ public final class FactorySearchCoordinator {
   private final Map<String, RecipeSearch> searches = new HashMap<>();
   private final Map<String, Long> searchRetryAfter = new HashMap<>();
   private final Map<String, Integer> searchRetryInterval = new HashMap<>();
+  private final Map<String, String> interfaceFailures = new HashMap<>();
 
   public interface Host {
     boolean available();
@@ -94,6 +95,7 @@ public final class FactorySearchCoordinator {
       if (now < searchRetryAfter.getOrDefault(thread.threadId(), 0L)) {
         return;
       }
+      interfaceFailures.remove(thread.threadId());
       var allowed = thread.lockedRecipe() == null ? null : Set.of(thread.lockedRecipe().toString());
       try {
         search = host.beginSearch(thread.threadId(), catalog, allowed);
@@ -126,6 +128,7 @@ public final class FactorySearchCoordinator {
         case BUDGET_EXHAUSTED ->
           host.updateThreadState(thread, FactoryThreadState.State.WAITING, FactoryThreadState.Reason.SEARCH_BUDGET);
         case NO_MATCH -> {
+          String interfaceFailure = search.interfaceFailure();
           var missing = search.missingResource();
           FactoryThreadState.Reason reason;
           if (missing.isPresent()) {
@@ -137,6 +140,9 @@ public final class FactorySearchCoordinator {
           }
           host.updateThreadState(thread, FactoryThreadState.State.WAITING, reason);
           invalidateThread(thread.threadId(), now);
+          if (!interfaceFailure.isEmpty()) {
+            interfaceFailures.put(thread.threadId(), interfaceFailure);
+          }
           backoffSearch(thread.threadId(), now);
         }
         default -> {
@@ -214,12 +220,18 @@ public final class FactorySearchCoordinator {
 
   public void invalidate() {
     searches.clear();
+    interfaceFailures.clear();
     wakeRetries();
   }
 
   public void invalidateThread(String threadId, long now) {
     searches.remove(threadId);
+    interfaceFailures.remove(threadId);
     resetSearchRetry(threadId, now);
+  }
+
+  public String interfaceFailure(String threadId) {
+    return interfaceFailures.getOrDefault(threadId, "");
   }
 
   private void resetSearchRetry(String threadId, long now) {

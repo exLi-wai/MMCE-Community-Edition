@@ -34,7 +34,7 @@ final class ParallelRecipeAdmission {
     int high = Math.min(
         definition.parallelized() ? limit : Math.min(limit, 1),
         Math.min(plan.maxRepeatableInputs(), plan.maxRepeatableOutputs()));
-    high = ChemicalTransactions.arithmeticLimit(definition, high);
+    high = ChemicalTransactions.arithmeticLimit(definition, high, aggregateDefinition);
     high = RecipeTriggeredResources.arithmeticLimit(definition, high, aggregateDefinition, upgrades);
     high = RecipeRandomItemOutputs.arithmeticLimit(definition, high, aggregateDefinition);
     var requiredFluids = new HashMap<FluidResourceKey, Long>();
@@ -118,13 +118,16 @@ final class ParallelRecipeAdmission {
     if (fluids == null) {
       fluids = new FluidOutputLayout(plan.source(), plan.source().level().registryAccess());
     }
-    var claims = definition.fluidOutputRequirements().stream().filter(output -> output.chance() == 1)
+    var claims = definition.fluidOutputRequirements().stream()
+        .filter(output -> output.chance() == 1 && !output.ignoreOutputCheck())
         .map(
             requirement -> new RecipeCandidate.Output<>(
                 new FluidResourceKey(requirement.stack(), plan.source().level().registryAccess())
                     .withSelector(definition.selectors().fluidOutput()),
                 requirement.parallelUnaffected() && aggregateDefinition ? requirement.stack().getAmount() : Math
-                    .multiplyExact((long) requirement.stack().getAmount(), instances)))
+                    .multiplyExact((long) requirement.stack().getAmount(), instances),
+                false,
+                requirement.ignoreOutputCheck()))
         .toList();
     var planning = fluids.planClaims(claims);
 
@@ -133,11 +136,14 @@ final class ParallelRecipeAdmission {
 
   private RecipeResourcePlanning prepareItemOutputs(int instances) {
     var claims = RecipeItemPreparation.inputCandidate(plan.recipe(), definition).outputs().stream()
+        .filter(output -> !output.ignoreOutputCheck())
         .map(
             output -> new RecipeCandidate.Output<>(
                 output.key(),
                 output.parallelUnaffected() && aggregateDefinition ? output.count() : Math
-                    .multiplyExact(output.count(), instances)))
+                    .multiplyExact(output.count(), instances),
+                false,
+                output.ignoreOutputCheck()))
         .toList();
     if (claims.isEmpty()) {
       return new ResourcePlanningSequence(List.of());

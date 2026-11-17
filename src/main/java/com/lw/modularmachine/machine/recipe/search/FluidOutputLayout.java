@@ -1,6 +1,7 @@
 package com.lw.modularmachine.machine.recipe.search;
 
 import com.lw.modularmachine.machine.recipe.RecipeExecutionTicket;
+import com.lw.modularmachine.api.recipe.FluidRequirement;
 import com.lw.modularmachine.machine.PortKind;
 import java.util.ArrayList;
 import java.util.HashMap;
@@ -59,6 +60,18 @@ public final class FluidOutputLayout {
 
   public Planning planClaims(List<RecipeCandidate.Output<FluidResourceKey>> claims) {
     return new Planning(claims);
+  }
+
+  public Planning planRequirements(List<FluidRequirement> requirements, String selector) {
+    return planClaims(
+        requirements.stream()
+            .map(
+                value -> new RecipeCandidate.Output<>(
+                    new FluidResourceKey(value.stack(), registries).withSelector(value.selector(selector)),
+                    value.stack().getAmount(),
+                    false,
+                    value.ignoreOutputCheck()))
+            .toList());
   }
 
   public final class Planning {

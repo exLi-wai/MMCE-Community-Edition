@@ -4,12 +4,15 @@ import com.google.gson.JsonObject;
 import com.google.gson.JsonParseException;
 import com.google.gson.JsonParser;
 import com.lw.modularmachine.api.recipe.ChemicalRecipeData;
+import com.lw.modularmachine.api.recipe.ChemicalRequirement;
 import com.lw.modularmachine.api.recipe.RecipeFailureAction;
 import com.mojang.serialization.JsonOps;
+import java.util.List;
 import net.minecraft.nbt.CompoundTag;
 import net.minecraft.nbt.ListTag;
 import net.minecraft.nbt.NbtOps;
 import net.minecraft.nbt.Tag;
+import net.minecraft.resources.ResourceLocation;
 import org.junit.jupiter.api.Test;
 import static org.junit.jupiter.api.Assertions.*;
 
@@ -44,6 +47,21 @@ class ChemicalRecipeStateTest {
         9007199254740993L,
         source.getAsJsonObject("chemicals").getAsJsonArray("inputs").get(0).getAsJsonObject().get("amount")
             .getAsLong());
+  }
+
+  @Test
+  void ignoredChemicalRowsKeepIndependentLongAmountsWhileRequiredInputsStayExact() {
+    var chemical = ResourceLocation.parse("mekanism:oxygen");
+    var rows = List.of(
+        new ChemicalRequirement(chemical, 1),
+        new ChemicalRequirement(chemical, Long.MAX_VALUE, "", 1, true),
+        new ChemicalRequirement(chemical, Long.MAX_VALUE, "", 1, true));
+    var data = new ChemicalRecipeData(List.of(), rows, List.of(), List.of());
+    var encoded = ChemicalRecipeData.CODEC.encodeStart(JsonOps.INSTANCE, data).getOrThrow();
+    assertEquals(data, ChemicalRecipeData.CODEC.parse(JsonOps.INSTANCE, encoded).getOrThrow());
+    assertThrows(ArithmeticException.class, () -> new ChemicalRecipeData(rows, List.of(), List.of(), List.of()));
+    var required = List.of(new ChemicalRequirement(chemical, 1), new ChemicalRequirement(chemical, Long.MAX_VALUE));
+    assertThrows(ArithmeticException.class, () -> new ChemicalRecipeData(List.of(), required, List.of(), List.of()));
   }
 
   @Test

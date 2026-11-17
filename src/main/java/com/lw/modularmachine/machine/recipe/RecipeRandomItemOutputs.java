@@ -72,7 +72,8 @@ final class RecipeRandomItemOutputs {
             output -> new RecipeCandidate.Output<>(
                 new StackIdentity(output.ingredientStack(), output.selector()),
                 output.amount(),
-                output.parallelUnaffected()))
+                output.parallelUnaffected(),
+                output.ignoreOutputCheck()))
         .toList();
     var groups = definition.ingredientArrays().randomOutputs().stream()
         .map(group -> describe(group, choice -> new StackIdentity(choice.item().orElseThrow(), group.selector())))
@@ -88,6 +89,12 @@ final class RecipeRandomItemOutputs {
     var scaled = new HashMap<K, Long>();
     try {
       for (var output : outputs) {
+        if (output.ignoreOutputCheck()) {
+          if (aggregate && !output.parallelUnaffected()) {
+            limit = (int) Math.min(limit, Long.MAX_VALUE / output.count());
+          }
+          continue;
+        }
         (aggregate && output.parallelUnaffected() ? fixed : scaled).merge(output.key(), output.count(), Math::addExact);
       }
       for (var group : groups) {

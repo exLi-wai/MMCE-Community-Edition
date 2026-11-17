@@ -9,6 +9,49 @@ import org.junit.jupiter.api.Test;
 import static org.junit.jupiter.api.Assertions.*;
 
 class RecipePlannerTest {
+  @Test
+  void overflowRowsCannotStealRequiredOutputSpace() {
+    var snapshot = new ResourceSnapshot<String>(0, Map.of(), List.of(new ResourceSnapshot.OutputSlot<>(null, 0, 8)));
+    var recipe = RecipeCandidate.outputOnly(
+        "overflow",
+        List.of(
+            new RecipeCandidate.Output<>("optional", 100, false, true),
+            new RecipeCandidate.Output<>("required", 6)));
+    var session = RecipePlanner.prepareOutputs(snapshot, recipe);
+    RecipePlanner.SearchResult<String> result;
+    int continuations = 0;
+    do {
+      result = session.advance(1);
+      assertTrue(result.workUsed() <= 1);
+      assertTrue(++continuations < 100);
+    } while (result.status() == RecipePlanner.Status.BUDGET_EXHAUSTED);
+    var plan = result.plan().orElseThrow();
+    assertEquals(List.of(new RecipePlan.Insertion<>(0, "required", 6)), plan.insertions());
+  }
+
+  @Test
+  void overflowRowsFillMatchingRemainderOnceAndDiscardExcess() {
+    var snapshot = new ResourceSnapshot<String>(0, Map.of(), List.of(new ResourceSnapshot.OutputSlot<>("same", 4, 10)));
+    var recipe = RecipeCandidate.outputOnly(
+        "overflow",
+        List.of(
+            new RecipeCandidate.Output<>("same", 2),
+            new RecipeCandidate.Output<>("same", Long.MAX_VALUE, false, true),
+            new RecipeCandidate.Output<>("same", Long.MAX_VALUE, false, true)));
+    var plan = RecipePlanner.prepareOutputs(snapshot, recipe).advance(100).plan().orElseThrow();
+    assertEquals(List.of(new RecipePlan.Insertion<>(0, "same", 6)), plan.insertions());
+  }
+
+  @Test
+  void overflowOnlyNeedsNoOutputSlotsButRequiredRowsStillBlock() {
+    var snapshot = new ResourceSnapshot<String>(0, Map.of(), List.of());
+    var optional = RecipeCandidate.outputOnly("optional", List.of(new RecipeCandidate.Output<>("a", 5, false, true)));
+    assertTrue(
+        RecipePlanner.prepareOutputs(snapshot, optional).advance(100).plan().orElseThrow().insertions().isEmpty());
+    var required = RecipeCandidate.outputOnly("required", List.of(new RecipeCandidate.Output<>("a", 1)));
+    assertEquals(RecipePlanner.Status.NO_MATCH, RecipePlanner.prepareOutputs(snapshot, required).advance(100).status());
+  }
+
   private static RecipeCandidate<String> recipe(String id, int priority, String input, long amount, String output) {
     return new RecipeCandidate<String>(
         id,

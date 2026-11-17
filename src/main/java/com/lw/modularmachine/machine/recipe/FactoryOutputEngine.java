@@ -50,29 +50,28 @@ public final class FactoryOutputEngine {
     Work(FactoryRunSet set, RecipeExecutionTicket ticket, ServerLevel level) {
       this.set = set;
       this.ticket = ticket;
-      var itemTotals = new LinkedHashMap<ItemResourceKey, Long>();
+      var itemTotals = new RecipeOutputClaims<ItemResourceKey>();
       var itemKeys = new HashSet<ItemResourceKey>();
-      var fluidTotals = new LinkedHashMap<FluidResourceKey, Long>();
+      var fluidTotals = new RecipeOutputClaims<FluidResourceKey>();
       for (var run : set.runs()) {
         for (var claim : run.outputClaims(level.registryAccess())) {
-          itemTotals.merge(claim.key(), claim.count(), Math::addExact);
+          itemTotals.add(claim.key(), claim.count(), claim.ignoreOutputCheck());
           itemKeys.add(claim.key());
         }
-        for (var fluid : run.fluidOutputClaims(level.registryAccess())) {
-          fluidTotals.merge(
+        for (var requirement : run.fluidOutputRequirements(level.registryAccess())) {
+          var fluid = requirement.stack();
+          fluidTotals.add(
               new FluidResourceKey(fluid, level.registryAccess()).withSelector(run.selectors().fluidOutput()),
               (long) fluid.getAmount(),
-              Math::addExact);
+              requirement.ignoreOutputCheck());
         }
       }
-      var itemClaims = itemTotals.entrySet().stream()
-          .map(entry -> new RecipeCandidate.Output<>(entry.getKey(), entry.getValue())).toList();
+      var itemClaims = itemTotals.claims();
       itemLayout = itemClaims.isEmpty() ? null : new ItemOutputLayout(ticket, itemKeys);
       itemPlanner = itemLayout == null ? null : RecipePlanner.prepareOutputs(
           itemLayout.snapshot(),
           RecipeCandidate.outputOnly(set.runs().getFirst().recipeId() + "/parallel", itemClaims));
-      var fluidClaims = fluidTotals.entrySet().stream()
-          .map(entry -> new RecipeCandidate.Output<>(entry.getKey(), entry.getValue())).toList();
+      var fluidClaims = fluidTotals.claims();
       fluidPlanner = new FluidOutputLayout(ticket, level.registryAccess()).planClaims(fluidClaims);
       resourcePlanner = RecipeResourceExecutionRegistry.prepareOutputs(ticket, set.runs());
     }

@@ -22,6 +22,7 @@ public final class RecipeScriptCallbacks {
   private static final Map<ResourceLocation, RecipeItemCallbacks.Modifier> ADAPTER_MODIFIERS = new LinkedHashMap<>();
   private static final Map<ResourceLocation, RecipeItemCallbacks.InputModifier> ADAPTER_INPUT_MODIFIERS = new LinkedHashMap<>();
   private static final Map<ResourceLocation, RecipeDeclaredObservers.Handler> LIFECYCLE = new LinkedHashMap<>();
+  private static final Map<ResourceLocation, RecipePreparationHandlers.Handler> PREPARATION = new LinkedHashMap<>();
   private static long generation;
   private static boolean capturing;
   private static boolean initialized;
@@ -32,19 +33,23 @@ public final class RecipeScriptCallbacks {
       Map<ResourceLocation, RecipeItemCallbacks.Checker> checkers,
       Map<ResourceLocation, RecipeItemCallbacks.Modifier> modifiers,
       Map<ResourceLocation, RecipeItemCallbacks.InputModifier> inputModifiers,
-      List<RecipeDeclaredObservers.Handler> lifecycle) {
+      List<RecipeDeclaredObservers.Handler> lifecycle,
+      List<RecipePreparationHandlers.Handler> preparation) {
     public Snapshot {
       checkers = Map.copyOf(checkers);
       modifiers = Map.copyOf(modifiers);
       inputModifiers = Map.copyOf(inputModifiers);
       lifecycle = List.copyOf(lifecycle);
-      if (checkers.size() + modifiers.size() + inputModifiers.size() + lifecycle.size() > MAX_CALLBACKS) {
+      preparation = List.copyOf(preparation);
+      if (checkers.size() + modifiers.size() + inputModifiers.size() + lifecycle.size() + preparation
+          .size() > MAX_CALLBACKS) {
         throw new IllegalArgumentException("Too many KubeJS recipe item callbacks");
       }
       checkers.keySet().forEach(RecipeScriptCallbacks::requireScriptId);
       modifiers.keySet().forEach(RecipeScriptCallbacks::requireScriptId);
       inputModifiers.keySet().forEach(RecipeScriptCallbacks::requireScriptId);
       lifecycle.forEach(handler -> requireScriptId(handler.id()));
+      preparation.forEach(handler -> requireScriptId(handler.id()));
     }
   }
 
@@ -59,6 +64,7 @@ public final class RecipeScriptCallbacks {
     MODIFIERS.clear();
     INPUT_MODIFIERS.clear();
     LIFECYCLE.clear();
+    PREPARATION.clear();
   }
 
   public static synchronized void checker(ResourceLocation id, RecipeItemCallbacks.Checker checker) {
@@ -81,6 +87,11 @@ public final class RecipeScriptCallbacks {
     LIFECYCLE.put(handler.id(), handler);
   }
 
+  public static synchronized void preparation(RecipePreparationHandlers.Handler handler) {
+    requireCapture();
+    PREPARATION.put(handler.id(), handler);
+  }
+
   public static synchronized void beginAdapters() {
     generation = Math.incrementExact(generation);
     initialized = true;
@@ -89,6 +100,7 @@ public final class RecipeScriptCallbacks {
     MODIFIERS.clear();
     INPUT_MODIFIERS.clear();
     LIFECYCLE.clear();
+    PREPARATION.clear();
     ADAPTER_CHECKERS.clear();
     ADAPTER_MODIFIERS.clear();
     ADAPTER_INPUT_MODIFIERS.clear();
@@ -123,7 +135,7 @@ public final class RecipeScriptCallbacks {
 
   private static int callbackCount() {
     return CHECKERS.size() + MODIFIERS.size() + INPUT_MODIFIERS.size() + ADAPTER_CHECKERS.size() + ADAPTER_MODIFIERS
-        .size() + ADAPTER_INPUT_MODIFIERS.size() + LIFECYCLE.size();
+        .size() + ADAPTER_INPUT_MODIFIERS.size() + LIFECYCLE.size() + PREPARATION.size();
   }
 
   private static void requireScriptId(ResourceLocation id) {
@@ -143,7 +155,14 @@ public final class RecipeScriptCallbacks {
     modifiers.putAll(MODIFIERS);
     var inputModifiers = new LinkedHashMap<>(ADAPTER_INPUT_MODIFIERS);
     inputModifiers.putAll(INPUT_MODIFIERS);
-    return new Snapshot(generation, initialized, checkers, modifiers, inputModifiers, List.copyOf(LIFECYCLE.values()));
+    return new Snapshot(
+        generation,
+        initialized,
+        checkers,
+        modifiers,
+        inputModifiers,
+        List.copyOf(LIFECYCLE.values()),
+        List.copyOf(PREPARATION.values()));
   }
 
   public static synchronized boolean isCurrent(Snapshot snapshot) {
@@ -161,6 +180,7 @@ public final class RecipeScriptCallbacks {
           snapshot.modifiers(),
           snapshot.inputModifiers());
       RecipeDeclaredObservers.install(snapshot.lifecycle());
+      RecipePreparationHandlers.install(snapshot.preparation());
     }
   }
 
@@ -180,8 +200,10 @@ public final class RecipeScriptCallbacks {
     MODIFIERS.clear();
     INPUT_MODIFIERS.clear();
     LIFECYCLE.clear();
+    PREPARATION.clear();
     ADAPTER_CHECKERS.clear();
     ADAPTER_MODIFIERS.clear();
     ADAPTER_INPUT_MODIFIERS.clear();
+    RecipePreparationHandlers.install(List.of());
   }
 }

@@ -7,6 +7,8 @@ import com.lw.modularmachine.machine.upgrade.UpgradeCatalog;
 import com.lw.modularmachine.api.upgrade.UpgradeEntry;
 import com.lw.modularmachine.machine.upgrade.UpgradeRestrictions;
 import com.lw.modularmachine.machine.upgrade.UpgradeBusBinding;
+import com.lw.modularmachine.machine.upgrade.UpgradeDescriptionService;
+import com.lw.modularmachine.api.upgrade.UpgradeDescriptions;
 import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.HashSet;
@@ -78,7 +80,12 @@ public final class UpgradeBusPayloads {
       int conflictCount,
       List<ResourceLocation> conflicts,
       long bindingRevision,
-      List<BindingView> bindings) implements CustomPacketPayload {
+      List<BindingView> bindings,
+      List<String> descriptions) implements CustomPacketPayload {
+    public Status(int containerId, BlockPos position, long revision, boolean valid, List<UpgradeEntry> entries, ResourceLocation machine, List<ResourceLocation> incompatible, int conflictCount, List<ResourceLocation> conflicts, long bindingRevision, List<BindingView> bindings) {
+      this(containerId, position, revision, valid, entries, machine, incompatible, conflictCount, conflicts,
+          bindingRevision, bindings, List.of());
+    }
     public Status(int containerId, BlockPos position, long revision, boolean valid, List<UpgradeEntry> entries, ResourceLocation machine, List<ResourceLocation> incompatible, int conflictCount, List<ResourceLocation> conflicts) {
       this(containerId, position, revision, valid, entries, machine, incompatible, conflictCount, conflicts, 0,
           List.of());
@@ -106,6 +113,12 @@ public final class UpgradeBusPayloads {
       incompatible = List.copyOf(incompatible);
       conflicts = List.copyOf(conflicts);
       bindings = List.copyOf(bindings);
+      descriptions = List.copyOf(descriptions);
+      if (descriptions.size() > UpgradeDescriptionService.MAX_BUS_LINES
+          || descriptions.stream()
+              .anyMatch(line -> line == null || line.length() > UpgradeDescriptions.MAX_LINE_LENGTH)) {
+        throw new IllegalArgumentException("Upgrade bus descriptions exceed their text budget");
+      }
       validateIdentifiers(entries, incompatible, conflicts);
       if (conflictCount < 0
           || (conflictCount == 0) != conflicts.isEmpty()
@@ -138,8 +151,9 @@ public final class UpgradeBusPayloads {
   }
 
   public static void register(RegisterPayloadHandlersEvent event) {
-    event.registrar("4")
+    event.registrar("5")
         .playToClient(TYPE, CODEC, (payload, context) -> context.enqueueWork(() -> receiver.accept(payload)));
+    UpgradeDescriptionPayloads.register(event);
   }
 
   public static void setClientReceiver(Consumer<Status> clientReceiver) {
@@ -181,7 +195,8 @@ public final class UpgradeBusPayloads {
         restrictions.totalViolations(),
         restrictions.upgradeIds(),
         bus.bindingRevision(),
-        bindings);
+        bindings,
+        valid ? UpgradeDescriptionService.bus(bus) : List.of());
   }
 
   private static void writeEntries(RegistryFriendlyByteBuf buffer, List<UpgradeEntry> entries) {
@@ -265,6 +280,10 @@ public final class UpgradeBusPayloads {
       buffer.writeVarInt(binding.conflictCount());
       writeIds(buffer, binding.conflicts());
     }
+    buffer.writeVarInt(status.descriptions().size());
+    for (var line : status.descriptions()) {
+      buffer.writeUtf(line, UpgradeDescriptions.MAX_LINE_LENGTH);
+    }
   }
 
   private static Status read(RegistryFriendlyByteBuf buffer) {
@@ -306,6 +325,11 @@ public final class UpgradeBusPayloads {
               ownerConflictCount,
               ownerConflicts));
     }
+    int descriptionCount = readSize(buffer, UpgradeDescriptionService.MAX_BUS_LINES);
+    var descriptions = new ArrayList<String>();
+    for (int i = 0; i < descriptionCount; i++) {
+      descriptions.add(buffer.readUtf(UpgradeDescriptions.MAX_LINE_LENGTH));
+    }
     return new Status(
         container,
         position,
@@ -317,6 +341,7 @@ public final class UpgradeBusPayloads {
         conflictCount,
         conflicts,
         bindingRevision,
-        bindings);
+        bindings,
+        descriptions);
   }
 }

@@ -23,6 +23,7 @@ import net.minecraft.util.RandomSource;
 import org.jetbrains.annotations.ApiStatus;
 import java.util.HashSet;
 import java.util.Objects;
+import com.lw.modularmachine.api.recipe.RecipePreparationEvents;
 
 /**
  * Read-only start admission: deductions are not applied and placements do not
@@ -50,6 +51,9 @@ public final class RecipeStartPlan {
   private String outputPreparationThread;
   private PreparedRecipeOutputs outputPreparation;
   private int parallelBudgetRemaining;
+  private int preparationLimit = Integer.MAX_VALUE;
+  private RecipePreparationHandlers.Session postChecks;
+  private final long preparationEpoch = RecipePreparationHandlers.epoch();
 
   RecipeStartPlan(RecipeExecutionTicket source, RecipeCatalog catalog, RecipeCandidate<ItemResourceKey> recipe, List<Deduction> deductions, List<Placement> placements, long inputChanceSeed, UpgradeRecipeCheckHandlers.Scope factoryScope) {
     this.source = source;
@@ -66,6 +70,14 @@ public final class RecipeStartPlan {
 
   public long inputChanceSeed() {
     return inputChanceSeed;
+  }
+
+  public RecipeStartPlan withPreparationLimit(int limit) {
+    if (limit < 1) {
+      throw new IllegalArgumentException("Positive recipe preparation limit required");
+    }
+    preparationLimit = Math.min(preparationLimit, limit);
+    return this;
   }
 
   public RecipeStartPlan withOutputPreparationContext(String thread) {
@@ -180,10 +192,33 @@ public final class RecipeStartPlan {
       factoryChecks = factoryScope.begin(this);
     }
     var result = factoryChecks.advance(budget);
+    if (result.status() == UpgradeRecipeCheckHandlers.Status.ALLOWED) {
+      if (postChecks == null) {
+        postChecks = RecipePreparationHandlers.begin(
+            source.owner(),
+            ResourceLocation.parse(recipe.id()),
+            threadId,
+            RecipePreparationEvents.Type.POST_CHECK,
+            Math.min(preparationLimit, RecipePreparationHandlers.parallelLimit(source, threadId)),
+            null);
+      }
+      int used = result.workUsed() + postChecks.advance(budget - result.workUsed());
+      preparationLimit = Math.min(preparationLimit, postChecks.parallelism());
+      var status = UpgradeRecipeCheckHandlers.Status.PENDING;
+      if (!postChecks.current()) {
+        status = UpgradeRecipeCheckHandlers.Status.STALE;
+      } else if (postChecks.complete()) {
+        status = postChecks
+            .rejected() ? UpgradeRecipeCheckHandlers.Status.REJECTED : UpgradeRecipeCheckHandlers.Status.ALLOWED;
+      }
+      result = new UpgradeRecipeCheckHandlers.Result(status, used);
+    }
 
-    return source.dependenciesCurrent() && catalog.isCurrent() ? result : new UpgradeRecipeCheckHandlers.Result(
-        UpgradeRecipeCheckHandlers.Status.STALE,
-        result.workUsed());
+    return source.dependenciesCurrent()
+        && catalog.isCurrent()
+        && preparationCurrent() ? result : new UpgradeRecipeCheckHandlers.Result(
+            UpgradeRecipeCheckHandlers.Status.STALE,
+            result.workUsed());
   }
 
   public boolean factoryAdmissionCurrent(UpgradeBusOwner factory, String threadId) {
@@ -192,6 +227,10 @@ public final class RecipeStartPlan {
     return source.owner() == factory
         && factoryChecks != null
         && factoryChecks.admitted(factory, threadId)
+        && postChecks != null
+        && postChecks.current()
+        && postChecks.complete()
+        && !postChecks.rejected()
         && source.dependenciesCurrent()
         && catalog.isCurrent()
         && inputPreparationCurrent()
@@ -283,6 +322,8 @@ public final class RecipeStartPlan {
     target.inputPreparedDefinition = inputPreparedDefinition;
     target.originalCandidate = originalCandidate;
     target.inputPreparedEpoch = inputPreparedEpoch;
+    target.preparationLimit = preparationLimit;
+    target.postChecks = postChecks;
     return target;
   }
 
@@ -371,6 +412,7 @@ public final class RecipeStartPlan {
       upgrades = thread.upgradeSnapshot();
     }
     limit = definition.parallelized() ? limit : Math.min(limit, 1);
+    limit = Math.min(limit, preparationLimit);
     limit = PatternProductionService.parallelLimit(source, definition, limit);
     boolean upgradesChanged = !upgrades.equals(parallelUpgrades);
     if (parallelAdmission == null || parallelRequest != limit || upgradesChanged) {
@@ -489,6 +531,9 @@ public final class RecipeStartPlan {
     var fixed = new HashMap<ItemResourceKey, Long>();
     boolean aggregate = source.owner() instanceof MachineControllerBlockEntity;
     for (var output : recipe.outputs()) {
+      if (output.ignoreOutputCheck()) {
+        continue;
+      }
       (aggregate && output.parallelUnaffected() ? fixed : required).merge(output.key(), output.count(), Math::addExact);
     }
     long result = Integer.MAX_VALUE;
@@ -536,11 +581,15 @@ public final class RecipeStartPlan {
 
   Optional<RecipeExecutionTicket> checkedTicket() {
     source.requireServerThread();
-    if (!catalog.isCurrent() || !inputPreparationCurrent()) {
+    if (!catalog.isCurrent() || !inputPreparationCurrent() || !preparationCurrent()) {
       return Optional.empty();
     }
     var fresh = source.refreshIfUnchanged().filter(RecipeCommitGuard::validate);
-    return catalog.isCurrent() && inputPreparationCurrent() ? fresh : Optional.empty();
+    return catalog.isCurrent() && inputPreparationCurrent() && preparationCurrent() ? fresh : Optional.empty();
+  }
+
+  private boolean preparationCurrent() {
+    return preparationEpoch == RecipePreparationHandlers.epoch() && (postChecks == null || postChecks.current());
   }
 
   RecipeExecutionTicket source() {

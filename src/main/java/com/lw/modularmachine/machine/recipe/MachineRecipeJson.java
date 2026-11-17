@@ -482,8 +482,12 @@ public final class MachineRecipeJson {
     for (int i = 0; i < values.size(); i++) {
       String path = "$." + field + "[" + i + "]";
       var fluid = object(values.get(i), path);
-      fields(fluid, Set.of("id", "amount", "components", "chance", "parallel_unaffected", "selector"), path);
+      fields(
+          fluid,
+          Set.of("id", "amount", "components", "chance", "parallel_unaffected", "selector", "ignore_output_check"),
+          path);
       fixedFlag(fluid, path);
+      outputCheckFlag(fluid, path, field.equals("fluid_outputs"));
       if (field.startsWith("fluid_per_tick")
           && fluid.has("parallel_unaffected")
           && fluid.get("parallel_unaffected").getAsBoolean()) {
@@ -525,7 +529,8 @@ public final class MachineRecipeJson {
       for (int index = 0; index < values.size(); index++) {
         String at = path + "[" + index + "]";
         var value = object(values.get(index), at);
-        fields(value, Set.of("chemical", "amount", "selector", "chance"), at);
+        fields(value, Set.of("chemical", "amount", "selector", "chance", "ignore_output_check"), at);
+        outputCheckFlag(value, at, field.equals("outputs"));
         identifier(value.get("chemical"), at + ".chemical");
         if (integer(value.get("amount"), at + ".amount") <= 0) {
           throw error(at + ".amount", "Expected a positive long chemical amount");
@@ -587,9 +592,11 @@ public final class MachineRecipeJson {
               "preview_stack",
               "parallel_unaffected",
               "min_amount",
-              "max_amount"),
+              "max_amount",
+              "ignore_output_check"),
           at);
       fixedFlag(demand, at);
+      outputCheckFlag(demand, at, !input);
       String match = demand.has("match") ? string(demand.get("match"), at + ".match") : "exact";
       if (!match.equals("exact") && !match.equals("item")) {
         throw error(at + ".match", "Expected exact or item");
@@ -725,6 +732,19 @@ public final class MachineRecipeJson {
     }
   }
 
+  private static void outputCheckFlag(JsonObject row, String path, boolean supported) {
+    var value = row.get("ignore_output_check");
+    if (value == null) {
+      return;
+    }
+    if (!value.isJsonPrimitive() || !value.getAsJsonPrimitive().isBoolean()) {
+      throw error(path + ".ignore_output_check", "Expected boolean");
+    }
+    if (value.getAsBoolean() && !supported) {
+      throw error(path + ".ignore_output_check", "Only completion output rows support ignored capacity");
+    }
+  }
+
   /** Native NBT booleans are bytes; restore only declared row flag fields. */
   static void restoreRowBooleans(JsonObject json, CompoundTag source) {
     if (source.contains("load_jei")) {
@@ -766,6 +786,7 @@ public final class MachineRecipeJson {
       var encoded = json.getAsJsonArray(field);
       for (int index = 0; index < rows.size() && index < encoded.size(); index++) {
         var row = rows.getCompound(index);
+        restoreBoolean(encoded.get(index).getAsJsonObject(), row, "ignore_output_check");
         if (field.equals("triggered_resources") && row.contains("repeatable")) {
           if (!row.contains("repeatable", Tag.TAG_BYTE)
               || row.getByte("repeatable") < 0
@@ -785,6 +806,32 @@ public final class MachineRecipeJson {
         }
       }
     }
+    if (json.has("chemicals")) {
+      var chemicals = source.getCompound("chemicals");
+      var encoded = json.getAsJsonObject("chemicals");
+      for (String field : List.of("inputs", "outputs", "per_tick", "per_tick_outputs")) {
+        if (!encoded.has(field)) {
+          continue;
+        }
+        var rows = chemicals.getList(field, Tag.TAG_COMPOUND);
+        for (int index = 0; index < rows.size() && index < encoded.getAsJsonArray(field).size(); index++) {
+          restoreBoolean(
+              encoded.getAsJsonArray(field).get(index).getAsJsonObject(),
+              rows.getCompound(index),
+              "ignore_output_check");
+        }
+      }
+    }
+  }
+
+  private static void restoreBoolean(JsonObject json, CompoundTag source, String field) {
+    if (!source.contains(field)) {
+      return;
+    }
+    if (!source.contains(field, Tag.TAG_BYTE) || source.getByte(field) < 0 || source.getByte(field) > 1) {
+      throw new IllegalArgumentException("Invalid frozen recipe flag: " + field);
+    }
+    json.addProperty(field, source.getBoolean(field));
   }
 
   private static JsonParseException error(String path, String message) {

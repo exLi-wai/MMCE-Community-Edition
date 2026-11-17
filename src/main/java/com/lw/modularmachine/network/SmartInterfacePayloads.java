@@ -84,7 +84,7 @@ public final class SmartInterfacePayloads {
   }
 
   public static void register(RegisterPayloadHandlersEvent event) {
-    event.registrar("2")
+    event.registrar("3")
         .playToClient(
             STATUS,
             StreamCodec.of(SmartInterfacePayloads::write, SmartInterfacePayloads::read),
@@ -122,13 +122,7 @@ public final class SmartInterfacePayloads {
       buffer.writeDouble(binding.value());
       buffer.writeVarLong(binding.revision());
       buffer.writeUtf(entry.machineName(), 512);
-      buffer.writeDouble(type.defaultValue());
-      buffer.writeDouble(type.minimum());
-      buffer.writeDouble(type.maximum());
-      buffer.writeUtf(type.header(), 256);
-      buffer.writeUtf(type.valueLabel(), 256);
-      buffer.writeUtf(type.footer(), 256);
-      buffer.writeInt(type.priority());
+      writeType(buffer, type);
       buffer.writeBoolean(entry.editable());
     }
   }
@@ -152,15 +146,10 @@ public final class SmartInterfacePayloads {
           buffer.readDouble(),
           buffer.readVarLong());
       String name = buffer.readUtf(512);
-      var type = new SmartInterfaceType(
-          binding.type(),
-          buffer.readDouble(),
-          buffer.readDouble(),
-          buffer.readDouble(),
-          buffer.readUtf(256),
-          buffer.readUtf(256),
-          buffer.readUtf(256),
-          buffer.readInt());
+      var type = readType(buffer);
+      if (!type.id().equals(binding.type())) {
+        throw new IllegalArgumentException("Smart interface type does not match binding");
+      }
       entries.add(new SmartInterfaceBlockEntity.Entry(binding, name, type, buffer.readBoolean()));
     }
 
@@ -175,6 +164,35 @@ public final class SmartInterfacePayloads {
     buffer.writeUtf(value.interfaceType(), ResourceSelector.MAX_LENGTH);
     buffer.writeVarLong(value.revision());
     buffer.writeDouble(value.value());
+  }
+
+  static void writeType(RegistryFriendlyByteBuf buffer, SmartInterfaceType type) {
+    buffer.writeUtf(type.id(), ResourceSelector.MAX_LENGTH);
+    buffer.writeDouble(type.defaultValue());
+    buffer.writeDouble(type.minimum());
+    buffer.writeDouble(type.maximum());
+    buffer.writeUtf(type.header(), 256);
+    buffer.writeUtf(type.valueLabel(), 256);
+    buffer.writeUtf(type.footer(), 256);
+    buffer.writeInt(type.priority());
+    buffer.writeUtf(type.notEqualMessage(), 256);
+    buffer.writeUtf(type.jeiTooltip(), 256);
+    buffer.writeVarInt(type.jeiTooltipArgsCount());
+  }
+
+  static SmartInterfaceType readType(RegistryFriendlyByteBuf buffer) {
+    return new SmartInterfaceType(
+        buffer.readUtf(ResourceSelector.MAX_LENGTH),
+        buffer.readDouble(),
+        buffer.readDouble(),
+        buffer.readDouble(),
+        buffer.readUtf(256),
+        buffer.readUtf(256),
+        buffer.readUtf(256),
+        buffer.readInt(),
+        buffer.readUtf(256),
+        buffer.readUtf(256),
+        buffer.readVarInt());
   }
 
   private static Action readAction(RegistryFriendlyByteBuf buffer) {

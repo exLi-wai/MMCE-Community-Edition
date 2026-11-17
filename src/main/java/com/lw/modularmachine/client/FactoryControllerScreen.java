@@ -640,6 +640,9 @@ public final class FactoryControllerScreen extends AbstractContainerScreen<Facto
     if (thread.duration() > 0 && "WAITING".equals(thread.state()) && !"NONE".equals(thread.reason())) {
       threadState = Component.translatable("menu.mmcece.factory.reason." + thread.reason().toLowerCase(Locale.ROOT));
     }
+    if (!thread.recipeFailureMessage().isEmpty()) {
+      threadState = Component.translatable(thread.recipeFailureMessage());
+    }
     graphics.drawString(font, threadState, x, y + 12, FONT_COLOR, false);
     if (thread.duration() == 0 && thread.parallelLimit() > 1) {
       graphics.drawString(font, Component.literal("x" + thread.parallelLimit()), x, y + 22, FONT_COLOR, false);
@@ -657,7 +660,9 @@ public final class FactoryControllerScreen extends AbstractContainerScreen<Facto
     } else if (!"NONE".equals(thread.reason())) {
       graphics.drawString(
           font,
-          Component.translatable("menu.mmcece.factory.reason." + thread.reason().toLowerCase(Locale.ROOT)),
+          thread.recipeFailureMessage().isEmpty() ? Component
+              .translatable("menu.mmcece.factory.reason." + thread.reason().toLowerCase(Locale.ROOT)) : Component
+                  .translatable(thread.recipeFailureMessage()),
           x,
           y + 22,
           FONT_COLOR,

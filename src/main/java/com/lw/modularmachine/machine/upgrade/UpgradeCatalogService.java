@@ -12,6 +12,7 @@ import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.Optional;
+import java.util.Set;
 import net.minecraft.core.HolderLookup;
 import net.minecraft.core.registries.BuiltInRegistries;
 import net.minecraft.resources.ResourceLocation;
@@ -40,17 +41,27 @@ public final class UpgradeCatalogService {
     private final boolean finishData;
     private final Map<ResourceLocation, List<UpgradeDefinition>> byItem;
     private final Map<ResourceLocation, ItemIndex> indexes;
+    private final Map<ResourceLocation, UpgradeScriptType> types;
+    private final Set<ResourceLocation> supportedItems;
 
     private Snapshot(long epoch, List<UpgradeDefinition> definitions, Map<ResourceLocation, List<UpgradeDefinition>> byItem, Map<ResourceLocation, ItemIndex> indexes) {
+      this(epoch, definitions, byItem, indexes, Map.of(), Set.of());
+    }
+
+    private Snapshot(long epoch, List<UpgradeDefinition> definitions, Map<ResourceLocation, List<UpgradeDefinition>> byItem, Map<ResourceLocation, ItemIndex> indexes, Map<ResourceLocation, UpgradeScriptType> types, Set<ResourceLocation> supportedItems) {
       this.epoch = epoch;
       this.definitions = List.copyOf(definitions);
-      tickCosts = definitions.stream().anyMatch(definition -> definition.tickCost().present());
-      tickData = definitions.stream().anyMatch(definition -> definition.tickDataHandler() != null);
-      finishData = definitions.stream().anyMatch(definition -> definition.finishDataHandler() != null);
+      var effects = new ArrayList<>(definitions);
+      types.values().forEach(type -> effects.add(type.template()));
+      tickCosts = effects.stream().anyMatch(definition -> definition.tickCost().present());
+      tickData = effects.stream().anyMatch(definition -> definition.tickDataHandler() != null);
+      finishData = effects.stream().anyMatch(definition -> definition.finishDataHandler() != null);
       var groups = new LinkedHashMap<ResourceLocation, List<UpgradeDefinition>>();
       byItem.forEach((item, values) -> groups.put(item, List.copyOf(values)));
       this.byItem = Map.copyOf(groups);
       this.indexes = Map.copyOf(indexes);
+      this.types = Map.copyOf(types);
+      this.supportedItems = Set.copyOf(supportedItems);
     }
 
     public long epoch() {
@@ -96,6 +107,12 @@ public final class UpgradeCatalogService {
       if (stack == null || stack.isEmpty()) {
         return Optional.empty();
       }
+      var explicit = UpgradeEntryResolver.typeIdentifier(stack);
+      if (explicit != null && supportedItems.contains(stack.getItem().builtInRegistryHolder().key().location())) {
+        var type = types.get(explicit);
+        return type == null ? Optional.empty() : Optional
+            .of(type.template().forItem(stack.getItem().builtInRegistryHolder().key().location(), null));
+      }
       var index = indexes.get(stack.getItem().builtInRegistryHolder().key().location());
       if (index == null) {
         return Optional.empty();
@@ -108,6 +125,13 @@ public final class UpgradeCatalogService {
       }
 
       return Optional.ofNullable(index.fallback());
+    }
+
+    public Map<ResourceLocation, UpgradeScriptType> types() {
+      return types;
+    }
+    public Set<ResourceLocation> supportedItems() {
+      return supportedItems;
     }
   }
 
@@ -126,37 +150,64 @@ public final class UpgradeCatalogService {
         Math.incrementExact(previous.epoch()),
         previous.definitions(),
         previous.byItem(),
-        previous.indexes);
+        previous.indexes,
+        previous.types,
+        previous.supportedItems);
   }
 
   public static void replaceDefinitions(Collection<UpgradeDefinition> definitions) {
+    replaceDefinitions(definitions, Map.of(), Set.of());
+  }
+
+  public static void replaceDefinitions(Collection<UpgradeDefinition> definitions, Map<ResourceLocation, UpgradeScriptType> types, Set<ResourceLocation> supportedItems) {
     var server = ServerLifecycleHooks.getCurrentServer();
     if (server == null || !server.isSameThread()) {
       throw new IllegalStateException("Upgrade definitions require the server thread and registry lookup");
     }
-    replaceDefinitions(definitions, server.registryAccess());
+    replaceDefinitions(definitions, server.registryAccess(), types, supportedItems);
   }
 
   static void replaceDefinitions(Collection<UpgradeDefinition> definitions, HolderLookup.Provider registries) {
+    replaceDefinitions(definitions, registries, Map.of(), Set.of());
+  }
+
+  private static void replaceDefinitions(Collection<UpgradeDefinition> definitions, HolderLookup.Provider registries, Map<ResourceLocation, UpgradeScriptType> types, Set<ResourceLocation> supportedItems) {
     var server = ServerLifecycleHooks.getCurrentServer();
     if (server != null && !server.isSameThread()) {
       throw new IllegalStateException("Upgrade definitions published outside server thread");
     }
-    if (definitions.size() > MAX_DEFINITIONS) {
+    if (definitions.size() > MAX_DEFINITIONS
+        || types.size() > MAX_DEFINITIONS
+        || supportedItems.size() > MAX_DEFINITIONS) {
       throw new JsonParseException("Too many fixed upgrade definitions");
     }
     var ordered = definitions.stream().sorted(Comparator.comparing(definition -> definition.effect().id())).toList();
     var grouped = new LinkedHashMap<ResourceLocation, List<UpgradeDefinition>>();
     var identifiers = new HashSet<ResourceLocation>();
+    identifiers.addAll(types.keySet());
+    for (var entry : types.entrySet()) {
+      if (!entry.getKey().equals(entry.getValue().type().id())) {
+        throw new JsonParseException("Upgrade type identity disagrees with its catalog key");
+      }
+    }
+    for (var item : supportedItems) {
+      if (!BuiltInRegistries.ITEM.containsKey(item) || BuiltInRegistries.ITEM.get(item) == Items.AIR) {
+        throw new JsonParseException("Unknown supported upgrade item: " + item);
+      }
+    }
     for (var definition : ordered) {
+      var type = types.get(definition.effect().id());
       if (!BuiltInRegistries.ITEM.containsKey(definition.item())
           || BuiltInRegistries.ITEM.get(definition.item()) == Items.AIR
-          || !identifiers.add(definition.effect().id())) {
+          || !identifiers.add(definition.effect().id()) && type == null
+          || type != null && !definition.equals(type.template().forItem(definition.item(), definition.components()))) {
         throw new JsonParseException("Unknown item or duplicate fixed upgrade ID: " + definition.item());
       }
       grouped.computeIfAbsent(definition.item(), ignored -> new ArrayList<>()).add(definition);
     }
-    for (var definition : ordered) {
+    var effects = new ArrayList<>(ordered);
+    types.values().forEach(type -> effects.add(type.template()));
+    for (var definition : effects) {
       for (var incompatible : definition.restrictions().incompatible()) {
         if (!identifiers.contains(incompatible)) {
           throw new JsonParseException(definition.effect().id() + ": Unknown incompatible upgrade " + incompatible);
@@ -185,7 +236,7 @@ public final class UpgradeCatalogService {
       }
       indexes.put(group.getKey(), new ItemIndex(fallback, exact));
     }
-    current = new Snapshot(Math.incrementExact(current.epoch()), ordered, grouped, indexes);
+    current = new Snapshot(Math.incrementExact(current.epoch()), ordered, grouped, indexes, types, supportedItems);
   }
 
   @SubscribeEvent
@@ -197,6 +248,7 @@ public final class UpgradeCatalogService {
     UpgradeBusDataHandlers.clearOnServerStop();
     UpgradeRuntimeDataHandlers.clearOnServerStop();
     UpgradeScriptHandlers.clearOnServerStop();
+    UpgradeDescriptionService.clear();
     UpgradeCallbackGuard.clear();
     current = new Snapshot(Math.incrementExact(current.epoch()), List.of(), Map.of(), Map.of());
   }

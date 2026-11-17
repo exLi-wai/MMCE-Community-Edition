@@ -47,21 +47,25 @@ public final class CompiledRecipeSet<K> {
       }
       var input = new LinkedHashMap<K, Long>();
       var output = new LinkedHashMap<K, Long>();
+      var recipeOutputKeys = new HashSet<K>();
       try {
         for (var demand : recipe.inputs()) {
           input.merge(demand.key(), demand.count(), Math::addExact);
         }
         for (var demand : recipe.outputs()) {
-          output.merge(demand.key(), demand.count(), Math::addExact);
+          recipeOutputKeys.add(demand.key());
+          if (!demand.ignoreOutputCheck()) {
+            output.merge(demand.key(), demand.count(), Math::addExact);
+          }
         }
       } catch (ArithmeticException overflow) {
         throw new IllegalArgumentException("Demand overflow in recipe " + recipe.id(), overflow);
       }
-      if (output.size() > MAX_DISTINCT_OUTPUTS) {
+      if (recipeOutputKeys.size() > MAX_DISTINCT_OUTPUTS) {
         throw new IllegalArgumentException("Too many distinct output keys");
       }
       pending.add(new Pending<>(recipe, input, output));
-      keys.addAll(output.keySet());
+      keys.addAll(recipeOutputKeys);
     }
     pending.sort(
         Comparator.<Pending<K>>comparingInt(entry -> entry.recipe().priority()).reversed()
@@ -209,6 +213,7 @@ public final class CompiledRecipeSet<K> {
     final List<Map.Entry<K, Long>> inputEntries;
     final List<K> outputKeys;
     final Map<K, Integer> outputIndices;
+    final List<RecipeCandidate.Output<K>> overflowOutputs;
     final K anchorKey;
     final long anchorAmount;
     private final long[] amounts;
@@ -216,6 +221,7 @@ public final class CompiledRecipeSet<K> {
     Entry(int rank, RecipeCandidate<K> recipe, Map<K, Long> input, Map<K, Long> output, K anchor) {
       this.rank = rank;
       this.recipe = recipe;
+      overflowOutputs = recipe.outputs().stream().filter(RecipeCandidate.Output::ignoreOutputCheck).toList();
       this.input = Map.copyOf(input);
       inputEntries = input.entrySet().stream().map(entry -> Map.entry(entry.getKey(), entry.getValue())).toList();
       anchorKey = anchor;

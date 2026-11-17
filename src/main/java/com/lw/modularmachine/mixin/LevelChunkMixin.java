@@ -21,7 +21,7 @@ public abstract class LevelChunkMixin {
     if (callback.getReturnValue() != null
         && ((LevelChunk) (Object) this).getLevel() instanceof ServerLevel level
         && level.getServer().isSameThread()) {
-      StructureChangeRouter.blockChanged(level, pos);
+      StructureChangeRouter.blockChanged(level, pos, callback.getReturnValue(), state);
     }
   }
 }

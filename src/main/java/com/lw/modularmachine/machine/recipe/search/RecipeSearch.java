@@ -11,6 +11,8 @@ import com.lw.modularmachine.machine.recipe.RecipeExecutionTicket;
 import com.lw.modularmachine.machine.recipe.MachineRecipe;
 import com.lw.modularmachine.machine.recipe.RecipeItemCallbackService;
 import com.lw.modularmachine.machine.recipe.RecipeItemPreparation;
+import com.lw.modularmachine.machine.recipe.RecipePreparationHandlers;
+import com.lw.modularmachine.api.recipe.RecipePreparationEvents;
 import com.lw.modularmachine.api.recipe.RecipeModifier;
 import com.mojang.serialization.JsonOps;
 import net.minecraft.resources.ResourceLocation;
@@ -31,6 +33,7 @@ import java.util.Optional;
 import java.util.Set;
 import java.util.function.Supplier;
 import org.jetbrains.annotations.ApiStatus;
+import com.lw.modularmachine.machine.factory.FactoryThreadPreset;
 
 /**
  * Server-owned multi-resource search with resumable candidate and output
@@ -54,6 +57,9 @@ public final class RecipeSearch {
   private RecipeIngredientArrayPreparation ingredientPreparation;
   private long inputPreparationEpoch = -1;
   private long inputPreparationWork;
+  private RecipePreparationHandlers.Session preChecks;
+  private boolean preChecked;
+  private final Map<String, Integer> preparationLimits = new HashMap<>();
 
   private record PreparedInputs(MachineRecipe definition, RecipeCandidate<ItemResourceKey> original, long epoch) {
   }
@@ -77,6 +83,7 @@ public final class RecipeSearch {
   private final Map<String, MissingResource> missingResources = new HashMap<>();
   private final Set<String> componentReady = new HashSet<>();
   private boolean resourcesDiagnosed;
+  private String interfaceFailure = "";
 
   private record MissingResource(RecipeCandidate<ItemResourceKey> candidate, PortKind kind) {
   }
@@ -146,6 +153,12 @@ public final class RecipeSearch {
           && (!definition.ingredientArrays().isEmpty()
               || definition.scriptOptions().itemCallbacks().stream()
                   .anyMatch(binding -> binding.io() == RecipeModifier.Io.INPUT && !binding.modifiers().isEmpty()));
+      boolean needsPreparation = transformsInput
+          || definition != null
+              && RecipePreparationHandlers.has(
+                  ticket.owner().structureMachineId(),
+                  ResourceLocation.parse(candidate.id()),
+                  RecipePreparationEvents.Type.PRE_CHECK);
       var missing = definition == null ? Optional.<PortKind>empty() : requirements.missing(definition);
       if (!transformsInput && missing.isPresent()
           || !transformsInput && !PatternProductionService.matches(ticket, definition, this.factoryThread)
@@ -160,9 +173,12 @@ public final class RecipeSearch {
               && !definition.executionOptions().threadName().isEmpty()) {
         continue;
       }
-      if (ticket.interfacesMatch(candidate.interfaceInputs())
-          && (transformsInput || resourcesAvailable(candidate.id(), definition))) {
-        if (transformsInput) {
+      boolean interfacesMatch = ticket.interfacesMatch(candidate.interfaceInputs());
+      if (!interfacesMatch && interfaceFailure.isEmpty()) {
+        interfaceFailure = ticket.interfaceFailureMessage(candidate.interfaceInputs());
+      }
+      if (interfacesMatch && (transformsInput || resourcesAvailable(candidate.id(), definition))) {
+        if (needsPreparation) {
           preparingCandidates.add(candidate);
         } else {
           resourceCandidates.add(candidate.id());
@@ -197,6 +213,34 @@ public final class RecipeSearch {
     while (inputPreparationCursor < inputPreparationCandidates.size() && used < budget) {
       var original = inputPreparationCandidates.get(inputPreparationCursor);
       var definition = catalog.definition(original.id());
+      if (!preChecked) {
+        if (preChecks == null) {
+          preChecks = RecipePreparationHandlers.begin(
+              ticket.owner(),
+              ResourceLocation.parse(original.id()),
+              factoryThread,
+              RecipePreparationEvents.Type.PRE_CHECK,
+              RecipePreparationHandlers.parallelLimit(ticket, factoryThread),
+              null);
+        }
+        int work = preChecks.advance(budget - used);
+        used += work;
+        inputPreparationWork += work;
+        if (!preChecks.current() || !ticket.dependenciesCurrent() || !catalog.isCurrent()) {
+          throw new UpgradeRecipeCheckHandlers.StaleException();
+        }
+        if (!preChecks.complete()) {
+          return used;
+        }
+        if (preChecks.rejected()) {
+          preChecks = null;
+          inputPreparationCursor++;
+          continue;
+        }
+        preparationLimits.put(original.id(), preChecks.parallelism());
+        preChecks = null;
+        preChecked = true;
+      }
       if (!definition.ingredientArrays().isEmpty()) {
         if (ingredientPreparation == null) {
           ingredientPreparation = new RecipeIngredientArrayPreparation(
@@ -223,6 +267,7 @@ public final class RecipeSearch {
               .put(original.id(), new PreparedInputs(nativeRecipe, original, ingredientPreparation.epoch()));
         }
         ingredientPreparation = null;
+        preChecked = false;
         inputPreparationCursor++;
         continue;
       }
@@ -248,7 +293,9 @@ public final class RecipeSearch {
         var value = prepared.orElseThrow();
         var ops = ticket.level().registryAccess().createSerializationContext(JsonOps.INSTANCE);
         var nativeRecipe = MachineRecipe.CODEC.codec().parse(ops, value.declaration()).getOrThrow();
-        if (PatternProductionService.matches(ticket, nativeRecipe, factoryThread)) {
+        if (RecipeResourceRequirements.missing(ticket, nativeRecipe).isEmpty()
+            && resourcesAvailable(original.id(), nativeRecipe)
+            && PatternProductionService.matches(ticket, nativeRecipe, factoryThread)) {
           var candidate = RecipeItemCallbackService
               .compilePrepared(nativeRecipe, ResourceLocation.parse(original.id()), ticket.level().registryAccess());
           preparedCandidates.add(RecipeItemPreparation.inputCandidate(candidate, nativeRecipe));
@@ -256,6 +303,7 @@ public final class RecipeSearch {
         }
       }
       inputPreparation = null;
+      preChecked = false;
       inputPreparationCursor++;
     }
     if (inputPreparationCursor == inputPreparationCandidates.size() && session == null) {
@@ -318,8 +366,22 @@ public final class RecipeSearch {
 
   public static Optional<RecipeSearch> beginFactory(FactoryControllerBlockEntity factory, String threadId, RecipeCatalog catalog, Set<String> allowedIds) {
     Objects.requireNonNull(threadId, "threadId");
+    var thread = factory.scheduler().channel(threadId);
+    if (thread == null)
+      return Optional.empty();
+    var coreAllowed = FactoryThreadPreset.allowedRecipes(factory.structureMachineId(), threadId, thread.lockedRecipe());
+    if (coreAllowed != null) {
+      if (allowedIds == null)
+        allowedIds = coreAllowed;
+      else {
+        var intersection = new HashSet<>(allowedIds);
+        intersection.retainAll(coreAllowed);
+        allowedIds = Set.copyOf(intersection);
+      }
+    }
+    var finalAllowed = allowedIds;
     return MachineRecipeService.catalogForFactory(factory, threadId, catalog)
-        .flatMap(effective -> begin(factory, effective, allowedIds, threadId));
+        .flatMap(effective -> begin(factory, effective, finalAllowed, threadId));
   }
 
   public static Optional<RecipeSearch> beginFactory(FactoryControllerBlockEntity factory, String threadId) {
@@ -423,7 +485,8 @@ public final class RecipeSearch {
                 ticket.level().registryAccess());
         pendingFactoryPlan = RecipeStartPlan
             .prepared(ticket, catalog, candidate, deductions, placements, inputChanceSeed, factoryScope)
-            .withOutputPreparationContext(factoryThread);
+            .withOutputPreparationContext(factoryThread)
+            .withPreparationLimit(preparationLimits.getOrDefault(generic.candidate().id(), Integer.MAX_VALUE));
         if (prepared != null) {
           pendingFactoryPlan.withPreparedInputs(prepared.definition(), prepared.original(), prepared.epoch());
         }
@@ -532,6 +595,9 @@ public final class RecipeSearch {
           groupBestIndex = groupCursor;
         }
       }
+      if (interfaceFailure.isEmpty()) {
+        interfaceFailure = groupSearch.interfaceFailure();
+      }
       completedGroupWork += groupSearch.totalWork();
       groupSearch = null;
       groupCursor++;
@@ -584,6 +650,10 @@ public final class RecipeSearch {
       }
     }
     return first == null ? Optional.empty() : Optional.of(first.kind());
+  }
+
+  public String interfaceFailure() {
+    return interfaceFailure;
   }
 
   private void diagnoseResources(RecipeExecutionTicket source, List<RecipeCandidate<ItemResourceKey>> candidates) {

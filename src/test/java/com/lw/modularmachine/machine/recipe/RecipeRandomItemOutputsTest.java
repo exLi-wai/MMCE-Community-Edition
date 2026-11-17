@@ -101,6 +101,23 @@ class RecipeRandomItemOutputsTest {
   }
 
   @Test
+  void ignoredOutputsUseEachFrozenRowBoundWithoutConsumingRequiredTotals() {
+    var rows = List.of(
+        new RecipeCandidate.Output<>("same", 1),
+        new RecipeCandidate.Output<>("same", Long.MAX_VALUE, false, true),
+        new RecipeCandidate.Output<>("same", Long.MAX_VALUE, false, true));
+    assertEquals(1, RecipeRandomItemOutputs.arithmeticLimit(rows, List.of(), 30, true));
+    assertEquals(30, RecipeRandomItemOutputs.arithmeticLimit(rows, List.of(), 30, false));
+    var fixed = List
+        .of(new RecipeCandidate.Output<>("same", 1), new RecipeCandidate.Output<>("same", Long.MAX_VALUE, true, true));
+    assertEquals(30, RecipeRandomItemOutputs.arithmeticLimit(fixed, List.of(), 30, true));
+    var scalable = List.of(
+        new RecipeCandidate.Output<>("same", 1),
+        new RecipeCandidate.Output<>("same", Long.MAX_VALUE / 2, false, true));
+    assertEquals(2, RecipeRandomItemOutputs.arithmeticLimit(scalable, List.of(), 30, true));
+  }
+
+  @Test
   void fixedOutputsScaleAcrossFactoryRunsWhileSelectorsAndDisabledChoicesRemainIndependent() {
     long quarter = Long.MAX_VALUE / 4;
     var fixed = new RecipeRandomItemOutputs.Group<>(List.of(choice("same", quarter, 1)), 1, true);

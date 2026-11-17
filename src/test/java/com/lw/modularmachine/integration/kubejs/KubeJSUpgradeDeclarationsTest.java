@@ -4,6 +4,7 @@ import org.junit.jupiter.api.Test;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertTrue;
+import static org.junit.jupiter.api.Assertions.assertThrows;
 
 class KubeJSUpgradeDeclarationsTest {
   @Test
@@ -14,8 +15,10 @@ class KubeJSUpgradeDeclarationsTest {
         .componentBoolean("minecraft:unbreakable", true);
 
     assertTrue(registration.valid());
-    assertEquals(1, registration.snapshot().definitions().size());
-    assertEquals("kubejs:test_parallel", registration.snapshot().definitions().getFirst().effect().id().toString());
+    var snapshot = registration.snapshot();
+    assertEquals(1, snapshot.definitions().size());
+    assertEquals("kubejs:test_parallel", snapshot.definitions().getFirst().effect().id().toString());
+    assertThrows(IllegalStateException.class, registration::snapshot);
   }
 
   @Test

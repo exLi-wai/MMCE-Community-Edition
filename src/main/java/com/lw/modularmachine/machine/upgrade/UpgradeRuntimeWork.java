@@ -4,6 +4,9 @@ import org.jetbrains.annotations.ApiStatus;
 import com.lw.modularmachine.api.upgrade.UpgradeRuntimeData;
 import com.lw.modularmachine.config.MachineConfig;
 import com.lw.modularmachine.machine.recipe.FrozenRecipeRun;
+import com.lw.modularmachine.machine.recipe.RecipePreparationHandlers;
+import com.lw.modularmachine.machine.recipe.RecipeTickPreparation;
+import com.lw.modularmachine.api.recipe.RecipePreparationEvents;
 import com.lw.modularmachine.util.thread.ServerThreadGuard;
 import java.util.ArrayDeque;
 import java.util.HashMap;
@@ -22,7 +25,10 @@ public final class UpgradeRuntimeWork {
 
   private final UpgradeBusOwner owner;
   private final Map<Key, UpgradeTickCosts> jobs = new HashMap<>();
-  private final ArrayDeque<Key> pending = new ArrayDeque<>();
+  private record RecipeKey(String threadId) {
+  }
+  private final Map<RecipeKey, RecipeTickPreparation> recipeJobs = new HashMap<>();
+  private final ArrayDeque<Object> pending = new ArrayDeque<>();
   private long budgetTick = Long.MIN_VALUE;
   private long epoch = Long.MIN_VALUE;
   private int budgetLeft;
@@ -43,24 +49,8 @@ public final class UpgradeRuntimeWork {
     if (UpgradeLifecyclePublisher.isDispatchingAny()) {
       return UpgradeTickCosts.prepare(owner, phase, threadId, runs);
     }
+    beginBudget(level);
     var definitions = UpgradeCatalogService.snapshot();
-    if (definitions.epoch() != epoch) {
-      clearJobs();
-      epoch = definitions.epoch();
-    }
-    if (budgetTick != level.getGameTime()) {
-      budgetTick = level.getGameTime();
-      budgetLeft = MachineConfig.RECIPE_OUTPUT_WORK.get();
-      var iterator = jobs.entrySet().iterator();
-      while (iterator.hasNext()) {
-        var entry = iterator.next();
-        if (!entry.getValue().runsCurrent()) {
-          entry.getValue().invalidate();
-          pending.remove(entry.getKey());
-          iterator.remove();
-        }
-      }
-    }
     if (!definitions.hasData(phase)) {
       return UpgradeTickCosts.prepare(owner, phase, threadId, runs);
     }
@@ -83,14 +73,7 @@ public final class UpgradeRuntimeWork {
       }
     }
     job.authorizeTick();
-    if (job.status() == UpgradeTickCosts.Status.PENDING && budgetLeft > 0 && key.equals(pending.peekFirst())) {
-      int allowance = Math.min(budgetLeft, Math.max(1, MachineConfig.RECIPE_OUTPUT_WORK.get() / pending.size()));
-      budgetLeft -= job.advanceData(allowance);
-      pending.remove(key);
-      if (job.status() == UpgradeTickCosts.Status.PENDING) {
-        pending.addLast(key);
-      }
-    }
+    advanceNext();
 
     return job;
   }
@@ -98,7 +81,86 @@ public final class UpgradeRuntimeWork {
   private void clearJobs() {
     jobs.values().forEach(UpgradeTickCosts::invalidate);
     jobs.clear();
+    recipeJobs.clear();
     pending.clear();
+  }
+
+  public RecipeTickPreparation.Status prepareRecipeTick(String threadId, List<FrozenRecipeRun> runs) {
+    var level = (ServerLevel) owner.getLevel();
+    ServerThreadGuard.require(level, "Recipe pre-tick work");
+    if (runs.stream().noneMatch(
+        run -> RecipePreparationHandlers
+            .has(owner.machineId(), run.recipeId(), RecipePreparationEvents.Type.PRE_TICK))) {
+      return RecipeTickPreparation.Status.ALLOWED;
+    }
+    beginBudget(level);
+    var key = new RecipeKey(threadId);
+    var job = recipeJobs.get(key);
+    if (job == null || !job.reusable(runs)) {
+      job = new RecipeTickPreparation(owner, threadId, runs);
+      recipeJobs.put(key, job);
+      pending.remove(key);
+      pending.addLast(key);
+    }
+    advanceNext();
+    return job.status();
+  }
+
+  /** A pre-tick gate must also let an older upgrade proposal leave the queue. */
+  private void advanceNext() {
+    if (pending.isEmpty() || budgetLeft <= 0) {
+      return;
+    }
+    int allowance = Math.min(budgetLeft, Math.max(1, MachineConfig.RECIPE_OUTPUT_WORK.get() / pending.size()));
+    var key = pending.removeFirst();
+    boolean incomplete = false;
+    if (key instanceof Key upgradeKey) {
+      var job = jobs.get(upgradeKey);
+      if (job != null && job.runsCurrent()) {
+        job.authorizeTick();
+        budgetLeft -= job.advanceData(allowance);
+        incomplete = job.status() == UpgradeTickCosts.Status.PENDING;
+      }
+    } else if (key instanceof RecipeKey recipeKey) {
+      var job = recipeJobs.get(recipeKey);
+      if (job != null && job.current()) {
+        budgetLeft -= job.advance(allowance);
+        incomplete = job.status() == RecipeTickPreparation.Status.PENDING;
+      }
+    }
+    if (incomplete) {
+      pending.addLast(key);
+    }
+  }
+
+  private void beginBudget(ServerLevel level) {
+    var definitions = UpgradeCatalogService.snapshot();
+    if (definitions.epoch() != epoch) {
+      clearJobs();
+      epoch = definitions.epoch();
+    }
+    if (budgetTick == level.getGameTime()) {
+      return;
+    }
+    budgetTick = level.getGameTime();
+    budgetLeft = MachineConfig.RECIPE_OUTPUT_WORK.get();
+    var iterator = jobs.entrySet().iterator();
+    while (iterator.hasNext()) {
+      var entry = iterator.next();
+      if (!entry.getValue().runsCurrent()) {
+        entry.getValue().invalidate();
+        pending.remove(entry.getKey());
+        iterator.remove();
+      }
+    }
+    var recipes = recipeJobs.entrySet().iterator();
+    while (recipes.hasNext()) {
+      var entry = recipes.next();
+      if (!entry.getValue().current()) {
+        pending.remove(entry.getKey());
+        recipes.remove();
+      }
+    }
   }
 
   public void clear(String threadId) {
@@ -116,6 +178,11 @@ public final class UpgradeRuntimeWork {
       job.invalidate();
     }
     pending.remove(key);
+    if (phase == UpgradeRuntimeData.Phase.TICK) {
+      var recipeKey = new RecipeKey(threadId);
+      recipeJobs.remove(recipeKey);
+      pending.remove(recipeKey);
+    }
   }
 
   public void clear() {

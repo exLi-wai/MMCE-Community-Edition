@@ -20,6 +20,9 @@ import net.minecraft.resources.ResourceLocation;
 import net.minecraft.world.item.ItemStack;
 import net.neoforged.neoforge.fluids.FluidStack;
 import com.lw.modularmachine.api.recipe.RecipeModifier;
+import com.lw.modularmachine.client.preview.ClientMachineCatalog;
+import java.util.IllegalFormatException;
+import java.util.Locale;
 
 /** Shared recipe artwork, quantities and descriptions for JEI and EMI. */
 public final class MachineRecipeDisplay {
@@ -73,12 +76,28 @@ public final class MachineRecipeDisplay {
               EnergyDisplay.unitComponent()));
     }
     for (var requirement : recipe.interfaceInputs()) {
-      result.add(
-          Component.translatable(
-              "jei.mmcece.machine_item.interface_input",
-              requirement.type(),
-              requirement.minimum(),
-              requirement.maximum()));
+      var machine = ClientMachineCatalog.machines().get(recipe.machineId());
+      var type = machine == null ? null : machine.interfaces().get(requirement.type());
+      if (type != null && !type.jeiTooltip().isEmpty()) {
+        Object[] arguments = switch (type.jeiTooltipArgsCount()) {
+          case 0 -> new Object[0];
+          case 1 -> new Object[]{requirement.minimum()};
+          default -> new Object[]{requirement.minimum(), requirement.maximum()};
+        };
+        String template = I18n.get(type.jeiTooltip());
+        try {
+          result.add(Component.literal(String.format(Locale.ROOT, template, arguments)));
+        } catch (IllegalFormatException invalid) {
+          result.add(Component.literal(template));
+        }
+      } else {
+        result.add(
+            Component.translatable(
+                "jei.mmcece.machine_item.interface_input",
+                requirement.type(),
+                requirement.minimum(),
+                requirement.maximum()));
+      }
     }
 
     return List.copyOf(result);

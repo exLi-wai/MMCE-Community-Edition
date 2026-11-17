@@ -1,5 +1,6 @@
 package com.lw.modularmachine.blockentity;
 
+import org.jetbrains.annotations.ApiStatus;
 import com.lw.modularmachine.machine.upgrade.UpgradeRuntimeDataHandlers;
 import com.lw.modularmachine.machine.upgrade.UpgradeBusDataHandlers;
 import com.lw.modularmachine.machine.upgrade.UpgradeItemDataHandlers;
@@ -207,6 +208,30 @@ public final class UpgradeBusBlockEntity extends BlockEntity implements MenuProv
 
   public List<UpgradeRestrictions.Installed> upgradeRestrictions(UpgradeBusOwner factory) {
     return upgradeRestrictionSourcesValid(factory) ? context(factory).restrictions() : List.of();
+  }
+
+  /**
+   * Captured installed definitions for read-only controller callbacks; no lease
+   * authority.
+   */
+  @ApiStatus.Internal
+  public List<UpgradeRestrictions.Installed> observedUpgradeRestrictions(UpgradeBusOwner owner) {
+    var server = requireServer();
+    var registration = owner.structureRegistration();
+    var binding = bindings.get(owner.getBlockPos());
+    var context = context(owner);
+    if (!current(context)
+        || !context.restrictionsCaptured()
+        || binding == null
+        || !binding.machine().equals(owner.machineId())
+        || !liveBus(server)
+        || !liveFactory(server, owner)
+        || registration == null
+        || !registration.currentForObservation(server)) {
+      return List.of();
+    }
+
+    return context.restrictions();
   }
 
   public List<UpgradeRestrictions.Installed> upgradeRestrictions() {

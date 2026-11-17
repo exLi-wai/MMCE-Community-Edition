@@ -31,6 +31,9 @@ public final class FactoryRunCoordinator {
     HolderLookup.Provider registries();
     long gameTime();
     boolean bindingsCurrent(FrozenRecipeRun run);
+    default boolean beforeTick(String threadId, List<FrozenRecipeRun> runs) {
+      return true;
+    }
     FactoryRunResourceResult tickParallel(String threadId, FactoryRunSet set);
     FactoryRunResourceResult tickSingle(String threadId, FrozenRecipeRun run);
     FactoryOutputEngine.Result advanceOutput(FactoryOutputEngine engine, String threadId, FactoryRunSet set);
@@ -79,6 +82,12 @@ public final class FactoryRunCoordinator {
     }
     if (entry.getValue().runs().stream().allMatch(FrozenRecipeRun::pendingOutput)) {
       advancePendingOutput(threadId, entry.getValue());
+      return;
+    }
+    var active = entry.getValue().runs().stream()
+        .filter(run -> !run.pendingOutput() && run.lastProgressTick() < host.gameTime()).toList();
+    if (!active.isEmpty() && !host.beforeTick(threadId, active)) {
+      host.updateThreadState(thread, FactoryThreadState.State.WAITING, FactoryThreadState.Reason.NONE);
       return;
     }
     if (entry.getValue().runs().size() > 1

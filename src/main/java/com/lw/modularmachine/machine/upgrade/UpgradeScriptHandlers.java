@@ -10,6 +10,7 @@ import com.lw.modularmachine.api.upgrade.DynamicUpgrades;
 import java.util.List;
 import java.util.Map;
 import java.util.Objects;
+import java.util.Set;
 import net.minecraft.resources.ResourceLocation;
 
 /**
@@ -25,7 +26,12 @@ public final class UpgradeScriptHandlers {
       Map<ResourceLocation, UpgradeItemData.Preparer> itemData,
       Map<ResourceLocation, UpgradeBusData.Preparer> busData,
       Map<ResourceLocation, UpgradeRuntimeData.Preparer> runtimeData,
-      List<UpgradeDefinition> definitions) {
+      List<UpgradeDefinition> definitions,
+      Map<ResourceLocation, UpgradeScriptType> types,
+      Set<ResourceLocation> supportedItems) {
+    public Snapshot(Map<ResourceLocation, DynamicUpgrades.Evaluator> dynamic, Map<ResourceLocation, UpgradeRecipeChecks.Checker> checks, Map<ResourceLocation, UpgradeEvents.Listener> events, Map<ResourceLocation, UpgradeItemData.Preparer> itemData, Map<ResourceLocation, UpgradeBusData.Preparer> busData, Map<ResourceLocation, UpgradeRuntimeData.Preparer> runtimeData, List<UpgradeDefinition> definitions) {
+      this(dynamic, checks, events, itemData, busData, runtimeData, definitions, Map.of(), Set.of());
+    }
     public static final Snapshot EMPTY = new Snapshot(
         Map.of(),
         Map.of(),
@@ -43,6 +49,8 @@ public final class UpgradeScriptHandlers {
       busData = Map.copyOf(busData);
       runtimeData = Map.copyOf(runtimeData);
       definitions = List.copyOf(definitions);
+      types = Map.copyOf(types);
+      supportedItems = Set.copyOf(supportedItems);
     }
   }
 
@@ -54,7 +62,7 @@ public final class UpgradeScriptHandlers {
   public static void install(Snapshot candidate) {
     UpgradeHandlerRegistry.requireServer();
     var next = Objects.requireNonNull(candidate, "candidate");
-    UpgradeCatalogService.replaceDefinitions(next.definitions());
+    UpgradeCatalogService.replaceDefinitions(next.definitions(), next.types(), next.supportedItems());
     if (!next.equals(current)) {
       current = next;
       UpgradeCatalogService.invalidateDynamicEffects();
@@ -63,6 +71,10 @@ public final class UpgradeScriptHandlers {
 
   public static DynamicUpgrades.Evaluator dynamic(ResourceLocation id) {
     return current.dynamic().get(id);
+  }
+
+  public static UpgradeScriptType type(ResourceLocation id) {
+    return current.types().get(id);
   }
 
   public static UpgradeRecipeChecks.Checker recipeCheck(ResourceLocation id) {

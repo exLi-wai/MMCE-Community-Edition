@@ -414,6 +414,7 @@
   "jei.mmcece.machine_item.priority": "优先级：%s",
   "jei.mmcece.machine_item.selector": "资源选择器：%s",
   "jei.mmcece.main_structure": "主体结构",
+  "jei.mmcece.modifier_cycle": "左键／右键切换结构修饰器",
   "jei.mmcece.materials_empty": "清单为空",
   "jei.mmcece.materials_help": "开关仅影响材料清单；滚轮滚动",
   "jei.mmcece.required_blocks": "所需方块",

@@ -33,24 +33,26 @@ public record ChemicalRecipeData(
   }
 
   public ChemicalRecipeData {
-    inputs = checked(inputs);
-    outputs = checked(outputs);
-    perTick = checked(perTick);
-    perTickOutputs = checked(perTickOutputs);
+    inputs = checked(inputs, false);
+    outputs = checked(outputs, true);
+    perTick = checked(perTick, false);
+    perTickOutputs = checked(perTickOutputs, false);
   }
 
   public boolean isEmpty() {
     return inputs.isEmpty() && outputs.isEmpty() && perTick.isEmpty() && perTickOutputs.isEmpty();
   }
 
-  private static List<ChemicalRequirement> checked(List<ChemicalRequirement> values) {
+  private static List<ChemicalRequirement> checked(List<ChemicalRequirement> values, boolean completionOutput) {
     var result = List.copyOf(values);
     if (result.size() > MAX_REQUIREMENTS) {
       throw new IllegalArgumentException("Too many chemical requirements");
     }
     var totals = new HashMap<Key, Long>();
     for (var requirement : result) {
-      totals.merge(new Key(requirement.chemical(), requirement.selector()), requirement.amount(), Math::addExact);
+      if (!completionOutput || !requirement.ignoreOutputCheck()) {
+        totals.merge(new Key(requirement.chemical(), requirement.selector()), requirement.amount(), Math::addExact);
+      }
     }
 
     return result;

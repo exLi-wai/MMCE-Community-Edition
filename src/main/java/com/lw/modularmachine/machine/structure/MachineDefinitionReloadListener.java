@@ -33,38 +33,55 @@ public final class MachineDefinitionReloadListener extends ContextAwareReloadLis
 
   private record Input(
       Map<ResourceLocation, JsonElement> roots,
-      List<StateOrientationAdapters.BlockReference> references) {
+      List<StateOrientationAdapters.BlockReference> references,
+      MachineDefinitionScripts.Snapshot scripts) {
   }
 
   private record Captured(
       Map<ResourceLocation, JsonElement> roots,
       StateOrientationAdapters.RegistrySnapshot registry,
-      MachineDefinitionDefaults defaults) {
+      MachineDefinitionDefaults defaults,
+      MachineDefinitionScripts.Snapshot scripts) {
   }
 
-  private record Candidate(Map<ResourceLocation, MachineDefinition> definitions, MachineDefinitionDefaults defaults) {
+  private record Candidate(
+      Map<ResourceLocation, MachineDefinition> definitions,
+      MachineDefinitionDefaults defaults,
+      MachineDefinitionScripts.Snapshot scripts) {
   }
 
   @Override
   public CompletableFuture<Void> reload(PreparationBarrier barrier, ResourceManager resources, ProfilerFiller prepareProfiler, ProfilerFiller applyProfiler, Executor backgroundExecutor, Executor gameExecutor) {
-    return CompletableFuture.supplyAsync(() -> readResources(resources), backgroundExecutor)
-        .thenApplyAsync(roots -> new Input(roots, MachineDefinitionParser.blockReferences(roots)), backgroundExecutor)
+    var scripts = MachineDefinitionScripts.snapshot();
+    return CompletableFuture
+        .supplyAsync(() -> MachineDefinitionScripts.apply(readResources(resources), scripts), backgroundExecutor)
+        .thenApplyAsync(
+            roots -> new Input(
+                roots,
+                MachineDefinitionScripts.compile(scripts, () -> MachineDefinitionParser.blockReferences(roots)),
+                scripts),
+            backgroundExecutor)
         .thenCompose(
             input -> CompletableFuture.supplyAsync(
                 () -> new Captured(
                     input.roots(),
                     StateOrientationAdapters.capture(input.references()),
-                    MachineDefinitionDefaults.capture()),
+                    MachineDefinitionDefaults.capture(),
+                    input.scripts()),
                 gameExecutor))
         .thenApplyAsync(
             captured -> new Candidate(
-                compileCandidate(captured.roots(), captured.registry(), captured.defaults()),
-                captured.defaults()),
+                MachineDefinitionScripts.compile(
+                    captured.scripts(),
+                    () -> compileCandidate(captured.roots(), captured.registry(), captured.defaults())),
+                captured.defaults(),
+                captured.scripts()),
             backgroundExecutor)
         .thenCompose(barrier::wait).thenAcceptAsync(candidate -> {
-          if (!candidate.defaults().equals(MachineDefinitionDefaults.capture())) {
+          if (!candidate.defaults().equals(MachineDefinitionDefaults.capture())
+              || !MachineDefinitionScripts.current(candidate.scripts())) {
             throw new IllegalStateException(
-                "Machine defaults changed during reload; reload again to publish a consistent generation");
+                "Machine defaults or script declarations changed during reload; reload again to publish a consistent generation");
           }
           StructureService.replaceDefinitions(candidate.definitions());
         }, gameExecutor);

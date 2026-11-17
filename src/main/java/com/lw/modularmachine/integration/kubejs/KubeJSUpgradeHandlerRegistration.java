@@ -16,6 +16,10 @@ import dev.latvian.mods.kubejs.event.KubeEvent;
 public final class KubeJSUpgradeHandlerRegistration implements KubeEvent {
   private final KubeJSUpgradeDeclarations.Registration handlers = KubeJSUpgradeDeclarations.registration();
 
+  public KubeJSUpgradeHandlerRegistration() {
+    handlers.activate();
+  }
+
   public KubeJSUpgradeDeclarations.FixedUpgradeBuilder fixedUpgrade(String item, String id) {
     return handlers.fixedUpgrade(item, id);
   }

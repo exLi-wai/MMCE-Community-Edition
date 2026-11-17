@@ -19,7 +19,7 @@ public final class FluidRequirement {
   public static final MapCodec<FluidRequirement> MAP_CODEC = new MapCodec<>() {
     @Override
     public <T> Stream<T> keys(DynamicOps<T> ops) {
-      return Stream.of("id", "amount", "components", "chance", "parallel_unaffected", "selector")
+      return Stream.of("id", "amount", "components", "chance", "parallel_unaffected", "selector", "ignore_output_check")
           .map(ops::createString);
     }
 
@@ -28,9 +28,11 @@ public final class FluidRequirement {
       return FluidStack.CODEC.parse(ops, ops.createMap(input.entries())).flatMap(
           stack -> Codec.DOUBLE.optionalFieldOf("chance", 1.0D).decode(ops, input).flatMap(
               chance -> Codec.BOOL.optionalFieldOf("parallel_unaffected", false).decode(ops, input).flatMap(
-                  fixed -> Codec.STRING.optionalFieldOf("selector").decode(ops, input).map(
-                      selector -> selector.map(value -> new FluidRequirement(stack, chance, fixed, value))
-                          .orElseGet(() -> new FluidRequirement(stack, chance, fixed))))));
+                  fixed -> Codec.BOOL.optionalFieldOf("ignore_output_check", false).decode(ops, input).flatMap(
+                      ignored -> Codec.STRING.optionalFieldOf("selector").decode(ops, input).map(
+                          selector -> selector.map(value -> new FluidRequirement(stack, chance, fixed, value))
+                              .orElseGet(() -> new FluidRequirement(stack, chance, fixed))
+                              .withIgnoreOutputCheck(ignored))))));
     }
 
     @Override
@@ -46,6 +48,9 @@ public final class FluidRequirement {
       if (value.parallelUnaffected) {
         prefix.add("parallel_unaffected", Codec.BOOL.encodeStart(ops, true));
       }
+      if (value.ignoreOutputCheck) {
+        prefix.add("ignore_output_check", Codec.BOOL.encodeStart(ops, true));
+      }
       if (value.selectorSpecified) {
         prefix.add("selector", Codec.STRING.encodeStart(ops, value.selector));
       }
@@ -58,20 +63,21 @@ public final class FluidRequirement {
   private final boolean parallelUnaffected;
   private final String selector;
   private final boolean selectorSpecified;
+  private final boolean ignoreOutputCheck;
 
   public FluidRequirement(FluidStack stack, double chance) {
     this(stack, chance, false);
   }
 
   public FluidRequirement(FluidStack stack, double chance, boolean parallelUnaffected) {
-    this(stack, chance, parallelUnaffected, "", false);
+    this(stack, chance, parallelUnaffected, "", false, false);
   }
 
   public FluidRequirement(FluidStack stack, double chance, boolean parallelUnaffected, String selector) {
-    this(stack, chance, parallelUnaffected, selector, true);
+    this(stack, chance, parallelUnaffected, selector, true, false);
   }
 
-  private FluidRequirement(FluidStack stack, double chance, boolean parallelUnaffected, String selector, boolean selectorSpecified) {
+  private FluidRequirement(FluidStack stack, double chance, boolean parallelUnaffected, String selector, boolean selectorSpecified, boolean ignoreOutputCheck) {
     Objects.requireNonNull(stack, "stack");
     if (stack.isEmpty() || !Double.isFinite(chance) || chance < 0 || chance > 1) {
       throw new IllegalArgumentException("Fluid requirements need a positive quantity and probability within 0..1");
@@ -81,6 +87,7 @@ public final class FluidRequirement {
     this.parallelUnaffected = parallelUnaffected;
     this.selector = ResourceSelector.require(selector);
     this.selectorSpecified = selectorSpecified;
+    this.ignoreOutputCheck = ignoreOutputCheck;
   }
 
   public FluidStack stack() {
@@ -93,6 +100,14 @@ public final class FluidRequirement {
 
   public boolean parallelUnaffected() {
     return parallelUnaffected;
+  }
+
+  public boolean ignoreOutputCheck() {
+    return ignoreOutputCheck;
+  }
+
+  public FluidRequirement withIgnoreOutputCheck(boolean value) {
+    return new FluidRequirement(stack, chance, parallelUnaffected, selector, selectorSpecified, value);
   }
 
   public String selector() {
@@ -112,6 +127,7 @@ public final class FluidRequirement {
     return other instanceof FluidRequirement value
         && chance == value.chance
         && parallelUnaffected == value.parallelUnaffected
+        && ignoreOutputCheck == value.ignoreOutputCheck
         && selectorSpecified == value.selectorSpecified
         && selector.equals(value.selector)
         && FluidStack.matches(stack, value.stack);
@@ -125,6 +141,7 @@ public final class FluidRequirement {
         stack.getAmount(),
         chance,
         parallelUnaffected,
+        ignoreOutputCheck,
         selector,
         selectorSpecified);
   }

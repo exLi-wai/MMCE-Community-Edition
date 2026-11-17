@@ -30,6 +30,8 @@ import net.minecraft.server.level.ServerLevel;
 import net.minecraft.world.level.block.entity.BlockEntity;
 import org.jetbrains.annotations.ApiStatus;
 import java.util.stream.Stream;
+import com.lw.modularmachine.machine.factory.FactoryThreadPreset;
+import net.minecraft.resources.ResourceLocation;
 
 /**
  * Internal recipe ownership and per-container source expansion. Cached
@@ -320,6 +322,13 @@ public final class PatternProductionService {
                   if (!key.lockedRecipe().isEmpty() && !candidate.id().equals(key.lockedRecipe())) {
                     return false;
                   }
+                  if (owner instanceof FactoryControllerBlockEntity factory
+                      && !FactoryThreadPreset.accepts(
+                          factory.structureMachineId(),
+                          key.thread(),
+                          ResourceLocation.parse(candidate.id()))) {
+                    return false;
+                  }
                   var recipe = catalog.definition(candidate.id());
                   return recipe != null
                       && recipe.executionOptions().accepts(key.thread())
@@ -455,6 +464,9 @@ public final class PatternProductionService {
           || !recipe.triggeredResources().rows().isEmpty()
           || recipe.inputs().stream().anyMatch(row -> row.minimumAmount() != row.amount())
           || recipe.outputs().stream().anyMatch(row -> row.minimumAmount() != row.amount())
+          || recipe.outputs().stream().anyMatch(MachineRecipe.ItemAmount::ignoreOutputCheck)
+          || recipe.fluidOutputRequirements().stream().anyMatch(value -> value.ignoreOutputCheck())
+          || recipe.chemicals().outputs().stream().anyMatch(value -> value.ignoreOutputCheck())
           || recipe.fluidInputRequirements().stream().anyMatch(value -> value.chance() != 1)
           || recipe.fluidOutputRequirements().stream().anyMatch(value -> value.chance() != 1)
           || recipe.fluidPerTickInputs().stream().anyMatch(value -> value.chance() != 1)

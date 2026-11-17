@@ -32,6 +32,8 @@ import net.minecraft.world.level.block.state.BlockState;
 import net.minecraft.world.level.BlockAndTintGetter;
 import net.neoforged.neoforge.client.event.RegisterColorHandlersEvent;
 import org.jetbrains.annotations.ApiStatus;
+import com.lw.modularmachine.block.ColoredStatedMachineComponentBlock;
+import net.minecraft.core.registries.BuiltInRegistries;
 
 /**
  * Shared block/item tint registration and authoritative component color
@@ -66,6 +68,11 @@ public final class MachineColorHandlers {
     MachineRegistries.PARALLEL_CONTROLLERS.values().forEach(holder -> blocks.add(holder.get()));
     MachineRegistries.UPGRADE_BUSES.values().forEach(holder -> blocks.add(holder.get()));
     blocks.add(MachineRegistries.SMART_INTERFACE.get());
+    BuiltInRegistries.BLOCK.forEach(block -> {
+      if (block instanceof ColoredStatedMachineComponentBlock) {
+        blocks.add(block);
+      }
+    });
     return blocks;
   }
 
@@ -107,6 +114,7 @@ public final class MachineColorHandlers {
 
   private static boolean isMachineColorBlock(Block block) {
     return block instanceof MachineCasingBlock
+        || block instanceof ColoredStatedMachineComponentBlock
         || block instanceof MachinePortBlock
         || block instanceof ParallelControllerBlock
         || block instanceof UpgradeBusBlock

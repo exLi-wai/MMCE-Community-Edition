@@ -43,7 +43,9 @@ public final class ChemicalRecipeSampling {
             new ChemicalRequirement(
                 row.chemical(),
                 Math.multiplyExact(row.amount() / instances, successes),
-                row.selector()));
+                row.selector(),
+                1,
+                row.ignoreOutputCheck()));
       }
     }
 

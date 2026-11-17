@@ -69,7 +69,14 @@ final class FactoryOutputAdmission {
 
   private RecipeResourcePlanning prepareItems() {
     var claims = RecipeItemPreparation.inputCandidate(plan.recipe(), definition).outputs().stream()
-        .map(claim -> new RecipeCandidate.Output<>(claim.key(), Math.multiplyExact(claim.count(), instances))).toList();
+        .filter(claim -> !claim.ignoreOutputCheck())
+        .map(
+            claim -> new RecipeCandidate.Output<>(
+                claim.key(),
+                Math.multiplyExact(claim.count(), instances),
+                false,
+                claim.ignoreOutputCheck()))
+        .toList();
     if (claims.isEmpty()) {
       return new ResourcePlanningSequence(List.of());
     }
@@ -84,10 +91,15 @@ final class FactoryOutputAdmission {
 
   private RecipeResourcePlanning prepareFluids() {
     var registries = ticket.level().registryAccess();
-    var claims = definition.fluidOutputRequirements().stream().filter(output -> output.chance() == 1).map(
-        requirement -> new RecipeCandidate.Output<>(
-            new FluidResourceKey(requirement.stack(), registries).withSelector(definition.selectors().fluidOutput()),
-            Math.multiplyExact((long) requirement.stack().getAmount(), instances)))
+    var claims = definition.fluidOutputRequirements().stream()
+        .filter(output -> output.chance() == 1 && !output.ignoreOutputCheck())
+        .map(
+            requirement -> new RecipeCandidate.Output<>(
+                new FluidResourceKey(requirement.stack(), registries)
+                    .withSelector(definition.selectors().fluidOutput()),
+                Math.multiplyExact((long) requirement.stack().getAmount(), instances),
+                false,
+                requirement.ignoreOutputCheck()))
         .toList();
     var planning = new FluidOutputLayout(ticket, registries).planClaims(claims);
 

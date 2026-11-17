@@ -249,7 +249,8 @@ public final class FactoryUpgradeSources {
 
   public List<BlockPos> upgradeBusPositions() {
     requireUpgradeThread();
-    if (!owner.canCommitStructure()) {
+    var registration = owner.structureRegistration();
+    if (registration == null || !registration.currentForObservation((ServerLevel) owner.getLevel())) {
       return List.of();
     }
     prepareUpgradeDiscovery();

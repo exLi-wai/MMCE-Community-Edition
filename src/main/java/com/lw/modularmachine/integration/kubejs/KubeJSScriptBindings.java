@@ -8,6 +8,7 @@ import com.lw.modularmachine.api.controller.ControllerScriptDataApi;
 import com.lw.modularmachine.api.controller.MachineEvents;
 import com.lw.modularmachine.api.client.controller.ControllerClientEvents;
 import com.lw.modularmachine.api.recipe.RecipeItemCallbacks;
+import com.lw.modularmachine.api.recipe.RecipePreparationEvents;
 import com.google.gson.JsonObject;
 import com.lw.modularmachine.api.smart.SmartInterfaceApi;
 import com.lw.modularmachine.api.upgrade.DynamicUpgrades;
@@ -31,6 +32,15 @@ import dev.latvian.mods.kubejs.script.BindingRegistry;
 import dev.latvian.mods.kubejs.script.ScriptType;
 import org.jetbrains.annotations.ApiStatus;
 import net.minecraft.world.item.crafting.Ingredient;
+import com.lw.modularmachine.api.controller.ControllerPatternQuery;
+import com.lw.modularmachine.api.controller.ControllerPatternSnapshot;
+import com.lw.modularmachine.api.controller.ControllerQueryApi;
+import com.lw.modularmachine.api.controller.ControllerSnapshot;
+import com.lw.modularmachine.api.controller.MachineRegistry;
+import com.lw.modularmachine.api.orientation.MachineOrientation;
+import com.lw.modularmachine.api.structure.StructureBlockCheck;
+import com.lw.modularmachine.api.upgrade.UpgradeDescriptions;
+import com.lw.modularmachine.api.upgrade.UpgradeType;
 
 /**
  * Script names and the explicit allowlist; registration order remains
@@ -42,10 +52,24 @@ final class KubeJSScriptBindings {
   }
 
   static void registerBindings(BindingRegistry registry) {
+    if (registry.type() == ScriptType.STARTUP) {
+      registry.add("StatedMachineComponentBuilder", KubeJSStatedMachineComponentBuilder.class);
+    }
     if (registry.type() == ScriptType.SERVER) {
       registry.add("RecipeBuilder", KubeJSRecipeBuilder.class);
       registry.add("RecipeModifierBuilder", KubeJSRecipeModifierBuilder.class);
       registry.add("IngredientArrayBuilder", KubeJSIngredientArrayBuilder.class);
+      registry.add("MachineUpgradeBuilder", KubeJSMachineUpgradeBuilder.class);
+      registry.add("DynamicMachineUpgradeBuilder", KubeJSDynamicMachineUpgradeBuilder.class);
+      registry.add("MachineUpgradeHelper", KubeJSMachineUpgradeHelper.class);
+      registry.add("MachineBuilder", KubeJSMachineBuilder.class);
+      registry.add("BlockArrayBuilder", KubeJSBlockArrayBuilder.class);
+      registry.add("MultiBlockModifierBuilder", KubeJSMultiBlockModifierBuilder.class);
+      registry.add("MachineModifier", KubeJSMachineModifier.class);
+      registry.add("FactoryRecipeThread", KubeJSFactoryRecipeThread.class);
+      registry.add("SmartInterfaceType", KubeJSSmartInterfaceType.class);
+      registry.add("MachineRegistry", MachineRegistry.class);
+      registry.add("ControllerQueryApi", ControllerQueryApi.class);
     }
   }
 
@@ -62,6 +86,37 @@ final class KubeJSScriptBindings {
     filter.allow(RecipeItemCallbacks.Modifier.class);
     filter.allow(RecipeItemCallbacks.InputModifier.class);
     filter.allow(RecipeItemCallbacks.ItemRequirement.class);
+    filter.allow(RecipePreparationEvents.Context.class);
+    filter.allow(RecipePreparationEvents.Event.class);
+    filter.allow(RecipePreparationEvents.Handler.class);
+    filter.allow(RecipePreparationEvents.Type.class);
+    filter.allow(KubeJSMachineBuilder.class);
+    filter.allow(KubeJSStatedMachineComponentBuilder.class);
+    filter.allow(KubeJSBlockArrayBuilder.class);
+    filter.allow(KubeJSMultiBlockModifierBuilder.class);
+    filter.allow(KubeJSMachineModifier.class);
+    filter.allow(KubeJSFactoryRecipeThread.class);
+    filter.allow(KubeJSSmartInterfaceType.class);
+    filter.allow(StructureBlockCheck.class);
+    filter.allow(StructureBlockCheck.Context.class);
+    filter.allow(MachineRegistry.class);
+    filter.allow(MachineRegistry.Machine.class);
+    filter.allow(ControllerQueryApi.class);
+    filter.allow(ControllerSnapshot.class);
+    filter.allow(ControllerSnapshot.RecipeThread.class);
+    filter.allow(ControllerSnapshot.MachineUpgrade.class);
+    filter.allow(ControllerSnapshot.DynamicPattern.class);
+    filter.allow(MachineOrientation.class);
+    filter.allow(ControllerPatternQuery.class);
+    filter.allow(ControllerPatternQuery.Status.class);
+    filter.allow(ControllerPatternSnapshot.class);
+    filter.allow(ControllerPatternSnapshot.Part.class);
+    filter.allow(KubeJSMachineUpgradeBuilder.class);
+    filter.allow(KubeJSDynamicMachineUpgradeBuilder.class);
+    filter.allow(KubeJSMachineUpgradeHelper.class);
+    filter.allow(UpgradeType.class);
+    filter.allow(UpgradeDescriptions.Context.class);
+    filter.allow(UpgradeDescriptions.Handler.class);
     filter.allow(ControllerClientEvents.Context.class);
     filter.allow(ControllerClientEvents.GuiListener.class);
     filter.allow(ControllerClientEvents.GuiEvent.class);

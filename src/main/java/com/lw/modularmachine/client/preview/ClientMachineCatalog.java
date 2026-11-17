@@ -12,6 +12,8 @@ import net.neoforged.bus.api.SubscribeEvent;
 import net.neoforged.fml.common.EventBusSubscriber;
 import net.neoforged.neoforge.client.event.ClientPlayerNetworkEvent;
 import org.jetbrains.annotations.ApiStatus;
+import com.lw.modularmachine.machine.smart.SmartInterfaceType;
+import java.util.stream.Collectors;
 
 /**
  * One atomic server-authored display generation, separate from StructureService
@@ -20,7 +22,22 @@ import org.jetbrains.annotations.ApiStatus;
 @ApiStatus.Internal
 @EventBusSubscriber(modid = ModularMachine.MODID, value = Dist.CLIENT)
 public final class ClientMachineCatalog {
-  public record Machine(ResourceLocation id, String translation, int color, MachinePreviewDefinition preview) {
+  public record Machine(
+      ResourceLocation id,
+      String translation,
+      int color,
+      MachinePreviewDefinition preview,
+      String prefix,
+      Map<String, SmartInterfaceType> interfaces,
+      List<MachineJeiPayloads.ModifierDisplay> modifiers) {
+    public Machine(ResourceLocation id, String translation, int color, MachinePreviewDefinition preview) {
+      this(id, translation, color, preview, "", Map.of(), List.of());
+    }
+
+    public Machine {
+      interfaces = Map.copyOf(interfaces);
+      modifiers = List.copyOf(modifiers);
+    }
     public List<MachineJeiPayloads.Part> parts() {
       return preview.minimum();
     }
@@ -41,7 +58,10 @@ public final class ClientMachineCatalog {
           header.machine(),
           header.translation(),
           header.color(),
-          new MachinePreviewDefinition(parts, header.fixed(), header.segments()));
+          new MachinePreviewDefinition(parts, header.fixed(), header.segments()),
+          header.prefix(),
+          header.interfaces().stream().collect(Collectors.toUnmodifiableMap(SmartInterfaceType::id, value -> value)),
+          header.modifiers());
     }
   }
   private static Map<ResourceLocation, Machine> active = Map.of();
@@ -100,9 +120,12 @@ public final class ClientMachineCatalog {
       pending.put(packet.machine(), previous);
     } else if (packet.start() == 0
         || !packet.segments().isEmpty()
+        || !packet.modifiers().isEmpty()
         || previous.header.total() != packet.total()
         || previous.header.fixed() != packet.fixed()
         || previous.header.color() != packet.color()
+        || !previous.header.prefix().equals(packet.prefix())
+        || !previous.header.interfaces().equals(packet.interfaces())
         || !previous.header.translation().equals(packet.translation())) {
       throw new IllegalArgumentException("Changed preview metadata");
     }

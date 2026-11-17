@@ -12,6 +12,7 @@ import net.minecraft.world.level.block.entity.BlockEntity;
 import net.minecraft.world.level.block.state.properties.BooleanProperty;
 import net.minecraft.world.level.block.state.properties.EnumProperty;
 import org.jetbrains.annotations.ApiStatus;
+import com.lw.modularmachine.machine.structure.StructureService;
 
 /**
  * Internal common controller appearance mapping and server-owned publication.
@@ -117,6 +118,9 @@ public final class ControllerAppearance {
       return;
     }
     var next = state.setValue(FORMED, formed).setValue(HIDDEN, hidden).setValue(APPEARANCE, appearance);
+    if (controller instanceof StructureService.StructureSubject subject) {
+      StructureService.updateWorkingComponents(subject, appearance == ControllerAppearanceState.RUNNING);
+    }
     if (next != state) {
       level.setBlock(controller.getBlockPos(), next, 2);
     }

@@ -726,6 +726,9 @@ public class MachinePortBlockEntity extends BlockEntity implements MenuProvider,
     if (!wasAssigned || machineColor != color) {
       machineColor = color;
       MachineColorable.update(this);
+      if (level instanceof ServerLevel server) {
+        StructureChangeRouter.resourceChanged(server, worldPosition);
+      }
     }
   }
 

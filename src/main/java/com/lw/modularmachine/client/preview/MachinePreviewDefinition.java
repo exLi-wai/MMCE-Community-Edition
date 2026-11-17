@@ -160,7 +160,8 @@ public final class MachinePreviewDefinition {
       var part = declarations.get(template);
       return new Part(
           DynamicPatternDefinition.translated(part.offset(), segment.origin(), segment.step(), repetition),
-          part.alternatives());
+          part.alternatives(),
+          part.previewTags());
     }
   }
 }

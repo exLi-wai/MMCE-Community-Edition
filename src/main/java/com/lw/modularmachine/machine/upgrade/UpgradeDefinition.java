@@ -163,6 +163,24 @@ public record UpgradeDefinition(
     return components != null;
   }
 
+  public UpgradeDefinition forItem(ResourceLocation boundItem, JsonObject boundComponents) {
+    return new UpgradeDefinition(
+        boundItem,
+        effect,
+        compatibility,
+        boundComponents,
+        dynamicEffect,
+        lifecycleHandler,
+        recipeCheckHandler,
+        startCost,
+        startDataHandler,
+        startBusDataHandler,
+        restrictions,
+        tickCost,
+        tickDataHandler,
+        finishDataHandler);
+  }
+
   public ItemResourceKey compileMatcher(HolderLookup.Provider registries) {
     if (!exactComponents()) {
       throw new IllegalStateException("An item-wide upgrade has no exact component matcher");

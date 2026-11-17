@@ -15,6 +15,8 @@ import com.lw.modularmachine.machine.controller.ControllerRunState;
 import com.lw.modularmachine.machine.recipe.search.RecipeCatalog;
 import com.lw.modularmachine.machine.controller.ControllerScriptState;
 import com.lw.modularmachine.machine.controller.ControllerScriptStateOwner;
+import com.lw.modularmachine.machine.controller.ControllerVisualData;
+import com.lw.modularmachine.machine.controller.ControllerVisualDataSync;
 import com.lw.modularmachine.machine.controller.ControllerOwnershipState;
 import com.lw.modularmachine.machine.recipe.command.ControllerCommandState;
 import com.lw.modularmachine.machine.recipe.command.ControllerCommandSubject;
@@ -89,6 +91,7 @@ public final class MachineControllerBlockEntity extends BlockEntity implements M
   private final Set<UUID> observerRecipients = new HashSet<>();
   private Tag unsupportedData;
   private ControllerScriptState controllerScriptState = ControllerScriptState.empty();
+  private ControllerVisualData clientVisualData;
   private Tag unsupportedScriptData;
   private ControllerOwnershipState ownership = ControllerOwnershipState.empty();
   private ControllerCommandState commandState = new ControllerCommandState();
@@ -260,11 +263,15 @@ public final class MachineControllerBlockEntity extends BlockEntity implements M
     StructureService.register(this);
     refreshAppearanceState();
     RecipeCommandService.schedule(this);
+    ControllerVisualDataSync.schedule(this);
   }
 
   @Override
   public CompoundTag getUpdateTag(HolderLookup.Provider registries) {
-    return ownership.clientTag();
+    var tag = ownership.clientTag();
+    ControllerVisualData.save(tag, this);
+
+    return tag;
   }
 
   @Override
@@ -276,6 +283,15 @@ public final class MachineControllerBlockEntity extends BlockEntity implements M
   public void handleUpdateTag(CompoundTag tag, HolderLookup.Provider registries) {
     if (level != null && level.isClientSide) {
       ownership = ControllerOwnershipState.load(tag);
+      var previousVisualData = clientVisualData;
+      clientVisualData = ControllerVisualData.load(tag);
+      if (clientVisualData != null) {
+        machineId = clientVisualData.machine();
+      }
+      if (!Objects.equals(previousVisualData, clientVisualData)) {
+        requestModelDataUpdate();
+        level.sendBlockUpdated(worldPosition, getBlockState(), getBlockState(), 8);
+      }
     }
   }
 
@@ -297,6 +313,8 @@ public final class MachineControllerBlockEntity extends BlockEntity implements M
   }
 
   private void detachRuntime() {
+    ControllerVisualDataSync.remove(this);
+    clientVisualData = null;
     PatternProductionService.invalidate(this);
     RecipeCommandService.unschedule(this);
     genericDiscovery.clear();
@@ -487,6 +505,9 @@ public final class MachineControllerBlockEntity extends BlockEntity implements M
     }
     PatternProductionService.invalidate(this);
     controllerScriptState = replacement;
+    if (!expected.snapshot().customData().equals(replacement.snapshot().customData())) {
+      ControllerVisualDataSync.schedule(this);
+    }
     recipeSearch.invalidate();
     recipeSearch.wakeRetry(level.getGameTime());
     if (runState.current() == null) {
@@ -510,6 +531,12 @@ public final class MachineControllerBlockEntity extends BlockEntity implements M
     }
 
     return replaceControllerScriptState(previous, previous.cleared());
+  }
+
+  /** Client presentation data, independent from saved server script state. */
+  @ApiStatus.Internal
+  public String clientCustomData() {
+    return clientVisualData == null ? "{}" : clientVisualData.customData();
   }
 
   public VerificationState verificationState() {
@@ -726,6 +753,7 @@ public final class MachineControllerBlockEntity extends BlockEntity implements M
       throw new IllegalStateException("Cannot rebind a paid or starting recipe");
     }
     machineId = id;
+    ControllerVisualDataSync.schedule(this);
     setChanged();
     StructureService.register(this);
   }
@@ -884,6 +912,10 @@ public final class MachineControllerBlockEntity extends BlockEntity implements M
         energyTransfer.bindingRebuilds());
   }
 
+  public String recipeInterfaceFailure() {
+    return runningRecipe().isEmpty() ? recipeSearch.interfaceFailure() : "";
+  }
+
   @Override
   protected void saveAdditional(CompoundTag tag, HolderLookup.Provider registries) {
     if (recipeStartInProgress()) {
@@ -934,6 +966,7 @@ public final class MachineControllerBlockEntity extends BlockEntity implements M
     } catch (RuntimeException invalidScriptData) {
       unsupportedScriptData = tag.get(ControllerScriptState.NBT_KEY).copy();
     }
+    ControllerVisualDataSync.schedule(this);
     genericDiscovery.clear();
     blueprintInventory.load(registries, tag.get("controller_blueprint"));
     recipeSearch.invalidate();

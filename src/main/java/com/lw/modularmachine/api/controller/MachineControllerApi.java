@@ -84,7 +84,13 @@ public final class MachineControllerApi {
       long successfulTransfers,
       long bindingRebuilds,
       RecipeRunStatus recipeRunStatus,
-      Optional<RunSnapshot> runningRun) {
+      Optional<RunSnapshot> runningRun,
+      String recipeFailureMessage) {
+    public Snapshot(BlockPos position, ResourceLocation machineId, long definitionEpoch, MachineOrientation orientation, VerificationState structureState, VerificationFailure structureFailure, Optional<StructureDiagnostic> structureDiagnostic, Optional<RecipeInputDiagnostic> recipeInputDiagnostic, boolean productionAllowed, long successfulTransfers, long bindingRebuilds, RecipeRunStatus recipeRunStatus, Optional<RunSnapshot> runningRun) {
+      this(position, machineId, definitionEpoch, orientation, structureState, structureFailure, structureDiagnostic,
+          recipeInputDiagnostic, productionAllowed, successfulTransfers, bindingRebuilds, recipeRunStatus, runningRun,
+          "");
+    }
     public Snapshot {
       position = Objects.requireNonNull(position, "position").immutable();
       Objects.requireNonNull(machineId, "machineId");
@@ -98,6 +104,9 @@ public final class MachineControllerApi {
       Objects.requireNonNull(recipeInputDiagnostic, "recipeInputDiagnostic");
       Objects.requireNonNull(recipeRunStatus, "recipeRunStatus");
       Objects.requireNonNull(runningRun, "runningRun");
+      if (recipeFailureMessage == null || recipeFailureMessage.length() > 256) {
+        throw new IllegalArgumentException("Invalid recipe failure message");
+      }
     }
   }
 

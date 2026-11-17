@@ -15,6 +15,7 @@ import net.neoforged.neoforge.event.server.ServerStoppedEvent;
 import net.neoforged.neoforge.event.server.ServerStoppingEvent;
 import net.neoforged.neoforge.server.ServerLifecycleHooks;
 import org.jetbrains.annotations.ApiStatus;
+import com.lw.modularmachine.machine.structure.MachineDefinitionScripts;
 
 /**
  * Internal server-script declarations, retained until a server can install
@@ -26,6 +27,7 @@ public final class KubeJSServerHandlers {
       long generation,
       List<KubeJSMachineEventRegistration.Handler> machines,
       UpgradeScriptHandlers.Snapshot upgrades,
+      boolean upgradesValid,
       List<KubeJSSmartInterfaceRegistration.Handler> smart,
       List<KubeJSRecipeLifecycleRegistration.Handler> recipes,
       List<KubeJSRecipeLifecycleRegistration.FailurePolicy> failures,
@@ -118,10 +120,15 @@ public final class KubeJSServerHandlers {
         "machine",
         () -> KubeJSMachineEventRegistration.install(snapshot.machines()),
         () -> KubeJSMachineEventRegistration.install(List.of()));
-    installDomain(
-        "runtime upgrade",
-        () -> UpgradeScriptHandlers.install(snapshot.upgrades()),
-        () -> UpgradeScriptHandlers.install(UpgradeScriptHandlers.Snapshot.EMPTY));
+    if (snapshot.upgradesValid()) {
+      try {
+        UpgradeScriptHandlers.install(snapshot.upgrades());
+      } catch (RuntimeException failure) {
+        // Catalog validation completes before publication; a bad candidate retains
+        // both the old definitions and their callback functions.
+        ModularMachine.LOGGER.warn("KubeJS upgrade candidate rejected; keeping the previous catalog", failure);
+      }
+    }
     installDomain(
         "smart interface",
         () -> KubeJSSmartInterfaceHandlers.install(snapshot.smart()),
@@ -169,6 +176,7 @@ public final class KubeJSServerHandlers {
       stopping = null;
       installedGeneration = -1;
       KubeJSMachineEventRegistration.clearOnServerStop();
+      MachineDefinitionScripts.clear();
     }
   }
 }

@@ -62,7 +62,10 @@ public record RecipeCandidate<K>(
     }
   }
 
-  public record Output<K>(K key, long count, boolean parallelUnaffected) {
+  public record Output<K>(K key, long count, boolean parallelUnaffected, boolean ignoreOutputCheck) {
+    public Output(K key, long count, boolean parallelUnaffected) {
+      this(key, count, parallelUnaffected, false);
+    }
     public Output(K key, long count) {
       this(key, count, false);
     }

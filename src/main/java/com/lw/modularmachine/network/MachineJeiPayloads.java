@@ -26,6 +26,14 @@ import net.neoforged.bus.api.SubscribeEvent;
 import net.neoforged.neoforge.event.OnDatapackSyncEvent;
 import net.neoforged.neoforge.network.PacketDistributor;
 import net.neoforged.neoforge.network.event.RegisterPayloadHandlersEvent;
+import com.lw.modularmachine.api.client.preview.PreviewBlockData;
+import com.lw.modularmachine.machine.smart.SmartInterfaceType;
+import com.lw.modularmachine.machine.structure.StructureModifierDefinition;
+import java.util.Collections;
+import java.util.HashMap;
+import java.util.Set;
+import net.minecraft.nbt.CompoundTag;
+import net.minecraft.world.item.ItemStack;
 
 /**
  * Bounded, display-only structure snapshots; never exposes live worlds or
@@ -69,33 +77,59 @@ public final class MachineJeiPayloads {
       return Math.addExact(Math.addExact(head, body), tail);
     }
   }
-  public record Part(BlockPos offset, List<BlockState> alternatives) {
+  public record Part(BlockPos offset, List<BlockState> alternatives, List<PreviewBlockData> previewTags) {
+    public Part(BlockPos offset, List<BlockState> alternatives) {
+      this(offset, alternatives, new CompoundTag());
+    }
+
+    public Part(BlockPos offset, List<BlockState> alternatives, CompoundTag previewData) {
+      this(offset, alternatives, Collections.nCopies(alternatives.size(), PreviewBlockData.of(previewData)));
+    }
+
     public Part {
       offset = offset.immutable();
       alternatives = List.copyOf(alternatives);
-      if (alternatives.isEmpty()) {
+      previewTags = List.copyOf(previewTags);
+      if (alternatives.isEmpty()
+          || alternatives.size() != previewTags.size()
+          || previewTags.stream().mapToLong(PreviewBlockData::sizeInBytes).sum() > 4_194_304L) {
         throw new IllegalArgumentException("Invalid preview alternatives");
       }
     }
+
   }
   public record Snapshot(
       long epoch,
       int machines,
       ResourceLocation machine,
       String translation,
+      String prefix,
+      List<SmartInterfaceType> interfaces,
+      List<ModifierDisplay> modifiers,
       int color,
       int start,
       int total,
       int fixed,
       List<Segment> segments,
       List<Part> parts) implements CustomPacketPayload {
+    public Snapshot(long epoch, int machines, ResourceLocation machine, String translation, int color, int start, int total, int fixed, List<Segment> segments, List<Part> parts) {
+      this(epoch, machines, machine, translation, "", List.of(), List.of(), color, start, total, fixed, segments,
+          parts);
+    }
+
     public Snapshot {
       parts = List.copyOf(parts);
       segments = List.copyOf(segments);
+      interfaces = List.copyOf(interfaces);
+      modifiers = List.copyOf(modifiers);
       if (epoch < 0
           || machines < 0
           || machines > 1024
           || translation.length() > 512
+          || prefix.length() > 512
+          || interfaces.size() > SmartInterfaceType.MAX_TYPES
+          || modifiers.size() > StructureModifierDefinition.MAX_GROUPS
+          || start != 0 && !modifiers.isEmpty()
           || color < 0
           || color > 0xFFFFFF
           || start < -2
@@ -115,13 +149,21 @@ public final class MachineJeiPayloads {
       return TYPE;
     }
   }
+
+  public record ModifierDisplay(String id, StructureModifierDefinition.Display display) {
+    public ModifierDisplay {
+      if (id == null || id.length() > 64 || display == null) {
+        throw new IllegalArgumentException("Invalid modifier presentation");
+      }
+    }
+  }
   private MachineJeiPayloads() {
   }
   public static void setReceiver(Consumer<Snapshot> value) {
     receiver = Objects.requireNonNull(value);
   }
   public static void register(RegisterPayloadHandlersEvent event) {
-    event.registrar("4").playToClient(
+    event.registrar("5").playToClient(
         TYPE,
         StreamCodec.of(MachineJeiPayloads::write, MachineJeiPayloads::read),
         (payload, context) -> context.enqueueWork(() -> receiver.accept(payload)));
@@ -131,6 +173,18 @@ public final class MachineJeiPayloads {
     buffer.writeVarInt(value.machines());
     buffer.writeResourceLocation(value.machine());
     buffer.writeUtf(value.translation(), 512);
+    buffer.writeUtf(value.prefix(), 512);
+    buffer.writeVarInt(value.interfaces().size());
+    for (var type : value.interfaces()) {
+      SmartInterfacePayloads.writeType(buffer, type);
+    }
+    buffer.writeVarInt(value.modifiers().size());
+    for (var modifier : value.modifiers()) {
+      buffer.writeUtf(modifier.id(), 64);
+      buffer.writeUtf(modifier.display().name(), 256);
+      buffer.writeUtf(modifier.display().description(), 512);
+      ItemStack.OPTIONAL_STREAM_CODEC.encode(buffer, modifier.display().stack());
+    }
     buffer.writeInt(value.color());
     buffer.writeInt(value.start());
     buffer.writeVarInt(value.total());
@@ -150,8 +204,10 @@ public final class MachineJeiPayloads {
     for (var part : value.parts()) {
       buffer.writeBlockPos(part.offset());
       buffer.writeVarInt(part.alternatives().size());
-      for (var state : part.alternatives()) {
-        buffer.writeVarInt(Block.getId(state));
+      var tags = part.previewTags();
+      for (int index = 0; index < part.alternatives().size(); index++) {
+        buffer.writeVarInt(Block.getId(part.alternatives().get(index)));
+        buffer.writeNbt(tags.get(index).compound());
       }
     }
   }
@@ -160,6 +216,29 @@ public final class MachineJeiPayloads {
     int machines = buffer.readVarInt();
     var machine = buffer.readResourceLocation();
     String translation = buffer.readUtf(512);
+    String prefix = buffer.readUtf(512);
+    int interfaceCount = buffer.readVarInt();
+    if (interfaceCount < 0 || interfaceCount > SmartInterfaceType.MAX_TYPES) {
+      throw new IllegalArgumentException("Too many preview smart interface types");
+    }
+    var interfaces = new ArrayList<SmartInterfaceType>();
+    for (int index = 0; index < interfaceCount; index++) {
+      interfaces.add(SmartInterfacePayloads.readType(buffer));
+    }
+    int modifierCount = buffer.readVarInt();
+    if (modifierCount < 0 || modifierCount > StructureModifierDefinition.MAX_GROUPS) {
+      throw new IllegalArgumentException("Too many structure modifier presentations");
+    }
+    var modifiers = new ArrayList<ModifierDisplay>();
+    for (int index = 0; index < modifierCount; index++) {
+      modifiers.add(
+          new ModifierDisplay(
+              buffer.readUtf(64),
+              new StructureModifierDefinition.Display(
+                  buffer.readUtf(256),
+                  buffer.readUtf(512),
+                  ItemStack.OPTIONAL_STREAM_CODEC.decode(buffer))));
+    }
     int color = buffer.readInt();
     int start = buffer.readInt();
     int total = buffer.readVarInt();
@@ -193,12 +272,27 @@ public final class MachineJeiPayloads {
         throw new IllegalArgumentException("Invalid preview alternative count");
       }
       var states = new ArrayList<BlockState>();
+      var tags = new ArrayList<PreviewBlockData>();
       for (int j = 0; j < size; j++) {
         states.add(Block.stateById(buffer.readVarInt()));
+        tags.add(PreviewBlockData.of(Objects.requireNonNull(buffer.readNbt(), "preview NBT")));
       }
-      parts.add(new Part(offset, states));
+      parts.add(new Part(offset, states, tags));
     }
-    return new Snapshot(epoch, machines, machine, translation, color, start, total, fixed, segments, parts);
+    return new Snapshot(
+        epoch,
+        machines,
+        machine,
+        translation,
+        prefix,
+        interfaces,
+        modifiers,
+        color,
+        start,
+        total,
+        fixed,
+        segments,
+        parts);
   }
 
   @SubscribeEvent
@@ -224,9 +318,27 @@ public final class MachineJeiPayloads {
           .toList();
       var parts = new ArrayList<Part>();
       parts.add(new Part(BlockPos.ZERO, List.of(controllerState(definition))));
+      var replacements = new HashMap<Integer, List<MachineDefinition.Part>>();
+      for (var group : definition.structureModifiers()) {
+        if (group.allowReplacement()) {
+          for (int index = 0; index < group.partIndices().size(); index++) {
+            replacements.computeIfAbsent(group.partIndices().get(index), ignored -> new ArrayList<>())
+                .add(group.conditions().get(index));
+          }
+        }
+      }
+      int declarationIndex = 0;
       for (var part : definition.declarationParts()) {
-        var states = new LinkedHashSet<BlockState>(states(part.rule()));
-        parts.add(new Part(part.offset(), new ArrayList<>(states)));
+        var candidates = new LinkedHashSet<PreviewCandidate>();
+        addCandidates(candidates, part);
+        for (var replacement : replacements.getOrDefault(declarationIndex++, List.of())) {
+          addCandidates(candidates, replacement);
+        }
+        parts.add(
+            new Part(
+                part.offset(),
+                candidates.stream().map(PreviewCandidate::state).toList(),
+                candidates.stream().map(PreviewCandidate::data).toList()));
       }
       for (int start = 0; start < parts.size();) {
         int end = chunkEnd(parts, start);
@@ -236,6 +348,11 @@ public final class MachineJeiPayloads {
                 definitions.size(),
                 definition.id(),
                 definition.translationKey(),
+                definition.prefix(),
+                definition.interfaceTypes().values().stream().sorted(Comparator.comparing(SmartInterfaceType::id))
+                    .toList(),
+                start == 0 ? definition.structureModifiers().stream()
+                    .map(group -> new ModifierDisplay(group.id(), group.display())).toList() : List.of(),
                 definition.color(),
                 start,
                 parts.size(),
@@ -255,6 +372,17 @@ public final class MachineJeiPayloads {
     }
   }
 
+  private record PreviewCandidate(BlockState state, PreviewBlockData data) {
+  }
+
+  private static void addCandidates(Set<PreviewCandidate> candidates, MachineDefinition.Part part) {
+    var data = part.scriptCondition() == null ? PreviewBlockData.EMPTY : PreviewBlockData
+        .of(part.scriptCondition().preview());
+    for (var state : states(part.rule())) {
+      candidates.add(new PreviewCandidate(state, data));
+    }
+  }
+
   /**
    * Oversized single entries use NeoForge's negotiated packet splitter, never
    * truncation.
@@ -263,7 +391,8 @@ public final class MachineJeiPayloads {
     int end = start;
     long bytes = 16 * 1024;
     while (end < parts.size() && end - start < CHUNK_PARTS) {
-      long cost = 16L + (long) parts.get(end).alternatives().size() * 5;
+      long cost = 16L + (long) parts.get(end).alternatives().size() * 5 + parts.get(end).previewTags().stream()
+          .mapToLong(PreviewBlockData::sizeInBytes).sum();
       if (end > start && bytes + cost > PACKET_BYTE_TARGET) {
         break;
       }

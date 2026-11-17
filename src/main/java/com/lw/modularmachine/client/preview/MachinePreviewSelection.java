@@ -123,7 +123,8 @@ public final class MachinePreviewSelection {
         if (!pending.occupied.add(part.offset())) {
           throw new IllegalArgumentException("Overlapping display parts");
         }
-        pending.entries.add(new PreviewSceneData.Entry(part.offset(), part.alternatives(), List.of()));
+        pending.entries
+            .add(new PreviewSceneData.Entry(part.offset(), part.alternatives(), List.of(), part.previewTags()));
         var item = part.alternatives().getFirst().getBlock().asItem();
         if (item != Items.AIR) {
           pending.counts.get(pending.layout.groupAt(index)).merge(item, 1, Integer::sum);

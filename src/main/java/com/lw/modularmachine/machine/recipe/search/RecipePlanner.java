@@ -5,6 +5,7 @@ import java.math.BigInteger;
 import java.util.ArrayList;
 import java.util.Collection;
 import java.util.List;
+import java.util.LinkedHashMap;
 import java.util.Map;
 import java.util.Objects;
 import java.util.Optional;
@@ -76,13 +77,14 @@ public final class RecipePlanner {
       INPUT,
       EXISTING,
       CAPACITY,
-      EMPTY
+      EMPTY,
+      OVERFLOW
     }
 
     private final ResourceSnapshot<K> snapshot;
     private final List<CompiledRecipeSet.Entry<K>> candidates;
     private final boolean outputOnly;
-    private final List<RecipePlan.Insertion<K>> insertions = new ArrayList<>();
+    private final Map<Integer, RecipePlan.Insertion<K>> insertions = new LinkedHashMap<>();
     private final List<Integer> emptySlots = new ArrayList<>();
     private Phase phase = Phase.NEXT;
     private CompiledRecipeSet.Entry<K> current;
@@ -96,6 +98,8 @@ public final class RecipePlanner {
     private BigInteger emptyCapacity;
     private int capacityKey, capacitySlot;
     private long capacityCount;
+    private int overflowRow, overflowSlot;
+    private long overflowRemaining;
 
     private Session(ResourceSnapshot<K> snapshot, CompiledRecipeSet<K> recipes, boolean outputOnly, Set<String> allowedIds) {
       this.snapshot = Objects.requireNonNull(snapshot, "snapshot");
@@ -142,6 +146,7 @@ public final class RecipePlanner {
           case EXISTING -> fillExisting();
           case CAPACITY -> checkCapacity();
           case EMPTY -> assignEmpty();
+          case OVERFLOW -> placeOverflow();
         }
       }
       return new SearchResult<>(
@@ -222,7 +227,7 @@ public final class RecipePlanner {
       if (remaining[key] == 0) {
         missingTypes--;
       }
-      insertions.add(new RecipePlan.Insertion<>(slotIndex, slot.key(), amount));
+      insertions.put(slotIndex, new RecipePlan.Insertion<>(slotIndex, slot.key(), amount));
       if (missingTypes == 0) {
         finish();
       }
@@ -322,14 +327,56 @@ public final class RecipePlanner {
     private void finish() {
       for (int i = 0; i < depth; i++) {
         if (chosen[i] >= 0) {
-          insertions.add(new RecipePlan.Insertion<>(emptySlots.get(i), current.outputKeys.get(chosen[i]), amounts[i]));
+          insertions.put(
+              emptySlots.get(i),
+              new RecipePlan.Insertion<>(emptySlots.get(i), current.outputKeys.get(chosen[i]), amounts[i]));
         }
       }
+      overflowRow = overflowSlot = 0;
+      overflowRemaining = current.overflowOutputs.isEmpty() ? 0 : current.overflowOutputs.getFirst().count();
+      phase = Phase.OVERFLOW;
+    }
+
+    /**
+     * Required outputs own their space first; explicit overflow rows use the
+     * remainder.
+     */
+    private void placeOverflow() {
+      if (overflowRow == current.overflowOutputs.size()) {
+        select();
+        return;
+      }
+      if (overflowRemaining == 0 || overflowSlot == snapshot.outputs().size()) {
+        overflowRow++;
+        overflowSlot = 0;
+        overflowRemaining = overflowRow == current.overflowOutputs.size() ? 0 : current.overflowOutputs.get(overflowRow)
+            .count();
+        return;
+      }
+      var output = current.overflowOutputs.get(overflowRow);
+      int index = overflowSlot++;
+      var slot = snapshot.outputs().get(index);
+      var prior = insertions.get(index);
+      K storedKey = prior == null ? slot.key() : prior.key();
+      if (storedKey != null && !storedKey.equals(output.key())) {
+        return;
+      }
+      long count = Math.addExact(slot.count(), prior == null ? 0 : prior.count());
+      long amount = Math.min(overflowRemaining, Math.max(0, slot.capacityFor(output.key()) - count));
+      if (amount > 0) {
+        insertions.put(
+            index,
+            new RecipePlan.Insertion<>(index, output.key(), Math.addExact(amount, prior == null ? 0 : prior.count())));
+        overflowRemaining -= amount;
+      }
+    }
+
+    private void select() {
       selected = new RecipePlan<>(
           snapshot.revision(),
           current.recipe,
           outputOnly ? Map.of() : current.input,
-          insertions);
+          List.copyOf(insertions.values()));
       terminal = Status.SELECTED;
     }
   }

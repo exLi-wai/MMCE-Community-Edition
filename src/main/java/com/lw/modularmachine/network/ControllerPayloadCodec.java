@@ -34,6 +34,7 @@ final class ControllerPayloadCodec {
     buffer.writeVarInt(payload.duration());
     buffer.writeVarInt(payload.averageTickMicros());
     buffer.writeVarInt(payload.averageSearchMicros());
+    writeText(buffer, payload.recipeFailureMessage());
     buffer.writeVarInt(payload.shortages().size());
     for (var shortage : payload.shortages()) {
       writeText(buffer, shortage.key());
@@ -62,6 +63,7 @@ final class ControllerPayloadCodec {
     int duration = buffer.readVarInt();
     int averageTickMicros = buffer.readVarInt();
     int averageSearchMicros = buffer.readVarInt();
+    String recipeFailureMessage = readText(buffer);
     int size = buffer.readVarInt();
     if (size < 0 || size > MAX_SHORTAGES) {
       throw new IllegalArgumentException("Too many status shortages");
@@ -89,7 +91,8 @@ final class ControllerPayloadCodec {
         duration,
         averageTickMicros,
         averageSearchMicros,
-        shortages);
+        shortages,
+        recipeFailureMessage);
   }
 
 }

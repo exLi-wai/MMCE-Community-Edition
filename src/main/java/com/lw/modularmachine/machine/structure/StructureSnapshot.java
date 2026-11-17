@@ -42,8 +42,10 @@ public final class StructureSnapshot {
     private final BlockState[] states;
     private final BlockState[] baseStates;
     private final CheckResult[] details;
+    private final boolean[] modifierScripts;
     private final Map<Long, LevelChunk> chunks = new HashMap<>();
     private int cursor;
+    private int modifierCursor;
 
     public Capture(CompiledStructure pattern, int[] checks) {
       this.pattern = pattern;
@@ -59,10 +61,11 @@ public final class StructureSnapshot {
       states = new BlockState[pattern.definition.parts().size()];
       baseStates = new BlockState[states.length];
       details = new CheckResult[states.length];
+      modifierScripts = new boolean[pattern.modifierPlan().conditions.size()];
     }
 
     public boolean complete() {
-      return cursor == captureIndices.length;
+      return cursor == captureIndices.length && modifierCursor == modifierScripts.length;
     }
 
     public int advance(ServerLevel level, int batch) {
@@ -71,7 +74,7 @@ public final class StructureSnapshot {
       // remain reachable through a capture spanning multiple server ticks.
       chunks.clear();
       int used = 0;
-      while (used < batch && !complete()) {
+      while (used < batch && cursor < captureIndices.length) {
         int index = captureIndices[cursor++];
         var pos = pattern.position(index);
         long key = ChunkPos.asLong(pos.getX() >> 4, pos.getZ() >> 4);
@@ -88,8 +91,27 @@ public final class StructureSnapshot {
           var state = chunk.getBlockState(pos);
           states[index] = state;
           baseStates[index] = pattern.snapshotState(index, state);
-          details[index] = captureDetails(chunk, pos, state, pattern.definition.parts().get(index));
+          var part = pattern.definition.parts().get(index);
+          details[index] = captureDetails(chunk, pos, state, part);
+          if (details[index] == CheckResult.MATCH
+              && part.scriptCondition() != null
+              && !part.scriptCondition().matches(level, pos, state)) {
+            details[index] = CheckResult.MISMATCH;
+          }
         }
+        used++;
+      }
+      while (used < batch && modifierCursor < modifierScripts.length) {
+        var condition = pattern.modifierPlan().conditions.get(modifierCursor);
+        var pos = pattern.position(condition.part());
+        var chunk = level.getChunkSource().getChunkNow(pos.getX() >> 4, pos.getZ() >> 4);
+        if (chunk == null) {
+          states[condition.part()] = null;
+          details[condition.part()] = CheckResult.UNAVAILABLE;
+        }
+        var state = states[condition.part()];
+        modifierScripts[modifierCursor++] = state != null
+            && (condition.script() == null || condition.script().matches(level, pos, state));
         used++;
       }
       chunks.clear();
@@ -156,7 +178,7 @@ public final class StructureSnapshot {
       if (!complete()) {
         throw new IllegalStateException("Structure snapshot is incomplete");
       }
-      return new Detached(pattern, checks, states, baseStates, details);
+      return new Detached(pattern, checks, states, baseStates, details, modifierScripts);
     }
   }
 
@@ -167,18 +189,20 @@ public final class StructureSnapshot {
     private final BlockState[] states;
     private final BlockState[] baseStates;
     private final CheckResult[] details;
+    private final boolean[] modifierScripts;
 
-    private Detached(CompiledStructure pattern, int[] checks, BlockState[] states, BlockState[] baseStates, CheckResult[] details) {
+    private Detached(CompiledStructure pattern, int[] checks, BlockState[] states, BlockState[] baseStates, CheckResult[] details, boolean[] modifierScripts) {
       this.pattern = pattern;
       this.checks = checks;
       this.states = states;
       this.baseStates = baseStates;
       this.details = details;
+      this.modifierScripts = modifierScripts;
     }
 
     public Result match() {
       var plan = pattern.modifierPlan();
-      var modifiers = plan.referenceSnapshot(index -> states[index]);
+      var modifiers = plan.referenceSnapshot(index -> states[index], index -> modifierScripts[index]);
       if (modifiers.failure() != VerificationFailure.NONE) {
         return new Result(modifiers.failure(), modifiers.failedPart(), modifiers);
       }

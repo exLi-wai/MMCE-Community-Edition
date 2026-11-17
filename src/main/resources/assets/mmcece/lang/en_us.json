@@ -414,6 +414,7 @@
   "jei.mmcece.machine_item.priority": "Priority: %s",
   "jei.mmcece.machine_item.selector": "Resource selector: %s",
   "jei.mmcece.main_structure": "Main structure",
+  "jei.mmcece.modifier_cycle": "Left / right click to change modifier",
   "jei.mmcece.materials_empty": "The list is empty",
   "jei.mmcece.materials_help": "Switches affect materials only; scroll to browse",
   "jei.mmcece.required_blocks": "Required Blocks",

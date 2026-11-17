@@ -36,6 +36,7 @@ import com.lw.modularmachine.api.recipe.RecipeLifecycleEvents.Type;
 import net.neoforged.bus.api.SubscribeEvent;
 import net.neoforged.neoforge.event.server.ServerStoppedEvent;
 import org.jetbrains.annotations.ApiStatus;
+import com.lw.modularmachine.machine.structure.StructureScriptChecks;
 
 /** Internal production dispatch and callback guards; not an integration API. */
 @ApiStatus.Internal
@@ -153,13 +154,19 @@ public final class RecipeLifecyclePublisher {
   }
 
   public static boolean isDispatching() {
-    return activeOwner != null || MachineEventPublisher.isDispatching() || RecipeItemCallbackService.isPreparing();
+    return activeOwner != null
+        || MachineEventPublisher.isDispatching()
+        || RecipeItemCallbackService.isPreparing()
+        || RecipePreparationHandlers.isDispatching()
+        || StructureScriptChecks.isChecking();
   }
 
   public static boolean isDispatching(StructureService.StructureSubject controller) {
     return activeOwner != null && activeOwner == controller
         || MachineEventPublisher.isDispatching(controller)
-        || RecipeItemCallbackService.isPreparing();
+        || RecipeItemCallbackService.isPreparing()
+        || RecipePreparationHandlers.isDispatching()
+        || StructureScriptChecks.isChecking();
   }
 
   public static void started(MachineControllerBlockEntity owner, FrozenRecipeRun run) {

@@ -31,6 +31,7 @@ public final class ControllerRecipeSearch {
   private int recipeRetryInterval = RECIPE_RETRY_INITIAL;
   private String lastRecipeFailure;
   private RecipeRunStatus idleRecipeStatus = RecipeRunStatus.IDLE;
+  private String interfaceFailure = "";
 
   public interface Host {
     RecipeCatalog catalog();
@@ -51,6 +52,10 @@ public final class ControllerRecipeSearch {
     return idleRecipeStatus;
   }
 
+  public String interfaceFailure() {
+    return interfaceFailure;
+  }
+
   public void pauseForEnergyTransfer() {
     idleAppearance = ControllerAppearanceState.PAUSED;
   }
@@ -65,6 +70,7 @@ public final class ControllerRecipeSearch {
   public void invalidate() {
     recipeSearch = null;
     preparedRecipe = null;
+    interfaceFailure = "";
   }
 
   public void advance(long now, int serverTick) {
@@ -92,6 +98,7 @@ public final class ControllerRecipeSearch {
     }
     if (recipeSearch == null) {
       idleRecipeStatus = RecipeRunStatus.IDLE;
+      interfaceFailure = "";
       var catalog = host.catalog();
       if (catalog == null) {
         idleAppearance = ControllerAppearanceState.PAUSED;
@@ -121,6 +128,7 @@ public final class ControllerRecipeSearch {
           return;
         }
         if (result.status() == Status.NO_MATCH) {
+          interfaceFailure = recipeSearch.interfaceFailure();
           idleAppearance = ControllerAppearanceState.PAUSED;
           idleRecipeStatus = recipeSearch.missingResource().map(RecipeResourceRequirements::ordinaryResult)
               .orElse(RecipeRunStatus.IDLE);
@@ -134,6 +142,7 @@ public final class ControllerRecipeSearch {
       }
     }
     var result = preparedRecipe.start();
+    interfaceFailure = "";
     idleRecipeStatus = RecipeRunStatus.IDLE;
     idleAppearance = result == Result.FAILED ? ControllerAppearanceState.ERROR : ControllerAppearanceState.PAUSED;
     if (result == Result.STARTED) {

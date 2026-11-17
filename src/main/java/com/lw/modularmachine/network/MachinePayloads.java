@@ -23,10 +23,11 @@ import net.minecraft.resources.ResourceLocation;
 import net.minecraft.world.InteractionHand;
 import net.neoforged.neoforge.fluids.FluidStack;
 import net.neoforged.neoforge.network.event.RegisterPayloadHandlersEvent;
+import com.lw.modularmachine.api.recipe.RecipeExecutionOptions;
 
 /** Versioned, bounded controller state payloads for menus and observers. */
 public final class MachinePayloads {
-  public static final int PROTOCOL_VERSION = 3;
+  public static final int PROTOCOL_VERSION = 4;
   public static final int RESOURCE_PROTOCOL_VERSION = 4;
   public static final int MAX_SHORTAGES = 8;
   public static final int MAX_TEXT_LENGTH = 512;
@@ -225,7 +226,7 @@ public final class MachinePayloads {
       if (version != PROTOCOL_VERSION
           || position == null
           || threadId == null
-          || !threadId.matches("[a-zA-Z0-9_.-]{1,64}")
+          || !RecipeExecutionOptions.validThreadName(threadId)
           || expectedRevision < 0
           || action == null) {
         throw new IllegalArgumentException("Invalid factory thread action payload");
@@ -268,10 +269,17 @@ public final class MachinePayloads {
       UUID runId,
       String runState,
       int progress,
-      int duration) {
+      int duration,
+      String recipeFailureMessage) {
+    public FactoryStatusThread(String threadId, ResourceLocation machineId, ResourceLocation lockedRecipe, boolean enabled, int priority, int parallelLimit, long upgradeRevision, int speedNumerator, int speedDenominator, int energyNumerator, int energyDenominator, int fluidNumerator, int fluidDenominator, String state, String reason, long revision, UUID runId, String runState, int progress, int duration) {
+      this(threadId, machineId, lockedRecipe, enabled, priority, parallelLimit, upgradeRevision, speedNumerator,
+          speedDenominator, energyNumerator, energyDenominator, fluidNumerator, fluidDenominator, state, reason,
+          revision, runId, runState, progress, duration, "");
+    }
     public FactoryStatusThread {
+      requireText(recipeFailureMessage);
       if (threadId == null
-          || !threadId.matches("[a-zA-Z0-9_.-]{1,64}")
+          || !RecipeExecutionOptions.validThreadName(threadId)
           || machineId == null
           || priority < FactoryThreadState.MIN_PRIORITY
           || priority > FactoryThreadState.MAX_PRIORITY
@@ -316,7 +324,14 @@ public final class MachinePayloads {
       int duration,
       int averageTickMicros,
       int averageSearchMicros,
-      List<Shortage> shortages) implements CustomPacketPayload {
+      List<Shortage> shortages,
+      String recipeFailureMessage) implements CustomPacketPayload {
+    public ControllerStatusPayload(int version, BlockPos position, ResourceLocation machineId, long definitionEpoch, String structureState, String structureFailure, String front, int roll, boolean productionAllowed, long successfulTransfers, long bindingRebuilds, String recipeStatus, String recipeId, String runState, int progress, int duration, int averageTickMicros, int averageSearchMicros, List<Shortage> shortages) {
+      this(version, position, machineId, definitionEpoch, structureState, structureFailure, front, roll,
+          productionAllowed, successfulTransfers, bindingRebuilds, recipeStatus, recipeId, runState, progress, duration,
+          averageTickMicros, averageSearchMicros, shortages, "");
+    }
+
     public ControllerStatusPayload {
       if (version != PROTOCOL_VERSION
           || definitionEpoch < 0
@@ -338,6 +353,7 @@ public final class MachinePayloads {
       requireText(recipeStatus);
       requireText(recipeId);
       requireText(runState);
+      requireText(recipeFailureMessage);
     }
 
     public static ControllerStatusPayload from(MachineControllerApi.Snapshot snapshot) {
@@ -366,7 +382,8 @@ public final class MachinePayloads {
           run == null ? 0 : run.duration(),
           ControllerMetrics.averageTickMicros(),
           ControllerMetrics.averageSearchMicros(),
-          shortages);
+          shortages,
+          snapshot.recipeFailureMessage());
     }
 
     @Override
