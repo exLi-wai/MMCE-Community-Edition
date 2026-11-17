@@ -11,7 +11,6 @@ import com.lw.modularmachine.machine.network.pattern.PatternJobs;
 import com.lw.modularmachine.machine.network.pattern.PatternDefinition;
 import com.lw.modularmachine.machine.network.pattern.PatternProviderState;
 import com.lw.modularmachine.machine.network.pattern.PatternRecipeDefinition;
-import com.lw.modularmachine.machine.network.pattern.PatternRecipeDefinition.ExecutionCosts;
 import com.lw.modularmachine.machine.network.pattern.PatternResourceKey;
 import com.lw.modularmachine.machine.network.pattern.PatternResourceLedger.JobStatus;
 import com.lw.modularmachine.machine.recipe.search.RecipeCatalog;
@@ -30,6 +29,7 @@ import net.minecraft.core.BlockPos;
 import net.minecraft.server.level.ServerLevel;
 import net.minecraft.world.level.block.entity.BlockEntity;
 import org.jetbrains.annotations.ApiStatus;
+import java.util.stream.Stream;
 
 /**
  * Internal recipe ownership and per-container source expansion. Cached
@@ -40,7 +40,7 @@ import org.jetbrains.annotations.ApiStatus;
 public final class PatternProductionService {
   private static final Map<StructureService.StructureSubject, OwnerState> OWNERS = new WeakHashMap<>();
   private static final Map<RecipeCatalog, Map<Compatibility, Boolean>> COMPATIBILITY = new WeakHashMap<>();
-  private static final Map<MachineRecipe, Map<ExecutionCosts, Declaration>> DECLARATIONS = new WeakHashMap<>();
+  private static final Map<MachineRecipe, Map<TickCosts, Declaration>> DECLARATIONS = new WeakHashMap<>();
   private static final Map<PatternProviderBlockEntity, ProviderCache> PROVIDERS = new WeakHashMap<>();
 
   private record ProviderCache(
@@ -59,6 +59,16 @@ public final class PatternProductionService {
   }
 
   private record Gateway(BlockPos position, String selector) {
+  }
+
+  private record TickCosts(int duration, List<Integer> fluids) {
+    private TickCosts {
+      fluids = List.copyOf(fluids);
+    }
+
+    long totalPerTick(long amount) {
+      return Math.multiplyExact(amount, duration);
+    }
   }
 
   private record ProviderSelector(PatternProviderBlockEntity provider, String selector) {
@@ -412,9 +422,12 @@ public final class PatternProductionService {
   }
 
   private static boolean matches(PatternRecipeDefinition pattern, String selector, MachineRecipe recipe, UpgradeSnapshot upgrades, ServerLevel level) {
-    ExecutionCosts costs;
+    TickCosts costs;
     try {
-      costs = PatternRecipeDefinition.executionCosts(recipe.duration(), recipe.fluidPerTick().getAmount(), upgrades);
+      costs = new TickCosts(
+          upgrades.durationFor(recipe.duration()),
+          recipe.fluidPerTickInputs().stream()
+              .map(row -> Math.toIntExact(upgrades.fluidPerTick(row.stack().getAmount()))).toList());
     } catch (IllegalArgumentException | ArithmeticException invalid) {
       return false;
     }
@@ -431,12 +444,24 @@ public final class PatternProductionService {
     return pattern.matchesNativeDeclaration(input, declaration.outputs());
   }
 
-  private static Declaration declaration(MachineRecipe recipe, ExecutionCosts costs, ServerLevel level) {
+  private static Declaration declaration(MachineRecipe recipe, TickCosts costs, ServerLevel level) {
     var inputs = new HashMap<String, Map<PatternResourceKey, Long>>();
     var outputs = new HashMap<PatternResourceKey, Long>();
     try {
-      if (recipe.fluidInputRequirements().stream().anyMatch(value -> value.chance() != 1)
+      if (!recipe.itemPayments().isEmpty()
+          || !recipe.triggeredResources().isEmpty()
+          || !recipe.ingredientArrays().inputs().isEmpty()
+          || !recipe.ingredientArrays().randomOutputs().isEmpty()
+          || !recipe.triggeredResources().rows().isEmpty()
+          || recipe.inputs().stream().anyMatch(row -> row.minimumAmount() != row.amount())
+          || recipe.outputs().stream().anyMatch(row -> row.minimumAmount() != row.amount())
+          || recipe.fluidInputRequirements().stream().anyMatch(value -> value.chance() != 1)
           || recipe.fluidOutputRequirements().stream().anyMatch(value -> value.chance() != 1)
+          || recipe.fluidPerTickInputs().stream().anyMatch(value -> value.chance() != 1)
+          || !recipe.fluidPerTickOutputs().isEmpty()
+          || !recipe.chemicals().perTickOutputs().isEmpty()
+          || Stream.of(recipe.chemicals().inputs(), recipe.chemicals().outputs(), recipe.chemicals().perTick())
+              .flatMap(List::stream).anyMatch(value -> value.chance() != 1)
           || recipe.scriptOptions().itemCallbacks().stream().anyMatch(value -> !value.modifiers().isEmpty())) {
         return Declaration.INVALID;
       }
@@ -466,12 +491,13 @@ public final class PatternProductionService {
       for (var fluid : recipe.fluidOutputs()) {
         add(outputs, new NetworkPortResource.Fluid(fluid), fluid.getAmount(), level);
       }
-      var perTick = recipe.fluidPerTick();
-      if (!perTick.isEmpty()) {
+      for (int index = 0; index < recipe.fluidPerTickInputs().size(); index++) {
+        var row = recipe.fluidPerTickInputs().get(index);
+        var perTick = row.stack();
         add(
-            inputs.computeIfAbsent(recipe.selectors().fluidPerTick(), ignored -> new HashMap<>()),
+            inputs.computeIfAbsent(row.selector(recipe.selectors().fluidPerTick()), ignored -> new HashMap<>()),
             new NetworkPortResource.Fluid(perTick),
-            costs.totalPerTick(costs.fluidPerTick()),
+            costs.totalPerTick(costs.fluids().get(index)),
             level);
       }
       for (var chemical : recipe.chemicals().inputs()) {

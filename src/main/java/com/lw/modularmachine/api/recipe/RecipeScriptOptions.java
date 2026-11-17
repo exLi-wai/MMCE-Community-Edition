@@ -13,7 +13,7 @@ import net.minecraft.resources.ResourceLocation;
  * Immutable display text and pure callback identities; executable functions are
  * never recipe data.
  */
-public record RecipeScriptOptions(List<String> tooltips, List<ItemCallbacks> itemCallbacks) {
+public record RecipeScriptOptions(List<String> tooltips, List<ItemCallbacks> itemCallbacks, boolean loadJei) {
   public static final int MAX_TOOLTIP_LINES = 64;
   public static final int MAX_TOOLTIP_LENGTH = 512;
   public static final int MAX_ITEM_CALLBACKS = 256;
@@ -23,8 +23,13 @@ public record RecipeScriptOptions(List<String> tooltips, List<ItemCallbacks> ite
       instance -> instance.group(
           Codec.STRING.listOf().optionalFieldOf("recipe_tooltips", List.of()).forGetter(RecipeScriptOptions::tooltips),
           ItemCallbacks.CODEC.listOf().optionalFieldOf("item_callbacks", List.of())
-              .forGetter(RecipeScriptOptions::itemCallbacks))
+              .forGetter(RecipeScriptOptions::itemCallbacks),
+          Codec.BOOL.optionalFieldOf("load_jei", true).forGetter(RecipeScriptOptions::loadJei))
           .apply(instance, RecipeScriptOptions::new));
+
+  public RecipeScriptOptions(List<String> tooltips, List<ItemCallbacks> itemCallbacks) {
+    this(tooltips, itemCallbacks, true);
+  }
 
   public RecipeScriptOptions {
     tooltips = List.copyOf(tooltips);

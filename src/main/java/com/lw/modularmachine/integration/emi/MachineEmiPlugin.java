@@ -33,6 +33,7 @@ public final class MachineEmiPlugin implements EmiPlugin {
     Map<ResourceLocation, MachineRecipeLayout> layouts = new LinkedHashMap<>();
     Map<ResourceLocation, ArrayList<RecipeHolder<MachineRecipe>>> recipes = new LinkedHashMap<>();
     registry.getRecipeManager().getAllRecipesFor(MachineRecipeRegistries.ITEM_TYPE.get()).stream()
+        .filter(holder -> holder.value().scriptOptions().loadJei())
         .sorted(Comparator.comparing(holder -> holder.id().toString())).forEach(
             holder -> recipes.computeIfAbsent(holder.value().machineId(), ignored -> new ArrayList<>()).add(holder));
     var machineIds = new TreeSet<ResourceLocation>(ClientMachineCatalog.machines().keySet());

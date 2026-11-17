@@ -5,8 +5,9 @@ import com.google.gson.JsonElement;
 import com.google.gson.JsonObject;
 import com.google.gson.JsonParseException;
 import java.util.Set;
+import org.jetbrains.annotations.ApiStatus;
 /** Shared machine-declaration JSON primitives with precise source paths. */
-@org.jetbrains.annotations.ApiStatus.Internal
+@ApiStatus.Internal
 final class MachineDefinitionJson {
   private MachineDefinitionJson() {
   }

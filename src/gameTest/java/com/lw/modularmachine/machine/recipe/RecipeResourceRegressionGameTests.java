@@ -1,0 +1,259 @@
+package com.lw.modularmachine.machine.recipe;
+
+import com.google.gson.JsonObject;
+import com.google.gson.JsonParser;
+import com.lw.modularmachine.api.orientation.MachineOrientation;
+import com.lw.modularmachine.api.upgrade.UpgradeSnapshot;
+import com.lw.modularmachine.block.FactoryControllerBlock;
+import com.lw.modularmachine.block.MachineControllerBlock;
+import com.lw.modularmachine.blockentity.FactoryControllerBlockEntity;
+import com.lw.modularmachine.blockentity.MachineControllerBlockEntity;
+import com.lw.modularmachine.blockentity.MachinePortBlockEntity;
+import com.lw.modularmachine.machine.recipe.resource.RecipeResourceDefinitions;
+import com.lw.modularmachine.machine.recipe.search.CompiledRecipeSet;
+import com.lw.modularmachine.machine.recipe.search.RecipeCatalog;
+import com.lw.modularmachine.machine.recipe.search.RecipeResourceRequirements;
+import com.lw.modularmachine.machine.structure.StructureService;
+import com.lw.modularmachine.registry.MachineRegistries;
+import com.mojang.serialization.JsonOps;
+import io.netty.buffer.Unpooled;
+import java.util.HashMap;
+import java.util.List;
+import java.util.Map;
+import net.minecraft.core.BlockPos;
+import net.minecraft.core.NonNullList;
+import net.minecraft.gametest.framework.GameTest;
+import net.minecraft.gametest.framework.GameTestHelper;
+import net.minecraft.nbt.Tag;
+import net.minecraft.network.RegistryFriendlyByteBuf;
+import net.minecraft.resources.ResourceLocation;
+import net.minecraft.world.item.ItemStack;
+import net.minecraft.world.item.Items;
+import net.minecraft.world.item.crafting.Recipe;
+import net.neoforged.neoforge.gametest.GameTestHolder;
+import net.neoforged.neoforge.gametest.PrefixGameTestTemplate;
+
+/**
+ * Focused physical-payment, selector persistence and parallel admission
+ * regressions.
+ */
+@GameTestHolder("mmcece_resource_regression")
+@PrefixGameTestTemplate(false)
+public final class RecipeResourceRegressionGameTests {
+  private static final ResourceLocation MACHINE = ResourceLocation.parse("mmcece:test_recipe_resources");
+  private static final int[][] OFFSETS = {{-1, 0, 1}, {1, 0, 1}, {0, 1, 1}, {0, -1, 1}, {-1, 1, 1}, {1, -1, 1}};
+  private static final String[] PORTS = {"item_input_bus_normal", "item_output_bus_normal", "fluid_input_hatch_normal",
+      "fluid_output_hatch_normal", "energy_input_hatch_normal", "energy_output_hatch_normal"};
+
+  private RecipeResourceRegressionGameTests() {
+  }
+
+  @GameTest(template = "empty16", timeoutTicks = 80)
+  public static void independent_runs_reserve_and_pay_whole_fuels_separately(GameTestHelper helper) {
+    var ticket = build(helper, true);
+    var input = input(helper, ticket);
+    var source = root();
+    source.add("inputs", JsonParser.parseString("[]"));
+    source.add("item_payments", JsonParser.parseString("""
+        {"fuels":[{"burn_time":100,"parallel_unaffected":true}]}
+        """));
+    var recipe = decode(helper, source);
+    input.inventory().setStackInSlot(0, new ItemStack(Items.COAL));
+    ticket = RecipeExecutionTicket.capture(ticket.owner()).orElseThrow();
+    helper
+        .assertTrue(!RecipeItemPayments.available(ticket, recipe, 2, false), "One coal admitted two independent runs");
+    helper.assertTrue(
+        RecipeItemPayments.available(ticket, recipe, 2, true),
+        "Aggregated fixed fuel stopped sharing its payment");
+    input.inventory().setStackInSlot(0, new ItemStack(Items.COAL, 2));
+    ticket = RecipeExecutionTicket.capture(ticket.owner()).orElseThrow();
+    helper.assertTrue(RecipeItemPayments.limit(ticket, recipe, 8, false) == 2, "Factory fuel limit shared excess heat");
+    var changes = new HashMap<String, NonNullList<ItemStack>>();
+    helper.assertTrue(RecipeItemPayments.apply(ticket, recipe, 2, false, 42, changes), "Independent payment failed");
+    helper.assertTrue(
+        changes.values().stream().flatMap(List::stream).allMatch(ItemStack::isEmpty),
+        "Independent runs paid fewer than two coal");
+    helper.assertTrue(
+        input.inventory().getStackInSlot(0).getCount() == 2,
+        "Preparation wrote physical fuel before commit");
+    source.getAsJsonObject("item_payments").getAsJsonArray("fuels").get(0).getAsJsonObject()
+        .addProperty("parallel_unaffected", false);
+    changes.clear();
+    helper.assertTrue(
+        RecipeItemPayments.apply(ticket, decode(helper, source), 2, true, 42, changes),
+        "Aggregate payment failed");
+    helper.assertTrue(
+        changes.values().stream().flatMap(List::stream).mapToInt(ItemStack::getCount).sum() == 1,
+        "Ordinary aggregate stopped rounding its combined demand once");
+    helper.succeed();
+  }
+
+  @GameTest(template = "empty16", timeoutTicks = 80)
+  public static void zero_chance_still_proves_each_run_and_container_fuels_return_each_bucket(GameTestHelper helper) {
+    var ticket = build(helper, true);
+    var input = input(helper, ticket);
+    var source = root();
+    source.add("inputs", JsonParser.parseString("[]"));
+    source.add("item_payments", JsonParser.parseString("{\"fuels\":[{\"burn_time\":100,\"chance\":0}]}"));
+    var recipe = decode(helper, source);
+    input.inventory().setStackInSlot(0, new ItemStack(Items.COAL));
+    ticket = RecipeExecutionTicket.capture(ticket.owner()).orElseThrow();
+    helper.assertTrue(
+        !RecipeItemPayments.available(ticket, recipe, 2, false),
+        "Zero chance bypassed the full fuel proof");
+    input.inventory().setStackInSlot(1, new ItemStack(Items.COAL));
+    ticket = RecipeExecutionTicket.capture(ticket.owner()).orElseThrow();
+    var changes = new HashMap<String, NonNullList<ItemStack>>();
+    helper.assertTrue(
+        RecipeItemPayments.apply(ticket, recipe, 2, false, 42, changes) && changes.isEmpty(),
+        "Zero chance consumed fuel");
+    input.inventory().setStackInSlot(0, new ItemStack(Items.LAVA_BUCKET));
+    input.inventory().setStackInSlot(1, new ItemStack(Items.LAVA_BUCKET));
+    ticket = RecipeExecutionTicket.capture(ticket.owner()).orElseThrow();
+    source.getAsJsonObject("item_payments").getAsJsonArray("fuels").get(0).getAsJsonObject().addProperty("chance", 1);
+    helper.assertTrue(
+        RecipeItemPayments.apply(ticket, decode(helper, source), 2, false, 42, changes),
+        "Container payment failed");
+    helper.assertTrue(
+        changes.values().stream().flatMap(List::stream).filter(stack -> stack.is(Items.BUCKET)).count() == 2,
+        "Container fuel shared heat or lost a bucket");
+    helper.succeed();
+  }
+
+  @GameTest(template = "empty16", timeoutTicks = 80)
+  public static void explicit_empty_fluid_selector_survives_wire_freeze_and_saved_run(GameTestHelper helper) {
+    var ticket = build(helper, false);
+    var source = root();
+    source.add("selectors", JsonParser.parseString("{\"fluid_per_tick\":\"tagged\"}"));
+    source.add(
+        "fluid_per_tick_inputs",
+        JsonParser.parseString("[{\"id\":\"minecraft:water\",\"amount\":10,\"selector\":\"\"}]"));
+    var recipe = decode(helper, source);
+    var registries = helper.getLevel().registryAccess();
+    var buffer = new RegistryFriendlyByteBuf(Unpooled.buffer(), registries);
+    try {
+      Recipe.STREAM_CODEC.encode(buffer, recipe);
+      recipe = (MachineRecipe) Recipe.STREAM_CODEC.decode(buffer);
+    } finally {
+      buffer.release();
+    }
+    helper.assertTrue(
+        RecipeResourceRequirements.missing(ticket, recipe).isEmpty(),
+        "Explicit empty selector required a tagged hatch");
+    var run = FrozenRecipeFactory
+        .freeze(ResourceLocation.parse("mmcece:selector_regression"), recipe, 0, registries, ticket.ports(), -1);
+    var restored = FrozenRecipeRun.read(run.save(), registries);
+    var definition = restored.save().getCompound("definition");
+    var row = definition.getList("fluid_per_tick_inputs", Tag.TAG_COMPOUND).getCompound(0);
+    helper.assertTrue(
+        row.contains("selector", Tag.TAG_STRING) && row.getString("selector").isEmpty(),
+        "Frozen encoding omitted the explicit empty selector");
+    var effective = RecipeTriggeredResources.effective(restored, restored.resourceData(registries))
+        .get(RecipeResourceDefinitions.FLUID);
+    helper.assertTrue(
+        effective.perTickInputs().getFirst().selector().isEmpty(),
+        "Runtime replaced explicit empty with the phase default");
+    source.getAsJsonArray("fluid_per_tick_inputs").get(0).getAsJsonObject().remove("selector");
+    var omitted = decode(helper, source);
+    helper.assertTrue(
+        omitted.fluidPerTickInputs().getFirst().selector("tagged").equals("tagged"),
+        "Omitted selector stopped inheriting the phase default");
+    helper.assertTrue(
+        RecipeResourceRequirements.missing(ticket, omitted).isPresent(),
+        "Omitted selector ignored the tagged phase default");
+    var encoded = MachineRecipe.CODEC.codec()
+        .encodeStart(registries.createSerializationContext(JsonOps.INSTANCE), omitted).getOrThrow().getAsJsonObject();
+    helper.assertTrue(
+        !encoded.getAsJsonArray("fluid_per_tick_inputs").get(0).getAsJsonObject().has("selector"),
+        "Omitted selector became explicitly empty during encoding");
+    source.remove("fluid_per_tick_inputs");
+    source.add("fluid_per_tick", JsonParser.parseString("{\"id\":\"minecraft:water\",\"amount\":10}"));
+    helper.assertTrue(
+        decode(helper, source).fluidPerTickInputs().getFirst().selector("tagged").equals("tagged"),
+        "Legacy tick input stopped inheriting the phase default");
+    helper.succeed();
+  }
+
+  @GameTest(template = "empty16", timeoutTicks = 80)
+  public static void factory_tick_fluids_use_per_run_int_bounds_and_long_batch_totals(GameTestHelper helper) {
+    var ticket = build(helper, true);
+    var source = root();
+    source.add("fluid_per_tick_inputs", JsonParser.parseString("[{\"id\":\"minecraft:water\",\"amount\":1500000000}]"));
+    source.add("fluid_per_tick_outputs", JsonParser.parseString("[{\"id\":\"minecraft:lava\",\"amount\":1500000000}]"));
+    var recipe = decode(helper, source);
+    helper.assertTrue(
+        admit(helper, ticket, recipe, false, UpgradeSnapshot.identity(0)) == 2,
+        "Independent runs were restricted by aggregate int fluid totals");
+    helper.assertTrue(
+        admit(helper, ticket, recipe, true, UpgradeSnapshot.identity(0)) == 1,
+        "Aggregated fluid stacks exceeded int bounds");
+    source.remove("fluid_per_tick_outputs");
+    var cheaper = new UpgradeSnapshot(0, 2, 1, 1, 1, 1, 1, 2);
+    helper.assertTrue(
+        admit(helper, ticket, decode(helper, source), true, cheaper) == 2,
+        "Admission used pre-upgrade fluid amounts");
+    helper.succeed();
+  }
+
+  private static int admit(GameTestHelper helper, RecipeExecutionTicket ticket, MachineRecipe recipe, boolean aggregate, UpgradeSnapshot upgrades) {
+    var id = ResourceLocation.parse("mmcece:fluid_admission_regression");
+    var candidate = recipe.compile(id, helper.getLevel().registryAccess());
+    var catalog = new RecipeCatalog(
+        recipe.machineId(),
+        new CompiledRecipeSet<>(List.of(candidate)),
+        Map.of(),
+        Map.of(),
+        () -> true,
+        null,
+        Map.of(id.toString(), recipe),
+        List.of());
+    var plan = RecipeStartPlan.prepared(ticket, catalog, candidate, List.of(), List.of(), 42, null);
+    return new ParallelRecipeAdmission(plan, recipe, 2, aggregate, upgrades).advance(4096);
+  }
+
+  private static JsonObject root() {
+    return JsonParser.parseString("""
+        {"machine":"mmcece:test_recipe_resources","duration":20,
+         "inputs":[{"stack":{"id":"minecraft:dirt"},"amount":1}],
+         "outputs":[{"stack":{"id":"minecraft:stone"},"amount":1}]}
+        """).getAsJsonObject();
+  }
+
+  private static MachineRecipe decode(GameTestHelper helper, JsonObject source) {
+    return MachineRecipe.CODEC.codec()
+        .parse(helper.getLevel().registryAccess().createSerializationContext(JsonOps.INSTANCE), source).getOrThrow();
+  }
+
+  private static MachinePortBlockEntity input(GameTestHelper helper, RecipeExecutionTicket ticket) {
+    return (MachinePortBlockEntity) helper.getLevel()
+        .getBlockEntity(ticket.owner().structurePosition().offset(-1, 0, 1));
+  }
+
+  private static RecipeExecutionTicket build(GameTestHelper helper, boolean factory) {
+    var level = helper.getLevel();
+    var origin = helper.absolutePos(new BlockPos(7, 5, 7));
+    level.setBlockAndUpdate(
+        origin,
+        factory ? FactoryControllerBlock.withOrientation(
+            MachineRegistries.FACTORY_CONTROLLER.get().defaultBlockState(),
+            MachineOrientation.IDENTITY) : MachineControllerBlock
+                .withOrientation(MachineRegistries.CONTROLLER.get().defaultBlockState(), MachineOrientation.IDENTITY));
+    for (int i = 0; i < OFFSETS.length; i++) {
+      level.setBlockAndUpdate(
+          origin.offset(OFFSETS[i][0], OFFSETS[i][1], OFFSETS[i][2]),
+          MachineRegistries.PORTS.get(PORTS[i]).get().defaultBlockState());
+    }
+    var owner = (StructureService.StructureSubject) level.getBlockEntity(origin);
+    if (owner instanceof FactoryControllerBlockEntity controller) {
+      controller.bindMachine(MACHINE);
+    } else {
+      ((MachineControllerBlockEntity) owner).bindMachine(MACHINE);
+    }
+    for (int i = 0; i < 200 && RecipeExecutionTicket.capture(owner).isEmpty(); i++) {
+      StructureService.advance(level, 512, 64, 50_000_000L);
+    }
+    var input = (MachinePortBlockEntity) level.getBlockEntity(origin.offset(-1, 0, 1));
+    input.inventory().setStackInSlot(0, new ItemStack(Items.DIRT, 2));
+    return RecipeExecutionTicket.capture(owner).orElseThrow();
+  }
+}

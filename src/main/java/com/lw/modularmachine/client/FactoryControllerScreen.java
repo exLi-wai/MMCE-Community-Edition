@@ -246,7 +246,10 @@ public final class FactoryControllerScreen extends AbstractContainerScreen<Facto
     return tr(
         "recipe_items",
         resourceNames(recipe.inputs(), chemicalInputs),
-        resourceNames(recipe.outputs(), recipe.chemicals().outputs()));
+        resourceNames(
+            recipe.outputs(),
+            Stream.concat(recipe.chemicals().outputs().stream(), recipe.chemicals().perTickOutputs().stream())
+                .toList()));
   }
 
   private static Component resourceNames(List<MachineRecipe.ItemAmount> items, List<ChemicalRequirement> chemicals) {
@@ -266,8 +269,11 @@ public final class FactoryControllerScreen extends AbstractContainerScreen<Facto
         .map(item -> item.displayStack().getHoverName().getString());
     var fluids = Stream.of(recipe.fluidInputs(), recipe.fluidOutputs(), List.of(recipe.fluidPerTick()))
         .flatMap(List::stream).filter(fluid -> !fluid.isEmpty()).map(fluid -> fluid.getHoverName().getString());
-    var chemicals = Stream.of(recipe.chemicals().inputs(), recipe.chemicals().outputs(), recipe.chemicals().perTick())
-        .flatMap(List::stream).map(value -> chemicalName(value).getString());
+    var chemicals = Stream.of(
+        recipe.chemicals().inputs(),
+        recipe.chemicals().outputs(),
+        recipe.chemicals().perTick(),
+        recipe.chemicals().perTickOutputs()).flatMap(List::stream).map(value -> chemicalName(value).getString());
 
     return Stream.of(items, fluids, chemicals).flatMap(stream -> stream).map(name -> name.toLowerCase(Locale.ROOT))
         .distinct().toList();

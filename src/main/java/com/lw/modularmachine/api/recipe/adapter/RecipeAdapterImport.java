@@ -14,7 +14,12 @@ public record RecipeAdapterImport(
     int duration,
     long energyPerTick,
     int priority,
-    RecipeAdapterCustomization customization) {
+    RecipeAdapterCustomization customization,
+    boolean prioritySpecified) {
+  public RecipeAdapterImport(String id, ResourceLocation adapter, List<ResourceLocation> recipes, boolean allRecipes, int duration, long energyPerTick, int priority, RecipeAdapterCustomization customization) {
+    this(id, adapter, recipes, allRecipes, duration, energyPerTick, priority, customization, priority != 0);
+  }
+
   public RecipeAdapterImport(String id, ResourceLocation adapter, List<ResourceLocation> recipes, boolean allRecipes, int duration, long energyPerTick, int priority) {
     this(id, adapter, recipes, allRecipes, duration, energyPerTick, priority, RecipeAdapterCustomization.NONE);
   }

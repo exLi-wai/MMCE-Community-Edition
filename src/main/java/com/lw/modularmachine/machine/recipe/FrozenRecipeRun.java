@@ -1,6 +1,7 @@
 package com.lw.modularmachine.machine.recipe;
 
 import com.lw.modularmachine.api.recipe.RecipeRunState;
+import com.lw.modularmachine.api.recipe.RecipeModifier;
 import com.lw.modularmachine.api.recipe.resource.RecipeResources;
 import com.lw.modularmachine.machine.recipe.resource.RecipeResourceDefinitions;
 import com.lw.modularmachine.machine.recipe.search.RecipeCandidate;
@@ -25,6 +26,8 @@ import net.minecraft.nbt.Tag;
 import net.minecraft.resources.ResourceLocation;
 import net.minecraft.world.item.ItemStack;
 import net.neoforged.neoforge.fluids.FluidStack;
+import com.lw.modularmachine.api.recipe.TriggeredResourceData;
+import org.jetbrains.annotations.ApiStatus;
 
 /**
  * Immutable paid-run state. Payload is shared privately between transitions; no
@@ -38,6 +41,7 @@ public final class FrozenRecipeRun {
 
   private static final class ResourceCache {
     RecipeResources value;
+    TriggeredResourceData triggers;
   }
   private final UUID runId;
   private final ResourceLocation machineId, recipeId;
@@ -45,6 +49,9 @@ public final class FrozenRecipeRun {
   private final long energyPerTick;
   private final long energyOutputPerTick;
   private final int energyOutputProgress;
+  private final int resourceOutputProgress;
+  private final int triggerProgress;
+  private final boolean tickResourceOutputs;
   private final RecipeExecutionOptions executionOptions;
   private final long itemCallbackEpoch;
   private final RecipeFailureAction failureAction;
@@ -78,6 +85,8 @@ public final class FrozenRecipeRun {
     energyPerTick = definition.energyPerTick();
     energyOutputPerTick = definition.energyOutputPerTick();
     energyOutputProgress = definition.energyOutputProgress();
+    resourceOutputProgress = definition.resourceOutputProgress();
+    tickResourceOutputs = definition.tickResourceOutputs();
     executionOptions = definition.executionOptions();
     failureAction = definition.failureAction();
     selectors = definition.selectors();
@@ -85,6 +94,19 @@ public final class FrozenRecipeRun {
     fluidPerTickData = definition.fluidPerTickData();
     fluidPerTick = definition.fluidPerTick();
     data = source.copy();
+    resourceCache.triggers = registries == null ? null : TriggeredResourceData.CODEC.parse(
+        registries.createSerializationContext(NbtOps.INSTANCE),
+        source.getCompound("definition").getList("triggered_resources", Tag.TAG_COMPOUND)).getOrThrow();
+    triggerProgress = source.getInt("trigger_progress");
+    boolean triggered = !source.getCompound("definition").getList("triggered_resources", Tag.TAG_COMPOUND).isEmpty();
+    if (source.contains("trigger_progress") && !source.contains("trigger_progress", Tag.TAG_INT)
+        || triggered
+            && (!source.contains("trigger_progress", Tag.TAG_INT)
+                || triggerProgress < progress
+                || triggerProgress > duration)
+        || !triggered && triggerProgress != 0) {
+      throw new IllegalArgumentException("Missing or invalid trigger progress");
+    }
     if (registries != null) {
       // Validate all extension demands before accepting paid state; transitions share
       // this cache.
@@ -103,6 +125,9 @@ public final class FrozenRecipeRun {
     energyPerTick = before.energyPerTick;
     energyOutputPerTick = before.energyOutputPerTick;
     energyOutputProgress = energyOutputPerTick > 0 ? Math.max(before.energyOutputProgress, progress) : 0;
+    resourceOutputProgress = before.tickResourceOutputs ? Math.max(before.resourceOutputProgress, progress) : 0;
+    triggerProgress = Math.max(before.triggerProgress, progress);
+    tickResourceOutputs = before.tickResourceOutputs;
     executionOptions = before.executionOptions;
     itemCallbackEpoch = before.itemCallbackEpoch;
     failureAction = before.failureAction;
@@ -177,9 +202,28 @@ public final class FrozenRecipeRun {
     return randomSeed;
   }
 
+  /**
+   * Output positions stay emitted through RESET/DECREASE and complete restart.
+   */
+  public boolean canEmitTickOutputs() {
+    return state == RecipeRunState.RUNNING && progress < duration && progress >= resourceOutputProgress;
+  }
+
+  public int tickOutputProgress() {
+    return resourceOutputProgress;
+  }
+
+  public int triggerProgress() {
+    return triggerProgress;
+  }
+
+  public TriggeredResourceData triggeredResources() {
+    return resourceCache.triggers == null ? TriggeredResourceData.NONE : resourceCache.triggers;
+  }
+
   public FluidStack fluidPerTick(HolderLookup.Provider registries) {
     if (fluidPerTickData.isEmpty()) {
-      return FluidStack.EMPTY;
+      return resourceData(registries).get(RecipeResourceDefinitions.FLUID).perTick();
     }
 
     return fluidPerTick == null ? FrozenRecipeRunCodec.decodeFluidPerTick(fluidPerTickData, registries) : fluidPerTick
@@ -195,7 +239,8 @@ public final class FrozenRecipeRun {
       throw new IllegalStateException("Outputs have not been generated");
     }
 
-    return chemicals.outputs();
+    return ChemicalRecipeSampling
+        .sample(chemicals.outputs(), randomSeed, parallelInstances, RecipeModifier.Io.OUTPUT, -1);
   }
 
   public int progress() {
@@ -231,7 +276,7 @@ public final class FrozenRecipeRun {
   }
 
   /** A paid run never silently switches its input routing after GUI edits. */
-  @org.jetbrains.annotations.ApiStatus.Internal
+  @ApiStatus.Internal
   public boolean matchesInputGroups(RecipeExecutionTicket ticket) {
     return bindings.matchesInputGroups(ticket);
   }
@@ -305,8 +350,14 @@ public final class FrozenRecipeRun {
             parallelInstances));
     pending.putString("state", RecipeRunState.OUTPUT_PENDING.name());
     pending.putInt("progress", progress);
+    if (!data.getCompound("definition").getList("triggered_resources", Tag.TAG_COMPOUND).isEmpty()) {
+      pending.putInt("trigger_progress", triggerProgress);
+    }
     if (energyOutputPerTick > 0) {
       pending.putInt("energy_output_progress", energyOutputProgress);
+    }
+    if (tickResourceOutputs) {
+      pending.putInt("resource_output_progress", resourceOutputProgress);
     }
     pending.putLong("last_progress_tick", lastProgressTick);
     if (data.getCompound("definition").contains("fluid_outputs")) {
@@ -435,7 +486,11 @@ public final class FrozenRecipeRun {
   }
 
   public CompoundTag save() {
-    return FrozenRecipeRunCodec.save(this, data, energyOutputProgress);
+    var saved = FrozenRecipeRunCodec.save(this, data, energyOutputProgress, resourceOutputProgress);
+    if (!data.getCompound("definition").getList("triggered_resources", Tag.TAG_COMPOUND).isEmpty()) {
+      saved.putInt("trigger_progress", triggerProgress);
+    }
+    return saved;
   }
 
   public CompoundTag definition() {
@@ -445,10 +500,15 @@ public final class FrozenRecipeRun {
   /**
    * Internal, once-decoded resource demands shared by immutable run transitions.
    */
-  @org.jetbrains.annotations.ApiStatus.Internal
+  @ApiStatus.Internal
   public RecipeResources resourceData(HolderLookup.Provider registries) {
-    java.util.Objects.requireNonNull(registries, "registries");
+    Objects.requireNonNull(registries, "registries");
     synchronized (resourceCache) {
+      if (resourceCache.triggers == null) {
+        resourceCache.triggers = TriggeredResourceData.CODEC.parse(
+            registries.createSerializationContext(NbtOps.INSTANCE),
+            data.getCompound("definition").getList("triggered_resources", Tag.TAG_COMPOUND)).getOrThrow();
+      }
       if (resourceCache.value == null) {
         resourceCache.value = RecipeResourceDefinitions.CODEC.codec()
             .parse(registries.createSerializationContext(NbtOps.INSTANCE), data.getCompound("definition")).getOrThrow();

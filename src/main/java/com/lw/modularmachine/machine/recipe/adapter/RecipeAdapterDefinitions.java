@@ -10,6 +10,7 @@ import java.util.List;
 import java.util.Set;
 import net.minecraft.resources.ResourceLocation;
 import org.jetbrains.annotations.ApiStatus;
+import com.lw.modularmachine.api.recipe.adapter.RecipeAdapterCustomization;
 
 /** Internal, immutable import settings captured with a machine definition. */
 @ApiStatus.Internal
@@ -50,9 +51,6 @@ public final class RecipeAdapterDefinitions {
         throw error(importPath + ".id", "Duplicate recipe adapter import ID " + id);
       }
       var adapter = identifier(row.get("adapter"), importPath + ".adapter");
-      if (!RecipeAdapterRegistry.known(adapter)) {
-        throw error(importPath + ".adapter", "Unknown recipe adapter " + adapter);
-      }
       boolean allRecipes = !row.has("recipes");
       var recipes = new ArrayList<ResourceLocation>();
       if (!allRecipes) {
@@ -83,7 +81,17 @@ public final class RecipeAdapterDefinitions {
       if (row.has("priority")) {
         priority = integer(row.get("priority"), importPath + ".priority", Integer.MIN_VALUE, Integer.MAX_VALUE);
       }
-      imports.add(new RecipeAdapterImport(id, adapter, recipes, allRecipes, duration, energyPerTick, priority));
+      imports.add(
+          new RecipeAdapterImport(
+              id,
+              adapter,
+              recipes,
+              allRecipes,
+              duration,
+              energyPerTick,
+              priority,
+              RecipeAdapterCustomization.NONE,
+              row.has("priority")));
     }
     validate(imports);
 

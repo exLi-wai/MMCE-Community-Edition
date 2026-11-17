@@ -10,6 +10,8 @@ import com.lw.modularmachine.api.recipe.ChemicalRecipeData;
 import com.lw.modularmachine.api.recipe.FluidRequirement;
 import com.lw.modularmachine.api.recipe.RecipeExecutionOptions;
 import com.lw.modularmachine.api.recipe.RecipeScriptOptions;
+import com.lw.modularmachine.api.recipe.IngredientArrayData;
+import com.lw.modularmachine.api.recipe.TriggeredResourceData;
 import com.lw.modularmachine.machine.smart.SmartInterfaceType;
 import com.lw.modularmachine.api.smart.SmartNumberRequirement;
 import com.mojang.serialization.Codec;
@@ -38,17 +40,29 @@ import net.minecraft.world.item.crafting.RecipeType;
 import net.minecraft.world.level.Level;
 import net.neoforged.neoforge.fluids.FluidStack;
 import net.minecraft.nbt.CompoundTag;
+import com.lw.modularmachine.api.recipe.ItemPaymentData;
+import com.lw.modularmachine.api.recipe.RecipeModifier;
+import java.util.stream.IntStream;
 
 /**
  * Native data definition. This recipe cannot assemble through a crafting grid
  * or bypass machine admission.
  */
 public final class MachineRecipe implements Recipe<RecipeInput> {
-  private record Extras(RecipeExecutionOptions executionOptions, RecipeScriptOptions scriptOptions) {
-    private static final MapCodec<Extras> CODEC = RecordCodecBuilder.mapCodec(
-        instance -> instance.group(
-            RecipeExecutionOptions.MAP_CODEC.forGetter(Extras::executionOptions),
-            RecipeScriptOptions.CODEC.forGetter(Extras::scriptOptions)).apply(instance, Extras::new));
+  private record Extras(
+      RecipeExecutionOptions executionOptions,
+      RecipeScriptOptions scriptOptions,
+      IngredientArrayData ingredientArrays,
+      TriggeredResourceData triggeredResources) {
+    private static final MapCodec<Extras> CODEC = RecordCodecBuilder
+        .mapCodec(
+            instance -> instance
+                .group(
+                    RecipeExecutionOptions.MAP_CODEC.forGetter(Extras::executionOptions),
+                    RecipeScriptOptions.CODEC.forGetter(Extras::scriptOptions),
+                    IngredientArrayData.MAP_CODEC.forGetter(Extras::ingredientArrays),
+                    TriggeredResourceData.MAP_CODEC.forGetter(Extras::triggeredResources))
+                .apply(instance, Extras::new));
 
     private Extras {
       Objects.requireNonNull(executionOptions, "executionOptions");
@@ -66,7 +80,9 @@ public final class MachineRecipe implements Recipe<RecipeInput> {
                 Codec.STRING.optionalFieldOf("match", "exact").forGetter(ItemAmount::match),
                 ItemStack.SINGLE_ITEM_CODEC.optionalFieldOf("preview_stack", ItemStack.EMPTY)
                     .forGetter(value -> value.preview),
-                Codec.BOOL.optionalFieldOf("parallel_unaffected", false).forGetter(ItemAmount::parallelUnaffected))
+                Codec.BOOL.optionalFieldOf("parallel_unaffected", false).forGetter(ItemAmount::parallelUnaffected),
+                Codec.LONG.optionalFieldOf("min_amount", 0L).forGetter(value -> value.minAmount),
+                Codec.LONG.optionalFieldOf("max_amount", 0L).forGetter(value -> value.maxAmount))
             .apply(instance, ItemAmount::new));
     private final ItemStack prototype;
     private final long amount;
@@ -75,8 +91,10 @@ public final class MachineRecipe implements Recipe<RecipeInput> {
     private final String match;
     private final ItemStack preview;
     private final boolean parallelUnaffected;
+    private final long minAmount;
+    private final long maxAmount;
 
-    private ItemAmount(ItemStack prototype, long amount, double chance, String selector, String match, ItemStack preview, boolean parallelUnaffected) {
+    private ItemAmount(ItemStack prototype, long amount, double chance, String selector, String match, ItemStack preview, boolean parallelUnaffected, long minAmount, long maxAmount) {
       if (prototype.isEmpty()
           || prototype.getCount() != 1
           || amount <= 0
@@ -84,7 +102,10 @@ public final class MachineRecipe implements Recipe<RecipeInput> {
           || chance < 0
           || chance > 1
           || !("exact".equals(match) || "item".equals(match))
-          || !preview.isEmpty() && preview.getCount() != 1) {
+          || !preview.isEmpty() && preview.getCount() != 1
+          || minAmount < 0
+          || maxAmount < minAmount
+          || maxAmount > 0 && amount != maxAmount) {
         throw new IllegalArgumentException("Expected one prototype and positive long amount");
       }
       this.prototype = prototype.copy();
@@ -94,6 +115,8 @@ public final class MachineRecipe implements Recipe<RecipeInput> {
       this.match = match;
       this.preview = preview.copy();
       this.parallelUnaffected = parallelUnaffected;
+      this.minAmount = minAmount;
+      this.maxAmount = maxAmount;
     }
 
     public String match() {
@@ -110,6 +133,10 @@ public final class MachineRecipe implements Recipe<RecipeInput> {
 
     public long amount() {
       return amount;
+    }
+
+    public long minimumAmount() {
+      return maxAmount == 0 ? amount : minAmount;
     }
 
     public double chance() {
@@ -143,6 +170,8 @@ public final class MachineRecipe implements Recipe<RecipeInput> {
               && amount == value.amount
               && chance == value.chance
               && parallelUnaffected == value.parallelUnaffected
+              && minAmount == value.minAmount
+              && maxAmount == value.maxAmount
               && selector.equals(value.selector)
               && match.equals(value.match)
               && ItemStack.matches(prototype, value.prototype)
@@ -161,7 +190,9 @@ public final class MachineRecipe implements Recipe<RecipeInput> {
           preview.getItem(),
           preview.getComponents(),
           preview.getCount(),
-          parallelUnaffected);
+          parallelUnaffected,
+          minAmount,
+          maxAmount);
     }
   }
 
@@ -253,7 +284,12 @@ public final class MachineRecipe implements Recipe<RecipeInput> {
     }
     validateAmounts(inputs());
     validateAmounts(outputs());
-    if (!resourceData.hasInputs() || !resourceData.hasOutputs()) {
+    if (!resourceData.hasInputs()
+        && extras.ingredientArrays().inputs().stream().noneMatch(group -> !group.optional())
+        && extras.triggeredResources().rows().stream().noneMatch(row -> row.io() == RecipeModifier.Io.INPUT)
+        || !resourceData.hasOutputs()
+            && extras.ingredientArrays().randomOutputs().isEmpty()
+            && extras.triggeredResources().rows().stream().noneMatch(row -> row.io() == RecipeModifier.Io.OUTPUT)) {
       throw new IllegalArgumentException("A machine recipe requires resource input and output");
     }
     if (inputs().size() != 1 && inputs().stream().anyMatch(ItemAmount::ignoresComponents)
@@ -264,6 +300,10 @@ public final class MachineRecipe implements Recipe<RecipeInput> {
 
   public RecipeResources resourceData() {
     return resourceData;
+  }
+
+  public ItemPaymentData itemPayments() {
+    return resourceData.get(RecipeResourceDefinitions.ITEM).payments();
   }
 
   private static void validateAmounts(List<ItemAmount> values) {
@@ -319,8 +359,24 @@ public final class MachineRecipe implements Recipe<RecipeInput> {
     return extras.scriptOptions();
   }
 
+  public IngredientArrayData ingredientArrays() {
+    return extras.ingredientArrays();
+  }
+
+  public TriggeredResourceData triggeredResources() {
+    return extras.triggeredResources();
+  }
+
   public FluidStack fluidPerTick() {
     return resourceData.get(RecipeResourceDefinitions.FLUID).perTick();
+  }
+
+  public List<FluidRequirement> fluidPerTickInputs() {
+    return resourceData.get(RecipeResourceDefinitions.FLUID).perTickInputs();
+  }
+
+  public List<FluidRequirement> fluidPerTickOutputs() {
+    return resourceData.get(RecipeResourceDefinitions.FLUID).perTickOutputs();
   }
 
   public List<FluidStack> fluidInputs() {
@@ -384,13 +440,15 @@ public final class MachineRecipe implements Recipe<RecipeInput> {
     return new RecipeCandidate<>(
         id.toString(),
         priority,
-        inputs().stream()
+        IntStream.range(0, inputs().size()).filter(row -> !itemPayments().isTool(row))
+            .mapToObj(row -> inputs().get(row))
             .map(
                 value -> new RecipeCandidate.Input<>(
                     inputKey(value, registries),
                     value.amount,
                     value.chance,
-                    value.parallelUnaffected))
+                    value.parallelUnaffected,
+                    value.minimumAmount()))
             .toList(),
         outputs().stream().filter(value -> value.chance == 1.0D)
             .map(
@@ -427,13 +485,13 @@ public final class MachineRecipe implements Recipe<RecipeInput> {
     if (!(encoded instanceof CompoundTag tag)) {
       throw new IllegalArgumentException("Machine recipe codec did not produce a compound");
     }
-    buffer.writeVarInt(15);
+    buffer.writeVarInt(16);
     buffer.writeNbt(tag);
   }
 
   private static MachineRecipe read(RegistryFriendlyByteBuf buffer) {
     try {
-      if (buffer.readVarInt() != 15) {
+      if (buffer.readVarInt() != 16) {
         throw new DecoderException("Unsupported machine recipe wire schema");
       }
       var encoded = buffer.readNbt();

@@ -7,6 +7,7 @@ import net.minecraft.nbt.CompoundTag;
 import net.minecraft.nbt.Tag;
 import net.minecraft.resources.ResourceLocation;
 import org.jetbrains.annotations.ApiStatus;
+import java.util.Objects;
 
 /** Owns one ordinary paid run and its transactional start/update leases. */
 @ApiStatus.Internal
@@ -24,7 +25,7 @@ public final class ControllerRunState {
   }
 
   public ControllerRunState(Host host) {
-    this.host = java.util.Objects.requireNonNull(host, "host");
+    this.host = Objects.requireNonNull(host, "host");
   }
 
   public FrozenRecipeRun current() {

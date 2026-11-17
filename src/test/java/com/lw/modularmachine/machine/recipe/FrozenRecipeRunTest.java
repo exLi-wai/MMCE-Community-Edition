@@ -9,6 +9,7 @@ import net.minecraft.nbt.ListTag;
 import net.minecraft.nbt.Tag;
 import org.junit.jupiter.api.Test;
 import static org.junit.jupiter.api.Assertions.*;
+import java.util.Locale;
 
 class FrozenRecipeRunTest {
   private static CompoundTag requirement(String item) {
@@ -22,7 +23,7 @@ class FrozenRecipeRunTest {
 
   static void addPort(CompoundTag source, PortKind kind) {
     var port = new CompoundTag();
-    port.putString("id", kind.name().toLowerCase(java.util.Locale.ROOT));
+    port.putString("id", kind.name().toLowerCase(Locale.ROOT));
     port.putString("kind", kind.name());
     source.getList("ports", Tag.TAG_COMPOUND).add(port);
   }

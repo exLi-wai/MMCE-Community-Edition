@@ -34,7 +34,6 @@ import java.util.UUID;
 import net.minecraft.core.NonNullList;
 import net.minecraft.server.level.ServerLevel;
 import net.minecraft.world.item.ItemStack;
-import net.neoforged.neoforge.fluids.FluidStack;
 
 /**
  * Server-owned multi-resource paid-run lifecycle; output and clearing the run
@@ -156,9 +155,7 @@ public final class RecipeRunEngine {
           };
         }
         RecipeExecutionTicket energyTicket = null;
-        RecipeExecutionTicket fluidTicket = null;
         var debits = List.<EnergyDebit>of();
-        var fluidDebits = List.<RecipeFluidDebits.Debit>of();
         if (run.energyPerTick() > 0) {
           var captured = RecipeExecutionTicket.captureEnergyInputs(controller);
           if (captured.isEmpty()) {
@@ -173,39 +170,34 @@ public final class RecipeRunEngine {
             return status = applyResourceFailure(controller, run, now, RecipeRunStatus.WAITING_ENERGY);
           }
         }
-        var fluidFee = run.fluidPerTick(level.registryAccess());
-        if (!fluidFee.isEmpty()) {
-          var captured = RecipeExecutionTicket.captureFluidInputs(controller);
-          if (captured.isEmpty()) {
-            return status = RecipeRunStatus.PAUSED;
-          }
-          if (!run.matchesInputGroups(captured.orElseThrow())) {
-            return status = RecipeRunStatus.PAUSED;
-          }
-          fluidTicket = captured.orElseThrow().forRun(run).orElse(null);
-          if (fluidTicket == null) {
-            return status = RecipeRunStatus.PAUSED;
-          }
-          if (!RecipeResourceRequirements.has(fluidTicket, PortKind.FLUID_INPUT, run.selectors().fluidPerTick())) {
-            return status = RecipeRunStatus.MISSING_FLUID_INPUT;
-          }
-          fluidDebits = planFluidDebits(fluidTicket, fluidFee, run.selectors().fluidPerTick());
-          if (fluidDebits == null) {
-            return status = applyResourceFailure(controller, run, now, RecipeRunStatus.WAITING_FLUID);
-          }
-        }
         var beforeTick = run;
         var resourceTick = RecipeResourceExecutionRegistry.prepareTick(controller, List.of(run));
         if (resourceTick.status() == TickStatus.STALE) {
           return status = RecipeRunStatus.PAUSED;
         }
         if (resourceTick.status() == TickStatus.MISSING_INPUT) {
+          if (resourceTick.resource() == RecipeResourceDefinitions.FLUID) {
+            return status = RecipeRunStatus.MISSING_FLUID_INPUT;
+          }
           return status = resourceTick
               .resource() == RecipeResourceDefinitions.CHEMICAL ? RecipeRunStatus.MISSING_CHEMICAL_INPUT : RecipeRunStatus.MISSING_RESOURCE_INPUT;
+        }
+        if (resourceTick.status() == TickStatus.MISSING_OUTPUT) {
+          if (resourceTick.resource() == RecipeResourceDefinitions.ITEM) {
+            return status = RecipeRunStatus.OUTPUT_BLOCKED;
+          }
+          return status = resourceTick
+              .resource() == RecipeResourceDefinitions.FLUID ? RecipeRunStatus.MISSING_FLUID_OUTPUT : RecipeRunStatus.MISSING_CHEMICAL_OUTPUT;
+        }
+        if (resourceTick.status() == TickStatus.OUTPUT_BLOCKED) {
+          return status = RecipeRunStatus.OUTPUT_BLOCKED;
         }
         if (resourceTick.status() == TickStatus.INSUFFICIENT) {
           var waiting = resourceTick
               .resource() == RecipeResourceDefinitions.CHEMICAL ? RecipeRunStatus.WAITING_CHEMICAL : RecipeRunStatus.WAITING_RESOURCE;
+          if (resourceTick.resource() == RecipeResourceDefinitions.FLUID) {
+            waiting = RecipeRunStatus.WAITING_FLUID;
+          }
           return status = applyResourceFailure(
               controller,
               run,
@@ -215,20 +207,13 @@ public final class RecipeRunEngine {
         }
         var additionalResources = resourceTick.prepared();
         var patterns = new PatternInputTransaction();
-        for (var debit : fluidDebits) {
-          if (debit.port().patternInput()) {
-            patterns.consumeFluid(debit.port(), debit.amount());
-          }
-        }
         if (additionalResources != null) {
           additionalResources.addPatterns(patterns);
         }
         var energyLeases = new ArrayList<MachinePortBlockEntity.EnergyStartLease>();
-        var fluidLeases = new ArrayList<MachinePortBlockEntity.FluidStartLease>();
         var tickCostLeases = new ArrayList<StartCostLease>();
         var resourceTransaction = new RecipeResourceTransaction();
         resourceTransaction.phase().enlist(energyOutputs);
-        var fluidResources = resourceTransaction.phase();
         var energyResources = resourceTransaction.phase();
         resourceTransaction.phase().track(tickCostLeases, StartCostLease::resolve);
         var ownerResources = resourceTransaction.phase();
@@ -244,7 +229,6 @@ public final class RecipeRunEngine {
               || !controller.revalidateProduction(proof)
               || !qualified(controller, run)
               || energyTicket != null && !RecipeCommitGuard.validate(energyTicket)
-              || fluidTicket != null && !RecipeCommitGuard.validate(fluidTicket)
               || !additionalResources.current()
               || !tickCosts.versionsCurrent()) {
             return status = RecipeRunStatus.PAUSED;
@@ -266,9 +250,6 @@ public final class RecipeRunEngine {
             }
           }
           energyOutputs.acquire();
-          if (!RecipeFluidDebits.acquireAndDrain(fluidDebits, fluidResources, fluidLeases)) {
-            return status = RecipeRunStatus.STALE;
-          }
           var advanced = run.advanced(now);
           if (advanced.progress() == advanced.duration()) {
             advanced = advanced.finished();
@@ -294,10 +275,6 @@ public final class RecipeRunEngine {
             energyLeases,
             MachinePortBlockEntity.EnergyStartLease::publish,
             notification -> ModularMachine.LOGGER.warn("Committed recipe energy notification failed", notification));
-        RecipeResourceTransaction.publishAll(
-            fluidLeases,
-            MachinePortBlockEntity.FluidStartLease::publish,
-            notification -> ModularMachine.LOGGER.warn("Committed recipe fluid notification failed", notification));
         publishController(controller);
         if (controller.runningRecipe().orElse(null) != run) {
           return status = RecipeRunStatus.STALE;
@@ -381,24 +358,14 @@ public final class RecipeRunEngine {
   }
 
   private static boolean stillUnavailable(MachineControllerBlockEntity controller, FrozenRecipeRun run, RecipeLifecycleEvents.ResourceFailure resource) {
-    if (resource.type() != ResourceType.ENERGY && resource.type() != ResourceType.FLUID) {
+    if (resource.type() != ResourceType.ENERGY) {
       return RecipeResourceExecutionRegistry.stillUnavailable(controller, List.of(run), resource.type());
     }
     if (resource == RecipeLifecycleEvents.ResourceFailure.ENERGY) {
       var ticket = RecipeExecutionTicket.captureEnergyInputs(controller).orElse(null);
       return ticket != null && planEnergyDebits(ticket, run.energyPerTick(), run.selectors().energyInput()) == null;
     }
-    var ticket = RecipeExecutionTicket.captureFluidInputs(controller).orElse(null);
-    if (ticket == null || !run.matchesInputGroups(ticket)) {
-      return false;
-    }
-
-    var source = ticket.forRun(run).orElse(null);
-    return source != null
-        && planFluidDebits(
-            source,
-            run.fluidPerTick(controller.getLevel().registryAccess()),
-            run.selectors().fluidPerTick()) == null;
+    return false;
   }
 
   private static List<EnergyDebit> planEnergyDebits(RecipeExecutionTicket ticket, long amount, String selector) {
@@ -412,30 +379,6 @@ public final class RecipeRunEngine {
       if (debit > 0) {
         debits.add(new EnergyDebit(port, debit));
         remaining -= debit;
-      }
-      if (remaining == 0) {
-        return List.copyOf(debits);
-      }
-    }
-
-    return null;
-  }
-
-  private static List<RecipeFluidDebits.Debit> planFluidDebits(RecipeExecutionTicket ticket, FluidStack required, String selector) {
-    int remaining = required.getAmount();
-    var debits = new ArrayList<RecipeFluidDebits.Debit>();
-    for (var port : ticket.ports()) {
-      if (port.kind() != PortKind.FLUID_INPUT || !port.selector().equals(selector)) {
-        continue;
-      }
-      var stored = port.fluid();
-      if (!FluidStack.isSameFluidSameComponents(stored, required)) {
-        continue;
-      }
-      int amount = (int) Math.min(remaining, port.fluidAmount());
-      if (amount > 0) {
-        debits.add(new RecipeFluidDebits.Debit(port, required.copyWithAmount(amount)));
-        remaining -= amount;
       }
       if (remaining == 0) {
         return List.copyOf(debits);

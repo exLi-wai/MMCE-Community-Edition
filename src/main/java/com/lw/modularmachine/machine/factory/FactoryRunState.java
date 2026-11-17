@@ -16,6 +16,7 @@ import java.util.Map;
 import java.util.Set;
 import java.util.UUID;
 import org.jetbrains.annotations.ApiStatus;
+import java.util.Objects;
 
 /** Authoritative paid batches and in-flight start admission for one factory. */
 @ApiStatus.Internal
@@ -40,8 +41,8 @@ public final class FactoryRunState {
   }
 
   public FactoryRunState(FactoryThreadConfiguration threadConfiguration, Host host) {
-    this.threadConfiguration = java.util.Objects.requireNonNull(threadConfiguration, "threadConfiguration");
-    this.host = java.util.Objects.requireNonNull(host, "host");
+    this.threadConfiguration = Objects.requireNonNull(threadConfiguration, "threadConfiguration");
+    this.host = Objects.requireNonNull(host, "host");
   }
 
   /**

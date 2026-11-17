@@ -19,6 +19,7 @@ import java.util.ArrayList;
 import java.util.List;
 import java.util.Set;
 import java.util.HashSet;
+import com.lw.modularmachine.api.recipe.ItemPaymentData;
 
 /**
  * Pure structural validation. Registry/component resolution belongs to the
@@ -42,8 +43,12 @@ public final class MachineRecipeJson {
       "thread_name",
       "max_threads",
       "recipe_tooltips",
+      "load_jei",
       "item_callbacks",
+      "item_payments",
       "fluid_per_tick",
+      "fluid_per_tick_inputs",
+      "fluid_per_tick_outputs",
       "fluid_inputs",
       "fluid_outputs",
       "failure_action",
@@ -51,6 +56,9 @@ public final class MachineRecipeJson {
       "random_seed",
       "modifiers",
       "interface_inputs",
+      "ingredient_arrays",
+      "random_item_outputs",
+      "triggered_resources",
       "selectors",
       "chemicals",
       "inputs",
@@ -128,6 +136,11 @@ public final class MachineRecipeJson {
     }
     validateFluidList(object, "fluid_inputs", "Fluid inputs require schema 2 and an array");
     validateFluidList(object, "fluid_outputs", "Fluid outputs require an array");
+    validateFluidList(object, "fluid_per_tick_inputs", "Per-tick fluid inputs require an array");
+    validateFluidList(object, "fluid_per_tick_outputs", "Per-tick fluid outputs require an array");
+    if (object.has("fluid_per_tick") && object.has("fluid_per_tick_inputs")) {
+      throw error("$.fluid_per_tick", "Use either fluid_per_tick or fluid_per_tick_inputs");
+    }
     String failureAction = object
         .has("failure_action") ? string(object.get("failure_action"), "$.failure_action") : "still";
     try {
@@ -153,17 +166,44 @@ public final class MachineRecipeJson {
     demands(object.get("inputs"), "$.inputs", true);
     demands(object.get("outputs"), "$.outputs", false);
     validateScriptOptions(object);
+    if (object.has("item_payments")) {
+      var payments = ItemPaymentData.CODEC.parse(JsonOps.INSTANCE, object.get("item_payments")).getOrThrow();
+      for (var tool : payments.tools()) {
+        if (tool.row() >= object.getAsJsonArray("inputs").size()) {
+          throw error("$.item_payments.tools", "Tool payment refers to a missing input row");
+        }
+      }
+    }
+    if (object.has("ingredient_arrays")) {
+      RecipeIngredientArrayResolution.validate(object.get("ingredient_arrays"));
+    }
+    if (object.has("random_item_outputs")) {
+      RecipeIngredientArrayResolution.validateRandomOutputs(object.get("random_item_outputs"));
+    }
+    RecipeTriggeredResources.validate(object, (int) duration);
     var chemicals = validateChemicals(object);
     if (!RecipeResourceDefinitions.Fields.hasExtensions(object.keySet())
         && (object.getAsJsonArray("inputs").isEmpty()
+            && (!object.has("ingredient_arrays")
+                || object.getAsJsonArray("ingredient_arrays").asList().stream().allMatch(element -> {
+                  var group = element.getAsJsonObject();
+                  return group.has("optional") && group.get("optional").getAsBoolean();
+                }))
+            && !RecipeTriggeredResources.has(object, RecipeModifier.Io.INPUT)
+            && !object.has("item_payments")
             && !object.has("fluid_inputs")
             && !object.has("fluid_per_tick")
+            && !object.has("fluid_per_tick_inputs")
             && energyPerTick == 0
             && chemicals.inputs().isEmpty()
             && chemicals.perTick().isEmpty()
             || object.getAsJsonArray("outputs").isEmpty()
+                && (!object.has("random_item_outputs") || object.getAsJsonArray("random_item_outputs").isEmpty())
+                && !RecipeTriggeredResources.has(object, RecipeModifier.Io.OUTPUT)
                 && !object.has("fluid_outputs")
+                && !object.has("fluid_per_tick_outputs")
                 && chemicals.outputs().isEmpty()
+                && chemicals.perTickOutputs().isEmpty()
                 && energyOutputPerTick == 0)) {
       throw error("$", "A machine recipe requires resource input and output");
     }
@@ -181,9 +221,9 @@ public final class MachineRecipeJson {
         (int) duration,
         energyPerTick,
         energyOutputPerTick,
-        object.has("fluid_per_tick"),
+        object.has("fluid_per_tick") || object.has("fluid_per_tick_inputs"),
         object.has("fluid_inputs"),
-        object.has("fluid_outputs"),
+        object.has("fluid_outputs") || object.has("fluid_per_tick_outputs"),
         failureAction,
         parallelized,
         randomSeed,
@@ -275,13 +315,40 @@ public final class MachineRecipeJson {
       }
       modifyItems(result, "inputs", RecipeModifier.Io.INPUT, modifiers);
       modifyItems(result, "outputs", RecipeModifier.Io.OUTPUT, modifiers);
+      if (result.has("item_payments")) {
+        var payments = result.getAsJsonObject("item_payments");
+        if (payments.has("fuels")) {
+          for (var element : payments.getAsJsonArray("fuels")) {
+            var fuel = element.getAsJsonObject();
+            fuel.addProperty(
+                "burn_time",
+                modifiers.amount(
+                    RecipeModifier.Target.ITEM,
+                    RecipeModifier.Io.INPUT,
+                    integer(fuel.get("burn_time"), "$.item_payments.fuels.burn_time"),
+                    1,
+                    Long.MAX_VALUE));
+            fuel.addProperty(
+                "chance",
+                modifiers.chance(
+                    RecipeModifier.Target.ITEM,
+                    RecipeModifier.Io.INPUT,
+                    fuel.has("chance") ? decimal(fuel.get("chance"), "$.item_payments.fuels.chance") : 1));
+          }
+        }
+      }
+      modifyIngredientArrays(result, modifiers);
+      RecipeTriggeredResources.modify(result, modifiers, originalDuration, duration);
       modifyFluids(result, "fluid_inputs", RecipeModifier.Io.INPUT, modifiers);
       modifyFluids(result, "fluid_outputs", RecipeModifier.Io.OUTPUT, modifiers);
+      modifyFluids(result, "fluid_per_tick_inputs", RecipeModifier.Io.INPUT, modifiers);
+      modifyFluids(result, "fluid_per_tick_outputs", RecipeModifier.Io.OUTPUT, modifiers);
       if (result.has("chemicals")) {
         var chemicals = result.getAsJsonObject("chemicals");
         modifyChemicals(chemicals, "inputs", RecipeModifier.Io.INPUT, modifiers);
         modifyChemicals(chemicals, "outputs", RecipeModifier.Io.OUTPUT, modifiers);
         modifyChemicals(chemicals, "per_tick", RecipeModifier.Io.INPUT, modifiers);
+        modifyChemicals(chemicals, "per_tick_outputs", RecipeModifier.Io.OUTPUT, modifiers);
       }
       if (result.has("fluid_per_tick")) {
         var fluid = result.getAsJsonObject("fluid_per_tick");
@@ -318,10 +385,66 @@ public final class MachineRecipeJson {
               integer(entry.get("amount"), path + ".amount"),
               1,
               Long.MAX_VALUE));
-      if (io == RecipeModifier.Io.OUTPUT) {
-        double chance = entry.has("chance") ? decimal(entry.get("chance"), path + ".chance") : 1.0D;
-        entry.addProperty("chance", modifiers.chance(RecipeModifier.Target.ITEM, io, chance));
+      double chance = entry.has("chance") ? decimal(entry.get("chance"), path + ".chance") : 1.0D;
+      entry.addProperty("chance", modifiers.chance(RecipeModifier.Target.ITEM, io, chance));
+      if (entry.has("max_amount")) {
+        long minimum = modifiers.amount(
+            RecipeModifier.Target.ITEM,
+            io,
+            integer(entry.get("min_amount"), path + ".min_amount"),
+            0,
+            Long.MAX_VALUE);
+        entry.addProperty("min_amount", Math.min(minimum, entry.get("amount").getAsLong()));
+        entry.addProperty("max_amount", entry.get("amount").getAsLong());
       }
+    }
+  }
+
+  private static void modifyIngredientArrays(JsonObject root, RecipeModifiers modifiers) {
+    modifyIngredientGroups(root, "ingredient_arrays", RecipeModifier.Io.INPUT, modifiers);
+    modifyIngredientGroups(root, "random_item_outputs", RecipeModifier.Io.OUTPUT, modifiers);
+  }
+
+  private static void modifyIngredientGroups(JsonObject root, String field, RecipeModifier.Io io, RecipeModifiers modifiers) {
+    if (!root.has(field)) {
+      return;
+    }
+    for (var element : root.getAsJsonArray(field)) {
+      var group = element.getAsJsonObject();
+      double groupChance = group.has("chance") ? decimal(group.get("chance"), "$.ingredient_arrays.chance") : 1;
+      for (var alternative : group.getAsJsonArray("alternatives")) {
+        var choice = alternative.getAsJsonObject();
+        var target = RecipeModifier.Target.parse(choice.get("resource").getAsString());
+        choice.addProperty(
+            "amount",
+            modifiers.amount(
+                target,
+                io,
+                integer(choice.get("amount"), "$.ingredient_arrays.alternatives.amount"),
+                1,
+                target == RecipeModifier.Target.FLUID ? Integer.MAX_VALUE : Long.MAX_VALUE));
+        if (choice.has("min_amount")) {
+          choice.addProperty(
+              "min_amount",
+              modifiers.amount(
+                  target,
+                  io,
+                  integer(choice.get("min_amount"), "$.ingredient_arrays.alternatives.min_amount"),
+                  0,
+                  target == RecipeModifier.Target.FLUID ? Integer.MAX_VALUE : Long.MAX_VALUE));
+        }
+        if (choice.has("max_amount")) {
+          choice.addProperty("max_amount", choice.get("amount").getAsLong());
+        }
+        if (io == RecipeModifier.Io.INPUT) {
+          double chance = choice
+              .has("chance") ? decimal(choice.get("chance"), "$.ingredient_arrays.alternatives.chance") : 1;
+          choice.addProperty("chance", modifiers.chance(target, io, groupChance * chance));
+        }
+      }
+      group.addProperty(
+          "chance",
+          io == RecipeModifier.Io.INPUT ? 1 : modifiers.chance(RecipeModifier.Target.ITEM, io, groupChance));
     }
   }
 
@@ -340,10 +463,8 @@ public final class MachineRecipeJson {
               integer(entry.get("amount"), "$." + field + "[" + index + "].amount"),
               1,
               Integer.MAX_VALUE));
-      if (io == RecipeModifier.Io.OUTPUT) {
-        double chance = entry.has("chance") ? decimal(entry.get("chance"), "$." + field + "[" + index + "].chance") : 1;
-        entry.addProperty("chance", modifiers.chance(RecipeModifier.Target.FLUID, io, chance));
-      }
+      double chance = entry.has("chance") ? decimal(entry.get("chance"), "$." + field + "[" + index + "].chance") : 1;
+      entry.addProperty("chance", modifiers.chance(RecipeModifier.Target.FLUID, io, chance));
     }
   }
 
@@ -361,8 +482,19 @@ public final class MachineRecipeJson {
     for (int i = 0; i < values.size(); i++) {
       String path = "$." + field + "[" + i + "]";
       var fluid = object(values.get(i), path);
-      fields(fluid, Set.of("id", "amount", "components", "chance", "parallel_unaffected"), path);
+      fields(fluid, Set.of("id", "amount", "components", "chance", "parallel_unaffected", "selector"), path);
       fixedFlag(fluid, path);
+      if (field.startsWith("fluid_per_tick")
+          && fluid.has("parallel_unaffected")
+          && fluid.get("parallel_unaffected").getAsBoolean()) {
+        throw error(path + ".parallel_unaffected", "Per-tick fluids scale with every parallel instance");
+      }
+      if (fluid.has("selector")) {
+        if (!field.startsWith("fluid_per_tick")) {
+          throw error(path + ".selector", "Start and completion fluids use their phase selector");
+        }
+        ResourceSelector.require(string(fluid.get("selector"), path + ".selector"));
+      }
       identifier(fluid.get("id"), path + ".id");
       long amount = integer(fluid.get("amount"), path + ".amount");
       if (amount <= 0 || amount > Integer.MAX_VALUE) {
@@ -380,8 +512,8 @@ public final class MachineRecipeJson {
       return ChemicalRecipeData.NONE;
     }
     var chemicals = object(root.get("chemicals"), "$.chemicals");
-    fields(chemicals, Set.of("inputs", "outputs", "per_tick"), "$.chemicals");
-    for (String field : List.of("inputs", "outputs", "per_tick")) {
+    fields(chemicals, Set.of("inputs", "outputs", "per_tick", "per_tick_outputs"), "$.chemicals");
+    for (String field : List.of("inputs", "outputs", "per_tick", "per_tick_outputs")) {
       if (!chemicals.has(field)) {
         continue;
       }
@@ -393,7 +525,7 @@ public final class MachineRecipeJson {
       for (int index = 0; index < values.size(); index++) {
         String at = path + "[" + index + "]";
         var value = object(values.get(index), at);
-        fields(value, Set.of("chemical", "amount", "selector"), at);
+        fields(value, Set.of("chemical", "amount", "selector", "chance"), at);
         identifier(value.get("chemical"), at + ".chemical");
         if (integer(value.get("amount"), at + ".amount") <= 0) {
           throw error(at + ".amount", "Expected a positive long chemical amount");
@@ -401,6 +533,7 @@ public final class MachineRecipeJson {
         if (value.has("selector")) {
           ResourceSelector.require(string(value.get("selector"), at + ".selector"));
         }
+        probability(value, at);
       }
     }
     try {
@@ -425,6 +558,10 @@ public final class MachineRecipeJson {
               integer(entry.get("amount"), "$.chemicals." + field + "[" + index + "].amount"),
               1,
               Long.MAX_VALUE));
+      entry.addProperty(
+          "chance",
+          modifiers
+              .chance(RecipeModifier.Target.CHEMICAL, io, entry.has("chance") ? entry.get("chance").getAsDouble() : 1));
     }
   }
 
@@ -441,7 +578,16 @@ public final class MachineRecipeJson {
       var demand = object(array.get(i), at);
       fields(
           demand,
-          Set.of("stack", "amount", "chance", "selector", "match", "preview_stack", "parallel_unaffected"),
+          Set.of(
+              "stack",
+              "amount",
+              "chance",
+              "selector",
+              "match",
+              "preview_stack",
+              "parallel_unaffected",
+              "min_amount",
+              "max_amount"),
           at);
       fixedFlag(demand, at);
       String match = demand.has("match") ? string(demand.get("match"), at + ".match") : "exact";
@@ -457,6 +603,13 @@ public final class MachineRecipeJson {
       long amount = integer(demand.get("amount"), at + ".amount");
       if (amount <= 0) {
         throw error(at + ".amount", "Expected positive long");
+      }
+      if (demand.has("min_amount") || demand.has("max_amount")) {
+        long min = integer(demand.get("min_amount"), at + ".min_amount");
+        long max = integer(demand.get("max_amount"), at + ".max_amount");
+        if (min < 0 || min > max || max != amount) {
+          throw error(at, "Item quantity range requires 0 <= minimum <= maximum = amount");
+        }
       }
       if (demand.has("chance")) {
         double chance = decimal(demand.get("chance"), at + ".chance");
@@ -574,7 +727,38 @@ public final class MachineRecipeJson {
 
   /** Native NBT booleans are bytes; restore only declared row flag fields. */
   static void restoreRowBooleans(JsonObject json, CompoundTag source) {
-    for (String field : List.of("inputs", "outputs", "fluid_inputs", "fluid_outputs")) {
+    if (source.contains("load_jei")) {
+      if (!source.contains("load_jei", Tag.TAG_BYTE)
+          || source.getByte("load_jei") < 0
+          || source.getByte("load_jei") > 1) {
+        throw new IllegalArgumentException("Invalid recipe display visibility flag");
+      }
+      json.addProperty("load_jei", source.getBoolean("load_jei"));
+    }
+    if (json.has("item_payments") && json.getAsJsonObject("item_payments").has("fuels")) {
+      var fuels = source.getCompound("item_payments").getList("fuels", Tag.TAG_COMPOUND);
+      var encoded = json.getAsJsonObject("item_payments").getAsJsonArray("fuels");
+      for (int index = 0; index < fuels.size() && index < encoded.size(); index++) {
+        var fuel = fuels.getCompound(index);
+        if (fuel.contains("parallel_unaffected")) {
+          if (!fuel.contains("parallel_unaffected", Tag.TAG_BYTE)
+              || fuel.getByte("parallel_unaffected") < 0
+              || fuel.getByte("parallel_unaffected") > 1) {
+            throw new IllegalArgumentException("Invalid fuel parallel-unaffected flag");
+          }
+          encoded.get(index).getAsJsonObject()
+              .addProperty("parallel_unaffected", fuel.getBoolean("parallel_unaffected"));
+        }
+      }
+    }
+    for (String field : List.of(
+        "inputs",
+        "outputs",
+        "fluid_inputs",
+        "fluid_outputs",
+        "fluid_per_tick_inputs",
+        "fluid_per_tick_outputs",
+        "triggered_resources")) {
       if (!json.has(field)) {
         continue;
       }
@@ -582,6 +766,14 @@ public final class MachineRecipeJson {
       var encoded = json.getAsJsonArray(field);
       for (int index = 0; index < rows.size() && index < encoded.size(); index++) {
         var row = rows.getCompound(index);
+        if (field.equals("triggered_resources") && row.contains("repeatable")) {
+          if (!row.contains("repeatable", Tag.TAG_BYTE)
+              || row.getByte("repeatable") < 0
+              || row.getByte("repeatable") > 1) {
+            throw new IllegalArgumentException("Invalid trigger repeatable flag");
+          }
+          encoded.get(index).getAsJsonObject().addProperty("repeatable", row.getBoolean("repeatable"));
+        }
         if (row.contains("parallel_unaffected")) {
           if (!row.contains("parallel_unaffected", Tag.TAG_BYTE)
               || row.getByte("parallel_unaffected") < 0

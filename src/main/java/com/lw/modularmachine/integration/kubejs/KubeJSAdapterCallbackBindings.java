@@ -10,12 +10,13 @@ import java.util.List;
 import java.util.Map;
 import java.util.Optional;
 import net.minecraft.resources.ResourceLocation;
+import org.jetbrains.annotations.ApiStatus;
 
 /**
  * Per-import callback rows and deterministic immutable bindings; publication
  * remains in build.
  */
-@org.jetbrains.annotations.ApiStatus.Internal
+@ApiStatus.Internal
 final class KubeJSAdapterCallbackBindings {
   private final Map<String, CallbackRow> callbackRows = new LinkedHashMap<>();
 

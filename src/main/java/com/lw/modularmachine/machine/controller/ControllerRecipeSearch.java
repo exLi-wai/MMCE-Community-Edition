@@ -13,6 +13,7 @@ import com.lw.modularmachine.machine.recipe.search.RecipePlanner.Status;
 import com.lw.modularmachine.machine.recipe.search.RecipeResourceRequirements;
 import net.minecraft.core.BlockPos;
 import org.jetbrains.annotations.ApiStatus;
+import java.util.Objects;
 
 /**
  * Ordinary-controller search, start retries and idle diagnostics; does not own
@@ -39,7 +40,7 @@ public final class ControllerRecipeSearch {
   }
 
   public ControllerRecipeSearch(Host host) {
-    this.host = java.util.Objects.requireNonNull(host, "host");
+    this.host = Objects.requireNonNull(host, "host");
   }
 
   public ControllerAppearanceState idleAppearance() {

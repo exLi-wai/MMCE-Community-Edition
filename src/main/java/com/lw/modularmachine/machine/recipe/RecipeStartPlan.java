@@ -22,6 +22,7 @@ import net.minecraft.resources.ResourceLocation;
 import net.minecraft.util.RandomSource;
 import org.jetbrains.annotations.ApiStatus;
 import java.util.HashSet;
+import java.util.Objects;
 
 /**
  * Read-only start admission: deductions are not applied and placements do not
@@ -68,7 +69,7 @@ public final class RecipeStartPlan {
   }
 
   public RecipeStartPlan withOutputPreparationContext(String thread) {
-    if (!java.util.Objects.equals(outputPreparationThread, thread)) {
+    if (!Objects.equals(outputPreparationThread, thread)) {
       parallelAdmission = null;
       parallelUpgrades = null;
       outputPreparation = null;
@@ -136,7 +137,10 @@ public final class RecipeStartPlan {
           continue;
         }
         if (input.chance() >= 1.0D || input.chance() > 0.0D && random.nextDouble() < input.chance()) {
-          result.merge(input.key(), input.count(), Math::addExact);
+          long quantity = RecipeItemAmounts.sample(input.minimumCount(), input.count(), random);
+          if (quantity > 0) {
+            result.merge(input.key(), quantity, Math::addExact);
+          }
         }
       }
     }
@@ -341,6 +345,18 @@ public final class RecipeStartPlan {
   }
 
   public int prepareParallel(MachineRecipe definition, int limit, int budget) {
+    return prepareParallel(definition, limit, budget, true);
+  }
+
+  /**
+   * Pure admission for comparing unresolved alternatives; output callbacks run
+   * after selection.
+   */
+  public int prepareIngredientParallel(MachineRecipe definition, int limit, int budget) {
+    return prepareParallel(definition, limit, budget, false);
+  }
+
+  private int prepareParallel(MachineRecipe definition, int limit, int budget, boolean prepareOutputCallbacks) {
     source.requireServerThread();
     boolean aggregate = source.owner() instanceof MachineControllerBlockEntity;
     var upgrades = source.ordinaryUpgrades();
@@ -368,7 +384,7 @@ public final class RecipeStartPlan {
 
     int admitted = parallelAdmission.advance(budget);
     parallelBudgetRemaining = parallelAdmission.remainingBudget();
-    if (admitted <= 0 || !RecipeItemPreparation.transformsOutputs(definition)) {
+    if (admitted <= 0 || !prepareOutputCallbacks || !RecipeItemPreparation.transformsOutputs(definition)) {
       return admitted;
     }
     if (outputPreparation == null) {
@@ -451,7 +467,8 @@ public final class RecipeStartPlan {
               .getValue());
     }
 
-    return (int) result;
+    var definition = preparedInputDefinition().orElseGet(() -> catalog.definition(recipe.id()));
+    return RecipeItemPayments.limit(source, definition, (int) result, aggregate);
   }
 
   /** Lookup identity only; deductions must keep the exact physical slot key. */

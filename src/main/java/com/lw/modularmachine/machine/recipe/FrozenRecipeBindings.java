@@ -13,12 +13,14 @@ import java.util.Set;
 import net.minecraft.nbt.CompoundTag;
 import net.minecraft.nbt.ListTag;
 import net.minecraft.nbt.Tag;
+import java.util.Locale;
+import org.jetbrains.annotations.ApiStatus;
 
 /**
  * Frozen logical routing; never resolves a live inventory or changes a paid
  * run.
  */
-@org.jetbrains.annotations.ApiStatus.Internal
+@ApiStatus.Internal
 final class FrozenRecipeBindings {
   private final Map<String, PortKind> logicalPorts;
   private final Map<String, String> logicalSelectors;
@@ -127,6 +129,16 @@ final class FrozenRecipeBindings {
   }
 
   void validateResources(JsonObject declaration, RecipeSelectors selectors, ChemicalRecipeData chemicals) {
+    if (declaration.has("triggered_resources")) {
+      for (var value : declaration.getAsJsonArray("triggered_resources")) {
+        var row = value.getAsJsonObject();
+        requirePort(
+            PortKind.valueOf(
+                row.get("resource").getAsString().toUpperCase(Locale.ROOT) + "_" + row.get("io").getAsString()
+                    .toUpperCase(Locale.ROOT)),
+            row.has("selector") ? row.get("selector").getAsString() : "");
+      }
+    }
     if (!declaration.getAsJsonArray("inputs").isEmpty()
         && !logicalPorts.containsValue(PortKind.ITEM_INPUT)
         && !patternInputs.contains(PortKind.ITEM_INPUT)
@@ -136,6 +148,7 @@ final class FrozenRecipeBindings {
     chemicals.inputs().forEach(value -> requirePort(PortKind.CHEMICAL_INPUT, value.selector()));
     chemicals.perTick().forEach(value -> requirePort(PortKind.CHEMICAL_INPUT, value.selector()));
     chemicals.outputs().forEach(value -> requirePort(PortKind.CHEMICAL_OUTPUT, value.selector()));
+    chemicals.perTickOutputs().forEach(value -> requirePort(PortKind.CHEMICAL_OUTPUT, value.selector()));
     if (declaration.has("fluid_inputs")) {
       requirePort(PortKind.FLUID_INPUT, selectors.fluidInput());
     }
@@ -144,6 +157,19 @@ final class FrozenRecipeBindings {
     }
     if (declaration.has("fluid_per_tick")) {
       requirePort(PortKind.FLUID_INPUT, selectors.fluidPerTick());
+    }
+    if (declaration.has("fluid_per_tick_inputs")) {
+      for (var row : declaration.getAsJsonArray("fluid_per_tick_inputs")) {
+        var fluid = row.getAsJsonObject();
+        String selector = fluid.has("selector") ? fluid.get("selector").getAsString() : selectors.fluidPerTick();
+        requirePort(PortKind.FLUID_INPUT, selector);
+      }
+    }
+    if (declaration.has("fluid_per_tick_outputs")) {
+      for (var row : declaration.getAsJsonArray("fluid_per_tick_outputs")) {
+        var fluid = row.getAsJsonObject();
+        requirePort(PortKind.FLUID_OUTPUT, fluid.has("selector") ? fluid.get("selector").getAsString() : "");
+      }
     }
     if (declaration.has("energy_per_tick") && declaration.get("energy_per_tick").getAsLong() > 0) {
       requirePort(PortKind.ENERGY_INPUT, selectors.energyInput());

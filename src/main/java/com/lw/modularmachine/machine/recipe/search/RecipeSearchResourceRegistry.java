@@ -11,6 +11,7 @@ import java.util.Objects;
 import java.util.Set;
 import net.minecraft.resources.ResourceLocation;
 import org.jetbrains.annotations.ApiStatus;
+import java.util.stream.Collectors;
 
 /** Internal Java registration, frozen before the first catalog is compiled. */
 @ApiStatus.Internal
@@ -19,6 +20,7 @@ public final class RecipeSearchResourceRegistry {
   private static List<Registration> frozen;
 
   static {
+    register(ResourceLocation.fromNamespaceAndPath("mmcece", "item"), ItemPaymentSearchResource::new);
     register(ResourceLocation.fromNamespaceAndPath("mmcece", "fluid"), FluidRecipeSearchResource::new);
     register(ResourceLocation.fromNamespaceAndPath("mmcece", "chemical"), ChemicalRecipeSearchResource::new);
   }
@@ -62,7 +64,7 @@ public final class RecipeSearchResourceRegistry {
     if (frozen == null) {
       frozen = FACTORIES.entrySet().stream().map(entry -> new Registration(entry.getKey(), entry.getValue())).toList();
     }
-    var supported = frozen.stream().map(Registration::id).collect(java.util.stream.Collectors.toUnmodifiableSet());
+    var supported = frozen.stream().map(Registration::id).collect(Collectors.toUnmodifiableSet());
     requireSupported(catalog, supported);
     var compiled = new ArrayList<RecipeSearchResource>(frozen.size());
     for (var registration : frozen) {

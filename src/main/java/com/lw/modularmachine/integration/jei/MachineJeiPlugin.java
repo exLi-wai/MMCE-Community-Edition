@@ -49,6 +49,7 @@ public final class MachineJeiPlugin implements IModPlugin {
     var connection = Minecraft.getInstance().getConnection();
     if (connection != null) {
       connection.getRecipeManager().getAllRecipesFor(MachineRecipeRegistries.ITEM_TYPE.get()).stream()
+          .filter(holder -> holder.value().scriptOptions().loadJei())
           .sorted(Comparator.comparing(holder -> holder.id().toString())).forEach(
               holder -> grouped.computeIfAbsent(holder.value().machineId(), ignored -> new ArrayList<>()).add(holder));
     }

@@ -15,6 +15,8 @@ import java.util.Objects;
 import java.util.Optional;
 import java.util.Set;
 import net.minecraft.resources.ResourceLocation;
+import com.lw.modularmachine.api.recipe.ItemPaymentData;
+import com.mojang.serialization.JsonOps;
 
 /**
  * Closed, immutable additions to each original declaration produced by an
@@ -38,7 +40,11 @@ public record RecipeAdapterCustomization(
     Optional<Integer> maxThreads,
     List<String> tooltips,
     List<CallbackBinding> itemCallbacks,
-    List<ItemParallelism> itemParallelism) {
+    List<ItemParallelism> itemParallelism,
+    List<ChemicalRequirement> chemicalPerTickOutputs,
+    List<FluidResource> fluidPerTickInputs,
+    List<FluidResource> fluidPerTickOutputs,
+    ResourceAdditions resourceAdditions) {
   public static final int MAX_REQUIREMENTS = 256;
   private static final int MAX_RESOURCE_JSON = 65536;
   public static final RecipeAdapterCustomization NONE = new RecipeAdapterCustomization(
@@ -59,7 +65,23 @@ public record RecipeAdapterCustomization(
       Optional.empty(),
       List.of(),
       List.of(),
+      List.of(),
+      List.of(),
+      List.of(),
       List.of());
+
+  public RecipeAdapterCustomization(List<RecipeModifier> modifiers, List<SmartNumberRequirement> interfaceInputs, List<FluidResource> fluidInputs, List<FluidResource> fluidOutputs, Optional<FluidResource> fluidPerTick, List<ChemicalRequirement> chemicalInputs, List<ChemicalRequirement> chemicalOutputs, List<ChemicalRequirement> chemicalPerTick, List<ItemOutput> itemOutputs, Map<Phase, String> selectors, Optional<Boolean> parallelized, Optional<RecipeFailureAction> failureAction, long energyOutputPerTick, Optional<String> threadName, Optional<Integer> maxThreads, List<String> tooltips, List<CallbackBinding> itemCallbacks, List<ItemParallelism> itemParallelism, List<ChemicalRequirement> chemicalPerTickOutputs, List<FluidResource> fluidPerTickInputs, List<FluidResource> fluidPerTickOutputs) {
+    this(modifiers, interfaceInputs, fluidInputs, fluidOutputs, fluidPerTick, chemicalInputs, chemicalOutputs,
+        chemicalPerTick, itemOutputs, selectors, parallelized, failureAction, energyOutputPerTick, threadName,
+        maxThreads, tooltips, itemCallbacks, itemParallelism, chemicalPerTickOutputs, fluidPerTickInputs,
+        fluidPerTickOutputs, ResourceAdditions.NONE);
+  }
+
+  public RecipeAdapterCustomization(List<RecipeModifier> modifiers, List<SmartNumberRequirement> interfaceInputs, List<FluidResource> fluidInputs, List<FluidResource> fluidOutputs, Optional<FluidResource> fluidPerTick, List<ChemicalRequirement> chemicalInputs, List<ChemicalRequirement> chemicalOutputs, List<ChemicalRequirement> chemicalPerTick, List<ItemOutput> itemOutputs, Map<Phase, String> selectors, Optional<Boolean> parallelized, Optional<RecipeFailureAction> failureAction, long energyOutputPerTick, Optional<String> threadName, Optional<Integer> maxThreads, List<String> tooltips, List<CallbackBinding> itemCallbacks, List<ItemParallelism> itemParallelism) {
+    this(modifiers, interfaceInputs, fluidInputs, fluidOutputs, fluidPerTick, chemicalInputs, chemicalOutputs,
+        chemicalPerTick, itemOutputs, selectors, parallelized, failureAction, energyOutputPerTick, threadName,
+        maxThreads, tooltips, itemCallbacks, itemParallelism, List.of(), List.of(), List.of());
+  }
 
   public RecipeAdapterCustomization(List<RecipeModifier> modifiers, List<SmartNumberRequirement> interfaceInputs, List<FluidResource> fluidInputs, List<FluidResource> fluidOutputs, Optional<FluidResource> fluidPerTick, List<ChemicalRequirement> chemicalInputs, List<ChemicalRequirement> chemicalOutputs, List<ChemicalRequirement> chemicalPerTick, List<ItemOutput> itemOutputs, Map<Phase, String> selectors, Optional<Boolean> parallelized, Optional<RecipeFailureAction> failureAction) {
     this(modifiers, interfaceInputs, fluidInputs, fluidOutputs, fluidPerTick, chemicalInputs, chemicalOutputs,
@@ -76,7 +98,11 @@ public record RecipeAdapterCustomization(
     chemicalInputs = bounded(chemicalInputs);
     chemicalOutputs = bounded(chemicalOutputs);
     chemicalPerTick = bounded(chemicalPerTick);
+    chemicalPerTickOutputs = bounded(chemicalPerTickOutputs);
+    fluidPerTickInputs = tickFluids(fluidPerTickInputs);
+    fluidPerTickOutputs = tickFluids(fluidPerTickOutputs);
     itemOutputs = bounded(itemOutputs);
+    Objects.requireNonNull(resourceAdditions, "resourceAdditions");
     selectors = Map.copyOf(selectors);
     selectors.values().forEach(ResourceSelector::require);
     Objects.requireNonNull(parallelized, "parallelized");
@@ -111,12 +137,51 @@ public record RecipeAdapterCustomization(
   }
 
   /**
+   * Closed additional native declarations captured using the registration's
+   * registry view.
+   */
+  public record ResourceAdditions(String encoded) {
+    public static final ResourceAdditions NONE = new ResourceAdditions("{}");
+
+    public ResourceAdditions {
+      var declaration = resource(
+          encoded,
+          Set.of(
+              "inputs",
+              "ingredient_arrays",
+              "random_item_outputs",
+              "load_jei",
+              "item_payments",
+              "output_ranges",
+              "triggered_resources"));
+      if (declaration.has("item_payments")) {
+        ItemPaymentData.CODEC.parse(JsonOps.INSTANCE, declaration.get("item_payments")).getOrThrow();
+      }
+      for (String field : List.of("inputs", "ingredient_arrays", "random_item_outputs", "triggered_resources")) {
+        if (declaration.has(field)
+            && (!declaration.get(field).isJsonArray() || declaration.getAsJsonArray(field).size() > MAX_REQUIREMENTS)) {
+          throw new IllegalArgumentException("Adapter resource additions require bounded arrays");
+        }
+      }
+      if (declaration.has("load_jei")
+          && (!declaration.get("load_jei").isJsonPrimitive()
+              || !declaration.getAsJsonPrimitive("load_jei").isBoolean())) {
+        throw new IllegalArgumentException("Adapter visibility requires a boolean");
+      }
+      encoded = declaration.toString();
+    }
+  }
+
+  /**
    * Registry-codec JSON captured at registration; no mutable FluidStack is
    * retained.
    */
   public record FluidResource(String encoded) {
     public FluidResource {
-      var object = resource(encoded, Set.of("id", "amount", "components", "chance", "parallel_unaffected"));
+      var object = resource(encoded, Set.of("id", "amount", "components", "chance", "parallel_unaffected", "selector"));
+      if (object.has("selector")) {
+        ResourceSelector.require(object.get("selector").getAsString());
+      }
       identifier(object, "id");
       var amount = object.get("amount");
       if (amount == null || !amount.isJsonPrimitive() || !amount.getAsJsonPrimitive().isNumber()) {
@@ -215,6 +280,18 @@ public record RecipeAdapterCustomization(
     }
 
     return copy;
+  }
+
+  private static List<FluidResource> tickFluids(List<FluidResource> values) {
+    var checked = bounded(values);
+    for (var value : checked) {
+      var declaration = JsonParser.parseString(value.encoded()).getAsJsonObject();
+      if (declaration.has("parallel_unaffected") && declaration.get("parallel_unaffected").getAsBoolean()) {
+        throw new IllegalArgumentException("Per-tick fluid quantities always scale with instances");
+      }
+    }
+
+    return checked;
   }
 
   private static JsonObject resource(String encoded, Set<String> fields) {

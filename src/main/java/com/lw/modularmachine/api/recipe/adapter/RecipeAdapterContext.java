@@ -53,7 +53,7 @@ public record RecipeAdapterContext(
         .priority(settings.priority());
   }
 
-  private ResourceLocation importedId(ResourceLocation source, String variant) {
+  public ResourceLocation importedId(ResourceLocation source, String variant) {
     final MessageDigest digest;
     try {
       digest = MessageDigest.getInstance("SHA-256");

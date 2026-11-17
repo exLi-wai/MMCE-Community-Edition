@@ -13,6 +13,7 @@ import java.util.HashMap;
 import java.util.Map;
 import java.util.Set;
 import org.jetbrains.annotations.ApiStatus;
+import java.util.Objects;
 
 /**
  * Owns bounded factory searches and retry state; paid runs and scheduler stay
@@ -44,8 +45,8 @@ public final class FactorySearchCoordinator {
   }
 
   public FactorySearchCoordinator(FactoryThreadConfiguration threadConfiguration, Host host) {
-    this.threadConfiguration = java.util.Objects.requireNonNull(threadConfiguration, "threadConfiguration");
-    this.host = java.util.Objects.requireNonNull(host, "host");
+    this.threadConfiguration = Objects.requireNonNull(threadConfiguration, "threadConfiguration");
+    this.host = Objects.requireNonNull(host, "host");
   }
 
   public void advance() {

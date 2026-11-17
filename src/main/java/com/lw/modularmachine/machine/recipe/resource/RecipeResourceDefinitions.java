@@ -34,11 +34,15 @@ public final class RecipeResourceDefinitions {
       "parallelized",
       "random_seed",
       "interface_inputs",
+      "ingredient_arrays",
+      "random_item_outputs",
+      "triggered_resources",
       "selectors",
       "modifiers",
       "thread_name",
       "max_threads",
       "recipe_tooltips",
+      "load_jei",
       "item_callbacks",
       "neoforge:conditions",
       "_kubejs_changed_marker",
@@ -52,15 +56,15 @@ public final class RecipeResourceDefinitions {
       ItemRecipeData.class,
       ItemRecipeData.CODEC,
       ItemRecipeData.NONE,
-      data -> !data.inputs().isEmpty(),
+      data -> !data.inputs().isEmpty() || !data.payments().fuels().isEmpty(),
       data -> !data.outputs().isEmpty());
   public static final RecipeResourceType<FluidRecipeData> FLUID = new RecipeResourceType<>(
       id("fluid"),
       FluidRecipeData.class,
       FluidRecipeData.CODEC,
       FluidRecipeData.NONE,
-      data -> !data.inputs().isEmpty() || !data.perTick().isEmpty(),
-      data -> !data.outputs().isEmpty());
+      data -> !data.inputs().isEmpty() || !data.perTickInputs().isEmpty(),
+      data -> !data.outputs().isEmpty() || !data.perTickOutputs().isEmpty());
   public static final RecipeResourceType<EnergyRecipeData> ENERGY = new RecipeResourceType<>(
       id("energy"),
       EnergyRecipeData.class,
@@ -74,7 +78,7 @@ public final class RecipeResourceDefinitions {
       ChemicalRecipeData.CODEC.optionalFieldOf("chemicals", ChemicalRecipeData.NONE),
       ChemicalRecipeData.NONE,
       data -> !data.inputs().isEmpty() || !data.perTick().isEmpty(),
-      data -> !data.outputs().isEmpty());
+      data -> !data.outputs().isEmpty() || !data.perTickOutputs().isEmpty());
 
   static {
     register(ITEM);

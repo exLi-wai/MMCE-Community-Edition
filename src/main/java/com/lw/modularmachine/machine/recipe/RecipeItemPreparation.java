@@ -19,8 +19,9 @@ import org.jetbrains.annotations.ApiStatus;
 public final class RecipeItemPreparation {
   public static boolean transformsOutputs(MachineRecipe recipe) {
     return recipe != null
-        && recipe.scriptOptions().itemCallbacks().stream()
-            .anyMatch(binding -> binding.io() == RecipeModifier.Io.OUTPUT && !binding.modifiers().isEmpty());
+        && (!recipe.ingredientArrays().randomOutputs().isEmpty()
+            || recipe.scriptOptions().itemCallbacks().stream()
+                .anyMatch(binding -> binding.io() == RecipeModifier.Io.OUTPUT && !binding.modifiers().isEmpty()));
   }
 
   /**
@@ -67,6 +68,10 @@ public final class RecipeItemPreparation {
     var reserved = new HashMap<PhysicalSlot, Long>();
     for (int row = 0; row < recipe.inputs().size(); row++) {
       var input = recipe.inputs().get(row);
+      if (recipe.itemPayments().isTool(row)) {
+        // The independent payment proof selects and checks durable tools below.
+        continue;
+      }
       long remaining = input.parallelUnaffected() && run.parallelInstances() > 1 ? input.amount() : Math
           .multiplyExact(input.amount(), instances);
       var key = ItemResourceKey.of(input.prototype(ticket.level().registryAccess()), ticket.level().registryAccess())
@@ -100,6 +105,13 @@ public final class RecipeItemPreparation {
       if (remaining > 0) {
         return InputCheck.STALE;
       }
+    }
+    if (!recipe.itemPayments().tools().isEmpty()) {
+      var tools = RecipeItemPayments.toolSlices(ticket, recipe, instances, run.parallelInstances() > 1);
+      if (tools.isEmpty()) {
+        return InputCheck.STALE;
+      }
+      slices.addAll(tools.orElseThrow());
     }
     if (recipe.scriptOptions().itemCallbacks().isEmpty()) {
       return InputCheck.ALLOWED;

@@ -133,6 +133,8 @@ public final class RecipeItemCallbackService {
           workUsed++;
           row.add("stack", ItemStack.SINGLE_ITEM_CODEC.encodeStart(ops, item).getOrThrow());
           row.addProperty("amount", amount);
+          row.remove("min_amount");
+          row.remove("max_amount");
           rowCursor++;
           modifierCursor = 0;
           item = null;

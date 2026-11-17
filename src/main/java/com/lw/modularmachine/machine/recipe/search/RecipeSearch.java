@@ -51,6 +51,7 @@ public final class RecipeSearch {
   private final Map<String, PreparedInputs> preparedDefinitions = new HashMap<>();
   private int inputPreparationCursor;
   private RecipeItemCallbackService.InputPreparation inputPreparation;
+  private RecipeIngredientArrayPreparation ingredientPreparation;
   private long inputPreparationEpoch = -1;
   private long inputPreparationWork;
 
@@ -142,10 +143,11 @@ public final class RecipeSearch {
     for (var candidate : catalog.candidatesForPreparation(counts, resourceSearches, allowedIds)) {
       var definition = catalog.definition(candidate.id());
       boolean transformsInput = definition != null
-          && definition.scriptOptions().itemCallbacks().stream()
-              .anyMatch(binding -> binding.io() == RecipeModifier.Io.INPUT && !binding.modifiers().isEmpty());
+          && (!definition.ingredientArrays().isEmpty()
+              || definition.scriptOptions().itemCallbacks().stream()
+                  .anyMatch(binding -> binding.io() == RecipeModifier.Io.INPUT && !binding.modifiers().isEmpty()));
       var missing = definition == null ? Optional.<PortKind>empty() : requirements.missing(definition);
-      if (missing.isPresent()
+      if (!transformsInput && missing.isPresent()
           || !transformsInput && !PatternProductionService.matches(ticket, definition, this.factoryThread)
           || definition != null
               && ticket.owner() instanceof FactoryControllerBlockEntity controller
@@ -158,7 +160,8 @@ public final class RecipeSearch {
               && !definition.executionOptions().threadName().isEmpty()) {
         continue;
       }
-      if (ticket.interfacesMatch(candidate.interfaceInputs()) && resourcesAvailable(candidate.id(), definition)) {
+      if (ticket.interfacesMatch(candidate.interfaceInputs())
+          && (transformsInput || resourcesAvailable(candidate.id(), definition))) {
         if (transformsInput) {
           preparingCandidates.add(candidate);
         } else {
@@ -194,6 +197,35 @@ public final class RecipeSearch {
     while (inputPreparationCursor < inputPreparationCandidates.size() && used < budget) {
       var original = inputPreparationCandidates.get(inputPreparationCursor);
       var definition = catalog.definition(original.id());
+      if (!definition.ingredientArrays().isEmpty()) {
+        if (ingredientPreparation == null) {
+          ingredientPreparation = new RecipeIngredientArrayPreparation(
+              ticket,
+              definition,
+              original,
+              preparationSnapshot,
+              resourceSearches,
+              factoryThread,
+              catalog);
+        }
+        ingredientPreparation.advance(budget - used);
+        used += ingredientPreparation.workUsed();
+        inputPreparationWork += ingredientPreparation.workUsed();
+        if (!ingredientPreparation.finished()) {
+          return used;
+        }
+        if (ingredientPreparation.prepared().isPresent()) {
+          var nativeRecipe = ingredientPreparation.prepared().orElseThrow();
+          var candidate = RecipeItemCallbackService
+              .compilePrepared(nativeRecipe, ResourceLocation.parse(original.id()), ticket.level().registryAccess());
+          preparedCandidates.add(RecipeItemPreparation.inputCandidate(candidate, nativeRecipe));
+          preparedDefinitions
+              .put(original.id(), new PreparedInputs(nativeRecipe, original, ingredientPreparation.epoch()));
+        }
+        ingredientPreparation = null;
+        inputPreparationCursor++;
+        continue;
+      }
       if (inputPreparation == null) {
         var ops = ticket.level().registryAccess().createSerializationContext(JsonOps.INSTANCE);
         var json = MachineRecipe.CODEC.codec().encodeStart(ops, definition).getOrThrow().getAsJsonObject();
@@ -340,7 +372,8 @@ public final class RecipeSearch {
       }
       var generic = result.plan().orElseThrow();
       if (resourcePlans == null) {
-        var definition = catalog.definition(generic.candidate().id());
+        var prepared = preparedDefinitions.get(generic.candidate().id());
+        var definition = prepared == null ? catalog.definition(generic.candidate().id()) : prepared.definition();
         var steps = new ArrayList<Supplier<RecipeResourcePlanning>>(resourceSearches.size());
         for (var resource : resourceSearches) {
           steps.add(() -> resource.outputs(generic.candidate().id(), definition));

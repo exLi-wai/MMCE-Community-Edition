@@ -11,6 +11,7 @@ import java.util.Map;
 import java.util.Optional;
 import java.util.Set;
 import org.jetbrains.annotations.ApiStatus;
+import com.lw.modularmachine.machine.recipe.RecipeTriggeredResources;
 
 /**
  * Internal component availability; quantities and transactions remain separate.
@@ -40,6 +41,36 @@ public final class RecipeResourceRequirements {
   }
 
   public Optional<PortKind> missing(MachineRecipe recipe) {
+    for (var group : recipe.ingredientArrays().randomOutputs()) {
+      if (!has(PortKind.ITEM_OUTPUT, group.selector())) {
+        return Optional.of(PortKind.ITEM_OUTPUT);
+      }
+    }
+    for (var fuel : recipe.itemPayments().fuels()) {
+      if (!has(PortKind.ITEM_INPUT, fuel.selector())) {
+        return Optional.of(PortKind.ITEM_INPUT);
+      }
+    }
+    for (var row : recipe.triggeredResources().rows()) {
+      var kind = RecipeTriggeredResources.kind(row);
+      if (!has(kind, row.selector())) {
+        return Optional.of(kind);
+      }
+    }
+    for (var group : recipe.ingredientArrays().inputs()) {
+      if (group.optional()) {
+        continue;
+      }
+      var kind = switch (group.resource()) {
+        case "item" -> PortKind.ITEM_INPUT;
+        case "fluid" -> PortKind.FLUID_INPUT;
+        case "chemical" -> PortKind.CHEMICAL_INPUT;
+        default -> throw new IllegalArgumentException("Unsupported ingredient group resource");
+      };
+      if (!has(kind, group.selector())) {
+        return Optional.of(kind);
+      }
+    }
     // Chance controls consumption or production, not declared port requirements.
     // Zero-chance inputs still need catalysts; outputs retain frozen item ports.
     for (var input : recipe.inputs()) {
@@ -64,8 +95,15 @@ public final class RecipeResourceRequirements {
     if (recipe.energyOutputPerTick() > 0 && !has(PortKind.ENERGY_OUTPUT, recipe.selectors().energyOutput())) {
       return Optional.of(PortKind.ENERGY_OUTPUT);
     }
-    if (!recipe.fluidPerTick().isEmpty() && !has(PortKind.FLUID_INPUT, recipe.selectors().fluidPerTick())) {
-      return Optional.of(PortKind.FLUID_INPUT);
+    for (var input : recipe.fluidPerTickInputs()) {
+      if (!has(PortKind.FLUID_INPUT, input.selector(recipe.selectors().fluidPerTick()))) {
+        return Optional.of(PortKind.FLUID_INPUT);
+      }
+    }
+    for (var output : recipe.fluidPerTickOutputs()) {
+      if (!has(PortKind.FLUID_OUTPUT, output.selector())) {
+        return Optional.of(PortKind.FLUID_OUTPUT);
+      }
     }
     for (var input : recipe.chemicals().inputs()) {
       if (!has(PortKind.CHEMICAL_INPUT, input.selector())) {
@@ -78,6 +116,11 @@ public final class RecipeResourceRequirements {
       }
     }
     for (var output : recipe.chemicals().outputs()) {
+      if (!has(PortKind.CHEMICAL_OUTPUT, output.selector())) {
+        return Optional.of(PortKind.CHEMICAL_OUTPUT);
+      }
+    }
+    for (var output : recipe.chemicals().perTickOutputs()) {
       if (!has(PortKind.CHEMICAL_OUTPUT, output.selector())) {
         return Optional.of(PortKind.CHEMICAL_OUTPUT);
       }

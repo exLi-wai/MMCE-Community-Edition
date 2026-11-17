@@ -73,13 +73,16 @@ final class MachineEmiItemRecipe extends BasicEmiRecipe {
   private static List<EmiIngredient> allInputs(MachineRecipe recipe) {
     var result = new ArrayList<EmiIngredient>();
     recipe.inputs().forEach(value -> result.add(item(value)));
-    var perTick = recipe.fluidPerTick();
-    if (!perTick.isEmpty()) {
+    for (var row : recipe.fluidPerTickInputs()) {
+      var perTick = row.stack();
       // Recipe-tree costs use the whole run; the slot still displays the per-tick
       // fee.
-      result.add(NeoForgeEmiStack.of(perTick).setAmount((long) perTick.getAmount() * recipe.duration()));
+      result.add(
+          NeoForgeEmiStack.of(perTick).setAmount((long) perTick.getAmount() * recipe.duration())
+              .setChance((float) row.chance()));
     }
-    recipe.fluidInputs().forEach(fluid -> result.add(NeoForgeEmiStack.of(fluid)));
+    recipe.fluidInputRequirements()
+        .forEach(row -> result.add(NeoForgeEmiStack.of(row.stack()).setChance((float) row.chance())));
 
     return List.copyOf(result);
   }
@@ -88,6 +91,10 @@ final class MachineEmiItemRecipe extends BasicEmiRecipe {
     var result = new ArrayList<EmiStack>();
     recipe.outputs().forEach(value -> result.add(item(value)));
     recipe.fluidOutputs().forEach(fluid -> result.add(NeoForgeEmiStack.of(fluid)));
+    recipe.fluidPerTickOutputs().forEach(
+        row -> result.add(
+            NeoForgeEmiStack.of(row.stack()).setAmount((long) row.stack().getAmount() * recipe.duration())
+                .setChance((float) row.chance())));
 
     return List.copyOf(result);
   }

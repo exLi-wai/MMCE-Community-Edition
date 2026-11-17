@@ -392,8 +392,7 @@ final class RangedSelectionDesignPanel {
       Component name = tr(key);
       if (key.startsWith("step_") || key.startsWith("origin_")) {
         int split = key.lastIndexOf('_');
-        name = tr(key.substring(0, split)).copy()
-            .append(" " + key.substring(split + 1).toUpperCase(java.util.Locale.ROOT));
+        name = tr(key.substring(0, split)).copy().append(" " + key.substring(split + 1).toUpperCase(Locale.ROOT));
       }
       field = new EditBox(font, 0, 0, width, 18, name);
       field.setMaxLength(maximum);

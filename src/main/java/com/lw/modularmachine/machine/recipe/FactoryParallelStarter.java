@@ -20,6 +20,7 @@ import net.minecraft.resources.ResourceLocation;
 import net.minecraft.world.item.ItemStack;
 import net.neoforged.neoforge.fluids.FluidStack;
 import java.util.Optional;
+import com.lw.modularmachine.machine.upgrade.UpgradeRecipeCheckHandlers;
 
 /** Admission, resource acquisition and atomic multi-run factory start. */
 public final class FactoryParallelStarter {
@@ -115,12 +116,6 @@ public final class FactoryParallelStarter {
       var ports = indexPorts(ticket);
       var replacements = new HashMap<String, NonNullList<ItemStack>>();
       var fluidRequirements = nativeRecipe.orElseThrow().fluidInputs();
-      additionalResources = RecipeResourceExecutionRegistry
-          .prepareStart(ticket, nativeRecipe.orElseThrow().resourceData(), plans.size());
-      if (additionalResources == null) {
-        return Result.STALE;
-      }
-      resources.enlistAdditional(additionalResources);
       if (!sameStartScope(uniquePlans, plans.getFirst(), ticket)) {
         return Result.STALE;
       }
@@ -151,6 +146,20 @@ public final class FactoryParallelStarter {
         }
       }
       var runs = prepareRuns(factory, threadId, plans, nativeRecipe.orElseThrow(), ticket, upgrades);
+      if (!RecipeItemPayments.apply(
+          ticket,
+          nativeRecipe.orElseThrow(),
+          plans.size(),
+          false,
+          plans.getFirst().inputChanceSeed(),
+          replacements)) {
+        return Result.STALE;
+      }
+      additionalResources = RecipeResourceExecutionRegistry.preparePaidStart(ticket, runs);
+      if (additionalResources == null) {
+        return Result.STALE;
+      }
+      resources.enlistAdditional(additionalResources);
       if (uniquePlans.stream().anyMatch(plan -> !plan.factoryAdmissionCurrent(factory, threadId))) {
         return Result.STALE;
       }
@@ -219,7 +228,7 @@ public final class FactoryParallelStarter {
       factory.runState().installRuns(threadId, runs);
       committed = true;
       return Result.STARTED;
-    } catch (com.lw.modularmachine.machine.upgrade.UpgradeRecipeCheckHandlers.StaleException stale) {
+    } catch (UpgradeRecipeCheckHandlers.StaleException stale) {
       return Result.STALE;
     } catch (RuntimeException failure) {
       ModularMachine.LOGGER

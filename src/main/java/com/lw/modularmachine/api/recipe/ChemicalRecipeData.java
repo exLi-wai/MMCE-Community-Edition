@@ -13,26 +13,34 @@ import net.minecraft.resources.ResourceLocation;
 public record ChemicalRecipeData(
     List<ChemicalRequirement> inputs,
     List<ChemicalRequirement> outputs,
-    List<ChemicalRequirement> perTick) {
+    List<ChemicalRequirement> perTick,
+    List<ChemicalRequirement> perTickOutputs) {
   public static final int MAX_REQUIREMENTS = 256;
-  public static final ChemicalRecipeData NONE = new ChemicalRecipeData(List.of(), List.of(), List.of());
+  public static final ChemicalRecipeData NONE = new ChemicalRecipeData(List.of(), List.of(), List.of(), List.of());
   public static final Codec<ChemicalRecipeData> CODEC = RecordCodecBuilder.create(
       instance -> instance.group(
           ChemicalRequirement.CODEC.listOf().optionalFieldOf("inputs", List.of()).forGetter(ChemicalRecipeData::inputs),
           ChemicalRequirement.CODEC.listOf().optionalFieldOf("outputs", List.of())
               .forGetter(ChemicalRecipeData::outputs),
           ChemicalRequirement.CODEC.listOf().optionalFieldOf("per_tick", List.of())
-              .forGetter(ChemicalRecipeData::perTick))
+              .forGetter(ChemicalRecipeData::perTick),
+          ChemicalRequirement.CODEC.listOf().optionalFieldOf("per_tick_outputs", List.of())
+              .forGetter(ChemicalRecipeData::perTickOutputs))
           .apply(instance, ChemicalRecipeData::new));
+
+  public ChemicalRecipeData(List<ChemicalRequirement> inputs, List<ChemicalRequirement> outputs, List<ChemicalRequirement> perTick) {
+    this(inputs, outputs, perTick, List.of());
+  }
 
   public ChemicalRecipeData {
     inputs = checked(inputs);
     outputs = checked(outputs);
     perTick = checked(perTick);
+    perTickOutputs = checked(perTickOutputs);
   }
 
   public boolean isEmpty() {
-    return inputs.isEmpty() && outputs.isEmpty() && perTick.isEmpty();
+    return inputs.isEmpty() && outputs.isEmpty() && perTick.isEmpty() && perTickOutputs.isEmpty();
   }
 
   private static List<ChemicalRequirement> checked(List<ChemicalRequirement> values) {

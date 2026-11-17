@@ -80,8 +80,9 @@ public final class RecipeCatalog {
     for (int rank = 0; rank < recipes.candidates().size(); rank++) {
       var definition = this.definitions.get(recipes.candidates().get(rank).id());
       if (definition != null
-          && definition.scriptOptions().itemCallbacks().stream()
-              .anyMatch(binding -> binding.io() == RecipeModifier.Io.INPUT && !binding.modifiers().isEmpty())) {
+          && (!definition.ingredientArrays().isEmpty()
+              || definition.scriptOptions().itemCallbacks().stream()
+                  .anyMatch(binding -> binding.io() == RecipeModifier.Io.INPUT && !binding.modifiers().isEmpty()))) {
         dynamicInputRanks.set(rank);
       }
     }

@@ -6,6 +6,7 @@ import com.lw.modularmachine.machine.recipe.RecipeExecutionTicket;
 import com.lw.modularmachine.machine.structure.StructureService;
 import java.util.List;
 import java.util.Objects;
+import java.util.Optional;
 import net.minecraft.core.HolderLookup;
 import org.jetbrains.annotations.ApiStatus;
 
@@ -26,10 +27,15 @@ public final class RecipeResourceExecution {
     void validate(D data, HolderLookup.Provider registries);
   }
 
-  public record Input<D>(RecipeExecutionTicket ticket, D data, int instances) {
+  public record Input<D>(RecipeExecutionTicket ticket, D data, int instances, Optional<FrozenRecipeRun> run) {
+    public Input(RecipeExecutionTicket ticket, D data, int instances) {
+      this(ticket, data, instances, Optional.empty());
+    }
+
     public Input {
       Objects.requireNonNull(ticket, "ticket");
       Objects.requireNonNull(data, "data");
+      Objects.requireNonNull(run, "run");
       if (instances < 1) {
         throw new IllegalArgumentException("Invalid resource instances");
       }
@@ -83,6 +89,8 @@ public final class RecipeResourceExecution {
     READY,
     STALE,
     MISSING_INPUT,
+    MISSING_OUTPUT,
+    OUTPUT_BLOCKED,
     INSUFFICIENT
   }
 

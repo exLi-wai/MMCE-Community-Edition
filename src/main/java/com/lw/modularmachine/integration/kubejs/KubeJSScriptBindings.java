@@ -22,11 +22,15 @@ import com.lw.modularmachine.api.recipe.RecipeRunState;
 import com.lw.modularmachine.api.recipe.RecipeLifecycleEvents;
 import com.lw.modularmachine.api.recipe.RecipeCommandActions;
 import com.lw.modularmachine.api.recipe.RecipeModifier;
+import com.lw.modularmachine.api.recipe.ChemicalRequirement;
+import com.lw.modularmachine.api.recipe.IngredientArrayData;
+import com.lw.modularmachine.api.component.ChemicalStackData;
 import com.lw.modularmachine.api.smart.SmartInterfaceEvents;
 import dev.latvian.mods.kubejs.plugin.ClassFilter;
 import dev.latvian.mods.kubejs.script.BindingRegistry;
 import dev.latvian.mods.kubejs.script.ScriptType;
 import org.jetbrains.annotations.ApiStatus;
+import net.minecraft.world.item.crafting.Ingredient;
 
 /**
  * Script names and the explicit allowlist; registration order remains
@@ -41,6 +45,7 @@ final class KubeJSScriptBindings {
     if (registry.type() == ScriptType.SERVER) {
       registry.add("RecipeBuilder", KubeJSRecipeBuilder.class);
       registry.add("RecipeModifierBuilder", KubeJSRecipeModifierBuilder.class);
+      registry.add("IngredientArrayBuilder", KubeJSIngredientArrayBuilder.class);
     }
   }
 
@@ -76,6 +81,14 @@ final class KubeJSScriptBindings {
     filter.allow(KubeJSRecipeAdapterRegistration.class);
     filter.allow(KubeJSRecipeBuilder.class);
     filter.allow(KubeJSRecipeBuilder.RecipeBuilder.class);
+    filter.allow(ChemicalRequirement.class);
+    filter.allow(ChemicalStackData.class);
+    filter.allow(IngredientArrayData.class);
+    filter.allow(IngredientArrayData.Group.class);
+    filter.allow(IngredientArrayData.Choice.class);
+    filter.allow(KubeJSIngredientArrayBuilder.class);
+    filter.allow(KubeJSIngredientArrayBuilder.IngredientArrayPrimer.class);
+    filter.allow(Ingredient.class);
     filter.allow(JsonObject.class);
     filter.allow(KubeJSRecipeModifierBuilder.class);
     filter.allow(KubeJSRecipeModifierBuilder.Builder.class);

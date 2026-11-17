@@ -52,8 +52,9 @@ final class ChemicalRecipeSearchResource implements RecipeSearchResource {
 
       @Override
       public RecipeResourcePlanning outputs(String recipeId, MachineRecipe definition) {
-        var planning = new ChemicalOutputLayout(ticket)
-            .plan(definition == null ? List.of() : definition.chemicals().outputs());
+        var planning = new ChemicalOutputLayout(ticket).plan(
+            definition == null ? List.of() : definition.chemicals().outputs().stream().filter(row -> row.chance() == 1)
+                .toList());
 
         return new ResourcePlanningAdapter<>(planning::status, planning::advance);
       }

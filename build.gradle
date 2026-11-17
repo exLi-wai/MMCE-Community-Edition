@@ -154,6 +154,7 @@ dependencies {
     compileOnly 'com.github.Towdium:PinIn:1.6.0'
     compileOnly "curse.maven:mek-268560:${mek_file_id}"
     compileOnly "curse.maven:appmek-574300:${appmek_file_id}"
+    compileOnly "curse.maven:PneumaticCraft-281849:${PneumaticCraft_file_id}"
 
     localRuntime "mezz.jei:jei-1.21.1-neoforge:${jei_version}"
     localRuntime "dev.latvian.mods:rhino:${rhino_version}"
@@ -170,6 +171,7 @@ dependencies {
     localRuntime("vazkii.botania:botania-neoforge-1.21.1:${botania_version}") {exclude group: 'mezz.jei'}
     localRuntime "curse.maven:mek-268560:${mek_file_id}"
     localRuntime "curse.maven:appmek-574300:${appmek_file_id}"
+    localRuntime "curse.maven:PneumaticCraft-281849:${PneumaticCraft_file_id}"
 }
 
 tasks.named('test', Test).configure {

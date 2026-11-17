@@ -41,6 +41,8 @@ import net.neoforged.neoforge.event.server.ServerStoppedEvent;
 import net.neoforged.neoforge.fluids.FluidStack;
 import net.neoforged.neoforge.server.ServerLifecycleHooks;
 import org.jetbrains.annotations.ApiStatus;
+import com.lw.modularmachine.machine.recipe.resource.chemical.ChemicalResourceExecution;
+import com.lw.modularmachine.machine.recipe.resource.fluid.FluidTickResourceExecution;
 
 /**
  * Validated candidates are staged by prospective RecipeManager; only current
@@ -90,7 +92,8 @@ public final class MachineRecipeService {
       throw new IllegalArgumentException(
           "Native machine recipe set is incomplete or contains an unvalidated recipe: missing " + missing + ", unvalidated " + unexpected);
     }
-    var imports = RecipeAdapterImports.generate(manager, StructureService.definitionsSnapshot(), registries, tags);
+    var imports = RecipeAdapterImports
+        .generate(manager, StructureService.definitionsSnapshot(), registries, tags, sources);
     var declarations = new LinkedHashMap<>(expected);
     var originalSources = new LinkedHashMap<>(sources);
     for (var entry : imports.recipes().entrySet()) {
@@ -133,6 +136,7 @@ public final class MachineRecipeService {
       }
       validatePorts(entry.getKey(), recipe, machine);
       RecipeResourceExecutionRegistry.validateDefinition(entry.getKey(), recipe.resourceData(), registries);
+      RecipeTriggeredResources.validateRegistry(recipe.triggeredResources());
       candidates.computeIfAbsent(recipe.machineId(), ignored -> new ArrayList<>())
           .add(recipe.compile(entry.getKey(), registries));
       effective.put(entry.getKey(), recipe);
@@ -348,6 +352,56 @@ public final class MachineRecipeService {
     return Optional.of(recipe != null && recipe.machineId().equals(machineId));
   }
 
+  /** Resolves conditional ingredient rules from the original declaration once. */
+  @ApiStatus.Internal
+  public static Optional<MachineRecipe> resolveIngredientSource(StructureService.StructureSubject owner, RecipeCatalog catalog, ResourceLocation id, List<RecipeModifier> extraRules) {
+    if (!(owner.structureLevel() instanceof ServerLevel level)) {
+      return Optional.empty();
+    }
+    var published = current(level.getServer());
+    if (published == null
+        || catalog == null
+        || !catalog.isCurrent()
+        || published.catalogs.get(owner.structureMachineId()) != catalog.root()
+        || catalog.recipes().candidate(id.toString()).isEmpty()) {
+      return Optional.empty();
+    }
+    var registration = owner.structureRegistration();
+    if (registration == null || !registration.canCommit(level)) {
+      return Optional.empty();
+    }
+    var structuralRules = registration.activeRecipeModifiers(level);
+    var context = catalog.contextRules();
+    if (owner instanceof FactoryControllerBlockEntity) {
+      if (context.size() < structuralRules.size()
+          || !context.subList(0, structuralRules.size()).equals(structuralRules)) {
+        return Optional.empty();
+      }
+    } else {
+      var expected = new ArrayList<>(structuralRules);
+      if (owner instanceof MachineControllerBlockEntity ordinary) {
+        var upgrades = ordinary.upgradeSnapshot();
+        if (!ordinary.upgradeSnapshotCurrent(upgrades)) {
+          return Optional.empty();
+        }
+        expected.addAll(upgrades.recipeModifiers());
+      }
+      expected.addAll(MachineControllerScriptDataService.modifiers(owner));
+      if (!context.equals(expected)) {
+        return Optional.empty();
+      }
+    }
+    var template = published.prepared.templates().get(id);
+    if (template == null) {
+      return Optional.empty();
+    }
+    var rules = new ArrayList<>(context);
+    rules.addAll(extraRules);
+    var result = template.resolve(rules, level.registryAccess(), published.durationMultiplier, published.defaults);
+    return catalog.isCurrent() && result.machineId().equals(owner.structureMachineId()) ? Optional.of(result) : Optional
+        .empty();
+  }
+
   static Optional<MachineRecipe> definitionForStart(MachineControllerBlockEntity controller, RecipeStartPlan plan) {
     return definitionForStart((StructureService.StructureSubject) controller, plan);
   }
@@ -489,5 +543,8 @@ public final class MachineRecipeService {
     RecipeScriptSources.clear();
     RecipeScriptCallbacks.reset();
     RecipeAdapterScriptSources.clear();
+    ChemicalResourceExecution.clear();
+    FluidTickResourceExecution.clear();
+    TriggeredItemExecution.clear();
   }
 }

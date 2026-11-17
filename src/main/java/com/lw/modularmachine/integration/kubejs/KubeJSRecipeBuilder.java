@@ -11,6 +11,10 @@ import com.google.gson.JsonObject;
 import com.lw.modularmachine.ModularMachine;
 import com.lw.modularmachine.api.recipe.RecipeFailureAction;
 import com.lw.modularmachine.api.recipe.ChemicalRecipeData;
+import com.lw.modularmachine.api.recipe.ChemicalRequirement;
+import com.lw.modularmachine.api.recipe.IngredientArrayData;
+import com.lw.modularmachine.api.recipe.TriggeredResourceData;
+import com.lw.modularmachine.api.recipe.ItemPaymentData;
 import com.lw.modularmachine.api.recipe.RecipeModifier;
 import com.lw.modularmachine.api.recipe.RecipeSelectors;
 import com.lw.modularmachine.api.recipe.FluidRequirement;
@@ -45,6 +49,8 @@ import net.minecraft.nbt.CompoundTag;
 import net.minecraft.world.item.component.CustomData;
 import net.minecraft.resources.ResourceLocation;
 import net.minecraft.world.item.ItemStack;
+import net.minecraft.world.item.crafting.Ingredient;
+import net.minecraft.core.registries.BuiltInRegistries;
 import net.neoforged.neoforge.fluids.FluidStack;
 import org.jetbrains.annotations.ApiStatus;
 
@@ -60,6 +66,18 @@ public final class KubeJSRecipeBuilder {
 
   public static RecipeItemCallbacks.ItemRequirement itemRequirement(ItemStack stack, String amount) {
     return RecipeItemCallbacks.requirement(stack, amount);
+  }
+
+  public static ChemicalRequirement chemical(String chemical, Number amount) {
+    return chemical(chemical, KubeJSRecipeArguments.integer(amount, "chemical amount", 1, Long.MAX_VALUE));
+  }
+
+  public static ChemicalRequirement chemical(String chemical, String amount) {
+    return chemical(chemical, KubeJSRecipeArguments.integer(amount, "chemical amount", 1, Long.MAX_VALUE));
+  }
+
+  private static ChemicalRequirement chemical(String chemical, long amount) {
+    return new ChemicalRequirement(KubeJSRecipeArguments.identifier(chemical, "chemical"), amount, "");
   }
 
   public static RecipeBuilder newBuilder(Context context, RecipesKubeEvent event, String recipeName, String machineName, Number processingTickTime) {
@@ -91,11 +109,15 @@ public final class KubeJSRecipeBuilder {
     private enum LastRequirement {
       NONE,
       ITEM,
+      FUEL,
       ENERGY,
       ENERGY_OUTPUT,
       FLUID_INPUT,
       FLUID_OUTPUT,
       FLUID_PER_TICK,
+      FLUID_PER_TICK_OUTPUT,
+      INGREDIENT_ARRAY,
+      RANDOM_OUTPUT,
       CHEMICAL
     }
 
@@ -104,15 +126,19 @@ public final class KubeJSRecipeBuilder {
     private final int duration, priority;
     private final Thread owner = Thread.currentThread();
     private final List<ItemRow> inputs = new ArrayList<>(), outputs = new ArrayList<>();
-    private final List<FluidRow> fluidInputs = new ArrayList<>(), fluidOutputs = new ArrayList<>();
+    private final List<ItemPaymentData.Fuel> fuelInputs = new ArrayList<>();
+    private final List<FluidRow> fluidInputs = new ArrayList<>(), fluidOutputs = new ArrayList<>(),
+        fluidPerTickInputs = new ArrayList<>(), fluidPerTickOutputs = new ArrayList<>();
     private final List<ChemicalRow> chemicalInputs = new ArrayList<>(), chemicalOutputs = new ArrayList<>(),
-        chemicalPerTick = new ArrayList<>();
+        chemicalPerTick = new ArrayList<>(), chemicalPerTickOutputs = new ArrayList<>();
     private final List<SmartNumberRequirement> interfaceInputs = new ArrayList<>();
     private final List<RecipeModifier> modifiers = new ArrayList<>();
     private final Map<ResourceLocation, RecipeResources.Entry<?>> resourceDeclarations = new LinkedHashMap<>();
     private final List<String> tooltips = new ArrayList<>();
     private final List<RecipeDeclaredObservers.Handler> lifecycleHandlers = new ArrayList<>();
-    private FluidStack fluidPerTick = FluidStack.EMPTY;
+    private final List<IngredientArrayData.Group> ingredientArrays = new ArrayList<>();
+    private final List<IngredientArrayData.Group> randomItemOutputs = new ArrayList<>();
+    private final List<KubeJSIngredientArrayBuilder.IngredientArrayPrimer> ingredientArrayCallbacks = new ArrayList<>();
     private long energyPerTick;
     private long energyOutputPerTick;
     private int energyRequirements;
@@ -125,6 +151,7 @@ public final class KubeJSRecipeBuilder {
     private boolean fluidInputTagged, fluidOutputTagged, fluidPerTickTagged, energyTagged;
     private boolean energyOutputTagged;
     private long randomSeed;
+    private boolean loadJei = true;
     private Boolean parallelized;
     private RecipeFailureAction failureAction;
     private LastRequirement last = LastRequirement.NONE;
@@ -170,8 +197,103 @@ public final class KubeJSRecipeBuilder {
       return addItemInput(stack, stack == null ? null : stack.getCount());
     }
 
+    public RecipeBuilder addItemInput(Ingredient ingredient) {
+      return addItemInput(ingredient, 1);
+    }
+
+    public RecipeBuilder addItemInput(Ingredient ingredient, Number amount) {
+      return addIngredientArrayInput(KubeJSIngredientArrayBuilder.newBuilder().addIngredient(ingredient, amount));
+    }
+
+    public RecipeBuilder addItemInput(Ingredient ingredient, String amount) {
+      return addIngredientArrayInput(KubeJSIngredientArrayBuilder.newBuilder().addIngredient(ingredient, amount));
+    }
+
+    public RecipeBuilder addItemInput(String ingredient) {
+      return addItemInput(ingredient, 1);
+    }
+
+    public RecipeBuilder addItemInput(String ingredient, Number amount) {
+      return ingredient != null && ingredient.startsWith("#") ? addItemInput(
+          KubeJSIngredientArrayBuilder.tagIngredient(ingredient),
+          amount) : addItemInput(itemPrototype(ingredient), amount);
+    }
+
+    public RecipeBuilder addItemInput(String ingredient, String amount) {
+      return ingredient != null && ingredient.startsWith("#") ? addItemInput(
+          KubeJSIngredientArrayBuilder.tagIngredient(ingredient),
+          amount) : addItemInput(itemPrototype(ingredient), amount);
+    }
+
+    private static ItemStack itemPrototype(String item) {
+      var id = KubeJSRecipeArguments.identifier(item, "item");
+      return new ItemStack(
+          BuiltInRegistries.ITEM.getOptional(id).orElseThrow(() -> new IllegalArgumentException("Unknown item " + id)));
+    }
+
+    public RecipeBuilder addIngredientArrayInput(KubeJSIngredientArrayBuilder.IngredientArrayPrimer ingredients) {
+      requireMutable();
+      Objects.requireNonNull(ingredients, "ingredient array");
+      if (ingredientArrays.size() >= IngredientArrayData.MAX_GROUPS) {
+        throw new IllegalArgumentException("Too many ingredient array inputs");
+      }
+      ingredientArrays.add(ingredients.snapshot(event.registries.access()));
+      ingredientArrayCallbacks.add(ingredients);
+      last = LastRequirement.INGREDIENT_ARRAY;
+      lastItem = null;
+      lastChemical = null;
+      lastFluid = null;
+
+      return this;
+    }
+
     public RecipeBuilder addInput(ItemStack stack) {
       return addItemInput(stack);
+    }
+
+    public RecipeBuilder addRandomItemOutput(KubeJSIngredientArrayBuilder.IngredientArrayPrimer ingredients) {
+      requireMutable();
+      var group = Objects.requireNonNull(ingredients, "random output ingredients")
+          .snapshotForOutput(event.registries.access());
+      IngredientArrayData.validateRandomOutput(group);
+      if (randomItemOutputs.size() >= IngredientArrayData.MAX_GROUPS) {
+        throw new IllegalArgumentException("Too many random item output groups");
+      }
+      randomItemOutputs.add(group);
+      ingredientArrayCallbacks.add(ingredients);
+      last = LastRequirement.RANDOM_OUTPUT;
+      lastItem = null;
+
+      return this;
+    }
+
+    public RecipeBuilder addCatalystInput(ItemStack ingredient, List<String> hints, List<RecipeModifier> rules) {
+      return addCatalystInput(KubeJSIngredientArrayBuilder.newBuilder().addIngredient(ingredient), hints, rules);
+    }
+
+    public RecipeBuilder addCatalystInput(FluidStack ingredient, List<String> hints, List<RecipeModifier> rules) {
+      return addCatalystInput(KubeJSIngredientArrayBuilder.newBuilder().addIngredient(ingredient), hints, rules);
+    }
+
+    public RecipeBuilder addCatalystInput(ChemicalRequirement ingredient, List<String> hints, List<RecipeModifier> rules) {
+      return addCatalystInput(KubeJSIngredientArrayBuilder.newBuilder().addIngredient(ingredient), hints, rules);
+    }
+
+    public RecipeBuilder addCatalystInput(KubeJSIngredientArrayBuilder.IngredientArrayPrimer ingredients, List<String> hints, List<RecipeModifier> rules) {
+      addIngredientArrayInput(ingredients);
+      var group = ingredientArrays.getLast();
+      ingredientArrays.set(
+          ingredientArrays.size() - 1,
+          new IngredientArrayData.Group(
+              group.alternatives(),
+              group.chance(),
+              !group.resource().equals("chemical"),
+              group.selector(),
+              true,
+              hints,
+              rules));
+
+      return this;
     }
 
     public RecipeBuilder addInput(FluidStack stack) {
@@ -223,6 +345,42 @@ public final class KubeJSRecipeBuilder {
       return addItem(inputs, stack, KubeJSRecipeArguments.integer(amount, "item amount", 1, Long.MAX_VALUE));
     }
 
+    public RecipeBuilder addFuelItemInput(Number requiredTotalBurnTime) {
+      return addFuelItemInput(
+          KubeJSRecipeArguments.integer(requiredTotalBurnTime, "fuel burn time", 1, Long.MAX_VALUE));
+    }
+
+    public RecipeBuilder addFuelItemInput(String requiredTotalBurnTime) {
+      return addFuelItemInput(
+          KubeJSRecipeArguments.integer(requiredTotalBurnTime, "fuel burn time", 1, Long.MAX_VALUE));
+    }
+
+    private RecipeBuilder addFuelItemInput(long requiredTotalBurnTime) {
+      requireMutable();
+      if (fuelInputs.size() >= MachineRecipeJson.MAX_DEMANDS) {
+        throw new IllegalArgumentException("Too many fuel requirements");
+      }
+      fuelInputs.add(new ItemPaymentData.Fuel(requiredTotalBurnTime, 1, false, ""));
+      last = LastRequirement.FUEL;
+      lastItem = null;
+      lastFluid = null;
+      lastChemical = null;
+      return this;
+    }
+
+    public RecipeBuilder consumeDurability(Number durability) {
+      requireMutable();
+      if (last != LastRequirement.ITEM || lastItem == null || !inputs.contains(lastItem)) {
+        throw new IllegalStateException("consumeDurability requires the last item input");
+      }
+      int amount = (int) KubeJSRecipeArguments.integer(durability, "tool durability", 0, Integer.MAX_VALUE);
+      if (amount > 0 && !lastItem.prototype.isDamageableItem()) {
+        throw new IllegalArgumentException("consumeDurability requires a damageable item");
+      }
+      lastItem.consumeDurability = amount;
+      return this;
+    }
+
     public RecipeBuilder addItemInput(ItemStack stack, String amount) {
       return addItem(inputs, stack, KubeJSRecipeArguments.integer(amount, "item amount", 1, Long.MAX_VALUE));
     }
@@ -251,6 +409,38 @@ public final class KubeJSRecipeBuilder {
 
     public RecipeBuilder addItemOutput(ItemStack stack) {
       return addItemOutput(stack, stack == null ? null : stack.getCount());
+    }
+
+    public RecipeBuilder addItemOutput(Ingredient ingredient) {
+      return addItemOutput(ingredient, 1);
+    }
+
+    public RecipeBuilder addItemOutput(Ingredient ingredient, Number amount) {
+      return addItemOutput(
+          KubeJSIngredientArrayBuilder.itemCandidates(ingredient, event.registries.access()).getFirst(),
+          amount);
+    }
+
+    public RecipeBuilder addItemOutput(Ingredient ingredient, String amount) {
+      return addItemOutput(
+          KubeJSIngredientArrayBuilder.itemCandidates(ingredient, event.registries.access()).getFirst(),
+          amount);
+    }
+
+    public RecipeBuilder addItemOutput(String ingredient) {
+      return addItemOutput(ingredient, 1);
+    }
+
+    public RecipeBuilder addItemOutput(String ingredient, Number amount) {
+      return ingredient != null && ingredient.startsWith("#") ? addItemOutput(
+          KubeJSIngredientArrayBuilder.tagIngredient(ingredient),
+          amount) : addItemOutput(itemPrototype(ingredient), amount);
+    }
+
+    public RecipeBuilder addItemOutput(String ingredient, String amount) {
+      return ingredient != null && ingredient.startsWith("#") ? addItemOutput(
+          KubeJSIngredientArrayBuilder.tagIngredient(ingredient),
+          amount) : addItemOutput(itemPrototype(ingredient), amount);
     }
 
     public RecipeBuilder addItemOutput(ItemStack stack, Number amount) {
@@ -366,13 +556,51 @@ public final class KubeJSRecipeBuilder {
     }
 
     public RecipeBuilder addFluidPerTickInput(FluidStack fluid) {
+      return addTickFluid(fluidPerTickInputs, fluid, false);
+    }
+
+    public RecipeBuilder addFluidPerTickOutput(FluidStack fluid) {
+      return addTickFluid(fluidPerTickOutputs, fluid, true);
+    }
+
+    public RecipeBuilder addFluidPerTickInputs(List<FluidStack> fluids) {
+      return addTickFluids(fluids, false);
+    }
+
+    public RecipeBuilder addFluidPerTickOutputs(List<FluidStack> fluids) {
+      return addTickFluids(fluids, true);
+    }
+
+    private RecipeBuilder addTickFluid(List<FluidRow> rows, FluidStack fluid, boolean output) {
       requireMutable();
-      if (!fluidPerTick.isEmpty()) {
-        throw new IllegalStateException("Only one fluid-per-tick requirement is supported");
+      if (rows.size() >= MachineRecipeJson.MAX_DEMANDS) {
+        throw new IllegalArgumentException("Too many fluid-per-tick requirements");
       }
-      fluidPerTick = detachedFluid(fluid);
-      last = LastRequirement.FLUID_PER_TICK;
+      lastFluid = new FluidRow(detachedFluid(fluid));
+      if (!output) {
+        lastFluid.selector = fluidPerTickSelector;
+      }
+      rows.add(lastFluid);
+      last = output ? LastRequirement.FLUID_PER_TICK_OUTPUT : LastRequirement.FLUID_PER_TICK;
       lastItem = null;
+      lastChemical = null;
+
+      return this;
+    }
+
+    private RecipeBuilder addTickFluids(List<FluidStack> fluids, boolean output) {
+      requireMutable();
+      Objects.requireNonNull(fluids, "fluid-per-tick requirements");
+      for (var fluid : fluids) {
+        if (output) {
+          addFluidPerTickOutput(fluid);
+        } else {
+          addFluidPerTickInput(fluid);
+        }
+      }
+      last = LastRequirement.NONE;
+      lastFluid = null;
+
       return this;
     }
 
@@ -424,6 +652,134 @@ public final class KubeJSRecipeBuilder {
 
     public RecipeBuilder addChemicalPerTickInput(String chemical, String amount) {
       return addChemical(chemicalPerTick, chemical, chemicalAmount(amount));
+    }
+
+    public RecipeBuilder addChemicalPerTickOutput(String chemical, Number amount) {
+      return addChemical(chemicalPerTickOutputs, chemical, chemicalAmount(amount));
+    }
+
+    public RecipeBuilder addChemicalPerTickOutput(String chemical, String amount) {
+      return addChemical(chemicalPerTickOutputs, chemical, chemicalAmount(amount));
+    }
+
+    public RecipeBuilder addGasInput(String chemical, Number amount) {
+      return addChemicalInput(chemical, amount);
+    }
+
+    public RecipeBuilder addGasInput(String chemical, String amount) {
+      return addChemicalInput(chemical, amount);
+    }
+
+    public RecipeBuilder addGasOutput(String chemical, Number amount) {
+      return addChemicalOutput(chemical, amount);
+    }
+
+    public RecipeBuilder addGasOutput(String chemical, String amount) {
+      return addChemicalOutput(chemical, amount);
+    }
+
+    public RecipeBuilder addGasPerTickInput(String chemical, Number amount) {
+      return addChemicalPerTickInput(chemical, amount);
+    }
+
+    public RecipeBuilder addGasPerTickInput(String chemical, String amount) {
+      return addChemicalPerTickInput(chemical, amount);
+    }
+
+    public RecipeBuilder addGasPerTickOutput(String chemical, Number amount) {
+      return addChemicalPerTickOutput(chemical, amount);
+    }
+
+    public RecipeBuilder addGasPerTickOutput(String chemical, String amount) {
+      return addChemicalPerTickOutput(chemical, amount);
+    }
+
+    public RecipeBuilder addGasInput(ChemicalRequirement chemical) {
+      return addChemical(chemicalInputs, chemical);
+    }
+
+    public RecipeBuilder addGasOutput(ChemicalRequirement chemical) {
+      return addChemical(chemicalOutputs, chemical);
+    }
+
+    public RecipeBuilder addGasPerTickInput(ChemicalRequirement chemical) {
+      return addChemical(chemicalPerTick, chemical);
+    }
+
+    public RecipeBuilder addGasPerTickOutput(ChemicalRequirement chemical) {
+      return addChemical(chemicalPerTickOutputs, chemical);
+    }
+
+    public RecipeBuilder addGasInputs(List<ChemicalRequirement> chemicals) {
+      return addChemicals(chemicalInputs, chemicals);
+    }
+
+    public RecipeBuilder addGasOutputs(List<ChemicalRequirement> chemicals) {
+      return addChemicals(chemicalOutputs, chemicals);
+    }
+
+    public RecipeBuilder addGasPerTickInputs(List<ChemicalRequirement> chemicals) {
+      return addChemicals(chemicalPerTick, chemicals);
+    }
+
+    public RecipeBuilder addGasPerTickOutputs(List<ChemicalRequirement> chemicals) {
+      return addChemicals(chemicalPerTickOutputs, chemicals);
+    }
+
+    public RecipeBuilder addChemicalInput(ChemicalRequirement chemical) {
+      return addGasInput(chemical);
+    }
+
+    public RecipeBuilder addChemicalOutput(ChemicalRequirement chemical) {
+      return addGasOutput(chemical);
+    }
+
+    public RecipeBuilder addChemicalPerTickInput(ChemicalRequirement chemical) {
+      return addGasPerTickInput(chemical);
+    }
+
+    public RecipeBuilder addChemicalPerTickOutput(ChemicalRequirement chemical) {
+      return addGasPerTickOutput(chemical);
+    }
+
+    public RecipeBuilder addChemicalInputs(List<ChemicalRequirement> chemicals) {
+      return addGasInputs(chemicals);
+    }
+
+    public RecipeBuilder addChemicalOutputs(List<ChemicalRequirement> chemicals) {
+      return addGasOutputs(chemicals);
+    }
+
+    public RecipeBuilder addChemicalPerTickInputs(List<ChemicalRequirement> chemicals) {
+      return addGasPerTickInputs(chemicals);
+    }
+
+    public RecipeBuilder addChemicalPerTickOutputs(List<ChemicalRequirement> chemicals) {
+      return addGasPerTickOutputs(chemicals);
+    }
+
+    private RecipeBuilder addChemical(List<ChemicalRow> rows, ChemicalRequirement chemical) {
+      Objects.requireNonNull(chemical, "chemical requirement");
+      addChemical(rows, chemical.chemical().toString(), chemical.amount());
+      lastChemical.selector = chemical.selector();
+      lastChemical.chance = chemical.chance();
+
+      return this;
+    }
+
+    private RecipeBuilder addChemicals(List<ChemicalRow> rows, List<ChemicalRequirement> chemicals) {
+      requireMutable();
+      Objects.requireNonNull(chemicals, "chemical requirements");
+      if (chemicals.size() > ChemicalRecipeData.MAX_REQUIREMENTS - rows.size()) {
+        throw new IllegalArgumentException("Too many chemical requirements");
+      }
+      for (var chemical : chemicals) {
+        addChemical(rows, chemical);
+      }
+      last = LastRequirement.NONE;
+      lastChemical = null;
+
+      return this;
     }
 
     private RecipeBuilder addChemical(List<ChemicalRow> rows, String chemical, long amount) {
@@ -481,6 +837,10 @@ public final class KubeJSRecipeBuilder {
       return this;
     }
 
+    public RecipeBuilder addSmartInterfaceDataInput(String type, Number value) {
+      return addSmartInterfaceDataInput(type, value, value);
+    }
+
     public RecipeBuilder addModifier(RecipeModifier modifier) {
       requireMutable();
       if (modifiers.size() >= RecipeModifiers.MAX_RULES) {
@@ -514,6 +874,42 @@ public final class KubeJSRecipeBuilder {
       return this;
     }
 
+    public RecipeBuilder setTriggerTime(Number ticks) {
+      requireMutable();
+      int tick = (int) KubeJSRecipeArguments.integer(ticks, "trigger time", 0, duration);
+      switch (last) {
+        case ITEM -> lastItem.triggerTime = tick;
+        case FLUID_INPUT, FLUID_OUTPUT -> lastFluid.triggerTime = tick;
+        case CHEMICAL -> {
+          if (chemicalPerTick.contains(lastChemical) || chemicalPerTickOutputs.contains(lastChemical)) {
+            throw new IllegalStateException(
+                "Trigger time applies to startup/final resource IO; per-tick rows already execute every tick");
+          }
+          lastChemical.triggerTime = tick;
+        }
+        default ->
+          throw new IllegalStateException("Trigger time requires a last item, fluid or chemical startup/final row");
+      }
+      return this;
+    }
+
+    public RecipeBuilder setTriggerRepeatable(boolean repeatable) {
+      requireMutable();
+      switch (last) {
+        case ITEM -> lastItem.triggerRepeatable = repeatable;
+        case FLUID_INPUT, FLUID_OUTPUT -> lastFluid.triggerRepeatable = repeatable;
+        case CHEMICAL -> {
+          if (chemicalPerTick.contains(lastChemical) || chemicalPerTickOutputs.contains(lastChemical)) {
+            throw new IllegalStateException("Trigger repeatability requires a startup/final resource row");
+          }
+          lastChemical.triggerRepeatable = repeatable;
+        }
+        default -> throw new IllegalStateException(
+            "Trigger repeatability requires a last item, fluid or chemical startup/final row");
+      }
+      return this;
+    }
+
     public RecipeBuilder setChance(Number chance) {
       requireMutable();
       Objects.requireNonNull(chance, "chance");
@@ -523,10 +919,37 @@ public final class KubeJSRecipeBuilder {
       }
       if (last == LastRequirement.ITEM && lastItem != null) {
         lastItem.chance = value;
-      } else if ((last == LastRequirement.FLUID_INPUT || last == LastRequirement.FLUID_OUTPUT) && lastFluid != null) {
+      } else if (last == LastRequirement.FUEL) {
+        var fuel = fuelInputs.getLast();
+        fuelInputs.set(
+            fuelInputs.size() - 1,
+            new ItemPaymentData.Fuel(fuel.burnTime(), value, fuel.parallelUnaffected(), fuel.selector()));
+      } else if (last == LastRequirement.RANDOM_OUTPUT) {
+        var group = randomItemOutputs.getLast();
+        randomItemOutputs.set(
+            randomItemOutputs.size() - 1,
+            new IngredientArrayData.Group(group.alternatives(), value, group.parallelUnaffected(), group.selector()));
+      } else if (last == LastRequirement.INGREDIENT_ARRAY) {
+        var group = ingredientArrays.getLast();
+        ingredientArrays.set(
+            ingredientArrays.size() - 1,
+            new IngredientArrayData.Group(
+                group.alternatives(),
+                value,
+                group.parallelUnaffected(),
+                group.selector(),
+                group.optional(),
+                group.tooltips(),
+                group.recipeModifiers()));
+      } else if (last == LastRequirement.CHEMICAL && lastChemical != null) {
+        lastChemical.chance = value;
+      } else if ((last == LastRequirement.FLUID_INPUT
+          || last == LastRequirement.FLUID_OUTPUT
+          || last == LastRequirement.FLUID_PER_TICK
+          || last == LastRequirement.FLUID_PER_TICK_OUTPUT) && lastFluid != null) {
         lastFluid.chance = value;
       } else {
-        throw new IllegalStateException("Chance requires the last item or start/output fluid requirement");
+        throw new IllegalStateException("Chance requires the last item, chemical or fluid requirement");
       }
       return this;
     }
@@ -535,6 +958,31 @@ public final class KubeJSRecipeBuilder {
       requireMutable();
       if (last == LastRequirement.ITEM && lastItem != null) {
         lastItem.parallelUnaffected = unaffected;
+      } else if (last == LastRequirement.FUEL) {
+        var fuel = fuelInputs.getLast();
+        fuelInputs.set(
+            fuelInputs.size() - 1,
+            new ItemPaymentData.Fuel(fuel.burnTime(), fuel.chance(), unaffected, fuel.selector()));
+      } else if (last == LastRequirement.RANDOM_OUTPUT) {
+        var group = randomItemOutputs.getLast();
+        randomItemOutputs.set(
+            randomItemOutputs.size() - 1,
+            new IngredientArrayData.Group(group.alternatives(), group.chance(), unaffected, group.selector()));
+      } else if (last == LastRequirement.INGREDIENT_ARRAY) {
+        var group = ingredientArrays.getLast();
+        if (group.resource().equals("chemical")) {
+          throw new IllegalStateException("Fixed parallel quantities are not supported for chemical ingredients");
+        }
+        ingredientArrays.set(
+            ingredientArrays.size() - 1,
+            new IngredientArrayData.Group(
+                group.alternatives(),
+                group.chance(),
+                unaffected,
+                group.selector(),
+                group.optional(),
+                group.tooltips(),
+                group.recipeModifiers()));
       } else if ((last == LastRequirement.FLUID_INPUT || last == LastRequirement.FLUID_OUTPUT) && lastFluid != null) {
         lastFluid.parallelUnaffected = unaffected;
       } else {
@@ -548,6 +996,28 @@ public final class KubeJSRecipeBuilder {
       ResourceSelector.require(selector);
       if (last == LastRequirement.ITEM && lastItem != null) {
         lastItem.selector = selector;
+      } else if (last == LastRequirement.FUEL) {
+        var fuel = fuelInputs.getLast();
+        fuelInputs.set(
+            fuelInputs.size() - 1,
+            new ItemPaymentData.Fuel(fuel.burnTime(), fuel.chance(), fuel.parallelUnaffected(), selector));
+      } else if (last == LastRequirement.RANDOM_OUTPUT) {
+        var group = randomItemOutputs.getLast();
+        randomItemOutputs.set(
+            randomItemOutputs.size() - 1,
+            new IngredientArrayData.Group(group.alternatives(), group.chance(), group.parallelUnaffected(), selector));
+      } else if (last == LastRequirement.INGREDIENT_ARRAY) {
+        var group = ingredientArrays.getLast();
+        ingredientArrays.set(
+            ingredientArrays.size() - 1,
+            new IngredientArrayData.Group(
+                group.alternatives(),
+                group.chance(),
+                group.parallelUnaffected(),
+                selector,
+                group.optional(),
+                group.tooltips(),
+                group.recipeModifiers()));
       } else if (last == LastRequirement.ENERGY && energyRequirements == 1) {
         setEnergyInputTag(selector);
       } else if (last == LastRequirement.ENERGY_OUTPUT && energyOutputRequirements == 1) {
@@ -559,7 +1029,9 @@ public final class KubeJSRecipeBuilder {
       } else if (last == LastRequirement.FLUID_OUTPUT) {
         setFluidOutputTag(selector);
       } else if (last == LastRequirement.FLUID_PER_TICK) {
-        setFluidPerTickTag(selector);
+        lastFluid.selector = selector;
+      } else if (last == LastRequirement.FLUID_PER_TICK_OUTPUT) {
+        lastFluid.selector = selector;
       } else {
         throw new IllegalStateException(
             "Tags require a last item, chemical, fluid phase, or unique energy requirement");
@@ -585,6 +1057,7 @@ public final class KubeJSRecipeBuilder {
       requireMutable();
       fluidPerTickSelector = phaseTag(fluidPerTickSelector, fluidPerTickTagged, selector);
       fluidPerTickTagged = true;
+      fluidPerTickInputs.forEach(row -> row.selector = selector);
       return this;
     }
 
@@ -753,6 +1226,18 @@ public final class KubeJSRecipeBuilder {
       return addLifecycleHandler(RecipeLifecycleEvents.Type.FINISHED, true, handler);
     }
 
+    public RecipeBuilder addFailureHandler(RecipeLifecycleEvents.Listener handler) {
+      return addLifecycleHandler(RecipeLifecycleEvents.Type.RESOURCE_FAILURE, false, handler);
+    }
+
+    public RecipeBuilder addFactoryFailureHandler(RecipeLifecycleEvents.Listener handler) {
+      return addLifecycleHandler(RecipeLifecycleEvents.Type.RESOURCE_FAILURE, true, handler);
+    }
+
+    public RecipeBuilder addFactoryPostTickHandler(RecipeLifecycleEvents.Listener handler) {
+      return addLifecycleHandler(RecipeLifecycleEvents.Type.TICK, true, handler);
+    }
+
     private RecipeBuilder addLifecycleHandler(RecipeLifecycleEvents.Type type, boolean factoryOnly, RecipeLifecycleEvents.Listener handler) {
       requireMutable();
       if (lifecycleHandlers.size() >= 256) {
@@ -769,25 +1254,104 @@ public final class KubeJSRecipeBuilder {
       return this;
     }
 
+    public RecipeBuilder setMinMaxAmount(Number minimum, Number maximum) {
+      return setItemRange(
+          KubeJSRecipeArguments.integer(minimum, "minimum item amount", 0, Long.MAX_VALUE),
+          KubeJSRecipeArguments.integer(maximum, "maximum item amount", 1, Long.MAX_VALUE));
+    }
+
+    public RecipeBuilder setMinMaxAmount(String minimum, String maximum) {
+      return setItemRange(
+          KubeJSRecipeArguments.integer(minimum, "minimum item amount", 0, Long.MAX_VALUE),
+          KubeJSRecipeArguments.integer(maximum, "maximum item amount", 1, Long.MAX_VALUE));
+    }
+
+    private RecipeBuilder setItemRange(long min, long max) {
+      requireMutable();
+      if (min > max) {
+        throw new IllegalArgumentException("Minimum item amount exceeds maximum");
+      }
+      if (last == LastRequirement.INGREDIENT_ARRAY) {
+        var group = ingredientArrays.getLast();
+        if (!group.resource().equals("item")) {
+          throw new IllegalStateException("Quantity ranges require an item ingredient group");
+        }
+        var choices = group.alternatives().stream()
+            .map(
+                choice -> new IngredientArrayData.Choice(
+                    choice.resource(),
+                    choice.item(),
+                    choice.fluid(),
+                    choice.chemical(),
+                    max,
+                    choice.chance(),
+                    choice.checker(),
+                    choice.modifiers(),
+                    min,
+                    max,
+                    choice.match()))
+            .toList();
+        ingredientArrays.set(
+            ingredientArrays.size() - 1,
+            new IngredientArrayData.Group(
+                choices,
+                group.chance(),
+                group.parallelUnaffected(),
+                group.selector(),
+                group.optional(),
+                group.tooltips(),
+                group.recipeModifiers()));
+        return this;
+      }
+      if (last != LastRequirement.ITEM || lastItem == null) {
+        throw new IllegalStateException("setMinMaxAmount requires an item row");
+      }
+      lastItem.amount = max;
+      lastItem.minAmount = min;
+      lastItem.maxAmount = max;
+
+      return this;
+    }
+
+    public RecipeBuilder setLoadJEI(boolean load) {
+      requireMutable();
+      loadJei = load;
+
+      return this;
+    }
+
     private RecipeScriptOptions scriptOptions() {
       var callbacks = new ArrayList<RecipeScriptOptions.ItemCallbacks>();
       collectCallbacks(callbacks, inputs, RecipeModifier.Io.INPUT);
       collectCallbacks(callbacks, outputs, RecipeModifier.Io.OUTPUT);
-      return new RecipeScriptOptions(tooltips, callbacks);
+      return new RecipeScriptOptions(tooltips, callbacks, loadJei);
     }
 
     private void collectCallbacks(List<RecipeScriptOptions.ItemCallbacks> callbacks, List<ItemRow> rows, RecipeModifier.Io io) {
+      int visibleIndex = 0;
       for (int index = 0; index < rows.size(); index++) {
         var row = rows.get(index);
+        if (row.triggerTime > 0) {
+          if (row.checker != null || !row.itemModifiers.isEmpty()) {
+            throw new IllegalStateException("Triggered item rows cannot attach item callbacks");
+          }
+          continue;
+        }
         if (row.checker != null || !row.itemModifiers.isEmpty()) {
           callbacks.add(
-              new RecipeScriptOptions.ItemCallbacks(io, index, Optional.ofNullable(row.checker), row.itemModifiers));
+              new RecipeScriptOptions.ItemCallbacks(
+                  io,
+                  visibleIndex,
+                  Optional.ofNullable(row.checker),
+                  row.itemModifiers));
         }
+        visibleIndex++;
       }
     }
 
     private void captureCallbacks() {
       lifecycleHandlers.forEach(RecipeScriptCallbacks::lifecycle);
+      ingredientArrayCallbacks.forEach(KubeJSIngredientArrayBuilder.IngredientArrayPrimer::captureCallbacks);
       for (var rows : List.of(inputs, outputs)) {
         for (var row : rows) {
           if (row.inlineChecker != null) {
@@ -820,6 +1384,34 @@ public final class KubeJSRecipeBuilder {
       json.addProperty("priority", priority);
       json.add("inputs", itemRows(inputs));
       json.add("outputs", itemRows(outputs));
+      var triggers = triggeredRows();
+      if (!triggers.isEmpty()) {
+        json.add("triggered_resources", encode(TriggeredResourceData.CODEC, triggers));
+      }
+      var tools = new ArrayList<ItemPaymentData.Tool>();
+      int visibleToolRow = 0;
+      for (int row = 0; row < inputs.size(); row++) {
+        if (inputs.get(row).triggerTime > 0) {
+          if (inputs.get(row).consumeDurability > 0) {
+            throw new IllegalStateException("Triggered inputs cannot combine durability payment");
+          }
+          continue;
+        }
+        if (inputs.get(row).consumeDurability > 0) {
+          tools.add(new ItemPaymentData.Tool(visibleToolRow, inputs.get(row).consumeDurability));
+        }
+        visibleToolRow++;
+      }
+      var payments = new ItemPaymentData(tools, fuelInputs);
+      if (!payments.isEmpty()) {
+        json.add("item_payments", encode(ItemPaymentData.CODEC, payments));
+      }
+      if (!ingredientArrays.isEmpty()) {
+        json.add("ingredient_arrays", encode(IngredientArrayData.CODEC, new IngredientArrayData(ingredientArrays)));
+      }
+      if (!randomItemOutputs.isEmpty()) {
+        json.add("random_item_outputs", encode(IngredientArrayData.Group.CODEC.listOf(), randomItemOutputs));
+      }
       if (energyPerTick > 0) {
         json.addProperty("energy_per_tick", energyPerTick);
       }
@@ -855,23 +1447,39 @@ public final class KubeJSRecipeBuilder {
       if (!modifiers.isEmpty()) {
         json.add("modifiers", encode(RecipeModifier.CODEC.listOf(), modifiers));
       }
-      if (!fluidPerTick.isEmpty()) {
-        json.add("fluid_per_tick", encode(FluidStack.CODEC, fluidPerTick));
+      if (!fluidPerTickInputs.isEmpty()) {
+        json.add(
+            "fluid_per_tick_inputs",
+            encode(
+                FluidRequirement.CODEC.listOf(),
+                fluidPerTickInputs.stream().map(FluidRow::tickRequirement).toList()));
+      }
+      if (!fluidPerTickOutputs.isEmpty()) {
+        json.add(
+            "fluid_per_tick_outputs",
+            encode(
+                FluidRequirement.CODEC.listOf(),
+                fluidPerTickOutputs.stream().map(FluidRow::tickRequirement).toList()));
       }
       if (!fluidInputs.isEmpty()) {
         json.add(
             "fluid_inputs",
-            encode(FluidRequirement.CODEC.listOf(), fluidInputs.stream().map(FluidRow::requirement).toList()));
+            encode(
+                FluidRequirement.CODEC.listOf(),
+                fluidInputs.stream().filter(row -> row.triggerTime == 0).map(FluidRow::requirement).toList()));
       }
       if (!fluidOutputs.isEmpty()) {
         json.add(
             "fluid_outputs",
-            encode(FluidRequirement.CODEC.listOf(), fluidOutputs.stream().map(FluidRow::requirement).toList()));
+            encode(
+                FluidRequirement.CODEC.listOf(),
+                fluidOutputs.stream().filter(row -> row.triggerTime == 0).map(FluidRow::requirement).toList()));
       }
       var chemicals = new ChemicalRecipeData(
-          chemicalInputs.stream().map(ChemicalRow::requirement).toList(),
-          chemicalOutputs.stream().map(ChemicalRow::requirement).toList(),
-          chemicalPerTick.stream().map(ChemicalRow::requirement).toList());
+          chemicalInputs.stream().filter(row -> row.triggerTime == 0).map(ChemicalRow::requirement).toList(),
+          chemicalOutputs.stream().filter(row -> row.triggerTime == 0).map(ChemicalRow::requirement).toList(),
+          chemicalPerTick.stream().map(ChemicalRow::requirement).toList(),
+          chemicalPerTickOutputs.stream().map(ChemicalRow::requirement).toList());
       if (!chemicals.isEmpty()) {
         json.add("chemicals", encode(ChemicalRecipeData.CODEC, chemicals));
       }
@@ -887,12 +1495,19 @@ public final class KubeJSRecipeBuilder {
     private JsonArray itemRows(List<ItemRow> rows) {
       var array = new JsonArray();
       for (var row : rows) {
+        if (row.triggerTime > 0) {
+          continue;
+        }
         var json = new JsonObject();
         json.add("stack", encode(ItemStack.SINGLE_ITEM_CODEC, row.prototype));
         if (row.preview != null) {
           json.add("preview_stack", encode(ItemStack.SINGLE_ITEM_CODEC, row.preview));
         }
         json.addProperty("amount", row.amount);
+        if (row.maxAmount > 0) {
+          json.addProperty("min_amount", row.minAmount);
+          json.addProperty("max_amount", row.maxAmount);
+        }
         if (row.chance != 1) {
           json.addProperty("chance", row.chance);
         }
@@ -908,6 +1523,75 @@ public final class KubeJSRecipeBuilder {
         array.add(json);
       }
       return array;
+    }
+
+    private TriggeredResourceData triggeredRows() {
+      var rows = new ArrayList<TriggeredResourceData.Row>();
+      for (var source : List.of(inputs, outputs)) {
+        for (var row : source) {
+          if (row.triggerTime > 0) {
+            if (row.minAmount != 0 || row.maxAmount != 0 || row.consumeDurability != 0) {
+              throw new IllegalStateException(
+                  "Triggered item rows cannot combine random quantities or durability payment");
+            }
+            rows.add(
+                new TriggeredResourceData.Row(
+                    "item",
+                    source == inputs ? RecipeModifier.Io.INPUT : RecipeModifier.Io.OUTPUT,
+                    row.triggerTime,
+                    row.triggerRepeatable,
+                    row.amount,
+                    row.chance,
+                    row.selector,
+                    Optional.of(row.prototype),
+                    Optional.empty(),
+                    Optional.empty(),
+                    row.parallelUnaffected,
+                    row.match));
+          }
+        }
+      }
+      for (var source : List.of(fluidInputs, fluidOutputs)) {
+        for (var row : source) {
+          if (row.triggerTime > 0) {
+            rows.add(
+                new TriggeredResourceData.Row(
+                    "fluid",
+                    source == fluidInputs ? RecipeModifier.Io.INPUT : RecipeModifier.Io.OUTPUT,
+                    row.triggerTime,
+                    row.triggerRepeatable,
+                    row.stack.getAmount(),
+                    row.chance,
+                    source == fluidInputs ? fluidInputSelector : fluidOutputSelector,
+                    Optional.empty(),
+                    Optional.of(row.stack.copyWithAmount(1)),
+                    Optional.empty(),
+                    row.parallelUnaffected,
+                    "exact"));
+          }
+        }
+      }
+      for (var source : List.of(chemicalInputs, chemicalOutputs)) {
+        for (var row : source) {
+          if (row.triggerTime > 0) {
+            rows.add(
+                new TriggeredResourceData.Row(
+                    "chemical",
+                    source == chemicalInputs ? RecipeModifier.Io.INPUT : RecipeModifier.Io.OUTPUT,
+                    row.triggerTime,
+                    row.triggerRepeatable,
+                    row.amount,
+                    row.chance,
+                    row.selector,
+                    Optional.empty(),
+                    Optional.empty(),
+                    Optional.of(row.chemical),
+                    false,
+                    "exact"));
+          }
+        }
+      }
+      return new TriggeredResourceData(rows);
     }
 
     private <T> JsonElement encode(Codec<T> codec, T value) {

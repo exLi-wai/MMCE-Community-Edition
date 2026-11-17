@@ -12,6 +12,7 @@ import net.minecraft.core.NonNullList;
 import net.minecraft.resources.ResourceLocation;
 import net.minecraft.world.item.ItemStack;
 import java.util.Optional;
+import com.lw.modularmachine.machine.upgrade.UpgradeRecipeCheckHandlers;
 
 /** Atomic item-input commit for one independent factory channel. */
 public final class FactoryRecipeStarter {
@@ -117,12 +118,6 @@ public final class FactoryRecipeStarter {
       if (fluidDebits == null) {
         return Result.STALE;
       }
-      additionalResources = RecipeResourceExecutionRegistry
-          .prepareStart(ticket, nativeRecipe.orElseThrow().resourceData(), 1);
-      if (additionalResources == null) {
-        return Result.STALE;
-      }
-      resources.enlistAdditional(additionalResources);
       var startCosts = plan.prepareFactoryStartup(factory, threadId, 1);
       if (!startCosts.current()) {
         return Result.STALE;
@@ -180,6 +175,15 @@ public final class FactoryRecipeStarter {
       if (fluidDebits == null) {
         return Result.STALE;
       }
+      if (!RecipeItemPayments
+          .apply(ticket, nativeRecipe.orElseThrow(), 1, false, plan.inputChanceSeed(), replacements)) {
+        return Result.STALE;
+      }
+      additionalResources = RecipeResourceExecutionRegistry.preparePaidStart(ticket, List.of(run));
+      if (additionalResources == null) {
+        return Result.STALE;
+      }
+      resources.enlistAdditional(additionalResources);
       if (!plan.factoryAdmissionCurrent(factory, threadId)
           || !plan.preparedOutputsCurrent(1)
           || !run.preparedItemCallbacksCurrent()
@@ -212,7 +216,7 @@ public final class FactoryRecipeStarter {
       factory.runState().installRun(threadId, run);
       committed = true;
       return Result.STARTED;
-    } catch (com.lw.modularmachine.machine.upgrade.UpgradeRecipeCheckHandlers.StaleException stale) {
+    } catch (UpgradeRecipeCheckHandlers.StaleException stale) {
       return Result.STALE;
     } catch (RuntimeException failure) {
       ModularMachine.LOGGER.warn("Factory recipe start failed at {}", factory.getBlockPos(), failure);

@@ -1,6 +1,10 @@
 package com.lw.modularmachine.client.recipe;
 
 import com.lw.modularmachine.machine.recipe.MachineRecipe;
+import com.lw.modularmachine.api.recipe.ChemicalRequirement;
+import com.lw.modularmachine.api.recipe.IngredientArrayData;
+import com.lw.modularmachine.api.component.ChemicalStackData;
+import com.lw.modularmachine.client.ChemicalDisplay;
 import com.lw.modularmachine.util.minecraft.energy.EnergyDisplay;
 import java.math.BigInteger;
 import java.text.NumberFormat;
@@ -15,6 +19,7 @@ import net.minecraft.network.chat.Component;
 import net.minecraft.resources.ResourceLocation;
 import net.minecraft.world.item.ItemStack;
 import net.neoforged.neoforge.fluids.FluidStack;
+import com.lw.modularmachine.api.recipe.RecipeModifier;
 
 /** Shared recipe artwork, quantities and descriptions for JEI and EMI. */
 public final class MachineRecipeDisplay {
@@ -89,7 +94,10 @@ public final class MachineRecipeDisplay {
 
   private static List<Component> itemTooltip(MachineRecipe.ItemAmount amount, boolean input, boolean includeChance) {
     var result = new ArrayList<Component>();
-    result.add(Component.translatable("jei.mmcece.machine_item.amount", amount.amount()));
+    result.add(
+        amount.minimumAmount() == amount.amount() ? Component
+            .translatable("jei.mmcece.machine_item.amount", amount.amount()) : Component
+                .translatable("jei.mmcece.machine_item.amount_range", amount.minimumAmount(), amount.amount()));
     if (includeChance && amount.chance() < 1) {
       var format = NumberFormat.getNumberInstance();
       format.setMaximumFractionDigits(2);
@@ -109,19 +117,21 @@ public final class MachineRecipeDisplay {
 
   public static List<FluidStack> fluids(MachineRecipe recipe, boolean input) {
     var result = new ArrayList<FluidStack>();
-    if (input && !recipe.fluidPerTick().isEmpty()) {
-      result.add(recipe.fluidPerTick());
-    }
+    (input ? recipe.fluidPerTickInputs() : recipe.fluidPerTickOutputs()).forEach(row -> result.add(row.stack()));
     result.addAll(input ? recipe.fluidInputs() : recipe.fluidOutputs());
 
     return List.copyOf(result);
   }
 
   public static List<Component> fluidTooltip(MachineRecipe recipe, FluidStack fluid, boolean input, int index) {
-    boolean perTick = input && index == 0 && !recipe.fluidPerTick().isEmpty();
+    var tickRows = input ? recipe.fluidPerTickInputs() : recipe.fluidPerTickOutputs();
+    boolean perTick = index < tickRows.size();
+    var row = perTick ? tickRows
+        .get(index) : (input ? recipe.fluidInputRequirements() : recipe.fluidOutputRequirements())
+            .get(index - tickRows.size());
     String selector;
     if (perTick) {
-      selector = recipe.selectors().fluidPerTick();
+      selector = row.selector().isEmpty() && input ? recipe.selectors().fluidPerTick() : row.selector();
     } else {
       selector = input ? recipe.selectors().fluidInput() : recipe.selectors().fluidOutput();
     }
@@ -131,6 +141,14 @@ public final class MachineRecipeDisplay {
             perTick ? "jei.mmcece.legacy.fluid_tick" : "jei.mmcece.machine_item.fluid_amount",
             fluid.getAmount()));
     result.add(selector(selector));
+    if (row.chance() < 1) {
+      var format = NumberFormat.getNumberInstance();
+      format.setMaximumFractionDigits(2);
+      String chance = row.chance() < .0001D ? "< 0.01%" : format.format(row.chance() * 100) + "%";
+      String key = input ? row.chance() == 0 ? "tooltip.machinery.chance.in.never" : "tooltip.machinery.chance.in" : row
+          .chance() == 0 ? "tooltip.machinery.chance.out.never" : "tooltip.machinery.chance.out";
+      result.add(Component.translatable(key, chance));
+    }
     if (!fluid.getComponentsPatch().isEmpty()) {
       result.add(
           Component.translatable("jei.mmcece.machine_item.fluid_components", fluid.getComponentsPatch().toString()));
@@ -144,6 +162,89 @@ public final class MachineRecipeDisplay {
     result.add(Component.translatable("jei.mmcece.machine_item.priority", recipe.priority()));
     result.add(Component.translatable("jei.mmcece.machine_item.input_groups"));
     recipe.scriptOptions().tooltips().forEach(line -> result.add(Component.literal(line)));
+    recipe.ingredientArrays().inputs().forEach(group -> groupDetails(result, group, false));
+    recipe.ingredientArrays().randomOutputs().forEach(group -> groupDetails(result, group, true));
+    for (var tool : recipe.itemPayments().tools()) {
+      result.add(
+          Component.translatable(
+              "jei.mmcece.machine_item.durability",
+              recipe.inputs().get(tool.row()).displayStack().getHoverName(),
+              tool.durability()));
+    }
+    for (var fuel : recipe.itemPayments().fuels()) {
+      result.add(Component.translatable("jei.mmcece.machine_item.fuel", fuel.burnTime()));
+      result.add(selector(fuel.selector()));
+    }
+    for (var row : recipe.triggeredResources().rows()) {
+      Component name = switch (row.resource()) {
+        case "item" -> row.item().orElseThrow().getHoverName();
+        case "fluid" -> row.fluid().orElseThrow().getHoverName();
+        default -> ChemicalDisplay.describe(new ChemicalStackData(row.chemical().orElseThrow(), row.amount())).name();
+      };
+      result.add(
+          Component.translatable(
+              "jei.mmcece.machine_item.trigger",
+              row.tick(),
+              row.io() == RecipeModifier.Io.INPUT ? "→" : "←",
+              name,
+              row.amount()));
+      if (row.repeatable()) {
+        result.add(Component.translatable("jei.mmcece.machine_item.trigger_repeatable"));
+      }
+      result.add(selector(row.selector()));
+    }
+    for (boolean input : new boolean[]{true, false}) {
+      for (boolean tick : new boolean[]{false, true}) {
+        var chemicals = tick ? input ? recipe.chemicals().perTick() : recipe.chemicals()
+            .perTickOutputs() : input ? recipe.chemicals().inputs() : recipe.chemicals().outputs();
+        chemicals.forEach(row -> result.addAll(chemicalTooltip(row, input, tick)));
+      }
+    }
+
+    return List.copyOf(result);
+  }
+
+  private static void groupDetails(List<Component> result, IngredientArrayData.Group group, boolean output) {
+    String key = output ? "random_output" : group.optional() ? "catalyst" : "alternatives";
+    result.add(Component.translatable("jei.mmcece.machine_item." + key));
+    int shown = Math.min(8, group.alternatives().size());
+    for (int index = 0; index < shown; index++) {
+      var choice = group.alternatives().get(index);
+      Component name = switch (choice.resource()) {
+        case "item" -> choice.item().orElseThrow().getHoverName();
+        case "fluid" -> choice.fluid().orElseThrow().getHoverName();
+        default ->
+          ChemicalDisplay.describe(new ChemicalStackData(choice.chemical().orElseThrow(), choice.amount())).name();
+      };
+      String amount = choice.minAmount() == choice.maxAmount() ? Long
+          .toString(choice.amount()) : choice.minAmount() + ".." + choice.maxAmount();
+      var line = Component.literal("  ").append(name).append(" ×" + amount);
+      if (output) {
+        line.append(Component.translatable("jei.mmcece.machine_item.weight", choice.chance()));
+      }
+      result.add(line);
+    }
+    if (shown < group.alternatives().size()) {
+      result.add(
+          Component.translatable("jei.mmcece.machine_item.more_alternatives", group.alternatives().size() - shown));
+    }
+    group.tooltips().forEach(line -> result.add(Component.literal(line)));
+    result.add(selector(group.selector()));
+  }
+
+  private static List<Component> chemicalTooltip(ChemicalRequirement row, boolean input, boolean perTick) {
+    var result = new ArrayList<Component>();
+    var name = ChemicalDisplay.describe(new ChemicalStackData(row.chemical(), row.amount())).name();
+    result.add(Component.literal(input ? "→ " : "← ").append(name).append(" ×" + row.amount() + (perTick ? "/t" : "")));
+    result.add(selector(row.selector()));
+    if (row.chance() < 1) {
+      var format = NumberFormat.getNumberInstance();
+      format.setMaximumFractionDigits(2);
+      String chance = row.chance() < .0001D ? "< 0.01%" : format.format(row.chance() * 100) + "%";
+      String key = input ? row.chance() == 0 ? "tooltip.machinery.chance.in.never" : "tooltip.machinery.chance.in" : row
+          .chance() == 0 ? "tooltip.machinery.chance.out.never" : "tooltip.machinery.chance.out";
+      result.add(Component.translatable(key, chance));
+    }
 
     return List.copyOf(result);
   }

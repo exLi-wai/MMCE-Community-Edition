@@ -27,6 +27,8 @@ import net.minecraft.world.item.Items;
 import net.minecraft.world.item.crafting.Recipe;
 import net.neoforged.neoforge.gametest.GameTestHolder;
 import net.neoforged.neoforge.gametest.PrefixGameTestTemplate;
+import java.util.Locale;
+import net.minecraft.nbt.Tag;
 
 /**
  * Isolated regression for optional preview stacks in the registered recipe wire
@@ -250,15 +252,14 @@ public final class RecipePreviewStreamGameTest {
     var ports = new ListTag();
     for (var kind : List.of(PortKind.ITEM_INPUT, PortKind.ITEM_OUTPUT, PortKind.FLUID_INPUT)) {
       var port = new CompoundTag();
-      port.putString("id", kind.name().toLowerCase(java.util.Locale.ROOT));
+      port.putString("id", kind.name().toLowerCase(Locale.ROOT));
       port.putString("kind", kind.name());
       ports.add(port);
     }
     saved.put("ports", ports);
     var restored = FrozenRecipeRun.read(saved, registries);
     helper.assertTrue(restored.resourceData(registries).equals(recipe.resourceData()), "Saved resource data changed");
-    definition.getList("fluid_inputs", net.minecraft.nbt.Tag.TAG_COMPOUND).getCompound(0)
-        .putString("id", "mmcece:unregistered_fluid");
+    definition.getList("fluid_inputs", Tag.TAG_COMPOUND).getCompound(0).putString("id", "mmcece:unregistered_fluid");
     boolean rejected = false;
     try {
       FrozenRecipeRun.read(saved, registries);

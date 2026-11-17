@@ -6,10 +6,13 @@ import com.lw.modularmachine.api.recipe.resource.RecipeResourcePlanning;
 import com.lw.modularmachine.api.recipe.resource.RecipeResourceType;
 import com.lw.modularmachine.api.recipe.resource.RecipeResources;
 import com.lw.modularmachine.machine.recipe.FrozenRecipeRun;
+import com.lw.modularmachine.machine.recipe.RecipeTriggeredResources;
+import com.lw.modularmachine.machine.recipe.TriggeredItemExecution;
 import com.lw.modularmachine.machine.recipe.PatternInputTransaction;
 import com.lw.modularmachine.machine.recipe.RecipeCommitGuard;
 import com.lw.modularmachine.machine.recipe.RecipeExecutionTicket;
 import com.lw.modularmachine.machine.recipe.resource.chemical.ChemicalResourceExecution;
+import com.lw.modularmachine.machine.recipe.resource.fluid.FluidTickResourceExecution;
 import com.lw.modularmachine.machine.recipe.search.RecipePlanner;
 import com.lw.modularmachine.machine.recipe.search.ResourcePlanningSequence;
 import com.lw.modularmachine.machine.structure.StructureService;
@@ -51,6 +54,14 @@ public final class RecipeResourceExecutionRegistry {
         ChemicalResourceExecution.finish(),
         ChemicalResourceExecution.freeze(),
         ChemicalResourceExecution.validation());
+    register(
+        RecipeResourceDefinitions.FLUID,
+        FluidTickResourceExecution.admission(),
+        FluidTickResourceExecution.start(),
+        FluidTickResourceExecution.tick(),
+        FluidTickResourceExecution.finish(),
+        FluidTickResourceExecution.freeze(),
+        FluidTickResourceExecution.validation());
   }
 
   private RecipeResourceExecutionRegistry() {
@@ -76,7 +87,7 @@ public final class RecipeResourceExecutionRegistry {
     Objects.requireNonNull(validation, "validation");
     RecipeResourceDefinitions.requireRegistered(type);
     if (installed != null
-        || ENGINE_OWNED.containsKey(type)
+        || ENGINE_OWNED.containsKey(type) && type != RecipeResourceDefinitions.FLUID
         || BINDINGS.stream().anyMatch(binding -> binding.type().id().equals(type.id()))) {
       throw new IllegalStateException("Duplicate or late resource execution registration: " + type.id());
     }
@@ -153,6 +164,42 @@ public final class RecipeResourceExecutionRegistry {
   private static <D> PreparedRecipeResource prepareStart(Binding<D> binding, RecipeExecutionTicket ticket, RecipeResources resources, int instances) {
     return binding.start()
         .prepare(List.of(new RecipeResourceExecution.Input<>(ticket, resources.get(binding.type()), instances)));
+  }
+
+  /**
+   * Frozen run seeds select actual debits only after full shared demand proof.
+   */
+  public static Prepared preparePaidStart(RecipeExecutionTicket ticket, List<FrozenRecipeRun> runs) {
+    ticket.requireServerThread();
+    if (runs.isEmpty()) {
+      throw new IllegalArgumentException("A paid start requires frozen runs");
+    }
+    var bindings = snapshot();
+    var resources = runs.stream().map(run -> run.resourceData(ticket.level().registryAccess())).toList();
+    resources.forEach(value -> requireSupported(value, bindings));
+    var participants = new ArrayList<PreparedRecipeResource>();
+    for (var binding : bindings) {
+      if (resources.stream().allMatch(value -> isEmpty(binding, value))) {
+        continue;
+      }
+      var participant = preparePaidStart(binding, ticket, runs, resources);
+      if (participant == null) {
+        return null;
+      }
+      participants.add(participant);
+    }
+
+    return new Prepared(participants, List.of(ticket), !participants.isEmpty());
+  }
+
+  private static <D> PreparedRecipeResource preparePaidStart(Binding<D> binding, RecipeExecutionTicket ticket, List<FrozenRecipeRun> runs, List<RecipeResources> resources) {
+    var claims = new ArrayList<RecipeResourceExecution.Input<D>>();
+    for (int index = 0; index < runs.size(); index++) {
+      var data = resources.get(index).get(binding.type());
+      claims.add(new RecipeResourceExecution.Input<>(ticket, data, 1, Optional.of(runs.get(index))));
+    }
+
+    return binding.start().prepare(List.copyOf(claims));
   }
 
   /**
@@ -308,9 +355,19 @@ public final class RecipeResourceExecutionRegistry {
       throw new IllegalStateException("Resource tick preparation outside server thread");
     }
     var bindings = snapshot();
-    var resources = runs.stream().map(run -> run.resourceData(owner.structureLevel().registryAccess())).toList();
+    var resources = runs.stream()
+        .map(run -> RecipeTriggeredResources.effective(run, run.resourceData(owner.structureLevel().registryAccess())))
+        .toList();
     resources.forEach(value -> requireSupported(value, bindings));
     var prepared = new ArrayList<PreparedRecipeResource>();
+    if (runs.stream().anyMatch(run -> !run.triggeredResources().isEmpty())) {
+      var triggeredItems = TriggeredItemExecution.prepare(owner, runs);
+      if (triggeredItems.status() != RecipeResourceExecution.TickStatus.READY) {
+        return new TickPreparation(triggeredItems.status(), RecipeResourceDefinitions.ITEM, null);
+      }
+      // Scheduled IO also needs transactional progress before its due position.
+      prepared.add(triggeredItems.prepared());
+    }
     for (var binding : bindings) {
       var result = prepareTick(binding, owner, runs, resources);
       if (result == null) {
@@ -333,7 +390,8 @@ public final class RecipeResourceExecutionRegistry {
     var resources = run.resourceData(registries);
     requireSupported(resources, bindings);
 
-    return bindings.stream().anyMatch(binding -> tickRequired(binding, resources));
+    return !run.triggeredResources().isEmpty()
+        || bindings.stream().anyMatch(binding -> tickRequired(binding, resources));
   }
 
   private static <D> boolean tickRequired(Binding<D> binding, RecipeResources resources) {
@@ -346,7 +404,12 @@ public final class RecipeResourceExecutionRegistry {
    * A failure-policy recheck evaluates only the resource that actually failed.
    */
   public static boolean stillUnavailable(StructureService.StructureSubject owner, List<FrozenRecipeRun> runs, RecipeResourceType<?> resource) {
-    var resources = runs.stream().map(run -> run.resourceData(owner.structureLevel().registryAccess())).toList();
+    if (resource == RecipeResourceDefinitions.ITEM) {
+      return TriggeredItemExecution.prepare(owner, runs).status() == RecipeResourceExecution.TickStatus.INSUFFICIENT;
+    }
+    var resources = runs.stream()
+        .map(run -> RecipeTriggeredResources.effective(run, run.resourceData(owner.structureLevel().registryAccess())))
+        .toList();
     for (var binding : snapshot()) {
       if (binding.type() == resource) {
         var result = prepareTick(binding, owner, runs, resources);
@@ -359,6 +422,9 @@ public final class RecipeResourceExecutionRegistry {
   }
 
   public static boolean stillUnavailable(StructureService.StructureSubject owner, List<FrozenRecipeRun> runs, ResourceType resource) {
+    if (resource == ResourceType.ITEM) {
+      return stillUnavailable(owner, runs, RecipeResourceDefinitions.ITEM);
+    }
     for (var binding : snapshot()) {
       if (binding.type().id().equals(resource.id())) {
         return stillUnavailable(owner, runs, binding.type());

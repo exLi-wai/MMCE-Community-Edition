@@ -37,6 +37,7 @@ public final class MachineRecipeBuilder {
   private final List<ChemicalRequirement> chemicalInputs = new ArrayList<>();
   private final List<ChemicalRequirement> chemicalOutputs = new ArrayList<>();
   private final List<ChemicalRequirement> chemicalPerTick = new ArrayList<>();
+  private final List<ChemicalRequirement> chemicalPerTickOutputs = new ArrayList<>();
   private final List<SmartNumberRequirement> interfaceInputs = new ArrayList<>();
   private final List<RecipeModifier> modifiers = new ArrayList<>();
   private final Map<ResourceLocation, RecipeResources.Entry<?>> resourceDeclarations = new LinkedHashMap<>();
@@ -46,7 +47,8 @@ public final class MachineRecipeBuilder {
   private int priority;
   private long energyPerTick, energyOutputPerTick, randomSeed;
   private RecipeExecutionOptions executionOptions = RecipeExecutionOptions.NONE;
-  private FluidStack fluidPerTick = FluidStack.EMPTY;
+  private final List<FluidRequirement> fluidPerTickInputs = new ArrayList<>();
+  private final List<FluidRequirement> fluidPerTickOutputs = new ArrayList<>();
 
   private MachineRecipeBuilder(ResourceLocation id, ResourceLocation machine, int duration) {
     this.id = Objects.requireNonNull(id, "id");
@@ -93,7 +95,24 @@ public final class MachineRecipeBuilder {
   }
 
   public MachineRecipeBuilder fluidPerTick(FluidStack fluid) {
-    fluidPerTick = requireFluid(fluid);
+    return fluidPerTickInput(fluid, 1, "");
+  }
+
+  public MachineRecipeBuilder fluidPerTickInput(FluidStack fluid) {
+    return fluidPerTickInput(fluid, 1, "");
+  }
+
+  public MachineRecipeBuilder fluidPerTickInput(FluidStack fluid, double chance, String selector) {
+    fluidPerTickInputs.add(new FluidRequirement(requireFluid(fluid), chance, false, selector));
+    return this;
+  }
+
+  public MachineRecipeBuilder fluidPerTickOutput(FluidStack fluid) {
+    return fluidPerTickOutput(fluid, 1, "");
+  }
+
+  public MachineRecipeBuilder fluidPerTickOutput(FluidStack fluid, double chance, String selector) {
+    fluidPerTickOutputs.add(new FluidRequirement(requireFluid(fluid), chance, false, selector));
     return this;
   }
 
@@ -133,7 +152,11 @@ public final class MachineRecipeBuilder {
   }
 
   public MachineRecipeBuilder chemicalInput(ResourceLocation chemical, long amount, String selector) {
-    chemicalInputs.add(new ChemicalRequirement(chemical, amount, selector));
+    return chemicalInput(chemical, amount, 1, selector);
+  }
+
+  public MachineRecipeBuilder chemicalInput(ResourceLocation chemical, long amount, double chance, String selector) {
+    chemicalInputs.add(new ChemicalRequirement(chemical, amount, selector, chance));
     return this;
   }
 
@@ -142,7 +165,11 @@ public final class MachineRecipeBuilder {
   }
 
   public MachineRecipeBuilder chemicalOutput(ResourceLocation chemical, long amount, String selector) {
-    chemicalOutputs.add(new ChemicalRequirement(chemical, amount, selector));
+    return chemicalOutput(chemical, amount, 1, selector);
+  }
+
+  public MachineRecipeBuilder chemicalOutput(ResourceLocation chemical, long amount, double chance, String selector) {
+    chemicalOutputs.add(new ChemicalRequirement(chemical, amount, selector, chance));
     return this;
   }
 
@@ -151,7 +178,24 @@ public final class MachineRecipeBuilder {
   }
 
   public MachineRecipeBuilder chemicalPerTick(ResourceLocation chemical, long amount, String selector) {
-    chemicalPerTick.add(new ChemicalRequirement(chemical, amount, selector));
+    return chemicalPerTick(chemical, amount, 1, selector);
+  }
+
+  public MachineRecipeBuilder chemicalPerTick(ResourceLocation chemical, long amount, double chance, String selector) {
+    chemicalPerTick.add(new ChemicalRequirement(chemical, amount, selector, chance));
+    return this;
+  }
+
+  public MachineRecipeBuilder chemicalPerTickOutput(ResourceLocation chemical, long amount) {
+    return chemicalPerTickOutput(chemical, amount, 1, "");
+  }
+
+  public MachineRecipeBuilder chemicalPerTickOutput(ResourceLocation chemical, long amount, String selector) {
+    return chemicalPerTickOutput(chemical, amount, 1, selector);
+  }
+
+  public MachineRecipeBuilder chemicalPerTickOutput(ResourceLocation chemical, long amount, double chance, String selector) {
+    chemicalPerTickOutputs.add(new ChemicalRequirement(chemical, amount, selector, chance));
     return this;
   }
 
@@ -244,12 +288,15 @@ public final class MachineRecipeBuilder {
     if (executionOptions.maxThreads() > 0) {
       json.addProperty("max_threads", executionOptions.maxThreads());
     }
-    if (!fluidPerTick.isEmpty()) {
-      json.add("fluid_per_tick", encode(FluidStack.CODEC, fluidPerTick, registries));
+    if (!fluidPerTickInputs.isEmpty()) {
+      json.add("fluid_per_tick_inputs", encode(FluidRequirement.CODEC.listOf(), fluidPerTickInputs, registries));
+    }
+    if (!fluidPerTickOutputs.isEmpty()) {
+      json.add("fluid_per_tick_outputs", encode(FluidRequirement.CODEC.listOf(), fluidPerTickOutputs, registries));
     }
     addFluids(json, "fluid_inputs", fluidInputs, registries);
     addFluids(json, "fluid_outputs", fluidOutputs, registries);
-    var chemicals = new ChemicalRecipeData(chemicalInputs, chemicalOutputs, chemicalPerTick);
+    var chemicals = new ChemicalRecipeData(chemicalInputs, chemicalOutputs, chemicalPerTick, chemicalPerTickOutputs);
     if (!chemicals.isEmpty()) {
       json.add("chemicals", encode(ChemicalRecipeData.CODEC, chemicals, registries));
     }

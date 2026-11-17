@@ -22,9 +22,14 @@ final class KubeJSRecipeRows {
   }
 
   static final class ItemRow {
+    int triggerTime;
+    boolean triggerRepeatable;
     final ItemStack prototype;
-    final long amount;
+    long amount;
+    long minAmount;
+    long maxAmount;
     double chance = 1;
+    int consumeDurability;
     boolean parallelUnaffected;
     String selector = "";
     String match = "exact";
@@ -42,9 +47,12 @@ final class KubeJSRecipeRows {
   }
 
   static final class ChemicalRow {
+    int triggerTime;
+    boolean triggerRepeatable;
     final ResourceLocation chemical;
     final long amount;
     String selector = "";
+    double chance = 1;
 
     ChemicalRow(ResourceLocation chemical, long amount) {
       this.chemical = chemical;
@@ -52,14 +60,17 @@ final class KubeJSRecipeRows {
     }
 
     ChemicalRequirement requirement() {
-      return new ChemicalRequirement(chemical, amount, selector);
+      return new ChemicalRequirement(chemical, amount, selector, chance);
     }
   }
 
   static final class FluidRow {
+    int triggerTime;
+    boolean triggerRepeatable;
     final FluidStack stack;
     double chance = 1;
     boolean parallelUnaffected;
+    String selector = "";
 
     FluidRow(FluidStack stack) {
       this.stack = stack;
@@ -67,6 +78,10 @@ final class KubeJSRecipeRows {
 
     FluidRequirement requirement() {
       return new FluidRequirement(stack, chance, parallelUnaffected);
+    }
+
+    FluidRequirement tickRequirement() {
+      return new FluidRequirement(stack, chance, parallelUnaffected, selector);
     }
   }
 

@@ -18,11 +18,13 @@ import net.minecraft.nbt.StringTag;
 import net.minecraft.nbt.Tag;
 import net.minecraft.resources.ResourceLocation;
 import net.minecraft.world.item.crafting.Recipe;
+import com.lw.modularmachine.api.recipe.RecipeScriptOptions;
+import org.jetbrains.annotations.ApiStatus;
 
 /**
  * Builds a frozen paid recipe declaration once, before the resource/run commit.
  */
-@org.jetbrains.annotations.ApiStatus.Internal
+@ApiStatus.Internal
 final class FrozenRecipeFactory {
   private FrozenRecipeFactory() {
   }
@@ -59,24 +61,31 @@ final class FrozenRecipeFactory {
   }
 
   static FrozenRecipeRun freeze(ResourceLocation recipeId, MachineRecipe recipe, long epoch, HolderLookup.Provider registries, List<RecipePortSnapshot> ports, long tick, UpgradeSnapshot upgrades, int inputGroup, int parallelInstances, Map<String, Integer> dynamicLengths, RecipeItemCallbacks.Context callbackContext) {
+    if (RecipeTriggeredResources.arithmeticLimit(recipe, parallelInstances, true, upgrades) < parallelInstances) {
+      throw new IllegalArgumentException("Combined trigger and per-tick amounts exceed frozen arithmetic limits");
+    }
     var encodedDefinition = Recipe.CODEC.encodeStart(registries.createSerializationContext(NbtOps.INSTANCE), recipe)
         .getOrThrow();
     if (!(encodedDefinition instanceof CompoundTag)) {
       throw new IllegalArgumentException("Machine recipe did not encode as a compound");
     }
     var definition = applyUpgrades((CompoundTag) encodedDefinition, upgrades);
+    UUID runId = UUID.randomUUID();
+    long seed = recipe.randomSeed() == 0 ? (runId.getMostSignificantBits() ^ runId
+        .getLeastSignificantBits()) & Long.MAX_VALUE : recipe.randomSeed();
+    RecipeRandomItemOutputs.freeze(definition, seed, parallelInstances, registries);
     RecipeResourceExecutionRegistry.freezeDefinition(definition, parallelInstances, registries);
     scaleDefinition(definition, parallelInstances);
     long callbackEpoch = -1;
-    if (!recipe.scriptOptions().itemCallbacks().isEmpty()) {
+    var frozenOptions = RecipeScriptOptions.CODEC.codec().parse(NbtOps.INSTANCE, definition).getOrThrow();
+    if (!frozenOptions.itemCallbacks().isEmpty()) {
       if (callbackContext == null) {
         throw new IllegalArgumentException("Item callback recipes require a prepared controller context");
       }
       var declaration = NbtOps.INSTANCE.convertTo(JsonOps.INSTANCE, definition).getAsJsonObject();
       MachineRecipeJson.restoreRowBooleans(declaration, definition);
       declaration.addProperty("parallelized", definition.getBoolean("parallelized"));
-      var prepared = RecipeItemCallbackService
-          .prepareOutputs(declaration, recipe.scriptOptions(), callbackContext, registries)
+      var prepared = RecipeItemCallbackService.prepareOutputs(declaration, frozenOptions, callbackContext, registries)
           .orElseThrow(() -> new IllegalStateException("Item callback preparation rejected the recipe"));
       var parsed = MachineRecipe.CODEC.codec()
           .parse(registries.createSerializationContext(JsonOps.INSTANCE), prepared.declaration()).getOrThrow();
@@ -86,7 +95,6 @@ final class FrozenRecipeFactory {
     }
     int duration = definition.getInt("duration");
     var tag = new CompoundTag();
-    UUID runId = UUID.randomUUID();
     tag.putInt("schema", 3);
     tag.putInt("input_group", InputGroup.require(inputGroup));
     tag.putInt("parallel_instances", parallelInstances);
@@ -96,8 +104,15 @@ final class FrozenRecipeFactory {
     tag.putString("recipe", recipeId.toString());
     tag.putInt("duration", duration);
     tag.putInt("progress", 0);
+    if (definition.contains("triggered_resources", Tag.TAG_LIST)) {
+      tag.putInt("trigger_progress", 0);
+    }
     if (recipe.energyOutputPerTick() > 0) {
       tag.putInt("energy_output_progress", 0);
+    }
+    if (!definition.getCompound("chemicals").getList("per_tick_outputs", Tag.TAG_COMPOUND).isEmpty()
+        || !definition.getList("fluid_per_tick_outputs", Tag.TAG_COMPOUND).isEmpty()) {
+      tag.putInt("resource_output_progress", 0);
     }
     tag.putString("state", "RUNNING");
     tag.putLong("last_progress_tick", tick);
@@ -106,8 +121,6 @@ final class FrozenRecipeFactory {
     if (callbackEpoch >= 0) {
       tag.putLong("item_callback_epoch", callbackEpoch);
     }
-    long seed = recipe.randomSeed() == 0 ? (runId.getMostSignificantBits() ^ runId
-        .getLeastSignificantBits()) & Long.MAX_VALUE : recipe.randomSeed();
     tag.putLong("random_seed", seed);
     tag.put("definition", definition);
     var mapping = new ListTag();
@@ -192,12 +205,18 @@ final class FrozenRecipeFactory {
   static CompoundTag applyUpgrades(CompoundTag source, UpgradeSnapshot upgrades) {
     var definition = source.copy();
     int duration = upgrades.durationFor(definition.getInt("duration"));
+    RecipeTriggeredResources.upgrade(definition, definition.getInt("duration"), duration);
     definition.putInt("duration", duration);
     if (definition.contains("energy_per_tick", Tag.TAG_ANY_NUMERIC)) {
       definition.putLong("energy_per_tick", upgrades.energyPerTick(definition.getLong("energy_per_tick")));
     }
     if (definition.contains("fluid_per_tick", Tag.TAG_COMPOUND)) {
       var fluidFee = definition.getCompound("fluid_per_tick");
+      fluidFee.putInt("amount", Math.toIntExact(upgrades.fluidPerTick(fluidFee.getInt("amount"))));
+    }
+    var fluidFees = definition.getList("fluid_per_tick_inputs", Tag.TAG_COMPOUND);
+    for (int index = 0; index < fluidFees.size(); index++) {
+      var fluidFee = fluidFees.getCompound(index);
       fluidFee.putInt("amount", Math.toIntExact(upgrades.fluidPerTick(fluidFee.getInt("amount"))));
     }
 
@@ -222,6 +241,9 @@ final class FrozenRecipeFactory {
     scaleRows(definition, "inputs", instances);
     scaleRows(definition, "fluid_inputs", instances);
     scaleRows(definition, "fluid_outputs", instances);
+    scaleRows(definition, "fluid_per_tick_inputs", instances);
+    scaleRows(definition, "fluid_per_tick_outputs", instances);
+    RecipeTriggeredResources.scale(definition, instances);
     if (definition.contains("fluid_per_tick", Tag.TAG_COMPOUND)) {
       var fee = definition.getCompound("fluid_per_tick");
       fee.putInt("amount", Math.toIntExact(Math.multiplyExact(fee.getInt("amount"), instances)));
@@ -243,6 +265,10 @@ final class FrozenRecipeFactory {
         row.putInt("amount", Math.toIntExact(amount));
       } else {
         row.putLong("amount", amount);
+        if (row.contains("max_amount", Tag.TAG_ANY_NUMERIC) && row.getLong("max_amount") > 0) {
+          row.putLong("min_amount", Math.multiplyExact(row.getLong("min_amount"), instances));
+          row.putLong("max_amount", amount);
+        }
       }
     }
   }

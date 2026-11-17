@@ -152,6 +152,15 @@ public final class AtomicRecipeStarter {
       if (replacements == null) {
         return Result.STALE;
       }
+      if (!RecipeItemPayments.apply(
+          checked.orElseThrow(),
+          nativeRecipe.orElseThrow(),
+          instances,
+          true,
+          plan.inputChanceSeed(),
+          replacements)) {
+        return Result.STALE;
+      }
       var fluidDebits = planFluidDebits(
           checked.orElseThrow(),
           nativeRecipe.orElseThrow(),
@@ -161,8 +170,7 @@ public final class AtomicRecipeStarter {
       if (fluidDebits == null) {
         return Result.STALE;
       }
-      additionalResources = RecipeResourceExecutionRegistry
-          .prepareStart(checked.orElseThrow(), nativeRecipe.orElseThrow().resourceData(), instances);
+      additionalResources = RecipeResourceExecutionRegistry.preparePaidStart(checked.orElseThrow(), List.of(run));
       if (additionalResources == null) {
         return Result.STALE;
       }

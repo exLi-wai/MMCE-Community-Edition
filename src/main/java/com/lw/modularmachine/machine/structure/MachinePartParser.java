@@ -27,12 +27,13 @@ import com.lw.modularmachine.machine.structure.MachineDefinition.Rule;
 import com.lw.modularmachine.machine.structure.MachineDefinition.Alternative;
 import com.lw.modularmachine.machine.structure.MachineDefinition.FieldCondition;
 import static com.lw.modularmachine.machine.structure.MachineDefinitionJson.*;
+import org.jetbrains.annotations.ApiStatus;
 
 /**
  * Part declarations, bounded alternatives and property expansion from captured
  * registry values.
  */
-@org.jetbrains.annotations.ApiStatus.Internal
+@ApiStatus.Internal
 final class MachinePartParser {
   static final long ALTERNATIVE_RESOURCE_BUDGET = 4_194_304L;
   private static final Logger LOGGER = LogUtils.getLogger();

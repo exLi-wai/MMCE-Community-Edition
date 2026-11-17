@@ -60,8 +60,8 @@ public final class MachineRecipeLayout {
   static int count(MachineRecipe recipe, Kind kind, boolean input) {
     return switch (kind) {
       case ENERGY -> input && recipe.energyPerTick() > 0 ? 1 : 0;
-      case FLUID ->
-        input ? recipe.fluidInputs().size() + (recipe.fluidPerTick().isEmpty() ? 0 : 1) : recipe.fluidOutputs().size();
+      case FLUID -> input ? recipe.fluidInputs().size() + recipe.fluidPerTickInputs().size() : recipe.fluidOutputs()
+          .size() + recipe.fluidPerTickOutputs().size();
       case ITEM -> input ? recipe.inputs().size() : recipe.outputs().size();
     };
   }

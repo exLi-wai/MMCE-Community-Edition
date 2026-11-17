@@ -29,7 +29,7 @@ public record RecipeModifier(Target target, Io io, Operation operation, double v
     if (!Double.isFinite(value)
         || operation == Operation.MULTIPLY && value < 0
         || target == Target.DURATION && io != Io.INPUT
-        || affectChance && (target != Target.ITEM && target != Target.FLUID || io != Io.OUTPUT)) {
+        || affectChance && target != Target.ITEM && target != Target.FLUID && target != Target.CHEMICAL) {
       throw new IllegalArgumentException("Unsupported modifier target/IO/chance or invalid numeric value");
     }
   }

@@ -13,6 +13,7 @@ import java.util.Map;
 import java.util.HashMap;
 import java.util.UUID;
 import org.jetbrains.annotations.ApiStatus;
+import java.util.Objects;
 
 /**
  * Advances the factory's paid batches before new searches, sharing existing
@@ -39,9 +40,9 @@ public final class FactoryRunCoordinator {
   }
 
   public FactoryRunCoordinator(FactoryThreadConfiguration threads, FactoryRunState runs, Host host) {
-    threadConfiguration = java.util.Objects.requireNonNull(threads, "threads");
-    runState = java.util.Objects.requireNonNull(runs, "runs");
-    this.host = java.util.Objects.requireNonNull(host, "host");
+    threadConfiguration = Objects.requireNonNull(threads, "threads");
+    runState = Objects.requireNonNull(runs, "runs");
+    this.host = Objects.requireNonNull(host, "host");
   }
 
   /**

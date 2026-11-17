@@ -30,13 +30,7 @@ public final class ChemicalTransactions {
   }
 
   public static List<ChemicalRequirement> scaled(List<ChemicalRequirement> requirements, int instances) {
-    return requirements.stream()
-        .map(
-            value -> new ChemicalRequirement(
-                value.chemical(),
-                Math.multiplyExact(value.amount(), instances),
-                value.selector()))
-        .toList();
+    return requirements.stream().map(value -> value.scaled(instances)).toList();
   }
 
   public static Batch inputs(RecipeExecutionTicket ticket, List<ChemicalRequirement> requirements) {
@@ -104,8 +98,11 @@ public final class ChemicalTransactions {
   }
 
   static int arithmeticLimit(MachineRecipe definition, int limit) {
-    for (var category : List
-        .of(definition.chemicals().inputs(), definition.chemicals().outputs(), definition.chemicals().perTick())) {
+    for (var category : List.of(
+        definition.chemicals().inputs(),
+        definition.chemicals().outputs(),
+        definition.chemicals().perTick(),
+        definition.chemicals().perTickOutputs())) {
       var totals = new LinkedHashMap<ChemicalResourceKey, Long>();
       for (var requirement : category) {
         totals.merge(

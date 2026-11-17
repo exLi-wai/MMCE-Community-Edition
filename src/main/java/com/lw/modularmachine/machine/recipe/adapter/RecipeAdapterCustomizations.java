@@ -32,6 +32,37 @@ final class RecipeAdapterCustomizations {
       return original;
     }
     var result = original.deepCopy();
+    if (!result.has("inputs")) {
+      result.add("inputs", new JsonArray());
+    }
+    if (!result.has("outputs")) {
+      result.add("outputs", new JsonArray());
+    }
+    var additions = JsonParser.parseString(customization.resourceAdditions().encoded()).getAsJsonObject();
+    int originalInputRows = result.getAsJsonArray("inputs").size();
+    if (additions.has("item_payments")) {
+      var payments = result.has("item_payments") ? result.getAsJsonObject("item_payments") : new JsonObject();
+      var addedPayments = additions.getAsJsonObject("item_payments").deepCopy();
+      if (addedPayments.has("tools")) {
+        for (var element : addedPayments.getAsJsonArray("tools")) {
+          var tool = element.getAsJsonObject();
+          tool.addProperty("row", Math.addExact(originalInputRows, tool.get("row").getAsInt()));
+        }
+        append(payments, "tools", addedPayments.getAsJsonArray("tools"));
+      }
+      if (addedPayments.has("fuels")) {
+        append(payments, "fuels", addedPayments.getAsJsonArray("fuels"));
+      }
+      result.add("item_payments", payments);
+    }
+    for (String field : List.of("inputs", "ingredient_arrays", "random_item_outputs", "triggered_resources")) {
+      if (additions.has(field)) {
+        append(result, field, additions.getAsJsonArray(field));
+      }
+    }
+    if (additions.has("load_jei")) {
+      result.add("load_jei", additions.get("load_jei"));
+    }
     int originalOutputRows = result.getAsJsonArray("outputs").size();
     for (var parallel : customization.itemParallelism()) {
       var rows = result.getAsJsonArray(parallel.io() == RecipeModifier.Io.INPUT ? "inputs" : "outputs");
@@ -49,13 +80,22 @@ final class RecipeAdapterCustomizations {
     append(result, "fluid_inputs", fluids(customization.fluidInputs()));
     append(result, "fluid_outputs", fluids(customization.fluidOutputs()));
     customization.fluidPerTick().ifPresent(fluid -> addFluidPerTick(result, fluid));
+    if (result.has("fluid_per_tick") && !customization.fluidPerTickInputs().isEmpty()) {
+      var prior = new JsonArray();
+      prior.add(result.remove("fluid_per_tick"));
+      append(result, "fluid_per_tick_inputs", prior);
+    }
+    append(result, "fluid_per_tick_inputs", fluids(customization.fluidPerTickInputs()));
+    append(result, "fluid_per_tick_outputs", fluids(customization.fluidPerTickOutputs()));
     if (!customization.chemicalInputs().isEmpty()
         || !customization.chemicalOutputs().isEmpty()
-        || !customization.chemicalPerTick().isEmpty()) {
+        || !customization.chemicalPerTick().isEmpty()
+        || !customization.chemicalPerTickOutputs().isEmpty()) {
       var chemicals = result.has("chemicals") ? result.getAsJsonObject("chemicals") : new JsonObject();
       append(chemicals, "inputs", encode(ChemicalRequirement.CODEC, customization.chemicalInputs()));
       append(chemicals, "outputs", encode(ChemicalRequirement.CODEC, customization.chemicalOutputs()));
       append(chemicals, "per_tick", encode(ChemicalRequirement.CODEC, customization.chemicalPerTick()));
+      append(chemicals, "per_tick_outputs", encode(ChemicalRequirement.CODEC, customization.chemicalPerTickOutputs()));
       result.add("chemicals", chemicals);
     }
     var outputs = new JsonArray();
@@ -76,6 +116,16 @@ final class RecipeAdapterCustomizations {
       outputs.add(row);
     }
     append(result, "outputs", outputs);
+    if (additions.has("output_ranges")) {
+      for (var range : additions.getAsJsonArray("output_ranges")) {
+        var value = range.getAsJsonObject();
+        int index = Math.addExact(originalOutputRows, value.get("row").getAsInt());
+        var row = result.getAsJsonArray("outputs").get(index).getAsJsonObject();
+        row.add("min_amount", value.get("min"));
+        row.add("max_amount", value.get("max"));
+        row.add("amount", value.get("max"));
+      }
+    }
     if (!customization.selectors().isEmpty()) {
       var selectors = result.has("selectors") ? result.getAsJsonObject("selectors") : new JsonObject();
       customization.selectors().forEach((phase, selector) -> {
@@ -91,8 +141,72 @@ final class RecipeAdapterCustomizations {
     customization.threadName().ifPresent(value -> result.addProperty("thread_name", value));
     customization.maxThreads().ifPresent(value -> result.addProperty("max_threads", value));
     addScriptOptions(result, customization, originalOutputRows);
+    resolveItemOnlySource(result);
 
     return result;
+  }
+
+  private static void resolveItemOnlySource(JsonObject result) {
+    var inputs = result.getAsJsonArray("inputs");
+    if (inputs.isEmpty() || inputs.size() == 1 && !result.has("ingredient_arrays")) {
+      return;
+    }
+    var source = inputs.get(0).getAsJsonObject();
+    if (!source.has("match") || !source.get("match").getAsString().equals("item")) {
+      return;
+    }
+    var choice = new JsonObject();
+    choice.addProperty("resource", "item");
+    choice.add("item", source.get("stack"));
+    choice.addProperty("match", "item");
+    for (String field : List.of("amount", "chance", "min_amount", "max_amount")) {
+      if (source.has(field)) {
+        choice.add(field, source.get(field));
+      }
+    }
+    if (result.has("item_callbacks")) {
+      var retained = new JsonArray();
+      for (var element : result.getAsJsonArray("item_callbacks")) {
+        var binding = element.getAsJsonObject();
+        if (binding.get("io").getAsString().equals("input")) {
+          int index = binding.get("row").getAsInt();
+          if (index == 0) {
+            for (String field : List.of("checker", "modifiers")) {
+              if (binding.has(field)) {
+                choice.add(field, binding.get(field));
+              }
+            }
+            continue;
+          }
+          binding.addProperty("row", index - 1);
+        }
+        retained.add(binding);
+      }
+      result.add("item_callbacks", retained);
+    }
+    if (result.has("item_payments") && result.getAsJsonObject("item_payments").has("tools")) {
+      for (var element : result.getAsJsonObject("item_payments").getAsJsonArray("tools")) {
+        var tool = element.getAsJsonObject();
+        int row = tool.get("row").getAsInt();
+        if (row == 0) {
+          throw new IllegalArgumentException("An item-only source cannot be a durability payment");
+        }
+        tool.addProperty("row", row - 1);
+      }
+    }
+    var alternatives = new JsonArray();
+    alternatives.add(choice);
+    var group = new JsonObject();
+    group.add("alternatives", alternatives);
+    for (String field : List.of("selector", "parallel_unaffected")) {
+      if (source.has(field)) {
+        group.add(field, source.get(field));
+      }
+    }
+    var groups = new JsonArray();
+    groups.add(group);
+    append(result, "ingredient_arrays", groups);
+    inputs.remove(0);
   }
 
   private static void addScriptOptions(JsonObject result, RecipeAdapterCustomization customization, int originalOutputRows) {
@@ -121,7 +235,7 @@ final class RecipeAdapterCustomizations {
       }
       bindings.put(key, next);
     }
-    var options = new RecipeScriptOptions(tooltips, List.copyOf(bindings.values()));
+    var options = new RecipeScriptOptions(tooltips, List.copyOf(bindings.values()), previous.loadJei());
     options.validateRows(result.getAsJsonArray("inputs").size(), result.getAsJsonArray("outputs").size());
     var encoded = RecipeScriptOptions.CODEC.codec().encodeStart(JsonOps.INSTANCE, options).getOrThrow()
         .getAsJsonObject();

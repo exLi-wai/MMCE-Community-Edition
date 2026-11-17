@@ -51,12 +51,13 @@ import net.neoforged.neoforge.registries.DeferredBlock;
 import net.neoforged.neoforge.registries.DeferredHolder;
 import net.neoforged.neoforge.registries.DeferredItem;
 import net.neoforged.neoforge.registries.DeferredRegister;
+import org.jetbrains.annotations.ApiStatus;
 
 /**
  * Ordered registration identities; declaration implementations live in focused
  * registry helpers.
  */
-@org.jetbrains.annotations.ApiStatus.Internal
+@ApiStatus.Internal
 public final class MachineRegistries {
 
   public static final DeferredRegister.Blocks BLOCKS = DeferredRegister.createBlocks(ModularMachine.MODID);

@@ -26,12 +26,13 @@ import net.minecraft.resources.ResourceLocation;
 import net.minecraft.world.phys.AABB;
 import com.lw.modularmachine.machine.structure.MachineDefinition.Part;
 import static com.lw.modularmachine.machine.structure.MachineDefinition.validBox;
+import org.jetbrains.annotations.ApiStatus;
 
 /**
  * JSON validation, reference capture and snapshot-only compilation of machine
  * declarations.
  */
-@org.jetbrains.annotations.ApiStatus.Internal
+@ApiStatus.Internal
 public final class MachineDefinitionParser {
 
   private MachineDefinitionParser() {

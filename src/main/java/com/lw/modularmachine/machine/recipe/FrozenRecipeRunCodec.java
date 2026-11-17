@@ -14,9 +14,10 @@ import net.minecraft.nbt.NbtOps;
 import net.minecraft.nbt.Tag;
 import net.minecraft.resources.ResourceLocation;
 import net.neoforged.neoforge.fluids.FluidStack;
+import org.jetbrains.annotations.ApiStatus;
 
 /** Schema 3 decoding and persistence checks, without live recipe lookup. */
-@org.jetbrains.annotations.ApiStatus.Internal
+@ApiStatus.Internal
 final class FrozenRecipeRunCodec {
   private static final Set<String> FIELDS = Set.of(
       "schema",
@@ -40,7 +41,9 @@ final class FrozenRecipeRunCodec {
       "last_progress_tick",
       "random_seed",
       "item_callback_epoch",
-      "energy_output_progress");
+      "energy_output_progress",
+      "resource_output_progress",
+      "trigger_progress");
 
   private FrozenRecipeRunCodec() {
   }
@@ -64,6 +67,8 @@ final class FrozenRecipeRunCodec {
       long energyPerTick,
       long energyOutputPerTick,
       int energyOutputProgress,
+      int resourceOutputProgress,
+      boolean tickResourceOutputs,
       RecipeExecutionOptions executionOptions,
       RecipeFailureAction failureAction,
       RecipeSelectors selectors,
@@ -177,12 +182,26 @@ final class FrozenRecipeRunCodec {
         || energyOutputPerTick == 0 && energyOutputProgress != 0) {
       throw new IllegalArgumentException("Invalid energy output progress");
     }
+    boolean tickResourceOutputs = !chemicals.perTickOutputs().isEmpty()
+        || definition.contains("fluid_per_tick_outputs", Tag.TAG_LIST)
+            && !definition.getList("fluid_per_tick_outputs", Tag.TAG_COMPOUND).isEmpty();
+    if (tickResourceOutputs && !source.contains("resource_output_progress", Tag.TAG_INT)
+        || source.contains("resource_output_progress") && !source.contains("resource_output_progress", Tag.TAG_INT)) {
+      throw new IllegalArgumentException("Missing or invalid tick resource output progress");
+    }
+    int resourceOutputProgress = source.getInt("resource_output_progress");
+    if (resourceOutputProgress < 0
+        || resourceOutputProgress > run.duration()
+        || tickResourceOutputs && resourceOutputProgress < run.progress()
+        || !tickResourceOutputs && resourceOutputProgress != 0) {
+      throw new IllegalArgumentException("Invalid tick resource output progress");
+    }
     RecipeExecutionOptions executionOptions = RecipeExecutionOptions.CODEC.parse(JsonOps.INSTANCE, declaration)
         .getOrThrow();
     RecipeFailureAction failureAction = RecipeFailureAction.parse(header.failureAction());
     CompoundTag fluidPerTickData;
     FluidStack fluidPerTick;
-    if (header.hasFluidPerTick()) {
+    if (definition.contains("fluid_per_tick", Tag.TAG_COMPOUND)) {
       fluidPerTickData = definition.getCompound("fluid_per_tick").copy();
       fluidPerTick = registries == null ? null : decodeFluidPerTick(fluidPerTickData, registries);
     } else {
@@ -193,6 +212,8 @@ final class FrozenRecipeRunCodec {
         energyPerTick,
         energyOutputPerTick,
         energyOutputProgress,
+        resourceOutputProgress,
+        tickResourceOutputs,
         executionOptions,
         failureAction,
         selectors,
@@ -235,12 +256,16 @@ final class FrozenRecipeRunCodec {
     return FluidStack.CODEC.parse(registries.createSerializationContext(NbtOps.INSTANCE), data).getOrThrow();
   }
 
-  static CompoundTag save(FrozenRecipeRun run, CompoundTag data, int energyOutputProgress) {
+  static CompoundTag save(FrozenRecipeRun run, CompoundTag data, int energyOutputProgress, int resourceOutputProgress) {
     var saved = data.copy();
     saved.putInt("schema", 3);
     saved.putInt("progress", run.progress());
     if (run.energyOutputPerTick() > 0) {
       saved.putInt("energy_output_progress", energyOutputProgress);
+    }
+    if (!data.getCompound("definition").getCompound("chemicals").getList("per_tick_outputs", Tag.TAG_COMPOUND).isEmpty()
+        || !data.getCompound("definition").getList("fluid_per_tick_outputs", Tag.TAG_COMPOUND).isEmpty()) {
+      saved.putInt("resource_output_progress", resourceOutputProgress);
     }
     saved.putString("state", run.state().name());
     saved.putLong("last_progress_tick", run.lastProgressTick());

@@ -35,6 +35,8 @@ final class ParallelRecipeAdmission {
         definition.parallelized() ? limit : Math.min(limit, 1),
         Math.min(plan.maxRepeatableInputs(), plan.maxRepeatableOutputs()));
     high = ChemicalTransactions.arithmeticLimit(definition, high);
+    high = RecipeTriggeredResources.arithmeticLimit(definition, high, aggregateDefinition, upgrades);
+    high = RecipeRandomItemOutputs.arithmeticLimit(definition, high, aggregateDefinition);
     var requiredFluids = new HashMap<FluidResourceKey, Long>();
     var fixedFluids = new HashMap<FluidResourceKey, Long>();
     for (var requirement : definition.fluidInputRequirements()) {
@@ -72,6 +74,17 @@ final class ParallelRecipeAdmission {
           definition.energyOutputPerTick(),
           definition.fluidPerTick().getAmount(),
           upgrades);
+      for (var input : definition.fluidPerTickInputs()) {
+        try {
+          long amount = upgrades.fluidPerTick(input.stack().getAmount());
+          high = amount == 0 ? high : (int) Math.min(high, Integer.MAX_VALUE / amount);
+        } catch (ArithmeticException overflow) {
+          high = 0;
+        }
+      }
+      for (var output : definition.fluidPerTickOutputs()) {
+        high = Math.min(high, Integer.MAX_VALUE / output.stack().getAmount());
+      }
       for (var output : definition.fluidOutputRequirements()) {
         if (!output.parallelUnaffected()) {
           high = Math.min(high, Integer.MAX_VALUE / output.stack().getAmount());
