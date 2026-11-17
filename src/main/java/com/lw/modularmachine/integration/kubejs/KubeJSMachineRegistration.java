@@ -1,12 +1,19 @@
 package com.lw.modularmachine.integration.kubejs;
 
+import com.google.gson.JsonElement;
+import com.google.gson.JsonObject;
+import com.google.gson.JsonParser;
+import com.lw.modularmachine.api.controller.ControllerScriptData;
 import com.lw.modularmachine.api.controller.MachineEvents;
 import com.lw.modularmachine.api.recipe.RecipeModifier;
 import com.lw.modularmachine.api.smart.SmartInterfaceEvents;
 import com.lw.modularmachine.api.client.controller.ControllerClientEvents;
 import dev.latvian.mods.kubejs.event.KubeEvent;
+import java.util.ArrayList;
+import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.Objects;
 import net.minecraft.resources.ResourceLocation;
 import org.jetbrains.annotations.ApiStatus;
 
@@ -122,8 +129,45 @@ public final class KubeJSMachineRegistration implements KubeEvent {
     client.setMachineGeoModel(machine, name);
   }
 
-  public MachineEvents.ScriptProposal scriptData(String customData, Map<ResourceLocation, RecipeModifier> modifiers) {
-    return MachineEvents.scriptData(customData, modifiers);
+  /** Returns an editable detached copy; changes require an Action proposal. */
+  public Map<String, Object> customData(ControllerScriptData snapshot) {
+    return scriptObject(JsonParser.parseString(snapshot.customData()).getAsJsonObject());
+  }
+
+  /** KubeJS converts ordinary script objects before capturing the proposal. */
+  public MachineEvents.ScriptProposal scriptData(JsonObject customData, Map<ResourceLocation, RecipeModifier> modifiers) {
+    return MachineEvents.scriptData(Objects.requireNonNull(customData, "customData").toString(), modifiers);
+  }
+
+  private static Map<String, Object> scriptObject(JsonObject source) {
+    var result = new LinkedHashMap<String, Object>();
+    source.entrySet().forEach(entry -> result.put(entry.getKey(), scriptValue(entry.getValue())));
+
+    return result;
+  }
+
+  private static Object scriptValue(JsonElement value) {
+    if (value.isJsonObject()) {
+      return scriptObject(value.getAsJsonObject());
+    }
+    if (value.isJsonArray()) {
+      var result = new ArrayList<Object>();
+      value.getAsJsonArray().forEach(element -> result.add(scriptValue(element)));
+
+      return result;
+    }
+    if (value.isJsonNull()) {
+      return null;
+    }
+    var primitive = value.getAsJsonPrimitive();
+    if (primitive.isBoolean()) {
+      return primitive.getAsBoolean();
+    }
+    if (primitive.isNumber()) {
+      return primitive.getAsNumber();
+    }
+
+    return primitive.getAsString();
   }
 
   public List<KubeJSMachineEventRegistration.Handler> serverSnapshot() {
