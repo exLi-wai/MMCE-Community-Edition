@@ -1,0 +1,1 @@
+{"type":"minecraft:block","neoforge:conditions":[{"type":"neoforge:mod_loaded","modid":"thaumaturge"}],"pools":[{"entries":[{"type":"minecraft:item","name":"mmcece:essentia_input_hatch"}],"conditions":[{"condition":"minecraft:survives_explosion"}],"rolls":1}]}

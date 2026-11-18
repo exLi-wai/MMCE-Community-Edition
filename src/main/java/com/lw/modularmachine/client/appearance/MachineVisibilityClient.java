@@ -299,6 +299,11 @@ public final class MachineVisibilityClient {
     MachineRegistries.DEDICATED_CONTROLLERS.values().forEach(holder -> ids.add(holder.getId()));
     MachineRegistries.DEDICATED_FACTORIES.values().forEach(holder -> ids.add(holder.getId()));
     MachineRegistries.CASINGS.values().forEach(holder -> ids.add(holder.getId()));
+    MachineRegistries.EMBER_INPUT_HATCHES.values().forEach(holder -> ids.add(holder.getId()));
+    MachineRegistries.TICKING_RECIPE_HATCHES.values().forEach(holder -> ids.add(holder.getId()));
+    if (MachineRegistries.LASER_INPUT_HATCH != null) {
+      ids.add(MachineRegistries.LASER_INPUT_HATCH.getId());
+    }
     MachineRegistries.PORTS.values().forEach(holder -> ids.add(holder.getId()));
     MachineRegistries.NETWORK_PORTS.values().forEach(holder -> ids.add(holder.getId()));
     if (MachineRegistries.ME_PATTERN_PROVIDER != null) {

@@ -7,6 +7,7 @@ import com.lw.modularmachine.machine.recipe.MachineRecipe;
 import com.lw.modularmachine.machine.recipe.MachineRecipeJson;
 import com.lw.modularmachine.machine.recipe.ResourceSelector;
 import com.lw.modularmachine.machine.recipe.resource.RecipeResourceBuilderDeclarations;
+import com.lw.modularmachine.machine.recipe.resource.RecipeResourceDefinitions;
 import com.lw.modularmachine.api.recipe.resource.RecipeResourceType;
 import com.lw.modularmachine.api.recipe.resource.RecipeResources;
 import com.lw.modularmachine.api.smart.SmartNumberRequirement;
@@ -234,6 +235,74 @@ public final class MachineRecipeBuilder {
   public MachineRecipeBuilder interfaceInput(SmartNumberRequirement requirement) {
     interfaceInputs.add(Objects.requireNonNull(requirement, "requirement"));
     return this;
+  }
+
+  public MachineRecipeBuilder environment(EnvironmentRequirement... requirements) {
+    return setResource(RecipeResourceDefinitions.ENVIRONMENT, new EnvironmentRecipeData(List.of(requirements)));
+  }
+
+  public MachineRecipeBuilder laserInput(long amount) {
+    return setResource(RecipeResourceDefinitions.LASER, new LaserRecipeData(amount));
+  }
+
+  public MachineRecipeBuilder emberInput(EmberRecipeData amount) {
+    return setResource(RecipeResourceDefinitions.EMBER, amount);
+  }
+
+  public MachineRecipeBuilder mana(long input, long output) {
+    return setResource(RecipeResourceDefinitions.MANA, new BufferedAmountRecipeData(input, output));
+  }
+
+  public MachineRecipeBuilder heat(long inputMilliheat, long outputMilliheat) {
+    return setResource(RecipeResourceDefinitions.HEAT, new BufferedAmountRecipeData(inputMilliheat, outputMilliheat));
+  }
+
+  public MachineRecipeBuilder auraInput(long input) {
+    return setResource(RecipeResourceDefinitions.AURA, new BufferedAmountRecipeData(input, 0));
+  }
+
+  public MachineRecipeBuilder auraOutput(WorldPoolRecipeData.Claim output) {
+    return setResource(
+        RecipeResourceDefinitions.AURA_WORLD,
+        new WorldPoolRecipeData(java.util.Optional.empty(), java.util.Optional.of(output)));
+  }
+
+  public MachineRecipeBuilder will(WorldPoolRecipeData declaration) {
+    return setResource(RecipeResourceDefinitions.WILL, declaration);
+  }
+
+  public MachineRecipeBuilder vis(WorldPoolRecipeData declaration) {
+    return setResource(RecipeResourceDefinitions.VIS, declaration);
+  }
+
+  public MachineRecipeBuilder flux(WorldPoolRecipeData declaration) {
+    return setResource(RecipeResourceDefinitions.FLUX, declaration);
+  }
+
+  public MachineRecipeBuilder compressedAir(CompressedAirRecipeData declaration) {
+    return setResource(RecipeResourceDefinitions.COMPRESSED_AIR, declaration);
+  }
+
+  public MachineRecipeBuilder lifeEssence(long input, long output) {
+    return setResource(RecipeResourceDefinitions.LIFE_ESSENCE, new BufferedAmountRecipeData(input, output));
+  }
+
+  public MachineRecipeBuilder meteorOutput(ResourceLocation catalyst, int count) {
+    return setResource(
+        RecipeResourceDefinitions.METEOR,
+        new MeteorRecipeData(java.util.Optional.of(new MeteorRecipeData.Launch(catalyst, count))));
+  }
+
+  public MachineRecipeBuilder essentia(KeyedAmountRecipeData declaration) {
+    return setResource(RecipeResourceDefinitions.ESSENTIA, declaration);
+  }
+
+  public MachineRecipeBuilder starlight(KeyedAmountRecipeData declaration) {
+    return setResource(RecipeResourceDefinitions.STARLIGHT, declaration);
+  }
+
+  public MachineRecipeBuilder constellations(ConstellationRecipeData declaration) {
+    return setResource(RecipeResourceDefinitions.CONSTELLATION, declaration);
   }
 
   public MachineRecipeBuilder selectors(RecipeSelectors selectors) {

@@ -303,7 +303,8 @@ public final class MachineRecipe implements Recipe<RecipeInput> {
         || chemicals().perTickOutputs().stream().anyMatch(ChemicalRequirement::ignoreOutputCheck)) {
       throw new IllegalArgumentException("Ignored output capacity is supported only by completion output rows");
     }
-    if (!resourceData.hasInputs()
+    if (resourceData.entries().stream()
+        .noneMatch(entry -> entry.type() != RecipeResourceDefinitions.ENVIRONMENT && entry.hasInputs())
         && extras.ingredientArrays().inputs().stream().noneMatch(group -> !group.optional())
         && extras.triggeredResources().rows().stream().noneMatch(row -> row.io() == RecipeModifier.Io.INPUT)
         || !resourceData.hasOutputs()
@@ -507,13 +508,13 @@ public final class MachineRecipe implements Recipe<RecipeInput> {
     if (!(encoded instanceof CompoundTag tag)) {
       throw new IllegalArgumentException("Machine recipe codec did not produce a compound");
     }
-    buffer.writeVarInt(17);
+    buffer.writeVarInt(19);
     buffer.writeNbt(tag);
   }
 
   private static MachineRecipe read(RegistryFriendlyByteBuf buffer) {
     try {
-      if (buffer.readVarInt() != 17) {
+      if (buffer.readVarInt() != 19) {
         throw new DecoderException("Unsupported machine recipe wire schema");
       }
       var encoded = buffer.readNbt();

@@ -9,6 +9,7 @@ import com.lw.modularmachine.blockentity.ParallelControllerBlockEntity;
 import com.lw.modularmachine.blockentity.PatternMirrorBlockEntity;
 import com.lw.modularmachine.blockentity.PatternProviderBlockEntity;
 import com.lw.modularmachine.blockentity.SmartInterfaceBlockEntity;
+import com.lw.modularmachine.blockentity.EmberInputHatchBlockEntity;
 import com.lw.modularmachine.blockentity.UpgradeBusBlockEntity;
 import java.util.stream.Stream;
 import net.minecraft.world.level.block.Block;
@@ -98,6 +99,14 @@ final class MachineBlockEntityFactories {
 
   static BlockEntityType<SmartInterfaceBlockEntity> smartInterface() {
     return BlockEntityType.Builder.of(SmartInterfaceBlockEntity::new, SMART_INTERFACE.get()).build(null);
+  }
+
+  static BlockEntityType<EmberInputHatchBlockEntity> emberInputHatch() {
+    return BlockEntityType.Builder
+        .of(
+            EmberInputHatchBlockEntity::new,
+            MachineRegistries.EMBER_INPUT_HATCHES.values().stream().map(DeferredBlock::get).toArray(Block[]::new))
+        .build(null);
   }
 
 }

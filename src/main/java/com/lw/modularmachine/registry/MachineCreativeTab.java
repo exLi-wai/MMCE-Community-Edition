@@ -40,6 +40,9 @@ final class MachineCreativeTab {
     DEDICATED_CONTROLLERS.values().forEach(block -> output.accept(block.get()));
     DEDICATED_FACTORIES.values().forEach(block -> output.accept(block.get()));
     output.accept(SMART_INTERFACE.get());
+    if (MachineRegistries.LASER_INPUT_HATCH != null) {
+      output.accept(MachineRegistries.LASER_INPUT_HATCH.get());
+    }
     if (ME_PATTERN_PROVIDER != null) {
       output.accept(ME_PATTERN_PROVIDER.get());
       output.accept(ME_PATTERN_MIRROR.get());
@@ -53,6 +56,8 @@ final class MachineCreativeTab {
     output.accept(RANGED_CONSTRUCT_TOOL.get());
     CASINGS.values().forEach(block -> output.accept(block.get()));
     PORTS.values().forEach(block -> output.accept(block.get()));
+    MachineRegistries.EMBER_INPUT_HATCHES.values().forEach(block -> output.accept(block.get()));
+    MachineRegistries.TICKING_RECIPE_HATCHES.values().forEach(block -> output.accept(block.get()));
     NETWORK_PORTS.values().forEach(block -> output.accept(block.get()));
   }
 }

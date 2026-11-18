@@ -23,6 +23,22 @@ public final class ResourceTypeRegistry {
     for (var type : BUILTINS) {
       TYPES.put(type.id(), type);
     }
+    TYPES.put(ResourceType.ENVIRONMENT.id(), ResourceType.ENVIRONMENT);
+    TYPES.put(ResourceType.LASER.id(), ResourceType.LASER);
+    TYPES.put(ResourceType.EMBER.id(), ResourceType.EMBER);
+    TYPES.put(ResourceType.MANA.id(), ResourceType.MANA);
+    TYPES.put(ResourceType.AURA.id(), ResourceType.AURA);
+    TYPES.put(ResourceType.AURA_WORLD.id(), ResourceType.AURA_WORLD);
+    TYPES.put(ResourceType.WILL.id(), ResourceType.WILL);
+    TYPES.put(ResourceType.VIS.id(), ResourceType.VIS);
+    TYPES.put(ResourceType.FLUX.id(), ResourceType.FLUX);
+    TYPES.put(ResourceType.LIFE_ESSENCE.id(), ResourceType.LIFE_ESSENCE);
+    TYPES.put(ResourceType.METEOR.id(), ResourceType.METEOR);
+    TYPES.put(ResourceType.ESSENTIA.id(), ResourceType.ESSENTIA);
+    TYPES.put(ResourceType.STARLIGHT.id(), ResourceType.STARLIGHT);
+    TYPES.put(ResourceType.CONSTELLATION.id(), ResourceType.CONSTELLATION);
+    TYPES.put(ResourceType.HEAT.id(), ResourceType.HEAT);
+    TYPES.put(ResourceType.COMPRESSED_AIR.id(), ResourceType.COMPRESSED_AIR);
   }
 
   private ResourceTypeRegistry() {

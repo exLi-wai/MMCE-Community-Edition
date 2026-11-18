@@ -7,14 +7,19 @@ import net.minecraft.core.BlockPos;
 import net.minecraft.core.HolderLookup;
 import net.minecraft.nbt.CompoundTag;
 import net.minecraft.world.level.block.entity.BlockEntity;
+import net.minecraft.world.level.block.entity.BlockEntityType;
 import net.minecraft.world.level.block.state.BlockState;
 
-public final class MachineCasingBlockEntity extends BlockEntity implements MachineColorable {
+public class MachineCasingBlockEntity extends BlockEntity implements MachineColorable {
   private int machineColor = MachineConfig.defaultCasingColor();
   private boolean machineColorAssigned;
 
   public MachineCasingBlockEntity(BlockPos pos, BlockState state) {
-    super(MachineRegistries.CASING_ENTITY.get(), pos, state);
+    this(MachineRegistries.CASING_ENTITY.get(), pos, state);
+  }
+
+  protected MachineCasingBlockEntity(BlockEntityType<?> type, BlockPos pos, BlockState state) {
+    super(type, pos, state);
   }
 
   @Override

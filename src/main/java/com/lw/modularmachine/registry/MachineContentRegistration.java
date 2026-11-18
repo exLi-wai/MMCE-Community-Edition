@@ -5,6 +5,12 @@ import com.lw.modularmachine.block.FactoryControllerBlock;
 import com.lw.modularmachine.block.MachineCasingBlock;
 import com.lw.modularmachine.block.MachineControllerBlock;
 import com.lw.modularmachine.block.MachinePortBlock;
+import com.lw.modularmachine.block.EmberInputHatchBlock;
+import com.lw.modularmachine.block.TickingRecipeHatchBlock;
+import com.lw.modularmachine.integration.neovitae.LifeEssenceHatchBlock;
+import com.lw.modularmachine.integration.astral.StarlightHatchBlock;
+import com.lw.modularmachine.machine.EmberHatchTier;
+import com.lw.modularmachine.util.Mods;
 import com.lw.modularmachine.block.NetworkPortBlock;
 import com.lw.modularmachine.block.ParallelControllerBlock;
 import com.lw.modularmachine.block.UpgradeBusBlock;
@@ -25,6 +31,7 @@ import com.lw.modularmachine.machine.UpgradeBusTier;
 import java.util.Locale;
 import net.minecraft.world.item.Item;
 import net.minecraft.world.level.block.SoundType;
+import net.minecraft.world.level.block.entity.BlockEntityType;
 import net.minecraft.world.level.block.state.BlockBehaviour;
 import net.minecraft.world.level.material.MapColor;
 import net.neoforged.neoforge.registries.DeferredBlock;
@@ -64,6 +71,66 @@ final class MachineContentRegistration {
     registerCasings();
     registerResourcePorts();
     registerNetworkPorts();
+    registerEmberHatches();
+  }
+
+  private static void registerEmberHatches() {
+    if (!Mods.EMBERS.isLoaded()) {
+      return;
+    }
+    for (var tier : EmberHatchTier.values()) {
+      String id = "ember_input_hatch_" + tier.path();
+      var hatch = BLOCKS.register(id, () -> new EmberInputHatchBlock(properties().strength(3F, 10F), tier));
+      MachineRegistries.EMBER_INPUT_HATCHES.put(id, hatch);
+      ITEMS.registerSimpleBlockItem(hatch);
+    }
+  }
+
+  static DeferredBlock<TickingRecipeHatchBlock> registerTickingHatch(String id, BlockEntityType.BlockEntitySupplier<?> factory) {
+    return registerTickingHatch(id, () -> new TickingRecipeHatchBlock(hatchProperties(), factory));
+  }
+
+  static BlockBehaviour.Properties hatchProperties() {
+    return properties().strength(3F, 10F);
+  }
+
+  static DeferredBlock<TickingRecipeHatchBlock> registerTickingHatch(String id, java.util.function.Supplier<TickingRecipeHatchBlock> block) {
+    var hatch = BLOCKS.register(id, block);
+    MachineRegistries.TICKING_RECIPE_HATCHES.put(id, hatch);
+    ITEMS.registerSimpleBlockItem(hatch);
+    return hatch;
+  }
+
+  static DeferredBlock<MachineCasingBlock> registerWorldHatch(Mods dependency, String id) {
+    if (!dependency.isLoaded()) {
+      return null;
+    }
+    var hatch = BLOCKS.register(id, () -> new MachineCasingBlock(properties().strength(3F, 10F)));
+    CASINGS.put(id, hatch);
+    ITEMS.registerSimpleBlockItem(hatch);
+    return hatch;
+  }
+
+  static DeferredBlock<TickingRecipeHatchBlock> registerLifeEssenceHatch(String id) {
+    if (!Mods.NEO_VITAE.isLoaded()) {
+      return null;
+    }
+    DeferredBlock<TickingRecipeHatchBlock> hatch = BLOCKS
+        .register(id, () -> new LifeEssenceHatchBlock(properties().strength(3F, 10F)));
+    MachineRegistries.TICKING_RECIPE_HATCHES.put(id, hatch);
+    ITEMS.registerSimpleBlockItem(hatch);
+    return hatch;
+  }
+
+  static DeferredBlock<TickingRecipeHatchBlock> registerStarlightHatch(String id, boolean input) {
+    if (!Mods.ASTRAL_SORCERY.isLoaded()) {
+      return null;
+    }
+    DeferredBlock<TickingRecipeHatchBlock> hatch = BLOCKS
+        .register(id, () -> new StarlightHatchBlock(properties().strength(3F, 10F), input));
+    MachineRegistries.TICKING_RECIPE_HATCHES.put(id, hatch);
+    ITEMS.registerSimpleBlockItem(hatch);
+    return hatch;
   }
 
   private static void registerPatternItems() {
@@ -105,6 +172,9 @@ final class MachineContentRegistration {
     ITEMS
         .register("factory_controller", () -> new ControllerBlockItem(FACTORY_CONTROLLER.get(), new Item.Properties()));
     ITEMS.registerSimpleBlockItem(SMART_INTERFACE);
+    if (MachineRegistries.LASER_INPUT_HATCH != null) {
+      ITEMS.registerSimpleBlockItem(MachineRegistries.LASER_INPUT_HATCH);
+    }
   }
 
   private static void registerParallelControllers() {
@@ -126,6 +196,9 @@ final class MachineContentRegistration {
   }
 
   private static void registerCasings() {
+    var environment = MachineRegistries.ENVIRONMENT_HATCH;
+    CASINGS.put("environment_hatch", environment);
+    ITEMS.registerSimpleBlockItem(environment);
     for (String name : new String[]{"plain", "vent", "firebox", "gearbox", "reinforced", "circuitry"}) {
       String id = "machine_casing_" + name;
       DeferredBlock<MachineCasingBlock> block = BLOCKS

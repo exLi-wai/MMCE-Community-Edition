@@ -36,6 +36,7 @@ final class RecipeIngredientArrayPreparation {
     BRANCH,
     INPUT_MODIFIERS,
     ITEM_INPUTS,
+    RESOURCE_INPUTS,
     RESOURCE_ADMISSION,
     RESOURCE_OUTPUTS,
     INPUT_CHECK,
@@ -58,10 +59,13 @@ final class RecipeIngredientArrayPreparation {
   private RecipeItemCallbackService.InputPreparation modifiers;
   private RecipePlanner.Session<ItemResourceKey> planner;
   private RecipeResourcePlanning resourceAdmission;
+  private RecipeInputPlanning resourceInputs;
   private int resourceCursor;
   private RecipeResourcePlanning output;
   private RecipeStartPlan parallel;
   private MachineRecipe best;
+  private MachineRecipe waiting;
+  private boolean waitingForInputs;
   private int bestCount;
   private int workUsed;
 
@@ -82,7 +86,7 @@ final class RecipeIngredientArrayPreparation {
   }
 
   Optional<MachineRecipe> prepared() {
-    return finished() ? Optional.ofNullable(best) : Optional.empty();
+    return finished() ? Optional.ofNullable(best == null ? waiting : best) : Optional.empty();
   }
 
   long epoch() {
@@ -128,6 +132,7 @@ final class RecipeIngredientArrayPreparation {
         case BRANCH -> beginBranch(registries, ops);
         case INPUT_MODIFIERS -> advanceInputModifiers(budget, registries, ops);
         case ITEM_INPUTS -> advanceItemInputs(budget);
+        case RESOURCE_INPUTS -> advanceResourceInputs(budget);
         case RESOURCE_ADMISSION -> advanceResourceAdmission(budget);
         case RESOURCE_OUTPUTS -> advanceResourceOutputs(budget);
         case INPUT_CHECK -> checkSingleInput(budget, registries);
@@ -181,10 +186,28 @@ final class RecipeIngredientArrayPreparation {
       advanceBranch();
     } else {
       planner = null;
+      resourceInputs = new RecipeInputPlanning(original.id(), definition, resources);
+      stage = Stage.RESOURCE_INPUTS;
+    }
+
+    return true;
+  }
+
+  private boolean advanceResourceInputs(int budget) {
+    var result = resourceInputs.advance(budget - workUsed);
+    workUsed += result.workUsed();
+    if (result.status() == RecipeResourcePlanning.Status.PENDING) {
+      return false;
+    }
+    if (result.status() == RecipeResourcePlanning.Status.REJECTED) {
+      advanceBranch();
+    } else if (resourceInputs.waiting()) {
+      waitingForInputs = true;
+      stage = Stage.RESOURCE_OUTPUTS;
+    } else {
       resourceAdmission = RecipeResourceExecutionRegistry.prepareAdmission(ticket, definition.resourceData(), 1);
       stage = Stage.RESOURCE_ADMISSION;
     }
-
     return true;
   }
 
@@ -236,6 +259,11 @@ final class RecipeIngredientArrayPreparation {
     }
     workUsed++;
     if (!acceptsInputs(1, registries)) {
+      advanceBranch();
+    } else if (waitingForInputs) {
+      if (waiting == null) {
+        waiting = definition;
+      }
       advanceBranch();
     } else {
       stage = Stage.PARALLEL;
@@ -307,7 +335,7 @@ final class RecipeIngredientArrayPreparation {
     modifiers = null;
     if (!PatternProductionService.matches(ticket, definition, thread)
         || RecipeResourceRequirements.missing(ticket, definition).isPresent()
-        || resources.stream().anyMatch(resource -> !resource.available(original.id(), definition))) {
+        || !RecipeSearch.resourcesFeasible(original.id(), definition, resources)) {
       return false;
     }
     var candidate = RecipeItemPreparation.inputCandidate(
@@ -355,6 +383,8 @@ final class RecipeIngredientArrayPreparation {
     resourceAdmission = null;
     output = null;
     resourceCursor = 0;
+    resourceInputs = null;
+    waitingForInputs = false;
     parallel = null;
     for (int group = choices.length - 1; group >= 0; group--) {
       var declaration = source.ingredientArrays().inputs().get(group);

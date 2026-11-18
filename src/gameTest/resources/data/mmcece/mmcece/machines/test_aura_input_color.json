@@ -1,0 +1,1 @@
+{"orientation":{"policy":"all_24"},"color":"#38A6D2","neoforge:conditions":[{"modid":"naturesaura","type":"neoforge:mod_loaded"}],"parts":[{"block":"mmcece:machine_casing_plain","part_id":"casing","offset":[-1,0,1]},{"block":"mmcece:aura_input_hatch","part_id":"hatch","offset":[1,0,1]}]}

@@ -3,6 +3,7 @@ package com.lw.modularmachine.machine.recipe;
 import com.lw.modularmachine.api.recipe.resource.RecipeResourcePlanning;
 import com.lw.modularmachine.api.upgrade.UpgradeSnapshot;
 import com.lw.modularmachine.blockentity.FactoryControllerBlockEntity;
+import com.lw.modularmachine.machine.recipe.resource.RecipeResourceExecutionRegistry;
 import com.lw.modularmachine.machine.recipe.search.RecipeCatalog;
 import com.lw.modularmachine.machine.recipe.search.ResourceSnapshot;
 import com.lw.modularmachine.machine.recipe.search.ItemSlotDomain;
@@ -44,7 +45,8 @@ public final class RecipeStartPlan {
   private ParallelRecipeAdmission parallelAdmission;
   private UpgradeSnapshot parallelUpgrades;
   private int parallelRequest;
-  private FactoryOutputAdmission factoryOutputAdmission;
+  private RecipeStartOutputAdmission startOutputAdmission;
+  private RecipeResourceExecutionRegistry.PaidStartPlanning paidStartPlanning;
   private MachineRecipe inputPreparedDefinition;
   private RecipeCandidate<ItemResourceKey> originalCandidate;
   private long inputPreparedEpoch = -1;
@@ -85,6 +87,7 @@ public final class RecipeStartPlan {
       parallelAdmission = null;
       parallelUpgrades = null;
       outputPreparation = null;
+      paidStartPlanning = null;
     }
     outputPreparationThread = thread;
     return this;
@@ -457,22 +460,28 @@ public final class RecipeStartPlan {
     return outputPreparation != null && outputPreparation.rejected();
   }
 
-  RecipeResourcePlanning.Progress prepareFactoryOutputs(MachineRecipe definition, RecipeExecutionTicket ticket, int instances, int budget) {
+  RecipeResourcePlanning.Progress prepareStartOutputs(MachineRecipe definition, RecipeExecutionTicket ticket, int instances, int budget, boolean factoryBatch) {
     source.requireServerThread();
     if (ticket.owner() != source.owner() || instances < 1) {
-      throw new IllegalArgumentException("Invalid factory output admission");
+      throw new IllegalArgumentException("Invalid start output admission");
     }
-    if (factoryOutputAdmission == null || !factoryOutputAdmission.matches(definition, instances)) {
-      factoryOutputAdmission = new FactoryOutputAdmission(this, definition, ticket, instances);
+    if (startOutputAdmission == null || !startOutputAdmission.matches(definition, instances, factoryBatch)) {
+      startOutputAdmission = new RecipeStartOutputAdmission(this, definition, ticket, instances, factoryBatch);
     }
 
-    return factoryOutputAdmission.advance(budget);
+    return startOutputAdmission.advance(budget);
   }
 
-  boolean factoryOutputsCurrent(MachineRecipe definition, int instances) {
-    return factoryOutputAdmission != null
-        && factoryOutputAdmission.matches(definition, instances)
-        && factoryOutputAdmission.current();
+  boolean startOutputsCurrent(MachineRecipe definition, int instances, boolean factoryBatch) {
+    return startOutputAdmission != null
+        && startOutputAdmission.matches(definition, instances, factoryBatch)
+        && startOutputAdmission.current();
+  }
+
+  RecipeResourceExecutionRegistry.PaidStartProgress preparePaidResources(RecipeExecutionTicket ticket, List<FrozenRecipeRun> runs, int budget) {
+    var result = RecipeResourceExecutionRegistry.preparePaidStart(ticket, runs, paidStartPlanning, budget);
+    paidStartPlanning = result.status() == RecipeResourcePlanning.Status.PENDING ? result.continuation() : null;
+    return result;
   }
 
   public int maxRepeatableInputs() {

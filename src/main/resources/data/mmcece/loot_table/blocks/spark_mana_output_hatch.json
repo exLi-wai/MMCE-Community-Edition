@@ -1,0 +1,1 @@
+{"pools":[{"conditions":[{"condition":"minecraft:survives_explosion"}],"rolls":1,"entries":[{"name":"mmcece:spark_mana_output_hatch","type":"minecraft:item"}]}],"type":"minecraft:block","neoforge:conditions":[{"modid":"botania","type":"neoforge:mod_loaded"}]}

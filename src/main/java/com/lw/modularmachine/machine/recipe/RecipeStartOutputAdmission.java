@@ -1,17 +1,21 @@
 package com.lw.modularmachine.machine.recipe;
 
 import com.lw.modularmachine.api.recipe.resource.RecipeResourcePlanning;
+import com.lw.modularmachine.machine.recipe.resource.RecipeResourceExecution;
 import com.lw.modularmachine.machine.recipe.resource.RecipeResourceExecutionRegistry;
 import com.lw.modularmachine.machine.recipe.search.FluidOutputLayout;
 import com.lw.modularmachine.machine.recipe.search.FluidResourceKey;
 import com.lw.modularmachine.machine.recipe.search.ItemOutputLayout;
 import com.lw.modularmachine.machine.recipe.search.RecipeCandidate;
 import com.lw.modularmachine.machine.recipe.search.RecipePlanner;
+import com.lw.modularmachine.machine.recipe.search.RecipeSearchResource;
 import com.lw.modularmachine.machine.recipe.search.ResourcePlanningAdapter;
 import com.lw.modularmachine.machine.recipe.search.ResourcePlanningSequence;
 import com.lw.modularmachine.machine.upgrade.UpgradeRecipeCheckHandlers;
+import java.util.ArrayList;
 import java.util.HashSet;
 import java.util.List;
+import java.util.function.Supplier;
 import org.jetbrains.annotations.ApiStatus;
 
 /**
@@ -19,27 +23,37 @@ import org.jetbrains.annotations.ApiStatus;
  * budget.
  */
 @ApiStatus.Internal
-final class FactoryOutputAdmission {
+final class RecipeStartOutputAdmission {
   private final RecipeStartPlan plan;
   private final MachineRecipe definition;
   private final int instances;
+  private final boolean factoryBatch;
   private RecipeExecutionTicket ticket;
   private final ResourcePlanningSequence sequence;
+  private final List<RecipeResourceExecution.Output> liveOutputs = new ArrayList<>();
+  private ResourcePlanningSequence outputVerification;
+  private RecipeSearchResource.ReplenishmentProof outputProof;
 
-  FactoryOutputAdmission(RecipeStartPlan plan, MachineRecipe definition, RecipeExecutionTicket ticket, int instances) {
+  RecipeStartOutputAdmission(RecipeStartPlan plan, MachineRecipe definition, RecipeExecutionTicket ticket, int instances, boolean factoryBatch) {
     this.plan = plan;
     this.definition = definition;
     this.ticket = ticket;
     this.instances = instances;
-    sequence = new ResourcePlanningSequence(
+    this.factoryBatch = factoryBatch;
+    sequence = factoryBatch ? new ResourcePlanningSequence(
         List.of(
             this::prepareItems,
             this::prepareFluids,
-            () -> RecipeResourceExecutionRegistry.prepareAdmission(this.ticket, definition.resourceData(), instances)));
+            () -> RecipeResourceExecutionRegistry.prepareAdmission(
+                this.ticket,
+                definition.resourceData(),
+                instances,
+                liveOutputs))) : RecipeResourceExecutionRegistry
+                    .prepareOutputAdmission(ticket, definition.resourceData(), instances, liveOutputs);
   }
 
-  boolean matches(MachineRecipe requested, int count) {
-    return definition == requested && instances == count;
+  boolean matches(MachineRecipe requested, int count, boolean batch) {
+    return definition == requested && instances == count && factoryBatch == batch;
   }
 
   RecipeResourcePlanning.Progress advance(int budget) {
@@ -50,11 +64,33 @@ final class FactoryOutputAdmission {
       throw new UpgradeRecipeCheckHandlers.StaleException();
     }
 
-    return sequence.advance(budget);
+    var admission = sequence.advance(budget);
+    if (admission.status() != RecipeResourcePlanning.Status.READY) {
+      return admission;
+    }
+    if (outputVerification == null || !outputProof.current()) {
+      var proof = new RecipeSearchResource.ReplenishmentProof();
+      var steps = new ArrayList<Supplier<RecipeResourcePlanning>>();
+      for (var output : liveOutputs) {
+        if (output instanceof RecipeSearchResource.Recheckable recheckable) {
+          steps.add(() -> recheckable.recheck(proof));
+        }
+      }
+      outputProof = proof;
+      outputVerification = new ResourcePlanningSequence(steps);
+    }
+    var verification = outputVerification.advance(budget - admission.workUsed());
+    return new RecipeResourcePlanning.Progress(verification.status(), admission.workUsed() + verification.workUsed());
   }
 
   boolean current() {
-    return sequence.status() == RecipeResourcePlanning.Status.READY && refreshTicket();
+    return outputVerification != null
+        && outputVerification.status() == RecipeResourcePlanning.Status.READY
+        && outputProof.current()
+        && refreshTicket()
+        && liveOutputs.stream()
+            .allMatch(output -> output instanceof RecipeSearchResource.Recheckable || output.searchCurrent(ticket))
+        && outputProof.current();
   }
 
   private boolean refreshTicket() {

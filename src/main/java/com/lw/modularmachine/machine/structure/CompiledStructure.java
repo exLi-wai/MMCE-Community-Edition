@@ -22,13 +22,16 @@ import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.Set;
+import java.util.TreeSet;
 import java.util.concurrent.CancellationException;
 import net.minecraft.core.BlockPos;
 import net.minecraft.core.Direction;
 import net.minecraft.core.SectionPos;
 import net.minecraft.server.level.ServerLevel;
 import net.minecraft.world.level.block.Rotation;
+import net.minecraft.world.level.block.Block;
 import net.minecraft.world.level.block.state.BlockState;
+import org.jetbrains.annotations.ApiStatus;
 
 /**
  * Immutable absolute layout. Production uses Builder; synchronous constructors
@@ -43,6 +46,7 @@ public final class CompiledStructure {
   public final Direction facing;
 
   private final List<BlockPos> positions;
+  private final Map<Block, List<Integer>> componentIndices;
   private final Map<Long, Integer> sectionGroups;
   private final Map<BlockPos, Integer> contentGroups;
   private final int[][] groups;
@@ -69,6 +73,7 @@ public final class CompiledStructure {
     orientation = data.orientation;
     facing = orientation.front();
     positions = data.positions;
+    componentIndices = data.componentIndices;
     sectionGroups = data.sections;
     contentGroups = data.contents;
     groups = data.groups;
@@ -168,6 +173,7 @@ public final class CompiledStructure {
             target.immutable(),
             orientation,
             List.copyOf(shifted),
+            componentIndices,
             Map.copyOf(sections),
             Map.copyOf(contents),
             indices.stream().map(values -> values.stream().mapToInt(Integer::intValue).toArray()).toArray(int[][]::new),
@@ -201,6 +207,7 @@ public final class CompiledStructure {
       BlockPos origin,
       MachineOrientation orientation,
       List<BlockPos> positions,
+      Map<Block, List<Integer>> componentIndices,
       Map<Long, Integer> sections,
       Map<BlockPos, Integer> contents,
       int[][] groups,
@@ -229,6 +236,7 @@ public final class CompiledStructure {
     private final OrientationCompilation.RulePreparation rules;
     private final StructureModifierTracker.Builder modifiers;
     private final List<BlockPos> positions = new ArrayList<>();
+    private final Map<Block, List<Integer>> componentIndices = new LinkedHashMap<>();
     private final Map<Long, Integer> sections = new LinkedHashMap<>();
     private final Map<BlockPos, Integer> contents = new LinkedHashMap<>();
     private final List<List<Integer>> groupIndices = new ArrayList<>();
@@ -292,6 +300,12 @@ public final class CompiledStructure {
             Math.addExact(origin.getY(), offset.getY()),
             Math.addExact(origin.getZ(), offset.getZ()));
         positions.add(position);
+        for (var alternative : part.rule().alternatives()) {
+          var indices = componentIndices.computeIfAbsent(alternative.block(), ignored -> new ArrayList<>());
+          if (indices.isEmpty() || indices.getLast() != cursor) {
+            indices.add(cursor);
+          }
+        }
         long section = SectionPos.asLong(position);
         Integer group = sections.get(section);
         if (group == null) {
@@ -326,11 +340,13 @@ public final class CompiledStructure {
         // callbacks.
         int[][] groups = groupIndices.stream().map(indices -> indices.stream().mapToInt(Integer::intValue).toArray())
             .toArray(int[][]::new);
+        componentIndices.replaceAll((block, indices) -> List.copyOf(indices));
         data = new Data(
             definition,
             origin,
             orientation,
             List.copyOf(positions),
+            Map.copyOf(componentIndices),
             Map.copyOf(sections),
             Map.copyOf(contents),
             groups,
@@ -569,6 +585,18 @@ public final class CompiledStructure {
 
   public BlockPos position(int index) {
     return positions.get(index);
+  }
+
+  @ApiStatus.Internal
+  public List<Integer> componentIndices(Set<? extends Block> blocks) {
+    if (blocks.size() == 1) {
+      return componentIndices.getOrDefault(blocks.iterator().next(), List.of());
+    }
+    var indices = new TreeSet<Integer>();
+    for (var block : blocks) {
+      indices.addAll(componentIndices.getOrDefault(block, List.of()));
+    }
+    return List.copyOf(indices);
   }
 
   public BlockPos energyInputPosition() {

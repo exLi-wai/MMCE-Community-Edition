@@ -52,7 +52,7 @@ public final class MachineRecipeLayout {
         18,
         highest + recipes.stream()
             .mapToInt(
-                recipe -> (recipe.energyPerTick() > 0 ? 20 : 0) + recipe.interfaceInputs().size() * 9 + (recipe
+                recipe -> (recipe.energyPerTick() > 0 ? 2 : 0) + MachineRecipeDisplay.text(recipe).size() * 9 + (recipe
                     .interfaceInputs().isEmpty() ? 0 : 2))
             .max().orElse(0));
   }

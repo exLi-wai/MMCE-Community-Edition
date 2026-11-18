@@ -16,6 +16,9 @@ public final class ClientScreenRegistration {
     event.register(MachineRegistries.PATTERN_PROVIDER_MENU.get(), PatternProviderScreen::new);
     event.register(MachineRegistries.CONTROLLER_MENU.get(), MachineControllerScreen::new);
     event.register(MachineRegistries.RESOURCE_MENU.get(), MachineResourceScreen::new);
+    event.register(MachineRegistries.LIFE_ESSENCE_MENU.get(), LegacyHatchScreen::new);
+    event.register(MachineRegistries.COMPRESSED_AIR_MENU.get(), LegacyHatchScreen::new);
+    event.register(MachineRegistries.STARLIGHT_MENU.get(), LegacyHatchScreen::new);
     event.register(MachineRegistries.FACTORY_CONTROLLER_MENU.get(), FactoryControllerScreen::new);
     event.register(MachineRegistries.UPGRADE_BUS_MENU.get(), UpgradeBusScreen::new);
     event.register(MachineRegistries.SMART_INTERFACE_MENU.get(), SmartInterfaceScreen::new);

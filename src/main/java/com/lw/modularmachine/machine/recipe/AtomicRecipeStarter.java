@@ -1,5 +1,6 @@
 package com.lw.modularmachine.machine.recipe;
 
+import com.lw.modularmachine.api.recipe.resource.RecipeResourcePlanning;
 import com.lw.modularmachine.api.component.ResourceType;
 import com.lw.modularmachine.machine.recipe.resource.RecipeResourceTransaction;
 import com.lw.modularmachine.machine.recipe.resource.RecipeResourceExecutionRegistry;
@@ -133,8 +134,27 @@ public final class AtomicRecipeStarter {
           || RecipeResourceRequirements.missing(checked.orElseThrow(), nativeRecipe.orElseThrow()).isPresent()) {
         return Result.STALE;
       }
+      int resourceBudget = budget - startupResult.workUsed();
+      var outputCheck = plan
+          .prepareStartOutputs(nativeRecipe.orElseThrow(), checked.orElseThrow(), instances, resourceBudget, false);
+      if (outputCheck.status() == RecipeResourcePlanning.Status.PENDING) {
+        return Result.BUSY;
+      }
+      if (outputCheck.status() != RecipeResourcePlanning.Status.READY) {
+        return Result.STALE;
+      }
       // Allocation, codecs, predicates and callbacks precede inventory leases.
       var run = prepareRun(plan, effectivePlan, checked.orElseThrow(), nativeRecipe.orElseThrow(), instances);
+      var paidStart = plan
+          .preparePaidResources(checked.orElseThrow(), List.of(run), resourceBudget - outputCheck.workUsed());
+      if (paidStart.status() == RecipeResourcePlanning.Status.PENDING) {
+        return Result.BUSY;
+      }
+      additionalResources = paidStart.prepared();
+      if (additionalResources == null) {
+        return Result.STALE;
+      }
+      additionalResourcePhase.enlist(additionalResources);
       var inputCheck = RecipeItemPreparation
           .checkInputs(nativeRecipe.orElseThrow(), checked.orElseThrow(), Optional.empty(), instances, run);
       if (inputCheck != RecipeItemCallbackService.InputCheck.ALLOWED) {
@@ -170,11 +190,6 @@ public final class AtomicRecipeStarter {
       if (fluidDebits == null) {
         return Result.STALE;
       }
-      additionalResources = RecipeResourceExecutionRegistry.preparePaidStart(checked.orElseThrow(), List.of(run));
-      if (additionalResources == null) {
-        return Result.STALE;
-      }
-      additionalResourcePhase.enlist(additionalResources);
       if (!plan.factoryAdmissionCurrent(controller, "main")
           || !startup.current()
           || !additionalResources.current()
@@ -192,6 +207,9 @@ public final class AtomicRecipeStarter {
         }
       }
       additionalResources.addPatterns(patterns);
+      if (!plan.startOutputsCurrent(nativeRecipe.orElseThrow(), instances, false)) {
+        return Result.STALE;
+      }
       patterns.acquire();
       startup.acquireInto(upgradeLeases);
       additionalResources.acquire();
@@ -229,6 +247,8 @@ public final class AtomicRecipeStarter {
       }
       owner.install(run);
       committed = true;
+    } catch (UpgradeRecipeCheckHandlers.StaleException stale) {
+      return Result.STALE;
     } catch (RuntimeException failure) {
       ModularMachine.LOGGER
           .warn("Recipe start aborted before resource commit at {}", controller.getBlockPos(), failure);

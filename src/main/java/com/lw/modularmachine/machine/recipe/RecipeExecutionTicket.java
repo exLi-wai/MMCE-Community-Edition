@@ -8,12 +8,18 @@ import com.lw.modularmachine.api.upgrade.UpgradeSnapshot;
 import com.lw.modularmachine.api.smart.SmartNumberRequirement;
 import com.lw.modularmachine.machine.structure.StructureService;
 import com.lw.modularmachine.util.thread.ServerThreadGuard;
+import com.google.common.collect.Iterators;
 import java.util.ArrayList;
+import java.util.Comparator;
+import java.util.Iterator;
 import java.util.List;
 import java.util.Map;
 import java.util.Optional;
+import java.util.Set;
 import java.util.TreeSet;
+import net.minecraft.core.BlockPos;
 import net.minecraft.server.level.ServerLevel;
+import net.minecraft.world.level.block.Block;
 import org.jetbrains.annotations.ApiStatus;
 
 /**
@@ -155,6 +161,10 @@ public final class RecipeExecutionTicket {
     return RecipeResourceCapture.capture(owner, CaptureMode.ALL);
   }
 
+  public static Optional<RecipeExecutionTicket> captureComponents(StructureService.StructureSubject owner) {
+    return RecipeResourceCapture.capture(owner, CaptureMode.COMPONENTS);
+  }
+
   static Optional<RecipeExecutionTicket> captureOutputs(MachineControllerBlockEntity controller) {
     return RecipeResourceCapture.capture(controller, CaptureMode.OUTPUTS);
   }
@@ -193,6 +203,40 @@ public final class RecipeExecutionTicket {
    */
   public List<RecipePortSnapshot> ports() {
     return selectedPorts;
+  }
+
+  public List<BlockPos> componentPositions(Block block) {
+    return componentPositions(Set.of(block));
+  }
+
+  public java.util.Iterator<BlockPos> componentPositionCandidates(Block block) {
+    requireServerThread();
+    var pattern = proof.registration.pattern;
+    return pattern.componentIndices(Set.of(block)).stream().map(pattern::position).iterator();
+  }
+
+  public Iterator<BlockPos> componentPositionCandidates(Set<? extends Block> blocks) {
+    requireServerThread();
+    var pattern = proof.registration.pattern;
+    var sources = blocks.stream().map(block -> pattern.componentIndices(Set.of(block)).iterator()).toList();
+    return Iterators.transform(Iterators.mergeSorted(sources, Comparator.naturalOrder()), pattern::position);
+  }
+
+  public List<BlockPos> componentPositions(Set<? extends Block> blocks) {
+    requireServerThread();
+    if (blocks.isEmpty()) {
+      return List.of();
+    }
+    var pattern = proof.registration.pattern;
+    var positions = new ArrayList<BlockPos>();
+    for (int index : pattern.componentIndices(blocks)) {
+      var position = pattern.position(index);
+      var chunk = proof.level.getChunkSource().getChunkNow(position.getX() >> 4, position.getZ() >> 4);
+      if (chunk != null && blocks.contains(chunk.getBlockState(position).getBlock())) {
+        positions.add(position);
+      }
+    }
+    return List.copyOf(positions);
   }
 
   public boolean interfacesMatch(List<SmartNumberRequirement> requirements) {

@@ -26,6 +26,43 @@ public final class ResourceType {
       ResourceLocation.fromNamespaceAndPath("mmcece", "chemical"),
       "CHEMICAL",
       3);
+  public static final ResourceType ENVIRONMENT = new ResourceType(
+      ResourceLocation.fromNamespaceAndPath("mmcece", "environment"),
+      "mmcece:environment",
+      -1);
+  public static final ResourceType LASER = new ResourceType(
+      ResourceLocation.fromNamespaceAndPath("mmcece", "laser"),
+      "mmcece:laser",
+      -1);
+  public static final ResourceType EMBER = new ResourceType(
+      ResourceLocation.fromNamespaceAndPath("mmcece", "ember"),
+      "mmcece:ember",
+      -1);
+  public static final ResourceType MANA = new ResourceType(
+      ResourceLocation.fromNamespaceAndPath("mmcece", "mana"),
+      "mmcece:mana",
+      -1);
+  public static final ResourceType AURA = new ResourceType(
+      ResourceLocation.fromNamespaceAndPath("mmcece", "aura"),
+      "mmcece:aura",
+      -1);
+  public static final ResourceType HEAT = new ResourceType(
+      ResourceLocation.fromNamespaceAndPath("mmcece", "heat"),
+      "mmcece:heat",
+      -1);
+  public static final ResourceType COMPRESSED_AIR = new ResourceType(
+      ResourceLocation.fromNamespaceAndPath("mmcece", "compressed_air"),
+      "mmcece:compressed_air",
+      -1);
+  public static final ResourceType AURA_WORLD = builtin("aura_world");
+  public static final ResourceType WILL = builtin("will");
+  public static final ResourceType VIS = builtin("vis");
+  public static final ResourceType FLUX = builtin("flux");
+  public static final ResourceType LIFE_ESSENCE = builtin("life_essence");
+  public static final ResourceType METEOR = builtin("meteor");
+  public static final ResourceType ESSENTIA = builtin("essentia");
+  public static final ResourceType STARLIGHT = builtin("starlight");
+  public static final ResourceType CONSTELLATION = builtin("constellation");
   private final ResourceLocation id;
   private final String name;
   private final int ordinal;
@@ -34,6 +71,11 @@ public final class ResourceType {
     this.id = Objects.requireNonNull(id, "id");
     this.name = Objects.requireNonNull(name, "name");
     this.ordinal = ordinal;
+  }
+
+  private static ResourceType builtin(String name) {
+    var id = ResourceLocation.fromNamespaceAndPath("mmcece", name);
+    return new ResourceType(id, id.toString(), -1);
   }
 
   /**

@@ -1,5 +1,6 @@
 package com.lw.modularmachine.machine.recipe;
 
+import com.lw.modularmachine.api.recipe.resource.RecipeResourcePlanning;
 import com.lw.modularmachine.machine.recipe.resource.RecipeResourceExecutionRegistry;
 import com.lw.modularmachine.machine.recipe.search.RecipeResourceRequirements;
 import com.lw.modularmachine.ModularMachine;
@@ -89,6 +90,14 @@ public final class FactoryRecipeStarter {
           return Result.CHECK_REJECTED;
         }
       }
+      var outputCheck = plan.prepareStartOutputs(nativeRecipe.orElseThrow(), ticket, 1, checkBudget, false);
+      checkBudget -= outputCheck.workUsed();
+      if (outputCheck.status() == RecipeResourcePlanning.Status.PENDING) {
+        return Result.CHECK_PENDING;
+      }
+      if (outputCheck.status() != RecipeResourcePlanning.Status.READY) {
+        return Result.STALE;
+      }
       var ports = new HashMap<String, RecipePortSnapshot>();
       for (var port : ticket.ports()) {
         ports.put(port.partId(), port);
@@ -156,6 +165,15 @@ public final class FactoryRecipeStarter {
               ticket.dynamicLengths(),
               RecipeItemPreparation
                   .context(ticket, ResourceLocation.parse(plan.recipe().id()), Optional.of(threadId), 1));
+      var paidStart = plan.preparePaidResources(ticket, List.of(run), checkBudget - prepared.workUsed());
+      if (paidStart.status() == RecipeResourcePlanning.Status.PENDING) {
+        return Result.CHECK_PENDING;
+      }
+      additionalResources = paidStart.prepared();
+      if (additionalResources == null) {
+        return Result.STALE;
+      }
+      resources.enlistAdditional(additionalResources);
       var inputCheck = RecipeItemPreparation
           .checkInputs(nativeRecipe.orElseThrow(), ticket, Optional.of(threadId), 1, run);
       if (inputCheck != RecipeItemCallbackService.InputCheck.ALLOWED) {
@@ -179,11 +197,6 @@ public final class FactoryRecipeStarter {
           .apply(ticket, nativeRecipe.orElseThrow(), 1, false, plan.inputChanceSeed(), replacements)) {
         return Result.STALE;
       }
-      additionalResources = RecipeResourceExecutionRegistry.preparePaidStart(ticket, List.of(run));
-      if (additionalResources == null) {
-        return Result.STALE;
-      }
-      resources.enlistAdditional(additionalResources);
       if (!plan.factoryAdmissionCurrent(factory, threadId)
           || !plan.preparedOutputsCurrent(1)
           || !run.preparedItemCallbacksCurrent()
@@ -198,7 +211,7 @@ public final class FactoryRecipeStarter {
         }
       }
       additionalResources.addPatterns(patterns);
-      if (!additionalResources.current()) {
+      if (!additionalResources.current() || !plan.startOutputsCurrent(nativeRecipe.orElseThrow(), 1, false)) {
         return Result.STALE;
       }
       patterns.acquire();

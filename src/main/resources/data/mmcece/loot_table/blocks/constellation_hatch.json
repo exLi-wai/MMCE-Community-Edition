@@ -1,0 +1,1 @@
+{"pools":[{"rolls":1,"conditions":[{"condition":"minecraft:survives_explosion"}],"entries":[{"type":"minecraft:item","name":"mmcece:constellation_hatch"}]}],"neoforge:conditions":[{"type":"neoforge:mod_loaded","modid":"astralsorcery"}],"type":"minecraft:block"}

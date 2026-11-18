@@ -1,0 +1,1 @@
+{"neoforge:conditions":[{"type":"neoforge:mod_loaded","modid":"embers"}],"orientation":{"policy":"all_24"},"color":"#38A6D2","parts":[{"part_id":"casing","offset":[-1,0,1],"block":"mmcece:machine_casing_plain"},{"part_id":"ember","offset":[1,0,1],"block":"mmcece:ember_input_hatch_big"}]}

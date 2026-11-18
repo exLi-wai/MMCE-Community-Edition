@@ -65,9 +65,14 @@ public final class MachineColorHandlers {
       blocks.add(MachineRegistries.ME_PATTERN_MIRROR.get());
     }
     MachineRegistries.CASINGS.values().forEach(holder -> blocks.add(holder.get()));
+    MachineRegistries.EMBER_INPUT_HATCHES.values().forEach(holder -> blocks.add(holder.get()));
+    MachineRegistries.TICKING_RECIPE_HATCHES.values().forEach(holder -> blocks.add(holder.get()));
     MachineRegistries.PARALLEL_CONTROLLERS.values().forEach(holder -> blocks.add(holder.get()));
     MachineRegistries.UPGRADE_BUSES.values().forEach(holder -> blocks.add(holder.get()));
     blocks.add(MachineRegistries.SMART_INTERFACE.get());
+    if (MachineRegistries.LASER_INPUT_HATCH != null) {
+      blocks.add(MachineRegistries.LASER_INPUT_HATCH.get());
+    }
     BuiltInRegistries.BLOCK.forEach(block -> {
       if (block instanceof ColoredStatedMachineComponentBlock) {
         blocks.add(block);

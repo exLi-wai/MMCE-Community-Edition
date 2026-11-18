@@ -1,6 +1,15 @@
 package com.lw.modularmachine.machine.recipe.resource;
 
+import com.lw.modularmachine.api.recipe.BufferedAmountRecipeData;
 import com.lw.modularmachine.api.recipe.ChemicalRecipeData;
+import com.lw.modularmachine.api.recipe.CompressedAirRecipeData;
+import com.lw.modularmachine.api.recipe.EnvironmentRecipeData;
+import com.lw.modularmachine.api.recipe.EmberRecipeData;
+import com.lw.modularmachine.api.recipe.LaserRecipeData;
+import com.lw.modularmachine.api.recipe.WorldPoolRecipeData;
+import com.lw.modularmachine.api.recipe.MeteorRecipeData;
+import com.lw.modularmachine.api.recipe.KeyedAmountRecipeData;
+import com.lw.modularmachine.api.recipe.ConstellationRecipeData;
 import com.lw.modularmachine.api.recipe.resource.RecipeResourceType;
 import com.lw.modularmachine.machine.component.ResourceTypeRegistry;
 import com.lw.modularmachine.api.recipe.resource.RecipeResources;
@@ -80,11 +89,130 @@ public final class RecipeResourceDefinitions {
       data -> !data.inputs().isEmpty() || !data.perTick().isEmpty(),
       data -> !data.outputs().isEmpty() || !data.perTickOutputs().isEmpty());
 
+  public static final RecipeResourceType<EnvironmentRecipeData> ENVIRONMENT = new RecipeResourceType<>(
+      id("environment"),
+      EnvironmentRecipeData.class,
+      EnvironmentRecipeData.CODEC,
+      EnvironmentRecipeData.NONE,
+      data -> !data.requirements().isEmpty(),
+      data -> false);
+
+  public static final RecipeResourceType<LaserRecipeData> LASER = new RecipeResourceType<>(
+      id("laser"),
+      LaserRecipeData.class,
+      LaserRecipeData.CODEC,
+      LaserRecipeData.NONE,
+      data -> data.input() > 0,
+      data -> false);
+
+  public static final RecipeResourceType<EmberRecipeData> EMBER = new RecipeResourceType<>(
+      id("ember"),
+      EmberRecipeData.class,
+      EmberRecipeData.CODEC,
+      EmberRecipeData.NONE,
+      data -> data.micros() > 0,
+      data -> false);
+  public static final RecipeResourceType<BufferedAmountRecipeData> MANA = new RecipeResourceType<>(
+      id("mana"),
+      BufferedAmountRecipeData.class,
+      BufferedAmountRecipeData.codec("mana_input", "mana_output"),
+      BufferedAmountRecipeData.NONE,
+      data -> data.input() > 0 || data.output() > 0,
+      data -> data.output() > 0);
+  public static final RecipeResourceType<BufferedAmountRecipeData> AURA = new RecipeResourceType<>(
+      id("aura"),
+      BufferedAmountRecipeData.class,
+      BufferedAmountRecipeData.inputCodec("aura_input"),
+      BufferedAmountRecipeData.NONE,
+      data -> data.input() > 0 || data.output() > 0,
+      data -> false);
+
+  public static final RecipeResourceType<BufferedAmountRecipeData> HEAT = new RecipeResourceType<>(
+      id("heat"),
+      BufferedAmountRecipeData.class,
+      BufferedAmountRecipeData.codec("heat_input", "heat_output"),
+      BufferedAmountRecipeData.NONE,
+      data -> data.input() > 0 || data.output() > 0,
+      data -> data.output() > 0);
+
+  public static final RecipeResourceType<CompressedAirRecipeData> COMPRESSED_AIR = new RecipeResourceType<>(
+      id("compressed_air"),
+      CompressedAirRecipeData.class,
+      CompressedAirRecipeData.CODEC,
+      CompressedAirRecipeData.NONE,
+      data -> data.input().isPresent() || data.output().isPresent(),
+      data -> data.output().isPresent());
+
+  public static final RecipeResourceType<WorldPoolRecipeData> AURA_WORLD = worldPool("aura_world", "aura", false);
+  public static final RecipeResourceType<WorldPoolRecipeData> WILL = worldPool("will", "will", true);
+  public static final RecipeResourceType<WorldPoolRecipeData> VIS = worldPool("vis", "vis", true);
+  public static final RecipeResourceType<WorldPoolRecipeData> FLUX = worldPool("flux", "flux", true);
+  public static final RecipeResourceType<BufferedAmountRecipeData> LIFE_ESSENCE = new RecipeResourceType<>(
+      id("life_essence"),
+      BufferedAmountRecipeData.class,
+      BufferedAmountRecipeData.codec("life_essence_input", "life_essence_output"),
+      BufferedAmountRecipeData.NONE,
+      data -> data.input() > 0 || data.output() > 0,
+      data -> data.output() > 0);
+
+  private static RecipeResourceType<WorldPoolRecipeData> worldPool(String name, String field, boolean hasInput) {
+    return new RecipeResourceType<>(
+        id(name),
+        WorldPoolRecipeData.class,
+        WorldPoolRecipeData.codec(field, hasInput),
+        WorldPoolRecipeData.NONE,
+        WorldPoolRecipeData::present,
+        data -> data.output().isPresent());
+  }
+
+  public static final RecipeResourceType<MeteorRecipeData> METEOR = new RecipeResourceType<>(
+      id("meteor"),
+      MeteorRecipeData.class,
+      MeteorRecipeData.CODEC,
+      MeteorRecipeData.NONE,
+      data -> data.output().isPresent(),
+      data -> data.output().isPresent());
+  public static final RecipeResourceType<KeyedAmountRecipeData> ESSENTIA = keyed("essentia");
+  public static final RecipeResourceType<KeyedAmountRecipeData> STARLIGHT = keyed("starlight");
+  public static final RecipeResourceType<ConstellationRecipeData> CONSTELLATION = new RecipeResourceType<>(
+      id("constellation"),
+      ConstellationRecipeData.class,
+      ConstellationRecipeData.CODEC,
+      ConstellationRecipeData.NONE,
+      data -> !data.active().isEmpty(),
+      data -> false);
+
+  private static RecipeResourceType<KeyedAmountRecipeData> keyed(String name) {
+    return new RecipeResourceType<>(
+        id(name),
+        KeyedAmountRecipeData.class,
+        KeyedAmountRecipeData.codec(name),
+        KeyedAmountRecipeData.NONE,
+        KeyedAmountRecipeData::present,
+        data -> !data.output().isEmpty());
+  }
+
   static {
     register(ITEM);
     register(FLUID);
     register(ENERGY);
     register(CHEMICAL);
+    register(ENVIRONMENT);
+    register(LASER);
+    register(EMBER);
+    register(MANA);
+    register(AURA);
+    register(HEAT);
+    register(COMPRESSED_AIR);
+    register(AURA_WORLD);
+    register(WILL);
+    register(VIS);
+    register(FLUX);
+    register(LIFE_ESSENCE);
+    register(METEOR);
+    register(ESSENTIA);
+    register(STARLIGHT);
+    register(CONSTELLATION);
   }
 
   public static final MapCodec<RecipeResources> CODEC = new MapCodec<>() {

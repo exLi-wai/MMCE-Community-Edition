@@ -56,11 +56,15 @@ public final class LongEnergyBuffer implements IEnergyStorage {
 
   @Override
   public int receiveEnergy(int amount, boolean simulate) {
+    return (int) receiveEnergyLong(amount, simulate);
+  }
+
+  public long receiveEnergyLong(long amount, boolean simulate) {
     readAllowed();
     if (!input || amount <= 0) {
       return 0;
     }
-    int accepted = (int) Math.min(amount, Math.min(capacity - stored, receiveAllowance()));
+    long accepted = Math.min(amount, Math.min(capacity - stored, receiveAllowance()));
     if (!simulate && accepted > 0) {
       beforeMutation.run();
       rollTick();
@@ -175,10 +179,18 @@ public final class LongEnergyBuffer implements IEnergyStorage {
     }
 
     public boolean extractExact(long amount) {
+      return extractExact(amount, true);
+    }
+
+    public boolean extractExternalExact(long amount) {
+      return extractExact(amount, false);
+    }
+
+    private boolean extractExact(long amount, boolean inputSide) {
       check();
       long now = clock.getAsLong();
       long available = Math.min(stored, now == budgetTick ? transferLimit - extracted : transferLimit);
-      if (!input || amount <= 0 || amount > available) {
+      if (input != inputSide || amount <= 0 || amount > available) {
         return false;
       }
       if (now != budgetTick) {
@@ -196,10 +208,18 @@ public final class LongEnergyBuffer implements IEnergyStorage {
      * Machine production fills an output hatch with its long per-tick allowance.
      */
     public boolean insertExact(long amount) {
+      return insertExact(amount, false);
+    }
+
+    public boolean receiveExternalExact(long amount) {
+      return insertExact(amount, true);
+    }
+
+    private boolean insertExact(long amount, boolean inputSide) {
       check();
       long now = clock.getAsLong();
       long available = Math.min(capacity - stored, now == budgetTick ? transferLimit - received : transferLimit);
-      if (input || amount <= 0 || amount > available) {
+      if (input != inputSide || amount <= 0 || amount > available) {
         return false;
       }
       if (now != budgetTick) {

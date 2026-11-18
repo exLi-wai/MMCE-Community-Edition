@@ -34,6 +34,7 @@ final class RecipeResourceCapture {
 
   enum CaptureMode {
     ALL,
+    COMPONENTS,
     OUTPUTS,
     ENERGY_INPUTS,
     ENERGY_OUTPUTS,
@@ -76,7 +77,7 @@ final class RecipeResourceCapture {
         }
         interfaces.add(new SmartSnapshot(position, smart, binding));
       }
-      if (part.rule().port() == null) {
+      if (mode == CaptureMode.COMPONENTS || part.rule().port() == null) {
         continue;
       }
       if (mode == CaptureMode.OUTPUTS

@@ -1,0 +1,1 @@
+{"orientation":{"policy":"all_24"},"neoforge:conditions":[{"type":"neoforge:mod_loaded","modid":"neovitae"}],"color":"#38A6D2","parts":[{"part_id":"casing","block":"mmcece:machine_casing_plain","offset":[-1,0,1]},{"part_id":"hatch","block":"mmcece:multi_will_input_hatch","offset":[1,0,1]}]}

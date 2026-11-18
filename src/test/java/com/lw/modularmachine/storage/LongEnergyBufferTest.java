@@ -7,6 +7,17 @@ import static org.junit.jupiter.api.Assertions.*;
 
 class LongEnergyBufferTest {
   @Test
+  void longInputDoesNotNarrowBeforeApplyingCapacity() {
+    var input = new LongEnergyBuffer(Long.MAX_VALUE, Long.MAX_VALUE, true, () -> 0, () -> {
+    });
+    assertEquals(Long.MAX_VALUE, input.receiveEnergyLong(Long.MAX_VALUE, true));
+    assertEquals(0, input.stored());
+    assertEquals(Long.MAX_VALUE, input.receiveEnergyLong(Long.MAX_VALUE, false));
+    assertEquals(0, input.receiveEnergyLong(1, false));
+    assertEquals(Long.MAX_VALUE, input.stored());
+  }
+
+  @Test
   void rejectedWriteRunsGuardBeforeChangingStorage() {
     var input = new LongEnergyBuffer(2048, 128, true, () -> 0, () -> {
       throw new IllegalStateException("wrong thread");

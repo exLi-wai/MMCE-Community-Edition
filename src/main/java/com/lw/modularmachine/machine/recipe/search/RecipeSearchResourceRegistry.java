@@ -1,8 +1,16 @@
 package com.lw.modularmachine.machine.recipe.search;
 
+import com.lw.modularmachine.machine.recipe.resource.world.WorldPoolResources;
+import com.lw.modularmachine.machine.recipe.resource.world.MeteorExecution;
+import com.lw.modularmachine.machine.recipe.resource.world.ConstellationExecution;
+import com.lw.modularmachine.machine.recipe.resource.keyed.KeyedRecipeResources;
 import com.lw.modularmachine.api.recipe.resource.RecipeResourceType;
 import com.lw.modularmachine.api.recipe.resource.RecipeResources;
 import com.lw.modularmachine.machine.recipe.resource.RecipeResourceDefinitions;
+import com.lw.modularmachine.api.recipe.EmberRecipeData;
+import com.lw.modularmachine.api.recipe.LaserRecipeData;
+import com.lw.modularmachine.api.recipe.BufferedAmountRecipeData;
+import com.lw.modularmachine.machine.recipe.resource.buffered.BufferedRecipeResources;
 import java.util.ArrayList;
 import java.util.LinkedHashMap;
 import java.util.List;
@@ -23,6 +31,58 @@ public final class RecipeSearchResourceRegistry {
     register(ResourceLocation.fromNamespaceAndPath("mmcece", "item"), ItemPaymentSearchResource::new);
     register(ResourceLocation.fromNamespaceAndPath("mmcece", "fluid"), FluidRecipeSearchResource::new);
     register(ResourceLocation.fromNamespaceAndPath("mmcece", "chemical"), ChemicalRecipeSearchResource::new);
+    register(RecipeResourceDefinitions.ENVIRONMENT, EnvironmentRecipeSearchResource::new);
+    register(RecipeResourceDefinitions.COMPRESSED_AIR, CompressedAirRecipeSearchResource::new);
+    register(RecipeResourceDefinitions.AURA_WORLD, WorldPoolResources.AURA::search);
+    register(RecipeResourceDefinitions.WILL, WorldPoolResources.WILL::search);
+    register(RecipeResourceDefinitions.VIS, WorldPoolResources.VIS::search);
+    register(RecipeResourceDefinitions.FLUX, WorldPoolResources.FLUX::search);
+    register(RecipeResourceDefinitions.METEOR, MeteorExecution::search);
+    register(RecipeResourceDefinitions.ESSENTIA, KeyedRecipeResources.ESSENTIA::search);
+    register(RecipeResourceDefinitions.STARLIGHT, KeyedRecipeResources.STARLIGHT::search);
+    register(RecipeResourceDefinitions.CONSTELLATION, ConstellationExecution::search);
+    register(
+        RecipeResourceDefinitions.LIFE_ESSENCE,
+        catalog -> new BufferedInputRecipeSearchResource<>(
+            catalog,
+            RecipeResourceDefinitions.LIFE_ESSENCE,
+            BufferedRecipeResources.LIFE_ESSENCE,
+            BufferedAmountRecipeData::input));
+    register(
+        RecipeResourceDefinitions.LASER,
+        catalog -> new BufferedInputRecipeSearchResource<>(
+            catalog,
+            RecipeResourceDefinitions.LASER,
+            BufferedRecipeResources.LASER,
+            LaserRecipeData::input));
+    register(
+        RecipeResourceDefinitions.EMBER,
+        catalog -> new BufferedInputRecipeSearchResource<>(
+            catalog,
+            RecipeResourceDefinitions.EMBER,
+            BufferedRecipeResources.EMBER,
+            EmberRecipeData::micros));
+    register(
+        RecipeResourceDefinitions.MANA,
+        catalog -> new BufferedInputRecipeSearchResource<>(
+            catalog,
+            RecipeResourceDefinitions.MANA,
+            BufferedRecipeResources.MANA,
+            BufferedAmountRecipeData::input));
+    register(
+        RecipeResourceDefinitions.AURA,
+        catalog -> new BufferedInputRecipeSearchResource<>(
+            catalog,
+            RecipeResourceDefinitions.AURA,
+            BufferedRecipeResources.AURA,
+            BufferedAmountRecipeData::input));
+    register(
+        RecipeResourceDefinitions.HEAT,
+        catalog -> new BufferedInputRecipeSearchResource<>(
+            catalog,
+            RecipeResourceDefinitions.HEAT,
+            BufferedRecipeResources.HEAT,
+            BufferedAmountRecipeData::input));
   }
 
   private RecipeSearchResourceRegistry() {

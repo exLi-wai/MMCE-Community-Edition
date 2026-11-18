@@ -66,15 +66,21 @@ public final class RecipeResourceExecution {
   }
 
   @FunctionalInterface
+  public interface PlannedStart<D> {
+    /** Budgeted preparation for deterministic debits specified by frozen data. */
+    Preparation prepare(RecipeExecutionTicket ticket, List<D> frozenData);
+  }
+
+  @FunctionalInterface
   public interface Admission<D> {
     /**
      * Checks the requested batch's output capacity and resource-specific numeric
      * limits without freezing a run or acquiring resources. Input allocation is
-     * checked with Start first. The plan must retain progress and report work;
-     * feasibility on the same ticket must be monotone in instances for binary
-     * admission. Arithmetic overflow denotes an infeasible count. The ticket is
-     * refreshed when this plan is created; continuation uses detached quantities
-     * and dependency identity, not the original ticket's same-tick commit proof.
+     * checked first. The plan must retain progress and report work; feasibility on
+     * the same ticket must be monotone in instances for binary admission.
+     * Arithmetic overflow denotes an infeasible count. The ticket is refreshed when
+     * this plan is created; continuation uses detached quantities and dependency
+     * identity, not the original ticket's same-tick commit proof.
      */
     RecipeResourcePlanning prepare(Input<D> input);
   }
@@ -127,8 +133,15 @@ public final class RecipeResourceExecution {
     D freeze(D data, int instances);
   }
 
-  public interface Output extends RecipeResourcePlanning {
+  public interface Preparation extends RecipeResourcePlanning {
     /** Called only after READY and a fresh commit proof; no writes happen here. */
     PreparedRecipeResource prepared(RecipeExecutionTicket ticket);
+  }
+
+  public interface Output extends Preparation {
+    default boolean searchCurrent(RecipeExecutionTicket ticket) {
+      var result = prepared(ticket);
+      return result != null && result.current();
+    }
   }
 }

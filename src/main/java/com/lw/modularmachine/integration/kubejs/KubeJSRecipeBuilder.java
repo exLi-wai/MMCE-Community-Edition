@@ -1,5 +1,9 @@
 package com.lw.modularmachine.integration.kubejs;
 
+import com.lw.modularmachine.api.recipe.WorldPoolRecipeData;
+import com.lw.modularmachine.api.recipe.MeteorRecipeData;
+import com.lw.modularmachine.api.recipe.ConstellationRecipeData;
+import com.lw.modularmachine.api.recipe.KeyedAmountRecipeData;
 import com.lw.modularmachine.machine.recipe.RecipeDeclaredObservers;
 import com.lw.modularmachine.machine.recipe.RecipePreparationHandlers;
 import com.lw.modularmachine.api.recipe.RecipePreparationEvents;
@@ -24,7 +28,15 @@ import com.lw.modularmachine.api.recipe.RecipeExecutionOptions;
 import com.lw.modularmachine.api.recipe.RecipeScriptOptions;
 import com.lw.modularmachine.api.recipe.RecipeItemCallbacks;
 import com.lw.modularmachine.api.recipe.RecipeLifecycleEvents;
+import com.lw.modularmachine.api.recipe.resource.RecipeResourceType;
 import com.lw.modularmachine.api.recipe.resource.RecipeResources;
+import com.lw.modularmachine.api.recipe.EnvironmentRecipeData;
+import com.lw.modularmachine.api.recipe.EnvironmentRequirement;
+import com.lw.modularmachine.api.recipe.LaserRecipeData;
+import com.lw.modularmachine.api.recipe.BufferedAmountRecipeData;
+import com.lw.modularmachine.api.recipe.CompressedAirRecipeData;
+import com.lw.modularmachine.api.recipe.EmberRecipeData;
+import com.lw.modularmachine.machine.recipe.resource.RecipeResourceDefinitions;
 import com.lw.modularmachine.api.smart.SmartNumberRequirement;
 import com.lw.modularmachine.machine.recipe.ItemStackSnapshots;
 import com.lw.modularmachine.machine.recipe.MachineRecipe;
@@ -187,12 +199,404 @@ public final class KubeJSRecipeBuilder {
           KubeJSRecipeArguments.identifier(resourceId, "recipe resource"),
           declaration,
           event.registries.access());
+      return putResource(entry);
+    }
+
+    public RecipeBuilder addLaserInput(Number amount) {
+      requireMutable();
+      return putResource(
+          RecipeResourceBuilderDeclarations.capture(
+              RecipeResourceDefinitions.LASER,
+              new LaserRecipeData(KubeJSRecipeArguments.integer(amount, "laser", 1, Long.MAX_VALUE))));
+    }
+
+    public RecipeBuilder addLaserInput(String amount) {
+      requireMutable();
+      return putResource(
+          RecipeResourceBuilderDeclarations.capture(
+              RecipeResourceDefinitions.LASER,
+              new LaserRecipeData(KubeJSRecipeArguments.integer(amount, "laser", 1, Long.MAX_VALUE))));
+    }
+
+    public RecipeBuilder addEmberInput(Number amount) {
+      requireMutable();
+      return putResource(
+          RecipeResourceBuilderDeclarations.capture(RecipeResourceDefinitions.EMBER, EmberRecipeData.of(amount)));
+    }
+
+    public RecipeBuilder addManaInput(Number amount) {
+      requireMutable();
+      var previous = bufferedDeclaration(RecipeResourceDefinitions.MANA);
+      long input = KubeJSRecipeArguments.integer(amount, "mana input", 1, Long.MAX_VALUE);
+      return putResource(
+          RecipeResourceBuilderDeclarations.capture(
+              RecipeResourceDefinitions.MANA,
+              new BufferedAmountRecipeData(Math.addExact(previous.input(), input), previous.output())));
+    }
+
+    public RecipeBuilder addManaOutput(Number amount) {
+      requireMutable();
+      var previous = bufferedDeclaration(RecipeResourceDefinitions.MANA);
+      long output = KubeJSRecipeArguments.integer(amount, "mana output", 1, Long.MAX_VALUE);
+      return putResource(
+          RecipeResourceBuilderDeclarations.capture(
+              RecipeResourceDefinitions.MANA,
+              new BufferedAmountRecipeData(previous.input(), Math.addExact(previous.output(), output))));
+    }
+
+    public RecipeBuilder addAuraInput(Number amount) {
+      requireMutable();
+      var previous = bufferedDeclaration(RecipeResourceDefinitions.AURA);
+      long input = KubeJSRecipeArguments.integer(amount, "aura input", 1, Long.MAX_VALUE);
+      return putResource(
+          RecipeResourceBuilderDeclarations.capture(
+              RecipeResourceDefinitions.AURA,
+              new BufferedAmountRecipeData(Math.addExact(previous.input(), input), 0)));
+    }
+
+    public RecipeBuilder addAuraOutput(String type, Number amount, Number maximum) {
+      return chunkPool(RecipeResourceDefinitions.AURA_WORLD, true, type, amount, false, 0, maximum);
+    }
+
+    public RecipeBuilder addAuraOutput(String type, Number amount) {
+      return addAuraOutput(type, amount, Integer.MAX_VALUE);
+    }
+
+    public RecipeBuilder addWillInput(String type, Number amount) {
+      return addWillInput(type, amount, 0);
+    }
+
+    public RecipeBuilder addWillInput(String type, Number amount, Number minimum) {
+      return chunkPoolInUnits(RecipeResourceDefinitions.WILL, false, type, amount, false, 0, minimum);
+    }
+
+    public RecipeBuilder addWillOutput(String type, Number amount) {
+      return addWillOutput(type, amount, Integer.MAX_VALUE);
+    }
+
+    public RecipeBuilder addWillOutput(String type, Number amount, Number maximum) {
+      return chunkPoolInUnits(RecipeResourceDefinitions.WILL, true, type, amount, false, 0, maximum);
+    }
+
+    public RecipeBuilder addMultiChunkWillInput(String type, int radius, Number amount, Number minimum) {
+      return chunkPoolInUnits(RecipeResourceDefinitions.WILL, false, type, amount, true, radius, minimum);
+    }
+
+    public RecipeBuilder addMultiChunkWillOutput(String type, int radius, Number amount, Number maximum) {
+      return chunkPoolInUnits(RecipeResourceDefinitions.WILL, true, type, amount, true, radius, maximum);
+    }
+
+    public RecipeBuilder addVisInput(Number amount) {
+      return addVisInput(amount, 0);
+    }
+
+    public RecipeBuilder addVisInput(Number amount, int radius) {
+      return addVisInput(amount, radius, 0);
+    }
+
+    public RecipeBuilder addVisInput(Number amount, int radius, Number minimum) {
+      return chunkPoolInUnits(RecipeResourceDefinitions.VIS, false, "", amount, false, radius, minimum);
+    }
+
+    public RecipeBuilder addVisOutput(Number amount) {
+      return addVisOutput(amount, 0);
+    }
+
+    public RecipeBuilder addVisOutput(Number amount, int radius) {
+      return addVisOutput(amount, radius, 500);
+    }
+
+    public RecipeBuilder addVisOutput(Number amount, int radius, Number maximum) {
+      return chunkPoolInUnits(RecipeResourceDefinitions.VIS, true, "", amount, false, radius, maximum);
+    }
+
+    public RecipeBuilder addFluxInput(Number amount) {
+      return addFluxInput(amount, 0);
+    }
+
+    public RecipeBuilder addFluxInput(Number amount, int radius) {
+      return addFluxInput(amount, radius, 0);
+    }
+
+    public RecipeBuilder addFluxInput(Number amount, int radius, Number minimum) {
+      return chunkPoolInUnits(RecipeResourceDefinitions.FLUX, false, "", amount, false, radius, minimum);
+    }
+
+    public RecipeBuilder addFluxOutput(Number amount) {
+      return addFluxOutput(amount, 0);
+    }
+
+    public RecipeBuilder addFluxOutput(Number amount, int radius) {
+      return addFluxOutput(amount, radius, 500);
+    }
+
+    public RecipeBuilder addFluxOutput(Number amount, int radius, Number maximum) {
+      return chunkPoolInUnits(RecipeResourceDefinitions.FLUX, true, "", amount, false, radius, maximum);
+    }
+
+    private RecipeBuilder chunkPoolInUnits(RecipeResourceType<WorldPoolRecipeData> type, boolean output, String kind, Number amount, boolean multichunk, int radius, Number limit) {
+      return chunkPool(
+          type,
+          output,
+          kind,
+          toMilli(amount, "chunk amount"),
+          multichunk,
+          radius,
+          nonNegativeMilli(limit, "chunk limit"));
+    }
+
+    private RecipeBuilder chunkPool(RecipeResourceType<WorldPoolRecipeData> type, boolean output, String kind, Number amount, boolean multichunk, int radius, Number limit) {
+      requireMutable();
+      var entry = resourceDeclarations.get(type.id());
+      var previous = entry == null ? WorldPoolRecipeData.NONE : type.dataClass().cast(entry.data());
+      var prior = output ? previous.output() : previous.input();
+      if (prior.isPresent()) {
+        throw new IllegalArgumentException("Only one declaration per chunk resource direction: " + type.id());
+      }
+      var claim = java.util.Optional.of(
+          new WorldPoolRecipeData.Claim(
+              kind,
+              KubeJSRecipeArguments.integer(amount, "chunk amount", 1, Long.MAX_VALUE),
+              multichunk,
+              radius,
+              KubeJSRecipeArguments.integer(limit, "chunk limit", 0, Long.MAX_VALUE)));
+      return putResource(
+          RecipeResourceBuilderDeclarations.capture(
+              type,
+              output ? new WorldPoolRecipeData(previous.input(), claim) : new WorldPoolRecipeData(
+                  claim,
+                  previous.output())));
+    }
+
+    private BufferedAmountRecipeData bufferedDeclaration(RecipeResourceType<BufferedAmountRecipeData> type) {
+      var previous = resourceDeclarations.get(type.id());
+      return previous == null ? BufferedAmountRecipeData.NONE : type.dataClass().cast(previous.data());
+    }
+
+    public RecipeBuilder addLifeEssenceInput(Number amount) {
+      requireMutable();
+      var type = RecipeResourceDefinitions.LIFE_ESSENCE;
+      var previous = bufferedDeclaration(type);
+      long quantity = KubeJSRecipeArguments.integer(amount, "life essence", 1, Long.MAX_VALUE);
+      return putResource(
+          RecipeResourceBuilderDeclarations.capture(
+              type,
+              new BufferedAmountRecipeData(Math.addExact(previous.input(), quantity), previous.output())));
+    }
+
+    public RecipeBuilder addLifeEssenceOutput(Number amount) {
+      requireMutable();
+      var type = RecipeResourceDefinitions.LIFE_ESSENCE;
+      var previous = bufferedDeclaration(type);
+      long quantity = KubeJSRecipeArguments.integer(amount, "life essence", 1, Long.MAX_VALUE);
+      return putResource(
+          RecipeResourceBuilderDeclarations.capture(
+              type,
+              new BufferedAmountRecipeData(previous.input(), Math.addExact(previous.output(), quantity))));
+    }
+
+    public RecipeBuilder addAspectInput(String aspect, Number amount) {
+      return addKeyed(RecipeResourceDefinitions.ESSENTIA, aspect, amount, false);
+    }
+
+    public RecipeBuilder addAspectOutput(String aspect, Number amount) {
+      return addKeyed(RecipeResourceDefinitions.ESSENTIA, aspect, amount, true);
+    }
+
+    public RecipeBuilder addEssentiaInput(String aspect, Number amount) {
+      return addAspectInput(aspect, amount);
+    }
+
+    public RecipeBuilder addEssentiaOutput(String aspect, Number amount) {
+      return addAspectOutput(aspect, amount);
+    }
+
+    public RecipeBuilder addStarlightInput(Number amount) {
+      return addStarlightInput(amount, KeyedAmountRecipeData.ANY_STARLIGHT.toString());
+    }
+
+    public RecipeBuilder addStarlightInput(Number amount, String source) {
+      return addKeyed(RecipeResourceDefinitions.STARLIGHT, source, amount, false);
+    }
+
+    public RecipeBuilder addStarlightOutput(Number amount) {
+      return addStarlightOutput(amount, "mmcece:unattuned");
+    }
+
+    public RecipeBuilder addStarlightOutput(Number amount, String constellation) {
+      return addKeyed(RecipeResourceDefinitions.STARLIGHT, constellation, amount, true);
+    }
+
+    private RecipeBuilder addKeyed(RecipeResourceType<KeyedAmountRecipeData> type, String id, Number amount, boolean output) {
+      requireMutable();
+      var captured = resourceDeclarations.get(type.id());
+      var previous = captured == null ? KeyedAmountRecipeData.NONE : type.dataClass().cast(captured.data());
+      var quantities = new java.util.LinkedHashMap<>(output ? previous.output() : previous.input());
+      long units = type == RecipeResourceDefinitions.STARLIGHT ? toMilli(amount, "starlight") : KubeJSRecipeArguments
+          .integer(amount, "essentia", 1, Long.MAX_VALUE);
+      quantities.merge(ResourceLocation.parse(id), units, Math::addExact);
+      return putResource(
+          RecipeResourceBuilderDeclarations.capture(
+              type,
+              output ? new KeyedAmountRecipeData(previous.input(), quantities) : new KeyedAmountRecipeData(
+                  quantities,
+                  previous.output())));
+    }
+
+    public RecipeBuilder addConstellationInput(String constellation) {
+      requireMutable();
+      var type = RecipeResourceDefinitions.CONSTELLATION;
+      var captured = resourceDeclarations.get(type.id());
+      var active = new java.util.ArrayList<>(
+          captured == null ? java.util.List.<ResourceLocation>of() : type.dataClass().cast(captured.data()).active());
+      active.add(ResourceLocation.parse(constellation));
+      return putResource(RecipeResourceBuilderDeclarations.capture(type, new ConstellationRecipeData(active)));
+    }
+
+    public RecipeBuilder addMeteorOutput(String catalyst) {
+      requireMutable();
+      var type = RecipeResourceDefinitions.METEOR;
+      if (resourceDeclarations.containsKey(type.id())) {
+        throw new IllegalArgumentException("Only one meteor catalyst is allowed per recipe");
+      }
+      return putResource(
+          RecipeResourceBuilderDeclarations.capture(
+              type,
+              new MeteorRecipeData(
+                  java.util.Optional.of(new MeteorRecipeData.Launch(ResourceLocation.parse(catalyst), 1)))));
+    }
+
+    public RecipeBuilder addHeatInput(Number amount) {
+      requireMutable();
+      var previous = bufferedDeclaration(RecipeResourceDefinitions.HEAT);
+      return putResource(
+          RecipeResourceBuilderDeclarations.capture(
+              RecipeResourceDefinitions.HEAT,
+              new BufferedAmountRecipeData(Math.addExact(previous.input(), milliheat(amount)), previous.output())));
+    }
+
+    public RecipeBuilder addHeatOutput(Number amount) {
+      requireMutable();
+      var previous = bufferedDeclaration(RecipeResourceDefinitions.HEAT);
+      return putResource(
+          RecipeResourceBuilderDeclarations.capture(
+              RecipeResourceDefinitions.HEAT,
+              new BufferedAmountRecipeData(previous.input(), Math.addExact(previous.output(), milliheat(amount)))));
+    }
+
+    private static long milliheat(Number amount) {
+      return toMilli(amount, "heat");
+    }
+
+    private static long toMilli(Number amount, String resource) {
+      long exact = nonNegativeMilli(amount, resource);
+      if (exact == 0) {
+        throw new IllegalArgumentException(resource + " must be positive");
+      }
+      return exact;
+    }
+
+    private static long nonNegativeMilli(Number amount, String resource) {
+      try {
+        long exact = new java.math.BigDecimal(amount.toString()).movePointRight(3).longValueExact();
+        if (exact < 0) {
+          throw new IllegalArgumentException(resource + " must not be negative");
+        }
+        return exact;
+      } catch (ArithmeticException | NumberFormatException invalid) {
+        throw new IllegalArgumentException(
+            resource + " requires at most three decimal places and a representable amount",
+            invalid);
+      }
+    }
+
+    public RecipeBuilder addCompressedAirInput(float pressure, Number air) {
+      requireMutable();
+      var previous = compressedAirDeclaration();
+      var amount = compressedAirAmount(pressure, air, previous.input());
+      return putResource(
+          RecipeResourceBuilderDeclarations.capture(
+              RecipeResourceDefinitions.COMPRESSED_AIR,
+              new CompressedAirRecipeData(java.util.Optional.of(amount), previous.output())));
+    }
+
+    public RecipeBuilder addCompressedAirOutput(float pressure, Number air) {
+      requireMutable();
+      var previous = compressedAirDeclaration();
+      var amount = compressedAirAmount(pressure, air, previous.output());
+      return putResource(
+          RecipeResourceBuilderDeclarations.capture(
+              RecipeResourceDefinitions.COMPRESSED_AIR,
+              new CompressedAirRecipeData(previous.input(), java.util.Optional.of(amount))));
+    }
+
+    private CompressedAirRecipeData compressedAirDeclaration() {
+      var previous = resourceDeclarations.get(RecipeResourceDefinitions.COMPRESSED_AIR.id());
+      return previous == null ? CompressedAirRecipeData.NONE : RecipeResourceDefinitions.COMPRESSED_AIR.dataClass()
+          .cast(previous.data());
+    }
+
+    private static CompressedAirRecipeData.Amount compressedAirAmount(float pressure, Number air, java.util.Optional<CompressedAirRecipeData.Amount> previous) {
+      long amount = KubeJSRecipeArguments.integer(air, "compressed air", 1, Long.MAX_VALUE);
+      if (previous.isPresent()) {
+        var prior = previous.orElseThrow();
+        if (Float.compare(prior.pressure(), pressure) != 0) {
+          throw new IllegalArgumentException("Compressed air declarations of one direction must use the same pressure");
+        }
+        amount = Math.addExact(amount, prior.air());
+      }
+      return new CompressedAirRecipeData.Amount(pressure, amount);
+    }
+
+    public RecipeBuilder setDimension(String... dimensions) {
+      return addEnvironment(
+          new EnvironmentRequirement.Dimension(
+              java.util.Arrays.stream(dimensions).map(id -> KubeJSRecipeArguments.identifier(id, "dimension"))
+                  .toList()));
+    }
+
+    public RecipeBuilder setBiome(String... biomes) {
+      return addEnvironment(
+          new EnvironmentRequirement.Biome(
+              java.util.Arrays.stream(biomes).map(id -> KubeJSRecipeArguments.identifier(id, "biome")).toList()));
+    }
+
+    public RecipeBuilder setTime(int begin, int end) {
+      return addEnvironment(new EnvironmentRequirement.Time(begin, end));
+    }
+
+    public RecipeBuilder setMoonPhase(int... phases) {
+      return addEnvironment(new EnvironmentRequirement.MoonPhase(java.util.Arrays.stream(phases).boxed().toList()));
+    }
+
+    public RecipeBuilder setAltitude(int begin, int end) {
+      return addEnvironment(new EnvironmentRequirement.Altitude(begin, end));
+    }
+
+    public RecipeBuilder setWeather(String weather) {
+      return addEnvironment(
+          new EnvironmentRequirement.Weather(
+              EnvironmentRequirement.Weather.Kind.valueOf(weather.toUpperCase(java.util.Locale.ROOT))));
+    }
+
+    private RecipeBuilder addEnvironment(EnvironmentRequirement requirement) {
+      requireMutable();
+      var type = RecipeResourceDefinitions.ENVIRONMENT;
+      var previous = resourceDeclarations.get(type.id());
+      var conditions = new ArrayList<EnvironmentRequirement>();
+      if (previous != null) {
+        conditions.addAll(type.dataClass().cast(previous.data()).requirements());
+      }
+      conditions.add(requirement);
+      return putResource(RecipeResourceBuilderDeclarations.capture(type, new EnvironmentRecipeData(conditions)));
+    }
+
+    private RecipeBuilder putResource(RecipeResources.Entry<?> entry) {
       resourceDeclarations.put(entry.type().id(), entry);
       last = LastRequirement.NONE;
       lastItem = null;
       lastChemical = null;
       lastFluid = null;
-
       return this;
     }
 

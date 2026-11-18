@@ -3,6 +3,8 @@ package com.lw.modularmachine.machine.structure;
 import com.google.gson.JsonElement;
 import com.google.gson.JsonParseException;
 import com.google.gson.JsonParser;
+import com.mojang.serialization.JsonOps;
+import net.neoforged.neoforge.common.conditions.ICondition;
 import com.lw.modularmachine.ModularMachine;
 import com.lw.modularmachine.machine.orientation.StateOrientationAdapters;
 import com.mojang.logging.LogUtils;
@@ -173,7 +175,13 @@ public final class MachineDefinitionReloadListener extends ContextAwareReloadLis
         if (result.containsKey(id)) {
           continue;
         }
-        put(result, id, JsonParser.parseReader(reader), entry.getKey().toString());
+        var fixture = JsonParser.parseReader(reader).getAsJsonObject();
+        var conditions = fixture.remove("neoforge:conditions");
+        if (conditions == null
+            || ICondition.LIST_CODEC.parse(JsonOps.INSTANCE, conditions).getOrThrow().stream()
+                .allMatch(condition -> condition.test(ICondition.IContext.EMPTY))) {
+          put(result, id, fixture, entry.getKey().toString());
+        }
       } catch (IOException | IllegalArgumentException | JsonParseException exception) {
         throw new JsonParseException(id + ": $: Failed reading GameTest fixture " + entry.getKey(), exception);
       }

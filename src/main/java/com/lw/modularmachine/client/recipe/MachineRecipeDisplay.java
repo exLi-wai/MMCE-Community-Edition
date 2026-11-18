@@ -1,6 +1,7 @@
 package com.lw.modularmachine.client.recipe;
 
 import com.lw.modularmachine.machine.recipe.MachineRecipe;
+import com.lw.modularmachine.machine.recipe.resource.RecipeResourceDefinitions;
 import com.lw.modularmachine.api.recipe.ChemicalRequirement;
 import com.lw.modularmachine.api.recipe.IngredientArrayData;
 import com.lw.modularmachine.api.component.ChemicalStackData;
@@ -99,8 +100,91 @@ public final class MachineRecipeDisplay {
                 requirement.maximum()));
       }
     }
+    int conditions = recipe.resourceData().get(RecipeResourceDefinitions.ENVIRONMENT).requirements().size();
+    if (conditions > 0) {
+      result.add(Component.translatable("jei.mmcece.machine_item.environment_required", conditions));
+    }
+    long laser = recipe.resourceData().get(RecipeResourceDefinitions.LASER).input();
+    if (laser > 0) {
+      result.add(
+          Component
+              .translatable("jei.mmcece.machine_item.laser_input", NumberFormat.getIntegerInstance().format(laser)));
+    }
 
+    var ember = recipe.resourceData().get(RecipeResourceDefinitions.EMBER);
+    if (ember.micros() > 0) {
+      var format = NumberFormat.getNumberInstance();
+      format.setMaximumFractionDigits(6);
+      result.add(Component.translatable("jei.mmcece.machine_item.ember_input", format.format(ember.amount())));
+    }
+    var mana = recipe.resourceData().get(RecipeResourceDefinitions.MANA);
+    appendAmount(result, "mana_input", mana.input());
+    appendAmount(result, "mana_output", mana.output());
+    appendAmount(result, "aura_input", recipe.resourceData().get(RecipeResourceDefinitions.AURA).input());
+    appendWorldPool(result, "aura_world", recipe.resourceData().get(RecipeResourceDefinitions.AURA_WORLD));
+    appendWorldPool(result, "will", recipe.resourceData().get(RecipeResourceDefinitions.WILL));
+    appendWorldPool(result, "vis", recipe.resourceData().get(RecipeResourceDefinitions.VIS));
+    appendWorldPool(result, "flux", recipe.resourceData().get(RecipeResourceDefinitions.FLUX));
+    var lifeEssence = recipe.resourceData().get(RecipeResourceDefinitions.LIFE_ESSENCE);
+    appendAmount(result, "life_essence_input", lifeEssence.input());
+    appendAmount(result, "life_essence_output", lifeEssence.output());
+    recipe.resourceData().get(RecipeResourceDefinitions.METEOR).output().ifPresent(
+        launch -> result
+            .add(Component.translatable("jei.mmcece.machine_item.meteor_output", launch.catalyst(), launch.count())));
+    appendKeyed(result, "essentia", recipe.resourceData().get(RecipeResourceDefinitions.ESSENTIA), 1);
+    appendKeyed(result, "starlight", recipe.resourceData().get(RecipeResourceDefinitions.STARLIGHT), 1_000);
+    recipe.resourceData().get(RecipeResourceDefinitions.CONSTELLATION).active()
+        .forEach(key -> result.add(Component.translatable("jei.mmcece.machine_item.constellation", key)));
+    var heat = recipe.resourceData().get(RecipeResourceDefinitions.HEAT);
+    appendAmount(result, "heat_input", heat.input());
+    appendAmount(result, "heat_output", heat.output());
+    var air = recipe.resourceData().get(RecipeResourceDefinitions.COMPRESSED_AIR);
+    air.input().ifPresent(
+        amount -> result.add(
+            Component.translatable(
+                "jei.mmcece.machine_item.compressed_air_input",
+                NumberFormat.getIntegerInstance().format(amount.air()),
+                amount.pressure())));
+    air.output().ifPresent(amount -> appendAmount(result, "compressed_air_output", amount.air()));
     return List.copyOf(result);
+  }
+
+  private static void appendAmount(List<Component> lines, String key, long count) {
+    if (count > 0) {
+      lines.add(
+          Component.translatable("jei.mmcece.machine_item." + key, NumberFormat.getIntegerInstance().format(count)));
+    }
+  }
+
+  private static void appendKeyed(List<Component> lines, String key, com.lw.modularmachine.api.recipe.KeyedAmountRecipeData data, int unit) {
+    var format = NumberFormat.getNumberInstance();
+    data.input().entrySet().stream().sorted(java.util.Map.Entry.comparingByKey()).forEach(
+        entry -> lines.add(
+            Component.translatable(
+                "jei.mmcece.machine_item." + key + "_input",
+                entry.getKey(),
+                format.format(java.math.BigDecimal.valueOf(entry.getValue(), unit == 1 ? 0 : 3)))));
+    data.output().entrySet().stream().sorted(java.util.Map.Entry.comparingByKey()).forEach(
+        entry -> lines.add(
+            Component.translatable(
+                "jei.mmcece.machine_item." + key + "_output",
+                entry.getKey(),
+                format.format(java.math.BigDecimal.valueOf(entry.getValue(), unit == 1 ? 0 : 3)))));
+  }
+
+  private static void appendWorldPool(List<Component> lines, String key, com.lw.modularmachine.api.recipe.WorldPoolRecipeData data) {
+    data.input().ifPresent(claim -> appendPoolClaim(lines, key + "_input", claim));
+    data.output().ifPresent(claim -> appendPoolClaim(lines, key + "_output", claim));
+  }
+
+  private static void appendPoolClaim(List<Component> lines, String key, com.lw.modularmachine.api.recipe.WorldPoolRecipeData.Claim claim) {
+    lines.add(
+        Component.translatable(
+            "jei.mmcece.machine_item." + key,
+            claim.amount(),
+            claim.kind(),
+            claim.radius(),
+            claim.limit()));
   }
 
   public static List<Component> itemTooltip(MachineRecipe.ItemAmount amount, boolean input) {

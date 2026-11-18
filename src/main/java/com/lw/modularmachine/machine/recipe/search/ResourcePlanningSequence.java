@@ -4,6 +4,7 @@ import com.lw.modularmachine.api.recipe.resource.RecipeResourcePlanning;
 import java.util.List;
 import java.util.Objects;
 import java.util.function.Supplier;
+import java.util.function.BooleanSupplier;
 import org.jetbrains.annotations.ApiStatus;
 
 /**
@@ -22,6 +23,26 @@ public final class ResourcePlanningSequence implements RecipeResourcePlanning {
     if (steps.isEmpty()) {
       status = Status.READY;
     }
+  }
+
+  static RecipeResourcePlanning check(BooleanSupplier available) {
+    return new RecipeResourcePlanning() {
+      private Status status = Status.PENDING;
+
+      @Override
+      public Status status() {
+        return status;
+      }
+
+      @Override
+      public Progress advance(int budget) {
+        if (status == Status.PENDING && budget > 0) {
+          status = available.getAsBoolean() ? Status.READY : Status.REJECTED;
+          return new Progress(status, 1);
+        }
+        return new Progress(status, 0);
+      }
+    };
   }
 
   @Override

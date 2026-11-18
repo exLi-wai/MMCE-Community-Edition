@@ -1,0 +1,1 @@
+{"type":"minecraft:block","neoforge:conditions":[{"type":"neoforge:mod_loaded","modid":"neovitae"}],"pools":[{"entries":[{"type":"minecraft:item","name":"mmcece:life_essence_output_hatch"}],"conditions":[{"condition":"minecraft:survives_explosion"}],"rolls":1}]}

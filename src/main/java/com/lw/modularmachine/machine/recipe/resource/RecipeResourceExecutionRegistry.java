@@ -12,6 +12,17 @@ import com.lw.modularmachine.machine.recipe.PatternInputTransaction;
 import com.lw.modularmachine.machine.recipe.RecipeCommitGuard;
 import com.lw.modularmachine.machine.recipe.RecipeExecutionTicket;
 import com.lw.modularmachine.machine.recipe.resource.chemical.ChemicalResourceExecution;
+import com.lw.modularmachine.machine.recipe.resource.environment.EnvironmentRecipeExecution;
+import com.lw.modularmachine.api.recipe.BufferedAmountRecipeData;
+import com.lw.modularmachine.api.recipe.EmberRecipeData;
+import com.lw.modularmachine.api.recipe.LaserRecipeData;
+import com.lw.modularmachine.machine.recipe.resource.buffered.BufferedRecipeResources;
+import com.lw.modularmachine.machine.recipe.resource.pneumatic.CompressedAirRecipeExecution;
+import com.lw.modularmachine.machine.recipe.resource.world.WorldPoolResources;
+import com.lw.modularmachine.machine.recipe.resource.world.MeteorExecution;
+import com.lw.modularmachine.machine.recipe.resource.world.ConstellationExecution;
+import com.lw.modularmachine.machine.recipe.resource.keyed.KeyedRecipeResources;
+import com.lw.modularmachine.util.Mods;
 import com.lw.modularmachine.machine.recipe.resource.fluid.FluidTickResourceExecution;
 import com.lw.modularmachine.machine.recipe.search.RecipePlanner;
 import com.lw.modularmachine.machine.recipe.search.ResourcePlanningSequence;
@@ -62,6 +73,18 @@ public final class RecipeResourceExecutionRegistry {
         FluidTickResourceExecution.finish(),
         FluidTickResourceExecution.freeze(),
         FluidTickResourceExecution.validation());
+    EnvironmentRecipeExecution.register();
+    BufferedRecipeResources.LASER.register(Mods.MEKANISM, LaserRecipeData::new);
+    BufferedRecipeResources.EMBER.register(Mods.EMBERS, EmberRecipeData::new);
+    BufferedRecipeResources.MANA.register(Mods.BOTANIA, BufferedAmountRecipeData::scaled);
+    BufferedRecipeResources.HEAT.register(Mods.MEKANISM, BufferedAmountRecipeData::scaled);
+    CompressedAirRecipeExecution.register();
+    BufferedRecipeResources.AURA.register(Mods.NATURES_AURA, amount -> new BufferedAmountRecipeData(amount, 0));
+    WorldPoolResources.register();
+    BufferedRecipeResources.LIFE_ESSENCE.register(Mods.NEO_VITAE, BufferedAmountRecipeData::scaled);
+    MeteorExecution.register();
+    KeyedRecipeResources.register();
+    ConstellationExecution.register();
   }
 
   private RecipeResourceExecutionRegistry() {
@@ -70,6 +93,7 @@ public final class RecipeResourceExecutionRegistry {
   private record Binding<D>(
       RecipeResourceType<D> type,
       RecipeResourceExecution.Admission<D> admission,
+      RecipeResourceExecution.PlannedStart<D> plannedStart,
       RecipeResourceExecution.Start<D> start,
       RecipeResourceExecution.Tick<D> tick,
       RecipeResourceExecution.Finish<D> finish,
@@ -78,9 +102,16 @@ public final class RecipeResourceExecutionRegistry {
   }
 
   public static synchronized <D> void register(RecipeResourceType<D> type, RecipeResourceExecution.Admission<D> admission, RecipeResourceExecution.Start<D> start, RecipeResourceExecution.Tick<D> tick, RecipeResourceExecution.Finish<D> finish, RecipeResourceExecution.Freeze<D> freeze, RecipeResourceExecution.Validation<D> validation) {
+    register(type, admission, null, Objects.requireNonNull(start, "start"), tick, finish, freeze, validation);
+  }
+
+  public static synchronized <D> void registerPlannedStart(RecipeResourceType<D> type, RecipeResourceExecution.Admission<D> admission, RecipeResourceExecution.PlannedStart<D> start, RecipeResourceExecution.Tick<D> tick, RecipeResourceExecution.Finish<D> finish, RecipeResourceExecution.Freeze<D> freeze, RecipeResourceExecution.Validation<D> validation) {
+    register(type, admission, Objects.requireNonNull(start, "plannedStart"), null, tick, finish, freeze, validation);
+  }
+
+  private static <D> void register(RecipeResourceType<D> type, RecipeResourceExecution.Admission<D> admission, RecipeResourceExecution.PlannedStart<D> plannedStart, RecipeResourceExecution.Start<D> start, RecipeResourceExecution.Tick<D> tick, RecipeResourceExecution.Finish<D> finish, RecipeResourceExecution.Freeze<D> freeze, RecipeResourceExecution.Validation<D> validation) {
     Objects.requireNonNull(type, "type");
     Objects.requireNonNull(admission, "admission");
-    Objects.requireNonNull(start, "start");
     Objects.requireNonNull(tick, "tick");
     Objects.requireNonNull(finish, "finish");
     Objects.requireNonNull(freeze, "freeze");
@@ -91,7 +122,7 @@ public final class RecipeResourceExecutionRegistry {
         || BINDINGS.stream().anyMatch(binding -> binding.type().id().equals(type.id()))) {
       throw new IllegalStateException("Duplicate or late resource execution registration: " + type.id());
     }
-    BINDINGS.add(new Binding<>(type, admission, start, tick, finish, freeze, validation));
+    BINDINGS.add(new Binding<>(type, admission, plannedStart, start, tick, finish, freeze, validation));
   }
 
   private static synchronized List<Binding<?>> snapshot() {
@@ -142,25 +173,6 @@ public final class RecipeResourceExecutionRegistry {
     }
   }
 
-  public static Prepared prepareStart(RecipeExecutionTicket ticket, RecipeResources resources, int instances) {
-    ticket.requireServerThread();
-    var bindings = snapshot();
-    requireSupported(resources, bindings);
-    var prepared = new ArrayList<PreparedRecipeResource>();
-    for (var binding : bindings) {
-      if (isEmpty(binding, resources)) {
-        continue;
-      }
-      var value = prepareStart(binding, ticket, resources, instances);
-      if (value == null) {
-        return null;
-      }
-      prepared.add(value);
-    }
-
-    return new Prepared(prepared, List.of(ticket), !prepared.isEmpty());
-  }
-
   private static <D> PreparedRecipeResource prepareStart(Binding<D> binding, RecipeExecutionTicket ticket, RecipeResources resources, int instances) {
     return binding.start()
         .prepare(List.of(new RecipeResourceExecution.Input<>(ticket, resources.get(binding.type()), instances)));
@@ -169,7 +181,7 @@ public final class RecipeResourceExecutionRegistry {
   /**
    * Frozen run seeds select actual debits only after full shared demand proof.
    */
-  public static Prepared preparePaidStart(RecipeExecutionTicket ticket, List<FrozenRecipeRun> runs) {
+  public static PaidStartProgress preparePaidStart(RecipeExecutionTicket ticket, List<FrozenRecipeRun> runs, PaidStartPlanning previous, int budget) {
     ticket.requireServerThread();
     if (runs.isEmpty()) {
       throw new IllegalArgumentException("A paid start requires frozen runs");
@@ -177,19 +189,72 @@ public final class RecipeResourceExecutionRegistry {
     var bindings = snapshot();
     var resources = runs.stream().map(run -> run.resourceData(ticket.level().registryAccess())).toList();
     resources.forEach(value -> requireSupported(value, bindings));
+    var inputs = new ArrayList<PlannedInput<?>>();
+    for (var binding : bindings) {
+      if (binding.plannedStart() != null) {
+        capturePlannedInput(binding, resources).ifPresent(inputs::add);
+      }
+    }
+    var work = previous != null && previous.inputs.equals(inputs) ? previous : new PaidStartPlanning(ticket, inputs);
+    var progress = work.sequence.advance(budget);
+    if (progress.status() != RecipeResourcePlanning.Status.READY) {
+      return new PaidStartProgress(progress.status(), work, null);
+    }
     var participants = new ArrayList<PreparedRecipeResource>();
     for (var binding : bindings) {
-      if (resources.stream().allMatch(value -> isEmpty(binding, value))) {
+      if (binding.plannedStart() != null || resources.stream().allMatch(value -> isEmpty(binding, value))) {
         continue;
       }
       var participant = preparePaidStart(binding, ticket, runs, resources);
       if (participant == null) {
-        return null;
+        return new PaidStartProgress(RecipeResourcePlanning.Status.REJECTED, work, null);
       }
       participants.add(participant);
     }
+    for (var plan : work.plans) {
+      participants.add(Objects.requireNonNull(plan.prepared(ticket), "prepared recipe input"));
+    }
+    return new PaidStartProgress(
+        RecipeResourcePlanning.Status.READY,
+        work,
+        new Prepared(participants, List.of(ticket), !participants.isEmpty()));
+  }
 
-    return new Prepared(participants, List.of(ticket), !participants.isEmpty());
+  public record PaidStartProgress(
+      RecipeResourcePlanning.Status status,
+      PaidStartPlanning continuation,
+      Prepared prepared) {
+  }
+
+  public static final class PaidStartPlanning {
+    private final List<PlannedInput<?>> inputs;
+    private final List<RecipeResourceExecution.Preparation> plans = new ArrayList<>();
+    private final ResourcePlanningSequence sequence;
+
+    private PaidStartPlanning(RecipeExecutionTicket ticket, List<PlannedInput<?>> inputs) {
+      this.inputs = List.copyOf(inputs);
+      var steps = new ArrayList<Supplier<RecipeResourcePlanning>>(inputs.size());
+      for (var input : inputs) {
+        steps.add(() -> {
+          var plan = input.prepare(currentPreparationTicket(ticket));
+          plans.add(plan);
+          return plan;
+        });
+      }
+      sequence = new ResourcePlanningSequence(steps);
+    }
+  }
+
+  private record PlannedInput<D>(RecipeResourceExecution.PlannedStart<D> strategy, List<D> claims) {
+    private RecipeResourceExecution.Preparation prepare(RecipeExecutionTicket ticket) {
+      return strategy.prepare(ticket, claims);
+    }
+  }
+
+  private static <D> Optional<PlannedInput<D>> capturePlannedInput(Binding<D> binding, List<RecipeResources> resources) {
+    var type = binding.type();
+    var claims = resources.stream().map(value -> value.get(type)).filter(type::hasInputs).toList();
+    return claims.isEmpty() ? Optional.empty() : Optional.of(new PlannedInput<>(binding.plannedStart(), claims));
   }
 
   private static <D> PreparedRecipeResource preparePaidStart(Binding<D> binding, RecipeExecutionTicket ticket, List<FrozenRecipeRun> runs, List<RecipeResources> resources) {
@@ -207,6 +272,18 @@ public final class RecipeResourceExecutionRegistry {
    * escapes this admission and no resource is acquired; commit prepares again.
    */
   public static RecipeResourcePlanning prepareAdmission(RecipeExecutionTicket ticket, RecipeResources resources, int instances) {
+    return prepareAdmission(ticket, resources, instances, null);
+  }
+
+  public static RecipeResourcePlanning prepareAdmission(RecipeExecutionTicket ticket, RecipeResources resources, int instances, List<RecipeResourceExecution.Output> liveOutputs) {
+    return prepareAdmission(ticket, resources, instances, liveOutputs, true);
+  }
+
+  public static ResourcePlanningSequence prepareOutputAdmission(RecipeExecutionTicket ticket, RecipeResources resources, int instances, List<RecipeResourceExecution.Output> liveOutputs) {
+    return prepareAdmission(ticket, resources, instances, liveOutputs, false);
+  }
+
+  private static ResourcePlanningSequence prepareAdmission(RecipeExecutionTicket ticket, RecipeResources resources, int instances, List<RecipeResourceExecution.Output> liveOutputs, boolean checkInputs) {
     ticket.requireServerThread();
     if (instances < 1) {
       throw new IllegalArgumentException("Invalid admission instances");
@@ -215,22 +292,40 @@ public final class RecipeResourceExecutionRegistry {
     requireSupported(resources, bindings);
     var steps = new ArrayList<Supplier<RecipeResourcePlanning>>();
     for (var binding : bindings) {
-      if (!isEmpty(binding, resources)) {
-        steps.add(() -> prepareAdmission(binding, ticket, resources, instances));
+      if (checkInputs ? !isEmpty(binding, resources) : hasOutputs(binding, resources)) {
+        steps.add(() -> prepareAdmission(binding, ticket, resources, instances, liveOutputs, checkInputs));
       }
     }
 
     return new ResourcePlanningSequence(steps);
   }
 
-  private static <D> RecipeResourcePlanning prepareAdmission(Binding<D> binding, RecipeExecutionTicket ticket, RecipeResources resources, int instances) {
+  private static <D> RecipeResourcePlanning prepareAdmission(Binding<D> binding, RecipeExecutionTicket ticket, RecipeResources resources, int instances, List<RecipeResourceExecution.Output> liveOutputs, boolean checkInputs) {
+    Supplier<RecipeResourcePlanning> outputs = () -> {
+      var output = binding.admission().prepare(
+          new RecipeResourceExecution.Input<>(
+              currentPreparationTicket(ticket),
+              resources.get(binding.type()),
+              instances));
+      if (liveOutputs != null && output instanceof RecipeResourceExecution.Output live) {
+        liveOutputs.add(live);
+      }
+      return output;
+    };
+    if (!checkInputs) {
+      return new AdmissionPlanning(null, null, outputs);
+    }
+    if (binding.plannedStart() != null) {
+      return new AdmissionPlanning(
+          null,
+          () -> binding.plannedStart().prepare(
+              currentPreparationTicket(ticket),
+              List.of(binding.freeze().freeze(resources.get(binding.type()), instances))),
+          outputs);
+    }
     return new AdmissionPlanning(
         () -> prepareStart(binding, currentPreparationTicket(ticket), resources, instances),
-        () -> binding.admission().prepare(
-            new RecipeResourceExecution.Input<>(
-                currentPreparationTicket(ticket),
-                resources.get(binding.type()),
-                instances)));
+        outputs);
   }
 
   private static RecipeExecutionTicket currentPreparationTicket(RecipeExecutionTicket ticket) {
@@ -243,13 +338,20 @@ public final class RecipeResourceExecutionRegistry {
    */
   static final class AdmissionPlanning implements RecipeResourcePlanning {
     private final Supplier<PreparedRecipeResource> inputs;
+    private final Supplier<RecipeResourcePlanning> inputPlanner;
     private final Supplier<RecipeResourcePlanning> outputs;
     private boolean inputsChecked;
+    private RecipeResourcePlanning inputPlan;
     private RecipeResourcePlanning output;
     private Status status = Status.PENDING;
 
     AdmissionPlanning(Supplier<PreparedRecipeResource> inputs, Supplier<RecipeResourcePlanning> outputs) {
-      this.inputs = Objects.requireNonNull(inputs, "inputs");
+      this(Objects.requireNonNull(inputs, "inputs"), null, outputs);
+    }
+
+    private AdmissionPlanning(Supplier<PreparedRecipeResource> inputs, Supplier<RecipeResourcePlanning> inputPlanner, Supplier<RecipeResourcePlanning> outputs) {
+      this.inputs = inputs;
+      this.inputPlanner = inputPlanner;
       this.outputs = Objects.requireNonNull(outputs, "outputs");
     }
 
@@ -268,12 +370,27 @@ public final class RecipeResourceExecutionRegistry {
       }
       int used = 0;
       try {
-        if (!inputsChecked) {
-          used++;
-          var prepared = inputs.get();
-          if (prepared == null || !prepared.current()) {
-            status = Status.REJECTED;
-            return new Progress(status, used);
+        if (!inputsChecked && (inputs != null || inputPlanner != null)) {
+          if (inputPlanner == null) {
+            used++;
+            var prepared = inputs.get();
+            if (prepared == null || !prepared.current()) {
+              status = Status.REJECTED;
+              return new Progress(status, used);
+            }
+          } else {
+            if (inputPlan == null) {
+              inputPlan = Objects.requireNonNull(inputPlanner.get(), "resource admission input plan");
+            }
+            var result = inputPlan.advance(budget - used);
+            if (result.workUsed() > budget - used || result.status() != inputPlan.status()) {
+              throw new IllegalStateException("Resource input admission violated its progress contract");
+            }
+            used += result.workUsed();
+            if (result.status() != Status.READY) {
+              status = result.status();
+              return new Progress(status, used);
+            }
           }
           inputsChecked = true;
         }
@@ -303,6 +420,10 @@ public final class RecipeResourceExecutionRegistry {
 
   private static <D> boolean isEmpty(Binding<D> binding, RecipeResources resources) {
     return binding.type().isEmpty(resources.get(binding.type()));
+  }
+
+  private static <D> boolean hasOutputs(Binding<D> binding, RecipeResources resources) {
+    return binding.type().hasOutputs(resources.get(binding.type()));
   }
 
   /** Runs before the existing engine-owned item/fluid/energy freezing. */

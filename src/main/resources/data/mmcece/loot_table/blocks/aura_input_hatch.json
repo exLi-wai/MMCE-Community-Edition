@@ -1,0 +1,1 @@
+{"pools":[{"conditions":[{"condition":"minecraft:survives_explosion"}],"rolls":1,"entries":[{"name":"mmcece:aura_input_hatch","type":"minecraft:item"}]}],"type":"minecraft:block","neoforge:conditions":[{"modid":"naturesaura","type":"neoforge:mod_loaded"}]}

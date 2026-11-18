@@ -1,0 +1,1 @@
+{"neoforge:conditions":[{"type":"neoforge:mod_loaded","modid":"pneumaticcraft"}],"orientation":{"policy":"all_24"},"parts":[{"block":"mmcece:machine_casing_plain","offset":[-1,0,1],"part_id":"casing"},{"block":"mmcece:compressed_air_input_hatch","offset":[1,0,1],"part_id":"hatch"}],"color":"#38A6D2"}

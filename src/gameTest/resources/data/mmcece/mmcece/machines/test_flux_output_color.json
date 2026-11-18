@@ -1,0 +1,1 @@
+{"orientation":{"policy":"all_24"},"neoforge:conditions":[{"type":"neoforge:mod_loaded","modid":"thaumaturge"}],"color":"#38A6D2","parts":[{"part_id":"casing","block":"mmcece:machine_casing_plain","offset":[-1,0,1]},{"part_id":"hatch","block":"mmcece:flux_output_hatch","offset":[1,0,1]}]}

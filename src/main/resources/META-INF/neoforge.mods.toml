@@ -75,7 +75,7 @@ Retain Its Original Flavor MMCE
 [[dependencies.${mod_id}]]
     modId="botania"
     type="optional"
-    versionRange="[454-SNAPSHOT,)"
+    versionRange="[456-SNAPSHOT,457)"
     ordering="AFTER"
     side="BOTH"
 
@@ -97,5 +97,33 @@ Retain Its Original Flavor MMCE
     modId="astralsorcery"
     type="optional"
     versionRange="[2.0.3,)"
+    ordering="AFTER"
+    side="BOTH"
+
+[[dependencies.${mod_id}]]
+    modId="embers"
+    type="optional"
+    versionRange="[1.21.1-1.5.9,)"
+    ordering="AFTER"
+    side="BOTH"
+
+[[dependencies.${mod_id}]]
+    modId="pneumaticcraft"
+    type="optional"
+    versionRange="[8.2.24,9)"
+    ordering="AFTER"
+    side="BOTH"
+
+[[dependencies.${mod_id}]]
+    modId="thaumaturge"
+    type="optional"
+    versionRange="*"
+    ordering="AFTER"
+    side="BOTH"
+
+[[dependencies.${mod_id}]]
+    modId="appliedthaumaturge"
+    type="optional"
+    versionRange="*"
     ordering="AFTER"
     side="BOTH"

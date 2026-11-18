@@ -105,7 +105,7 @@ public final class FactoryParallelStarter {
         }
       }
       var outputCheck = plans.getFirst()
-          .prepareFactoryOutputs(nativeRecipe.orElseThrow(), ticket, plans.size(), checkBudget);
+          .prepareStartOutputs(nativeRecipe.orElseThrow(), ticket, plans.size(), checkBudget, true);
       checkBudget -= outputCheck.workUsed();
       if (outputCheck.status() == RecipeResourcePlanning.Status.PENDING) {
         return Result.CHECK_PENDING;
@@ -146,6 +146,15 @@ public final class FactoryParallelStarter {
         }
       }
       var runs = prepareRuns(factory, threadId, plans, nativeRecipe.orElseThrow(), ticket, upgrades);
+      var paidStart = plans.getFirst().preparePaidResources(ticket, runs, checkBudget - prepared.workUsed());
+      if (paidStart.status() == RecipeResourcePlanning.Status.PENDING) {
+        return Result.CHECK_PENDING;
+      }
+      additionalResources = paidStart.prepared();
+      if (additionalResources == null) {
+        return Result.STALE;
+      }
+      resources.enlistAdditional(additionalResources);
       if (!RecipeItemPayments.apply(
           ticket,
           nativeRecipe.orElseThrow(),
@@ -155,11 +164,6 @@ public final class FactoryParallelStarter {
           replacements)) {
         return Result.STALE;
       }
-      additionalResources = RecipeResourceExecutionRegistry.preparePaidStart(ticket, runs);
-      if (additionalResources == null) {
-        return Result.STALE;
-      }
-      resources.enlistAdditional(additionalResources);
       if (uniquePlans.stream().anyMatch(plan -> !plan.factoryAdmissionCurrent(factory, threadId))) {
         return Result.STALE;
       }
@@ -167,7 +171,6 @@ public final class FactoryParallelStarter {
           .checkInputs(nativeRecipe.orElseThrow(), ticket, Optional.of(threadId), plans.size(), runs.getFirst());
       if (runs.stream().anyMatch(run -> !run.preparedItemCallbacksCurrent())
           || !plans.getFirst().preparedOutputsCurrent(plans.size())
-          || !plans.getFirst().factoryOutputsCurrent(nativeRecipe.orElseThrow(), plans.size())
           || uniquePlans.stream()
               .anyMatch(plan -> !plan.factoryAdmissionCurrent(factory, threadId) || !plan.catalog().isCurrent())
           || !startCosts.current()) {
@@ -212,6 +215,9 @@ public final class FactoryParallelStarter {
       }
       if (!energyTotalsFit(runs)) {
         return Result.LIMIT_REACHED;
+      }
+      if (!plans.getFirst().startOutputsCurrent(nativeRecipe.orElseThrow(), plans.size(), true)) {
+        return Result.STALE;
       }
       patterns.acquire();
       startCosts.acquireInto(resources.upgradeLeases());
