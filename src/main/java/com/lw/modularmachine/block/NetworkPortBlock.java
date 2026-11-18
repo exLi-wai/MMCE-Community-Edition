@@ -6,6 +6,7 @@ import com.lw.modularmachine.machine.HatchTier;
 import com.lw.modularmachine.machine.PortKind;
 import com.mojang.serialization.MapCodec;
 import java.util.List;
+import net.minecraft.ChatFormatting;
 import net.minecraft.core.BlockPos;
 import net.minecraft.network.chat.Component;
 import net.minecraft.world.InteractionHand;
@@ -66,9 +67,11 @@ public final class NetworkPortBlock extends MachinePortBlock {
 
   @Override
   public void appendHoverText(ItemStack stack, Item.TooltipContext context, List<Component> tooltip, TooltipFlag flag) {
-    tooltip.add(Component.translatable("tooltip.mmcece.network_port", kind().isInput() ? 9 : 36, Integer.MAX_VALUE));
+    tooltip.add(
+        Component.translatable("tooltip.mmcece.network_port", kind().isInput() ? 9 : 36, Integer.MAX_VALUE)
+            .withStyle(ChatFormatting.GRAY));
     if (kind().isInput()) {
-      tooltip.add(Component.translatable("tooltip.mmcece.input_group"));
+      tooltip.add(Component.translatable("tooltip.mmcece.input_group").withStyle(ChatFormatting.GRAY));
     }
   }
 

@@ -21,9 +21,9 @@ import vazkii.botania.api.mana.ManaReceiver;
 import vazkii.botania.api.mana.spark.ManaSparkAttachable;
 
 public final class SparkManaHatchBlockEntity extends BufferedRecipeHatchBlockEntity implements ManaReceiver, ManaSparkAttachable, WandBindable, Bound, TickingRecipeHatchBlock.ServerTicking {
-  private static final int CAPACITY = 1_000_000;
+  static final int CAPACITY = 1_000_000;
+  static final String MANA = "spark_mana";
   private static final String BINDING = "collector_position";
-  private static final String MANA = "spark_mana";
   private final boolean input;
   private BlockPos binding = Bound.UNBOUND_POS;
   private int displayedMana;

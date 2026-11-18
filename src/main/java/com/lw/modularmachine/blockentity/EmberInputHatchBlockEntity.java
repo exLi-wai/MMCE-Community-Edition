@@ -8,9 +8,11 @@ import org.jetbrains.annotations.ApiStatus;
 
 @ApiStatus.Internal
 public final class EmberInputHatchBlockEntity extends BufferedRecipeHatchBlockEntity {
+  public static final String STORED_AMOUNT_TAG = "ember_micros";
+
   public EmberInputHatchBlockEntity(BlockPos position, BlockState state) {
     super(MachineRegistries.EMBER_INPUT_ENTITY.get(), position, state,
-        ((EmberInputHatchBlock) state.getBlock()).tier().capacity() * 1_000_000L, "ember_micros");
+        ((EmberInputHatchBlock) state.getBlock()).tier().capacity() * 1_000_000L, STORED_AMOUNT_TAG);
   }
 
   public boolean acceptsVolatile() {

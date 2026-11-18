@@ -12,6 +12,7 @@ import com.lw.modularmachine.block.MachineCasingBlock;
 import com.lw.modularmachine.block.LaserInputHatchBlock;
 import com.lw.modularmachine.block.EmberInputHatchBlock;
 import com.lw.modularmachine.block.TickingRecipeHatchBlock;
+import com.lw.modularmachine.integration.botania.SparkManaHatchBlock;
 import com.lw.modularmachine.integration.botania.SparkManaHatchBlockEntity;
 import com.lw.modularmachine.integration.mekanism.HeatHatchBlockEntity;
 import com.lw.modularmachine.integration.naturesaura.AuraInputHatchBlockEntity;
@@ -127,11 +128,13 @@ public final class MachineRegistries {
           "laser_input_hatch",
           () -> new LaserInputHatchBlock(MachineContentRegistration.properties().strength(3F, 10F))) : null;
   public static final DeferredBlock<TickingRecipeHatchBlock> SPARK_MANA_INPUT = Mods.BOTANIA
-      .isLoaded() ? MachineContentRegistration
-          .registerTickingHatch("spark_mana_input_hatch", SparkManaHatchBlockEntity::new) : null;
+      .isLoaded() ? MachineContentRegistration.registerTickingHatch(
+          "spark_mana_input_hatch",
+          () -> new SparkManaHatchBlock(MachineContentRegistration.hatchProperties())) : null;
   public static final DeferredBlock<TickingRecipeHatchBlock> SPARK_MANA_OUTPUT = Mods.BOTANIA
-      .isLoaded() ? MachineContentRegistration
-          .registerTickingHatch("spark_mana_output_hatch", SparkManaHatchBlockEntity::new) : null;
+      .isLoaded() ? MachineContentRegistration.registerTickingHatch(
+          "spark_mana_output_hatch",
+          () -> new SparkManaHatchBlock(MachineContentRegistration.hatchProperties())) : null;
   public static final DeferredBlock<TickingRecipeHatchBlock> AURA_INPUT = Mods.NATURES_AURA
       .isLoaded() ? MachineContentRegistration
           .registerTickingHatch("aura_input_hatch", AuraInputHatchBlockEntity::new) : null;

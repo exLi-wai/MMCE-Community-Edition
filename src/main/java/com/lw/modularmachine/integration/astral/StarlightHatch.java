@@ -51,7 +51,7 @@ public abstract class StarlightHatch<N extends TransmissionNode> extends TileEnt
     stock = new KeyedStock(capacity);
   }
 
-  private static int inputCapacity(BlockState state) {
+  static int inputCapacity(BlockState state) {
     if (state.is(MachineRegistries.STARLIGHT_INPUT_BRILLIANT.get())) {
       return 32_000_000;
     }
