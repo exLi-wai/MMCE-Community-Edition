@@ -1,6 +1,7 @@
 package com.lw.modularmachine.blockentity;
 
 import com.lw.modularmachine.block.EmberInputHatchBlock;
+import com.lw.modularmachine.config.MachineConfig;
 import com.lw.modularmachine.registry.MachineRegistries;
 import net.minecraft.core.BlockPos;
 import net.minecraft.world.level.block.state.BlockState;
@@ -12,7 +13,8 @@ public final class EmberInputHatchBlockEntity extends BufferedRecipeHatchBlockEn
 
   public EmberInputHatchBlockEntity(BlockPos position, BlockState state) {
     super(MachineRegistries.EMBER_INPUT_ENTITY.get(), position, state,
-        ((EmberInputHatchBlock) state.getBlock()).tier().capacity() * 1_000_000L, STORED_AMOUNT_TAG);
+        MachineConfig.emberInputCapacity(((EmberInputHatchBlock) state.getBlock()).tier()) * 1_000_000L,
+        STORED_AMOUNT_TAG);
   }
 
   public boolean acceptsVolatile() {

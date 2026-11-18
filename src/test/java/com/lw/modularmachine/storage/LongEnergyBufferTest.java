@@ -7,6 +7,36 @@ import static org.junit.jupiter.api.Assertions.*;
 
 class LongEnergyBufferTest {
   @Test
+  void loweredCapacityKeepsSavedStockAndBlocksNewInput() {
+    var input = new LongEnergyBuffer(10, 10, true, () -> 0, () -> {
+    });
+    input.loadPreservingExcess(15);
+    assertEquals(15, input.stored());
+    assertEquals(0, input.receivableNow());
+    assertEquals(0, input.receiveEnergyLong(1, false));
+    try (var lease = input.acquire()) {
+      assertTrue(lease.extractExact(8));
+    }
+    assertEquals(15, input.stored());
+    try (var lease = input.acquire()) {
+      assertTrue(lease.extractExact(8));
+      lease.resolve(true);
+    }
+    assertEquals(3, input.receiveEnergyLong(4, false));
+    assertEquals(10, input.stored());
+  }
+
+  @Test
+  void longOutputDoesNotNarrowToTheFeAdapterLimit() {
+    long amount = 3_000_000_000L;
+    var output = new LongEnergyBuffer(amount, amount, false, () -> 0, () -> {
+    });
+    output.load(amount);
+    assertEquals(amount, output.extractEnergyLong(amount, false));
+    assertEquals(0, output.stored());
+  }
+
+  @Test
   void longInputDoesNotNarrowBeforeApplyingCapacity() {
     var input = new LongEnergyBuffer(Long.MAX_VALUE, Long.MAX_VALUE, true, () -> 0, () -> {
     });

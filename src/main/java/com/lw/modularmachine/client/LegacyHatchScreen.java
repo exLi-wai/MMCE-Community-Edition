@@ -64,7 +64,7 @@ final class LegacyHatchScreen extends AbstractContainerScreen<LegacyHatchMenu> {
 
   private void renderStarlight(GuiGraphics graphics) {
     int capacity = menu.value(1);
-    int width = capacity > 0 ? (int) (165L * menu.value(0) / capacity) : 0;
+    int width = capacity > 0 ? (int) (165L * Math.min(menu.value(0), capacity) / capacity) : 0;
     graphics.fill(leftPos + 6, topPos + 69, leftPos + 6 + width, topPos + 79, 0xFF8CA6EB);
   }
 

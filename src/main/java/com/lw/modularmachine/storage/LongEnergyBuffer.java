@@ -64,7 +64,7 @@ public final class LongEnergyBuffer implements IEnergyStorage {
     if (!input || amount <= 0) {
       return 0;
     }
-    long accepted = Math.min(amount, Math.min(capacity - stored, receiveAllowance()));
+    long accepted = Math.min(amount, receivableNow());
     if (!simulate && accepted > 0) {
       beforeMutation.run();
       rollTick();
@@ -77,11 +77,15 @@ public final class LongEnergyBuffer implements IEnergyStorage {
 
   @Override
   public int extractEnergy(int amount, boolean simulate) {
+    return (int) extractEnergyLong(amount, simulate);
+  }
+
+  public long extractEnergyLong(long amount, boolean simulate) {
     readAllowed();
     if (input || amount <= 0) {
       return 0;
     }
-    int accepted = (int) Math.min(amount, Math.min(stored, extractAllowance()));
+    long accepted = Math.min(amount, Math.min(stored, extractAllowance()));
     if (!simulate && accepted > 0) {
       beforeMutation.run();
       rollTick();
@@ -132,9 +136,13 @@ public final class LongEnergyBuffer implements IEnergyStorage {
    * capabilities.
    */
   public void load(long amount) {
+    loadPreservingExcess(Math.min(amount, capacity));
+  }
+
+  public void loadPreservingExcess(long amount) {
     readAllowed();
     beforeMutation.run();
-    stored = Math.max(0, Math.min(amount, capacity));
+    stored = Math.max(0, amount);
   }
 
   public long stored() {
@@ -150,7 +158,7 @@ public final class LongEnergyBuffer implements IEnergyStorage {
 
   public long receivableNow() {
     readAllowed();
-    return Math.min(capacity - stored, Math.max(0, receiveAllowance()));
+    return Math.max(0, Math.min(capacity - stored, receiveAllowance()));
   }
 
   private void readAllowed() {

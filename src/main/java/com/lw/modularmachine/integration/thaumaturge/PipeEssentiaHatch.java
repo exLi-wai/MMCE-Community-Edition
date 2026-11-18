@@ -5,6 +5,7 @@ import com.leclowndu93150.thaumaturge.api.essentia.EssentiaCapabilities;
 import com.leclowndu93150.thaumaturge.api.essentia.EssentiaPull;
 import com.leclowndu93150.thaumaturge.api.essentia.IEssentiaConduit;
 import com.lw.modularmachine.registry.MachineRegistries;
+import com.lw.modularmachine.config.MachineConfig;
 import net.minecraft.core.BlockPos;
 import net.minecraft.core.Direction;
 import net.minecraft.core.Holder;
@@ -17,8 +18,17 @@ public final class PipeEssentiaHatch extends EssentiaHatch implements IEssentiaC
   private static final int SUCTION = 64;
 
   public PipeEssentiaHatch(BlockPos position, BlockState state) {
-    super(MachineRegistries.PIPE_ESSENTIA_ENTITY.get(), position, state,
-        state.is(MachineRegistries.ESSENTIA_INPUT.get()));
+    this(position, state, state.is(MachineRegistries.ESSENTIA_INPUT.get()));
+  }
+
+  private PipeEssentiaHatch(BlockPos position, BlockState state, boolean input) {
+    super(MachineRegistries.PIPE_ESSENTIA_ENTITY.get(), position, state, input,
+        input ? CAPACITY : MachineConfig.essentiaOutputCapacity());
+  }
+
+  @Override
+  protected int savedAmountLimit() {
+    return input ? CAPACITY : MachineConfig.MAX_ESSENTIA_OUTPUT_CAPACITY;
   }
 
   @Override

@@ -2,6 +2,7 @@ package com.lw.modularmachine.integration.mekanism;
 
 import com.lw.modularmachine.block.TickingRecipeHatchBlock;
 import com.lw.modularmachine.blockentity.BufferedRecipeHatchBlockEntity;
+import com.lw.modularmachine.config.MachineConfig;
 import com.lw.modularmachine.machine.recipe.RecipeLifecyclePublisher;
 import com.lw.modularmachine.registry.MachineRegistries;
 import mekanism.api.heat.HeatAPI;
@@ -15,13 +16,12 @@ import org.jetbrains.annotations.ApiStatus;
 @ApiStatus.Internal
 public final class HeatHatchBlockEntity extends BufferedRecipeHatchBlockEntity implements IHeatHandler, TickingRecipeHatchBlock.ServerTicking {
   private static final int UNITS_PER_HEAT = 1_000;
-  private static final long CAPACITY = 1_000_000_000L;
   private static final double HEAT_CAPACITY = 1;
   private static final double INVERSE_CONDUCTION = 5;
   private final boolean input;
 
   public HeatHatchBlockEntity(BlockPos position, BlockState state) {
-    super(MachineRegistries.HEAT_ENTITY.get(), position, state, CAPACITY, "mekanism_heat",
+    super(MachineRegistries.HEAT_ENTITY.get(), position, state, MachineConfig.heatHatchCapacity(), "mekanism_heat",
         state.is(MachineRegistries.HEAT_INPUT.get()));
     input = state.is(MachineRegistries.HEAT_INPUT.get());
   }
@@ -55,7 +55,7 @@ public final class HeatHatchBlockEntity extends BufferedRecipeHatchBlockEntity i
     if (!Double.isFinite(transfer) || transfer == 0 || !live() || RecipeLifecyclePublisher.isDispatching()) {
       return 0;
     }
-    long requested = (long) Math.min(Math.abs(transfer) * UNITS_PER_HEAT, CAPACITY);
+    long requested = (long) (Math.abs(transfer) * UNITS_PER_HEAT);
     return exchangeHeat(requested, transfer > 0);
   }
 
@@ -68,7 +68,7 @@ public final class HeatHatchBlockEntity extends BufferedRecipeHatchBlockEntity i
       return receive(amount, false);
     }
     if (!adding && !input) {
-      return extract((int) amount);
+      return extract(amount);
     }
     try (var lease = acquireRecipeBuffer()) {
       if (!(adding ? lease.insertExact(amount) : lease.extractExact(amount))) {
@@ -103,14 +103,18 @@ public final class HeatHatchBlockEntity extends BufferedRecipeHatchBlockEntity i
     if (!Double.isFinite(transfer) || transfer <= 0) {
       return;
     }
-    int offered = (int) Math.min(available(), transfer * UNITS_PER_HEAT);
+    long requested = (long) (transfer * UNITS_PER_HEAT);
+    if (requested == 0 && target instanceof HeatHatchBlockEntity other && other.input) {
+      requested = 1;
+    }
+    long offered = Math.min(available(), requested);
     if (offered <= 0) {
       return;
     }
     if (target instanceof HeatHatchBlockEntity other) {
-      extract((int) other.exchangeHeat(offered, true));
+      extract(other.exchangeHeat(offered, true));
     } else {
-      int sent = extract(offered);
+      long sent = extract(offered);
       if (sent > 0) {
         target.handleHeat(sent / (double) UNITS_PER_HEAT);
       }

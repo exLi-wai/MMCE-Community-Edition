@@ -10,6 +10,7 @@ import com.lw.modularmachine.api.recipe.KeyedAmountRecipeData;
 import com.lw.modularmachine.api.recipe.WorldPoolRecipeData;
 import com.lw.modularmachine.machine.recipe.resource.keyed.KeyedStock;
 import com.mojang.serialization.JsonOps;
+import net.minecraft.nbt.CompoundTag;
 import net.minecraft.nbt.NbtOps;
 import net.minecraft.resources.ResourceLocation;
 import org.junit.jupiter.api.Test;
@@ -19,6 +20,37 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 
 class LegacyAddonDeclarationsTest {
+  @Test
+  void keyedStockLoadMergesEquivalentSavedKeys() {
+    var saved = new CompoundTag();
+    saved.putLong("test", 2);
+    saved.putLong("minecraft:test", 4);
+    var stock = new KeyedStock(5);
+    stock.load(saved, 20);
+    assertEquals(6, stock.amount(ResourceLocation.parse("minecraft:test")));
+    assertEquals(6, stock.total());
+    assertEquals(0, stock.space());
+  }
+
+  @Test
+  void reducedKeyedCapacityPreservesBalancesAndRollsBackMultipleDebits() {
+    var first = ResourceLocation.parse("thaumaturge:aer");
+    var second = ResourceLocation.parse("thaumaturge:ignis");
+    var saved = new CompoundTag();
+    saved.putLong(first.toString(), 9);
+    saved.putLong(second.toString(), 6);
+    var stock = new KeyedStock(5);
+    stock.load(saved, 20);
+    assertEquals(15, stock.total());
+    assertEquals(0, stock.move(first, 1, false));
+    var firstDebit = stock.acquire(first, -8);
+    var secondDebit = stock.acquire(second, -5);
+    firstDebit.resolve(false);
+    secondDebit.resolve(false);
+    assertEquals(saved, stock.save());
+    assertEquals(0, stock.space());
+  }
+
   @Test
   void worldPoolFreezesAmountWithoutScalingCoverageOrLimits() {
     var codec = WorldPoolRecipeData.codec("will", true).codec();

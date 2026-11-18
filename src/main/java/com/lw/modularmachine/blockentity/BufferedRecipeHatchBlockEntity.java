@@ -53,8 +53,8 @@ public abstract class BufferedRecipeHatchBlockEntity extends MachineCasingBlockE
     return buffer.capacity();
   }
 
-  protected final int extract(int amount) {
-    return live() && !RecipeLifecyclePublisher.isDispatching() ? buffer.extractEnergy(amount, false) : 0;
+  protected final long extract(long amount) {
+    return live() && !RecipeLifecyclePublisher.isDispatching() ? buffer.extractEnergyLong(amount, false) : 0;
   }
 
   public final long stored() {
@@ -98,8 +98,12 @@ public abstract class BufferedRecipeHatchBlockEntity extends MachineCasingBlockE
   @Override
   protected void loadAdditional(CompoundTag tag, HolderLookup.Provider registries) {
     requireMutation();
-    buffer.load(tag.getLong(nbtKey));
+    buffer.loadPreservingExcess(Math.min(tag.getLong(nbtKey), savedAmountLimit()));
     super.loadAdditional(tag, registries);
+  }
+
+  protected long savedAmountLimit() {
+    return Long.MAX_VALUE;
   }
 
   @Override

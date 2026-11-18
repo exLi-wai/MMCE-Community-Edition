@@ -1,7 +1,9 @@
 package com.lw.modularmachine.config;
 
+import com.lw.modularmachine.machine.EmberHatchTier;
 import com.lw.modularmachine.machine.HatchTier;
 import com.lw.modularmachine.machine.ParallelControllerTier;
+import com.lw.modularmachine.machine.StarlightInputTier;
 import com.lw.modularmachine.machine.UpgradeBusTier;
 import com.lw.modularmachine.api.recipe.RecipeFailureAction;
 import com.lw.modularmachine.machine.factory.FactoryThreadStateCodec;
@@ -14,6 +16,7 @@ import net.minecraft.resources.ResourceLocation;
 import net.neoforged.neoforge.common.ModConfigSpec;
 
 public final class MachineConfig {
+  public static final int MAX_ESSENTIA_OUTPUT_CAPACITY = 65_536;
   public static final ModConfigSpec SPEC;
   public static final ModConfigSpec.BooleanValue CLEAN_CUSTOM_DATA_ON_STRUCTURE_CHECK_FAILED;
   public static final ModConfigSpec.BooleanValue ENABLE_DURATION_MULTIPLIER;
@@ -39,6 +42,13 @@ public final class MachineConfig {
   public static final Map<String, ModConfigSpec.LongValue> ENERGY_HATCH_CAPACITY;
   public static final Map<String, ModConfigSpec.LongValue> ENERGY_HATCH_TRANSFER;
   public static final Map<String, ModConfigSpec.IntValue> UPGRADE_BUS_SLOTS;
+  private static final Map<EmberHatchTier, ModConfigSpec.IntValue> EMBER_CAPACITIES;
+  private static final Map<StarlightInputTier, ModConfigSpec.IntValue> STARLIGHT_CAPACITIES;
+  private static final ModConfigSpec.IntValue ESSENTIA_OUTPUT_CAPACITY;
+  private static final ModConfigSpec.IntValue SPARK_MANA_CAPACITY;
+  private static final ModConfigSpec.IntValue AURA_INPUT_CAPACITY;
+  private static final ModConfigSpec.LongValue LASER_INPUT_CAPACITY;
+  private static final ModConfigSpec.LongValue HEAT_CAPACITY;
 
   static {
     ModConfigSpec.Builder builder = new ModConfigSpec.Builder();
@@ -161,6 +171,46 @@ public final class MachineConfig {
     }
     UPGRADE_BUS_SLOTS = Map.copyOf(busSlots);
     builder.pop();
+
+    builder.translation("mmcece.config.addon_hatch").push("addon_hatch");
+    ESSENTIA_OUTPUT_CAPACITY = addonCapacity(
+        builder,
+        "essentia_output",
+        "Ordinary output hatch capacity in essentia units.")
+        .defineInRange("essentia_output", 4_096, 1, MAX_ESSENTIA_OUTPUT_CAPACITY);
+    SPARK_MANA_CAPACITY = addonCapacity(
+        builder,
+        "spark_mana",
+        "Capacity in Mana, shared by both spark hatch directions.")
+        .defineInRange("spark_mana", 1_000_000, 1, Integer.MAX_VALUE);
+    AURA_INPUT_CAPACITY = addonCapacity(builder, "aura_input", "Local input buffer capacity in Nature's Aura units.")
+        .defineInRange("aura_input", 500_000, 1, Integer.MAX_VALUE);
+    LASER_INPUT_CAPACITY = addonCapacity(builder, "laser_input", "Capacity in integer Mekanism laser energy units.")
+        .defineInRange("laser_input", (long) Integer.MAX_VALUE, 1L, Long.MAX_VALUE);
+    HEAT_CAPACITY = addonCapacity(builder, "heat", "Local capacity in milli-heat, shared by both hatch directions.")
+        .defineInRange("heat", 1_000_000_000L, 1L, Long.MAX_VALUE);
+
+    builder.translation("mmcece.config.addon_hatch.ember").push("ember");
+    var emberCapacities = new EnumMap<EmberHatchTier, ModConfigSpec.IntValue>(EmberHatchTier.class);
+    for (var tier : EmberHatchTier.values()) {
+      emberCapacities.put(
+          tier,
+          addonCapacity(builder, "ember." + tier.path(), "Capacity in whole Ember units.")
+              .defineInRange(tier.path(), tier.capacity(), 1, Integer.MAX_VALUE));
+    }
+    EMBER_CAPACITIES = Map.copyOf(emberCapacities);
+    builder.pop();
+
+    builder.translation("mmcece.config.addon_hatch.starlight").push("starlight");
+    var starlightCapacities = new EnumMap<StarlightInputTier, ModConfigSpec.IntValue>(StarlightInputTier.class);
+    for (var tier : StarlightInputTier.values()) {
+      starlightCapacities.put(
+          tier,
+          addonCapacity(builder, "starlight." + tier.path(), "Capacity in whole Starlight units.")
+              .defineInRange(tier.path(), tier.capacity(), 1, Integer.MAX_VALUE / 1_000));
+    }
+    STARLIGHT_CAPACITIES = Map.copyOf(starlightCapacities);
+    builder.pop(2);
     SPEC = builder.build();
   }
 
@@ -238,6 +288,34 @@ public final class MachineConfig {
     return energyValue(ENERGY_HATCH_TRANSFER, tier, tier.transferLimit());
   }
 
+  public static int essentiaOutputCapacity() {
+    return configuredCapacity(ESSENTIA_OUTPUT_CAPACITY);
+  }
+
+  public static int sparkManaCapacity() {
+    return configuredCapacity(SPARK_MANA_CAPACITY);
+  }
+
+  public static int auraInputCapacity() {
+    return configuredCapacity(AURA_INPUT_CAPACITY);
+  }
+
+  public static long laserInputCapacity() {
+    return configuredCapacity(LASER_INPUT_CAPACITY);
+  }
+
+  public static long heatHatchCapacity() {
+    return configuredCapacity(HEAT_CAPACITY);
+  }
+
+  public static int emberInputCapacity(EmberHatchTier tier) {
+    return configuredCapacity(EMBER_CAPACITIES.get(tier));
+  }
+
+  public static int starlightInputCapacity(StarlightInputTier tier) {
+    return configuredCapacity(STARLIGHT_CAPACITIES.get(tier));
+  }
+
   public static int upgradeBusSlots(UpgradeBusTier tier) {
     var value = UPGRADE_BUS_SLOTS.get(tier.path());
     int fallback = tier.slots();
@@ -254,6 +332,15 @@ public final class MachineConfig {
     }
     long configured = value.get();
     return configured <= 0 ? fallback : configured;
+  }
+
+  private static ModConfigSpec.Builder addonCapacity(ModConfigSpec.Builder builder, String key, String comment) {
+    return builder.translation("mmcece.config.addon_hatch." + key)
+        .comment(comment, "Re-enter the world after changing. Keep client and server values matching.").worldRestart();
+  }
+
+  private static <T extends Number> T configuredCapacity(ModConfigSpec.ConfigValue<T> value) {
+    return SPEC.isLoaded() ? value.get() : value.getDefault();
   }
 
   private static Map<String, ModConfigSpec.IntValue> hatchValues(ModConfigSpec.Builder builder, String section, List<HatchTier> tiers, boolean transfer, int max) {

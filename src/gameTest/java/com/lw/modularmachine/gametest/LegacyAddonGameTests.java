@@ -63,17 +63,19 @@ public final class LegacyAddonGameTests {
     var level = helper.getLevel();
     var fixture = coloredStructure(helper, "test_laser_color", MachineRegistries.LASER_INPUT_HATCH.get());
     var laser = (LaserInputHatchBlockEntity) fixture.hatch();
+    long capacity = laser.capacity();
+    long debited = Math.min(34, capacity);
     laser.receive(Long.MAX_VALUE, false);
     try (var lease = laser.acquireRecipeBuffer()) {
-      helper.assertTrue(lease.extractExact(12), "Expected enough laser energy to reserve");
+      helper.assertTrue(lease.extractExact(debited), "Expected enough laser energy to reserve");
     }
-    helper.assertTrue(laser.available() == LaserInputHatchBlockEntity.CAPACITY, "Rollback did not restore the buffer");
+    helper.assertTrue(laser.available() == capacity, "Rollback did not restore the buffer");
     try (var lease = laser.acquireRecipeBuffer()) {
-      helper.assertTrue(lease.extractExact(34), "Expected enough laser energy to debit");
+      helper.assertTrue(lease.extractExact(debited), "Expected enough laser energy to debit");
       lease.resolve(true);
     }
     long saved = laser.saveWithoutMetadata(level.registryAccess()).getLong("laser_energy");
-    helper.assertTrue(saved == LaserInputHatchBlockEntity.CAPACITY - 34, "Save lost or duplicated laser energy");
+    helper.assertTrue(saved == capacity - debited, "Save lost or duplicated laser energy");
     helper.succeed();
   }
 
@@ -104,15 +106,17 @@ public final class LegacyAddonGameTests {
       coloredStructure(helper, "test_spark_mana_input_color", MachineRegistries.SPARK_MANA_INPUT.get());
       var fixture = coloredStructure(helper, "test_spark_mana_output_color", MachineRegistries.SPARK_MANA_OUTPUT.get());
       var output = (com.lw.modularmachine.integration.botania.SparkManaHatchBlockEntity) fixture.hatch();
+      long reserved = Math.min(1_000, output.capacity());
+      long produced = Math.min(400, output.capacity());
       try (var lease = output.acquireRecipeBuffer()) {
-        helper.assertTrue(lease.insertExact(1_000), "Mana output had no reservation space");
+        helper.assertTrue(lease.insertExact(reserved), "Mana output had no reservation space");
       }
       helper.assertTrue(output.stored() == 0, "Mana output rollback left uncommitted production");
       try (var lease = output.acquireRecipeBuffer()) {
-        helper.assertTrue(lease.insertExact(400), "Mana output could not receive production");
+        helper.assertTrue(lease.insertExact(produced), "Mana output could not receive production");
         lease.resolve(true);
       }
-      helper.assertTrue(output.getCurrentMana() == 400, "Mana output did not commit production");
+      helper.assertTrue(output.getCurrentMana() == produced, "Mana output did not commit production");
     }
     if (Mods.NATURES_AURA.isLoaded()) {
       coloredStructure(helper, "test_aura_input_color", MachineRegistries.AURA_INPUT.get());
@@ -130,14 +134,19 @@ public final class LegacyAddonGameTests {
       var inputPos = output.getBlockPos().above();
       level.setBlockAndUpdate(inputPos, MachineRegistries.HEAT_INPUT.get().defaultBlockState());
       var input = (com.lw.modularmachine.integration.mekanism.HeatHatchBlockEntity) level.getBlockEntity(inputPos);
+      long produced = Math.min(10_000, output.capacity());
       try (var lease = output.acquireRecipeBuffer()) {
-        helper.assertTrue(lease.insertExact(10_000), "Heat output rejected production");
+        helper.assertTrue(lease.insertExact(produced), "Heat output rejected production");
         lease.resolve(true);
       }
+      helper.assertTrue(output.stored() == produced, "Heat output did not commit production");
+      double difference = output.getTemperature(0) - input.getTotalTemperature();
+      double inverseConduction = output.getInverseConduction(0) + input.getTotalInverseConduction();
+      long offered = difference > 0 ? Math.max(1, (long) (difference / inverseConduction * 1_000)) : 0;
+      long conducted = Math.min(offered, Math.min(produced, input.capacity()));
       output.tickHatch();
-      helper.assertTrue(
-          input.stored() > 0 && output.stored() + input.stored() == 10_000,
-          "Heat transfer lost or duplicated stock");
+      helper.assertTrue(input.stored() == conducted, "Heat input did not receive the expected whole milli-heat");
+      helper.assertTrue(output.stored() + input.stored() == produced, "Heat transfer lost or duplicated stock");
     }
     helper.succeed();
   }

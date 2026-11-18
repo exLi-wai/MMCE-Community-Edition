@@ -20,7 +20,7 @@ final class BotaniaHatchHud {
             graphics,
             window,
             font,
-            hatch.getCurrentMana(),
+            (int) Math.min(hatch.getCurrentMana(), hatch.capacity()),
             (int) hatch.capacity(),
             hatch.getBlockState().getBlock().getName().getString(),
             ItemStack.EMPTY,

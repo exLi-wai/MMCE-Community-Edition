@@ -1,7 +1,8 @@
 package com.lw.modularmachine.integration.astral;
 
 import com.lw.modularmachine.block.TickingRecipeHatchBlock;
-import com.lw.modularmachine.registry.MachineRegistries;
+import com.lw.modularmachine.config.MachineConfig;
+import com.lw.modularmachine.machine.StarlightInputTier;
 import hellfirepvp.astralsorcery.common.lib.BlocksAS;
 import java.util.List;
 import net.minecraft.ChatFormatting;
@@ -31,15 +32,15 @@ public final class StarlightHatchBlock extends TickingRecipeHatchBlock {
     if (!input) {
       return;
     }
-    var state = defaultBlockState();
-    boolean basic = state.is(MachineRegistries.STARLIGHT_INPUT.get());
-    boolean brilliant = state.is(MachineRegistries.STARLIGHT_INPUT_BRILLIANT.get());
-    var altar = basic ? BlocksAS.ALTAR_RESONANCE.get() : BlocksAS.ALTAR_RADIANCE.get();
-    String comparison = brilliant ? "tooltip.mmcece.starlight_input_hatch.four_times" : "tooltip.mmcece.starlight_input_hatch.same";
-    tooltip.add(
-        Component.translatable("tooltip.mmcece.starlight_input_hatch", StarlightHatch.inputCapacity(state) / 1_000)
-            .withStyle(ChatFormatting.GRAY));
-    tooltip.add(Component.translatable(comparison, altar.getName()).withStyle(ChatFormatting.GRAY));
+    var tier = StarlightHatch.inputTier(defaultBlockState());
+    int capacity = MachineConfig.starlightInputCapacity(tier);
+    tooltip
+        .add(Component.translatable("tooltip.mmcece.starlight_input_hatch", capacity).withStyle(ChatFormatting.GRAY));
+    if (capacity == tier.capacity()) {
+      var altar = tier == StarlightInputTier.BASIC ? BlocksAS.ALTAR_RESONANCE.get() : BlocksAS.ALTAR_RADIANCE.get();
+      String comparison = tier == StarlightInputTier.BRILLIANT ? "tooltip.mmcece.starlight_input_hatch.four_times" : "tooltip.mmcece.starlight_input_hatch.same";
+      tooltip.add(Component.translatable(comparison, altar.getName()).withStyle(ChatFormatting.GRAY));
+    }
   }
 
   @Override

@@ -1,6 +1,7 @@
 package com.lw.modularmachine.integration.botania;
 
 import com.lw.modularmachine.block.TickingRecipeHatchBlock;
+import com.lw.modularmachine.config.MachineConfig;
 import java.util.List;
 import net.minecraft.ChatFormatting;
 import net.minecraft.core.component.DataComponents;
@@ -20,8 +21,8 @@ public final class SparkManaHatchBlock extends TickingRecipeHatchBlock {
   public void appendHoverText(ItemStack stack, Item.TooltipContext context, List<Component> tooltip, TooltipFlag flag) {
     var data = stack.get(DataComponents.BLOCK_ENTITY_DATA);
     long stored = data == null ? 0 : data.copyTag().getLong(SparkManaHatchBlockEntity.MANA);
-    int capacity = SparkManaHatchBlockEntity.CAPACITY;
-    long mana = Math.clamp(stored, 0, capacity);
+    int capacity = MachineConfig.sparkManaCapacity();
+    int mana = (int) Math.clamp(stored, 0, Integer.MAX_VALUE);
     tooltip
         .add(Component.translatable("tooltip.mmcece.spark_mana_hatch", mana, capacity).withStyle(ChatFormatting.GRAY));
   }

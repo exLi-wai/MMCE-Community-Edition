@@ -29,7 +29,7 @@ import org.jetbrains.annotations.ApiStatus;
 @ApiStatus.Internal
 public abstract class EssentiaHatch extends MachineCasingBlockEntity implements TickingRecipeHatchBlock.ServerTicking, KeyedResourcePort {
   protected static final int CAPACITY = 4096;
-  protected final KeyedStock stock = new KeyedStock(CAPACITY);
+  protected final KeyedStock stock;
   protected final boolean input;
   protected boolean transferring;
   private int reservations;
@@ -37,8 +37,13 @@ public abstract class EssentiaHatch extends MachineCasingBlockEntity implements 
   private final KeyedRequestObservers requestObservers = new KeyedRequestObservers();
 
   protected EssentiaHatch(BlockEntityType<?> type, BlockPos position, BlockState state, boolean input) {
+    this(type, position, state, input, CAPACITY);
+  }
+
+  protected EssentiaHatch(BlockEntityType<?> type, BlockPos position, BlockState state, boolean input, int capacity) {
     super(type, position, state);
     this.input = input;
+    stock = new KeyedStock(capacity);
   }
 
   @Override
@@ -268,8 +273,12 @@ public abstract class EssentiaHatch extends MachineCasingBlockEntity implements 
       }
     }
     super.loadAdditional(tag, registries);
-    stock.load(tag.getCompound("essentia"));
+    stock.load(tag.getCompound("essentia"), savedAmountLimit());
     clearDemands();
+  }
+
+  protected int savedAmountLimit() {
+    return CAPACITY;
   }
 
   @Override

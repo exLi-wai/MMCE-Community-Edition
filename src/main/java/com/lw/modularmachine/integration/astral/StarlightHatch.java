@@ -5,6 +5,7 @@ import com.lw.modularmachine.api.recipe.KeyedAmountRecipeData;
 import com.lw.modularmachine.api.recipe.resource.RecipeResourceParticipant;
 import com.lw.modularmachine.block.TickingRecipeHatchBlock;
 import com.lw.modularmachine.config.MachineConfig;
+import com.lw.modularmachine.machine.StarlightInputTier;
 import com.lw.modularmachine.machine.recipe.RecipeLifecyclePublisher;
 import com.lw.modularmachine.machine.recipe.resource.keyed.KeyedResourcePort;
 import com.lw.modularmachine.machine.recipe.resource.keyed.KeyedStock;
@@ -47,15 +48,16 @@ public abstract class StarlightHatch<N extends TransmissionNode> extends TileEnt
   private StarlightHatch(TileRegistryObject<?> type, BlockPos position, BlockState state, boolean input) {
     super(type, position, state);
     this.input = input;
-    capacity = input ? inputCapacity(state) : 2_000_000;
+    capacity = input ? MachineConfig.starlightInputCapacity(inputTier(state)) * 1_000 : 2_000_000;
     stock = new KeyedStock(capacity);
   }
 
-  static int inputCapacity(BlockState state) {
+  static StarlightInputTier inputTier(BlockState state) {
     if (state.is(MachineRegistries.STARLIGHT_INPUT_BRILLIANT.get())) {
-      return 32_000_000;
+      return StarlightInputTier.BRILLIANT;
     }
-    return state.is(MachineRegistries.STARLIGHT_INPUT_TRAIT.get()) ? 8_000_000 : 2_000_000;
+    return state
+        .is(MachineRegistries.STARLIGHT_INPUT_TRAIT.get()) ? StarlightInputTier.TRAIT : StarlightInputTier.BASIC;
   }
 
   void openMenu(net.minecraft.world.entity.player.Player player) {
@@ -241,7 +243,7 @@ public abstract class StarlightHatch<N extends TransmissionNode> extends TileEnt
     super.loadAdditional(tag, registries);
     color = MachineColorable.load(tag);
     assigned = tag.contains(MachineColorable.COLOR_TAG);
-    stock.load(tag.getCompound("starlight"));
+    stock.load(tag.getCompound("starlight"), input ? Integer.MAX_VALUE : capacity);
   }
 
   @Override

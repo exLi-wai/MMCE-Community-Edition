@@ -37,6 +37,11 @@ public final class LifeEssenceHatchBlockEntity extends BufferedRecipeHatchBlockE
   }
 
   @Override
+  protected long savedAmountLimit() {
+    return capacity();
+  }
+
+  @Override
   protected long storageLimit() {
     var orb = inventory.getItem(0);
     int capacity = orbCapacity(orb);

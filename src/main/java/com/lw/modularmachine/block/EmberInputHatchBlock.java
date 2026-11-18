@@ -1,6 +1,7 @@
 package com.lw.modularmachine.block;
 
 import com.lw.modularmachine.blockentity.EmberInputHatchBlockEntity;
+import com.lw.modularmachine.config.MachineConfig;
 import com.lw.modularmachine.machine.EmberHatchTier;
 import com.mojang.serialization.MapCodec;
 import com.rekindled.embers.util.DecimalFormats;
@@ -39,13 +40,13 @@ public final class EmberInputHatchBlock extends MachineCasingBlock {
   public void appendHoverText(ItemStack stack, Item.TooltipContext context, List<Component> tooltip, TooltipFlag flag) {
     var data = stack.get(DataComponents.BLOCK_ENTITY_DATA);
     long stored = data == null ? 0 : data.copyTag().getLong(EmberInputHatchBlockEntity.STORED_AMOUNT_TAG);
-    long amount = Math.clamp(stored, 0, tier.capacity() * 1_000_000L);
+    long amount = Math.max(0, stored);
     var format = DecimalFormats.getDecimalFormat("embers.decimal_format.ember");
     tooltip.add(
         Component.translatable(
             "embers.tooltip.item.ember",
             format.format(amount / 1_000_000.0),
-            format.format(tier.capacity())).withStyle(ChatFormatting.GRAY));
+            format.format(MachineConfig.emberInputCapacity(tier))).withStyle(ChatFormatting.GRAY));
   }
 
   public EmberHatchTier tier() {

@@ -2,6 +2,7 @@ package com.lw.modularmachine.integration.naturesaura;
 
 import com.lw.modularmachine.block.TickingRecipeHatchBlock;
 import com.lw.modularmachine.blockentity.BufferedRecipeHatchBlockEntity;
+import com.lw.modularmachine.config.MachineConfig;
 import com.lw.modularmachine.machine.recipe.RecipeLifecyclePublisher;
 import com.lw.modularmachine.registry.MachineRegistries;
 import de.ellpeck.naturesaura.api.aura.chunk.IAuraChunk;
@@ -12,10 +13,9 @@ import net.minecraft.world.level.block.state.BlockState;
 
 public final class AuraInputHatchBlockEntity extends BufferedRecipeHatchBlockEntity implements TickingRecipeHatchBlock.ServerTicking {
   private static final int RADIUS = 20;
-  private static final int CAPACITY = 500_000;
-
   public AuraInputHatchBlockEntity(BlockPos position, BlockState state) {
-    super(MachineRegistries.AURA_INPUT_ENTITY.get(), position, state, CAPACITY, "natural_aura");
+    super(MachineRegistries.AURA_INPUT_ENTITY.get(), position, state, MachineConfig.auraInputCapacity(),
+        "natural_aura");
   }
 
   @Override

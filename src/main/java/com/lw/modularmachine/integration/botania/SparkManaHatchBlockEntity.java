@@ -2,6 +2,7 @@ package com.lw.modularmachine.integration.botania;
 
 import com.lw.modularmachine.block.TickingRecipeHatchBlock;
 import com.lw.modularmachine.blockentity.BufferedRecipeHatchBlockEntity;
+import com.lw.modularmachine.config.MachineConfig;
 import com.lw.modularmachine.machine.recipe.RecipeLifecyclePublisher;
 import com.lw.modularmachine.registry.MachineRegistries;
 import net.minecraft.core.BlockPos;
@@ -21,7 +22,6 @@ import vazkii.botania.api.mana.ManaReceiver;
 import vazkii.botania.api.mana.spark.ManaSparkAttachable;
 
 public final class SparkManaHatchBlockEntity extends BufferedRecipeHatchBlockEntity implements ManaReceiver, ManaSparkAttachable, WandBindable, Bound, TickingRecipeHatchBlock.ServerTicking {
-  static final int CAPACITY = 1_000_000;
   static final String MANA = "spark_mana";
   private static final String BINDING = "collector_position";
   private final boolean input;
@@ -30,7 +30,7 @@ public final class SparkManaHatchBlockEntity extends BufferedRecipeHatchBlockEnt
   private int lastSyncedMana = -1;
 
   public SparkManaHatchBlockEntity(BlockPos position, BlockState state) {
-    super(MachineRegistries.SPARK_MANA_ENTITY.get(), position, state, CAPACITY, MANA,
+    super(MachineRegistries.SPARK_MANA_ENTITY.get(), position, state, MachineConfig.sparkManaCapacity(), MANA,
         state.is(MachineRegistries.SPARK_MANA_INPUT.get()));
     input = state.is(MachineRegistries.SPARK_MANA_INPUT.get());
   }
@@ -124,7 +124,7 @@ public final class SparkManaHatchBlockEntity extends BufferedRecipeHatchBlockEnt
 
   @Override
   public boolean isFull() {
-    return !input || getCurrentMana() >= CAPACITY;
+    return !input || getCurrentMana() >= capacity();
   }
 
   @Override
@@ -180,7 +180,12 @@ public final class SparkManaHatchBlockEntity extends BufferedRecipeHatchBlockEnt
   protected void loadAdditional(CompoundTag tag, HolderLookup.Provider registries) {
     super.loadAdditional(tag, registries);
     binding = tag.contains(BINDING) ? BlockPos.of(tag.getLong(BINDING)) : Bound.UNBOUND_POS;
-    displayedMana = (int) Math.clamp(tag.getLong(MANA), 0, CAPACITY);
+    displayedMana = (int) Math.clamp(tag.getLong(MANA), 0, savedAmountLimit());
+  }
+
+  @Override
+  protected long savedAmountLimit() {
+    return Integer.MAX_VALUE;
   }
 
   @Override

@@ -40,7 +40,7 @@ public final class KeyedStock {
   }
 
   public long space() {
-    return capacity - total;
+    return Math.max(0, capacity - total);
   }
 
   public void watchInput(ReplenishmentProof proof) {
@@ -71,24 +71,28 @@ public final class KeyedStock {
   }
 
   public long move(ResourceLocation key, long delta, boolean simulate) {
-    long count = amount(key);
-    long actual = Math.clamp(delta, -count, space());
+    long actual = Math.clamp(delta, -amount(key), space());
     if (!simulate && actual != 0) {
-      if (count + actual == 0) {
-        balances.remove(key);
-      } else {
-        balances.put(key, count + actual);
-      }
-      total += actual;
-      if (actual > 0) {
-        invalidate(outputProofs);
-        outputProofs = null;
-      } else {
-        invalidate(inputProofs);
-        inputProofs = null;
-      }
+      applyChange(key, actual);
     }
     return actual;
+  }
+
+  private void applyChange(ResourceLocation key, long delta) {
+    long updated = amount(key) + delta;
+    if (updated == 0) {
+      balances.remove(key);
+    } else {
+      balances.put(key, updated);
+    }
+    total += delta;
+    if (delta > 0) {
+      invalidate(outputProofs);
+      outputProofs = null;
+    } else {
+      invalidate(inputProofs);
+      inputProofs = null;
+    }
   }
 
   public RecipeResourceParticipant acquire(ResourceLocation key, long delta) {
@@ -97,8 +101,11 @@ public final class KeyedStock {
     }
     move(key, delta, false);
     return commit -> {
-      if (!commit && move(key, -delta, false) != -delta) {
-        throw new IllegalStateException("Keyed hatch rollback could not restore exact stock");
+      if (!commit && delta != 0) {
+        if (delta > amount(key) || delta < 0 && total > Long.MAX_VALUE + delta) {
+          throw new IllegalStateException("Keyed hatch rollback could not restore exact stock");
+        }
+        applyChange(key, -delta);
       }
     };
   }
@@ -110,13 +117,19 @@ public final class KeyedStock {
   }
 
   public void load(CompoundTag tag) {
+    load(tag, capacity);
+  }
+
+  public void load(CompoundTag tag, long savedAmountLimit) {
     invalidateProofs();
     balances.clear();
     total = 0;
     for (var name : tag.getAllKeys()) {
       var key = ResourceLocation.tryParse(name);
-      if (key != null && tag.getLong(name) > 0) {
-        move(key, tag.getLong(name), false);
+      long amount = Math.min(tag.getLong(name), savedAmountLimit - total);
+      if (key != null && amount > 0) {
+        balances.put(key, amount(key) + amount);
+        total += amount;
       }
     }
   }
