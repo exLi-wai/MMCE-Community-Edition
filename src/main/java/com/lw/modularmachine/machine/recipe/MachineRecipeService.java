@@ -51,6 +51,7 @@ import com.lw.modularmachine.machine.recipe.resource.fluid.FluidTickResourceExec
 public final class MachineRecipeService {
   private static final Map<RecipeManager, Prepared> PREPARED = new IdentityHashMap<>();
   private static final Map<MinecraftServer, Published> ACTIVE = new IdentityHashMap<>();
+  private static volatile MachineRecipeReloadListener.SourceCache nativeSources = new MachineRecipeReloadListener.SourceCache();
 
   private record Prepared(
       long structureEpoch,
@@ -76,6 +77,10 @@ public final class MachineRecipeService {
     if (server != null) {
       ServerThreadGuard.require(server, "Machine recipe catalog accessed");
     }
+    // Derive only from the last live publication. None of the previous
+    // authority, callback snapshots or contextual catalogs are carried over.
+    var previous = server == null ? null : ACTIVE.get(server);
+    var previousCatalogs = previous == null ? Map.<ResourceLocation, RecipeCatalog>of() : previous.prepared.catalogs();
     var actual = new LinkedHashMap<ResourceLocation, MachineRecipe>();
     for (var holder : manager.getAllRecipesFor(MachineRecipeRegistries.ITEM_TYPE.get())) {
       if (!sources.containsKey(holder.id())) {
@@ -140,15 +145,14 @@ public final class MachineRecipeService {
       validatePorts(entry.getKey(), recipe, machine);
       RecipeResourceExecutionRegistry.validateDefinition(entry.getKey(), recipe.resourceData(), registries);
       RecipeTriggeredResources.validateRegistry(recipe.triggeredResources());
-      candidates.computeIfAbsent(recipe.machineId(), ignored -> new ArrayList<>())
-          .add(recipe.compile(entry.getKey(), registries));
+      var compiled = reuseCandidate(previousCatalogs.get(recipe.machineId()), entry.getKey(), recipe);
+      if (compiled == null) {
+        compiled = recipe.compile(entry.getKey(), registries);
+      }
+      candidates.computeIfAbsent(recipe.machineId(), ignored -> new ArrayList<>()).add(compiled);
       effective.put(entry.getKey(), recipe);
     }
-    var frozen = new HashMap<ResourceLocation, CompiledRecipeSet<ItemResourceKey>>();
-    candidates.forEach((machine, values) -> {
-      frozen.put(machine, new CompiledRecipeSet<>(values)); // Compile every machine before any publication.
-    });
-    var catalogs = prepareCatalogs(frozen, effective);
+    var catalogs = prepareCatalogs(candidates, effective, previousCatalogs);
     boolean changed = !imports.recipes().isEmpty()
         || effective.entrySet().stream().anyMatch(entry -> entry.getValue() != actual.get(entry.getKey()));
     if (!RecipeAdapterScriptSources.isCurrent(imports.scriptRevision())) {
@@ -190,17 +194,36 @@ public final class MachineRecipeService {
     return catalogFor((StructureService.StructureSubject) controller);
   }
 
+  private static RecipeCandidate<ItemResourceKey> reuseCandidate(RecipeCatalog previous, ResourceLocation id, MachineRecipe recipe) {
+    if (previous == null || !recipe.hasReusableIndexData()) {
+      return null;
+    }
+    var key = id.toString();
+    var definition = previous.definition(key);
+    return definition != null && recipe.sameDefinition(definition) && definition.hasReusableIndexData() ? previous
+        .recipes().candidate(key).orElseThrow() : null;
+  }
+
   /**
-   * Compiles resource strategies while reload can still reject the prospective
-   * generation.
+   * Rebuilds only changed machine indexes before the prospective generation can
+   * be installed. Candidate identity proves that the same validated data and
+   * recipe ID were reused without changing the machine's ranking inputs.
    */
-  private static Map<ResourceLocation, RecipeCatalog> prepareCatalogs(Map<ResourceLocation, CompiledRecipeSet<ItemResourceKey>> candidates, Map<ResourceLocation, MachineRecipe> effective) {
+  private static Map<ResourceLocation, RecipeCatalog> prepareCatalogs(Map<ResourceLocation, List<RecipeCandidate<ItemResourceKey>>> candidates, Map<ResourceLocation, MachineRecipe> effective, Map<ResourceLocation, RecipeCatalog> previousCatalogs) {
     var grouped = new HashMap<ResourceLocation, Map<String, MachineRecipe>>();
     effective.forEach(
         (id, recipe) -> grouped.computeIfAbsent(recipe.machineId(), ignored -> new HashMap<>())
             .put(id.toString(), recipe));
     var result = new HashMap<ResourceLocation, RecipeCatalog>();
-    candidates.forEach((machine, recipes) -> {
+    candidates.forEach((machine, values) -> {
+      var previous = previousCatalogs.get(machine);
+      if (previous != null
+          && previous.recipes().size() == values.size()
+          && values.stream().allMatch(value -> previous.recipes().candidate(value.id()).orElse(null) == value)) {
+        result.put(machine, previous);
+        return;
+      }
+      var recipes = new CompiledRecipeSet<>(values);
       var definitions = grouped.getOrDefault(machine, Map.of());
       var fluids = new HashMap<String, List<FluidStack>>();
       var outputs = new HashMap<String, List<FluidStack>>();
@@ -526,7 +549,7 @@ public final class MachineRecipeService {
 
   @SubscribeEvent
   public static void addReloadListener(AddReloadListenerEvent event) {
-    event.addListener(new MachineRecipeReloadListener(event.getServerResources().getRecipeManager()));
+    event.addListener(new MachineRecipeReloadListener(event.getServerResources().getRecipeManager(), nativeSources));
   }
 
   @SubscribeEvent
@@ -543,6 +566,7 @@ public final class MachineRecipeService {
   public static void stopped(ServerStoppedEvent event) {
     ACTIVE.remove(event.getServer());
     PREPARED.clear();
+    nativeSources = new MachineRecipeReloadListener.SourceCache();
     RecipeScriptSources.clear();
     RecipeScriptCallbacks.reset();
     RecipeAdapterScriptSources.clear();

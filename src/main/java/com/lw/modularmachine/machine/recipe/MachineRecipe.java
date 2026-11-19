@@ -28,6 +28,7 @@ import java.util.List;
 import java.util.Objects;
 import java.util.stream.Stream;
 import net.minecraft.core.HolderLookup;
+import net.minecraft.core.registries.BuiltInRegistries;
 import net.minecraft.nbt.ByteTag;
 import net.minecraft.network.RegistryFriendlyByteBuf;
 import net.minecraft.network.codec.StreamCodec;
@@ -500,6 +501,35 @@ public final class MachineRecipe implements Recipe<RecipeInput> {
         && randomSeed == other.randomSeed
         && interfaceInputs.equals(other.interfaceInputs)
         && selectors.equals(other.selectors);
+  }
+
+  /**
+   * Reuse compiled data only for values with stable registry references. Stack
+   * component patches and extension codecs can embed reload-scoped holders whose
+   * equality compares only the registry key.
+   */
+  boolean hasReusableIndexData() {
+    if (!ingredientArrays().inputs().isEmpty()
+        || !ingredientArrays().randomOutputs().isEmpty()
+        || !triggeredResources().rows().isEmpty()
+        || resourceData.entries().stream().anyMatch(
+            entry -> entry.type() != RecipeResourceDefinitions.ITEM
+                && entry.type() != RecipeResourceDefinitions.FLUID
+                && entry.type() != RecipeResourceDefinitions.ENERGY
+                && entry.type() != RecipeResourceDefinitions.CHEMICAL
+                && !entry.type().empty().equals(entry.data()))) {
+      return false;
+    }
+    return Stream.concat(inputs().stream(), outputs().stream())
+        .allMatch(row -> stableItem(row.prototype) && stableItem(row.preview))
+        && Stream.of(fluidInputRequirements(), fluidOutputRequirements(), fluidPerTickInputs(), fluidPerTickOutputs())
+            .flatMap(List::stream).allMatch(row -> row.stack().getComponentsPatch().isEmpty());
+  }
+
+  private static boolean stableItem(ItemStack stack) {
+    return stack.isEmpty()
+        || stack.isComponentsPatchEmpty()
+            && BuiltInRegistries.ITEM.getKey(stack.getItem()).getNamespace().equals(ResourceLocation.DEFAULT_NAMESPACE);
   }
 
   private static void write(RegistryFriendlyByteBuf buffer, MachineRecipe value) {

@@ -20,9 +20,12 @@ import com.lw.modularmachine.registry.MachineRegistries;
 import com.mojang.serialization.JsonOps;
 import io.netty.buffer.Unpooled;
 import io.netty.handler.codec.DecoderException;
+import java.io.IOException;
+import java.nio.file.Files;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.concurrent.atomic.AtomicBoolean;
+import net.minecraft.SharedConstants;
 import net.minecraft.core.BlockPos;
 import net.minecraft.core.Direction;
 import net.minecraft.core.component.DataComponents;
@@ -32,6 +35,7 @@ import net.minecraft.network.RegistryFriendlyByteBuf;
 import net.minecraft.network.chat.Component;
 import net.minecraft.network.chat.MutableComponent;
 import net.minecraft.resources.ResourceLocation;
+import net.minecraft.server.packs.PackType;
 import net.minecraft.world.item.ItemStack;
 import net.minecraft.world.item.Items;
 import net.minecraft.world.item.crafting.Recipe;
@@ -39,8 +43,10 @@ import net.minecraft.world.item.crafting.SingleRecipeInput;
 import net.minecraft.world.level.block.entity.BlockEntity;
 import net.minecraft.world.level.block.state.properties.BlockStateProperties;
 import net.minecraft.world.level.material.Fluids;
+import net.minecraft.world.level.storage.LevelResource;
 import net.neoforged.neoforge.gametest.GameTestHolder;
 import net.neoforged.neoforge.gametest.PrefixGameTestTemplate;
+import org.apache.commons.io.FileUtils;
 
 @GameTestHolder("mmcece")
 @PrefixGameTestTemplate(false)
@@ -344,6 +350,68 @@ public final class NativeMachineRecipeGameTests {
             helper.fail("Native lifecycle assertion: " + error);
           }
         }));
+  }
+
+  @GameTest(templateNamespace = "mmcece_recipe_codec", template = "empty16", batch = "native_recipe_delta", timeoutTicks = 600)
+  public static void native_reload_reuses_unchanged_catalog_and_applies_recipe_changes(GameTestHelper helper)
+      throws IOException {
+    var server = helper.getLevel().getServer();
+    var repository = server.getPackRepository();
+    var originalPacks = List.copyOf(repository.getSelectedIds());
+    var selected = new ArrayList<>(originalPacks);
+    var origin = helper.absolutePos(new BlockPos(9, 5, 9));
+    var controller = RecipeResourceTicketGameTests.build(helper, origin, MachineOrientation.IDENTITY);
+    var original = MachineRecipeService.catalogFor(controller).orElseThrow();
+    var edited = id("mmcece/test_incremental_edit");
+    var deleted = id("mmcece/test_incremental_delete");
+    var pack = Files.createTempDirectory(server.getWorldPath(LevelResource.DATAPACK_DIR), "mmcece-recipe-delta-");
+    try {
+      int format = SharedConstants.getCurrentVersion().getPackVersion(PackType.SERVER_DATA);
+      Files.writeString(
+          pack.resolve("pack.mcmeta"),
+          "{\"pack\":{\"pack_format\":" + format + ",\"description\":\"MMCE recipe delta test\"}}");
+      var directory = Files.createDirectories(pack.resolve("data/mmcece/recipe/mmcece"));
+      var editedFile = directory.resolve("test_incremental_edit.json");
+      var deletedFile = directory.resolve("test_incremental_delete.json");
+      var recipe = root();
+      recipe.addProperty("machine", "mmcece:test_recipe_reentrant");
+      Files.writeString(editedFile, recipe.toString());
+      Files.writeString(deletedFile, recipe.toString());
+      repository.reload();
+      selected.add("file/" + pack.getFileName());
+      server.reloadResources(selected).join();
+
+      var afterAdd = MachineRecipeService
+          .catalogFor(RecipeResourceTicketGameTests.build(helper, origin, MachineOrientation.IDENTITY)).orElseThrow();
+      helper.assertTrue(
+          original != afterAdd && !original.isCurrent() && original.recipes() == afterAdd.recipes(),
+          "Adding unrelated recipes did not retain the immutable index under a fresh catalog");
+      helper.assertTrue(
+          MachineRecipeService.definition(server, edited).orElseThrow().duration() == 40
+              && server.getRecipeManager().byKey(deleted).isPresent(),
+          "New recipes were not visible after reload");
+
+      recipe.addProperty("duration", 63);
+      Files.writeString(editedFile, recipe.toString());
+      Files.delete(deletedFile);
+      server.reloadResources(selected).join();
+
+      var afterChanges = MachineRecipeService
+          .catalogFor(RecipeResourceTicketGameTests.build(helper, origin, MachineOrientation.IDENTITY)).orElseThrow();
+      helper.assertTrue(
+          afterAdd != afterChanges && !afterAdd.isCurrent() && original.recipes() == afterChanges.recipes(),
+          "Editing and deleting unrelated recipes did not retain the immutable index under a fresh catalog");
+      helper.assertTrue(
+          MachineRecipeService.definition(server, edited).orElseThrow().duration() == 63
+              && MachineRecipeService.definition(server, deleted).isEmpty()
+              && server.getRecipeManager().byKey(deleted).isEmpty(),
+          "Edited or deleted recipes remained in the old state after reload");
+    } finally {
+      FileUtils.deleteDirectory(pack.toFile());
+      repository.reload();
+      server.reloadResources(originalPacks).join();
+    }
+    helper.succeed();
   }
 
   @GameTest(template = "empty16", batch = "factory_run_persistence", timeoutTicks = 600)
