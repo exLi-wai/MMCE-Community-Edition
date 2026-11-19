@@ -21,7 +21,6 @@ import java.util.Set;
 @ApiStatus.Internal
 public final class CompiledRecipeSet<K> {
   public static final int MAX_CANDIDATES = 4096;
-  public static final int MAX_TOTAL_REQUIREMENTS = 65_536;
   public static final int MAX_DISTINCT_OUTPUTS = 256;
   private final List<Entry<K>> entries;
   private final List<RecipeCandidate<K>> candidates;
@@ -36,14 +35,9 @@ public final class CompiledRecipeSet<K> {
     var ids = new HashSet<String>();
     var pending = new ArrayList<Pending<K>>();
     var keys = new HashSet<K>();
-    int requirements = 0;
     for (var recipe : candidates) {
       if (!ids.add(recipe.id())) {
         throw new IllegalArgumentException("Duplicate recipe ID: " + recipe.id());
-      }
-      requirements = Math.addExact(requirements, Math.addExact(recipe.inputs().size(), recipe.outputs().size()));
-      if (requirements > MAX_TOTAL_REQUIREMENTS) {
-        throw new IllegalArgumentException("Too many recipe requirements");
       }
       var input = new LinkedHashMap<K, Long>();
       var output = new LinkedHashMap<K, Long>();

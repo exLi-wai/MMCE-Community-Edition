@@ -2,6 +2,7 @@ package com.lw.modularmachine.machine.recipe.adapter;
 
 import com.google.gson.JsonObject;
 import com.lw.modularmachine.api.recipe.adapter.RecipeAdapterImport;
+import net.minecraft.core.HolderLookup;
 import net.minecraft.resources.ResourceLocation;
 import org.jetbrains.annotations.ApiStatus;
 
@@ -14,7 +15,7 @@ final class MachineRecipeCopies {
   private MachineRecipeCopies() {
   }
 
-  static JsonObject copy(JsonObject original, ResourceLocation target, RecipeAdapterImport settings) {
+  static JsonObject copy(JsonObject original, ResourceLocation target, RecipeAdapterImport settings, HolderLookup.Provider registries) {
     var result = original.deepCopy();
     result.addProperty("machine", target.toString());
     if (settings.duration() > 0) {
@@ -31,6 +32,6 @@ final class MachineRecipeCopies {
     // Native conditions have already admitted the source in this generation.
     result.remove("neoforge:conditions");
 
-    return RecipeAdapterCustomizations.apply(result, settings.customization());
+    return RecipeAdapterCustomizations.apply(result, settings.customization(), registries);
   }
 }

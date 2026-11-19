@@ -140,10 +140,18 @@ public record RecipeAdapterCustomization(
    * Closed additional native declarations captured using the registration's
    * registry view.
    */
-  public record ResourceAdditions(String encoded) {
+  public record ResourceAdditions(String encoded, Map<ResourceLocation, NativeResource> nativeResources) {
     public static final ResourceAdditions NONE = new ResourceAdditions("{}");
 
+    public ResourceAdditions(String encoded) {
+      this(encoded, Map.of());
+    }
+
     public ResourceAdditions {
+      nativeResources = Map.copyOf(nativeResources);
+      if (nativeResources.size() > MAX_REQUIREMENTS) {
+        throw new IllegalArgumentException("Too many adapter native resources");
+      }
       var declaration = resource(
           encoded,
           Set.of(
@@ -167,6 +175,27 @@ public record RecipeAdapterCustomization(
           && (!declaration.get("load_jei").isJsonPrimitive()
               || !declaration.getAsJsonPrimitive("load_jei").isBoolean())) {
         throw new IllegalArgumentException("Adapter visibility requires a boolean");
+      }
+      encoded = declaration.toString();
+      long size = encoded.length();
+      for (var entry : nativeResources.entrySet()) {
+        size += (long) entry.getKey().toString().length() + entry.getValue().encoded().length();
+      }
+      if (size > MAX_RESOURCE_JSON) {
+        throw new IllegalArgumentException("Adapter resource additions are too large");
+      }
+    }
+  }
+
+  public record NativeResource(String encoded, boolean replace) {
+    public NativeResource {
+      Objects.requireNonNull(encoded, "native resource declaration");
+      if (encoded.length() > MAX_RESOURCE_JSON) {
+        throw new IllegalArgumentException("Adapter native resource data is too large");
+      }
+      var declaration = JsonParser.parseString(encoded).getAsJsonObject();
+      if (declaration.size() == 0) {
+        throw new IllegalArgumentException("Adapter native resource declaration cannot be empty");
       }
       encoded = declaration.toString();
     }

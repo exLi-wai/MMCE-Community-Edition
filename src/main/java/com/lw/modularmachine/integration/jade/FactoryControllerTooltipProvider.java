@@ -57,14 +57,6 @@ final class FactoryControllerTooltipProvider implements IBlockComponentProvider,
       data.putString(key + "id", thread.threadId());
       data.putString(key + "state", thread.state().name());
       data.putString(key + "reason", thread.reason().name());
-      data.putInt(key + "parallel", thread.parallelLimit());
-      var upgrade = thread.upgradeSnapshot();
-      data.putInt(key + "speed_num", upgrade.speedNumerator());
-      data.putInt(key + "speed_den", upgrade.speedDenominator());
-      data.putInt(key + "energy_num", upgrade.energyNumerator());
-      data.putInt(key + "energy_den", upgrade.energyDenominator());
-      data.putInt(key + "fluid_num", upgrade.fluidNumerator());
-      data.putInt(key + "fluid_den", upgrade.fluidDenominator());
       factory.run(thread.threadId()).ifPresentOrElse(run -> {
         data.putBoolean(key + "has_run", true);
         data.putString(key + "recipe", run.recipeId().toString());
@@ -100,16 +92,6 @@ final class FactoryControllerTooltipProvider implements IBlockComponentProvider,
               data.getString(key + "id"),
               Component.translatable(
                   "menu.mmcece.factory.thread_state." + data.getString(key + "state").toLowerCase(Locale.ROOT))));
-      tooltip.add(Component.translatable("jade.mmcece.factory.parallel", data.getInt(key + "parallel")));
-      tooltip.add(
-          Component.translatable(
-              "jade.mmcece.factory.upgrades",
-              data.getInt(key + "speed_num"),
-              data.getInt(key + "speed_den"),
-              data.getInt(key + "energy_num"),
-              data.getInt(key + "energy_den"),
-              data.getInt(key + "fluid_num"),
-              data.getInt(key + "fluid_den")));
       String reason = data.getString(key + "reason");
       if (!"NONE".equals(reason)) {
         tooltip.add(

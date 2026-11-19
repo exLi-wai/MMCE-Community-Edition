@@ -53,7 +53,7 @@ public final class RecipeResourceBuilderDeclarations {
     declaration.entrySet().forEach(field -> target.add(field.getKey(), field.getValue().deepCopy()));
   }
 
-  private static <D> JsonObject encode(RecipeResources.Entry<D> entry, HolderLookup.Provider registries) {
+  public static <D> JsonObject encode(RecipeResources.Entry<D> entry, HolderLookup.Provider registries) {
     var type = entry.type();
     capture(type, entry.data());
     var ops = Objects.requireNonNull(registries, "registries").createSerializationContext(JsonOps.INSTANCE);

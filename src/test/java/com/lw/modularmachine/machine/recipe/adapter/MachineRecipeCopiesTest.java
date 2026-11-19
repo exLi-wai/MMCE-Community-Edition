@@ -9,6 +9,7 @@ import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.Optional;
+import net.minecraft.core.RegistryAccess;
 import net.minecraft.resources.ResourceLocation;
 import org.junit.jupiter.api.Test;
 import static org.junit.jupiter.api.Assertions.*;
@@ -99,7 +100,7 @@ class MachineRecipeCopiesTest {
             3,
             false));
     var settings = new RecipeAdapterImport("copy", B, List.of(), true, 30, 5, 7, customization);
-    var copied = MachineRecipeCopies.copy(source, A, settings);
+    var copied = MachineRecipeCopies.copy(source, A, settings, RegistryAccess.EMPTY);
     assertEquals(initial, source);
     assertEquals("test:a", copied.get("machine").getAsString());
     assertEquals(30, copied.get("duration").getAsInt());
@@ -131,7 +132,7 @@ class MachineRecipeCopiesTest {
             2,
             false));
     var settings = new RecipeAdapterImport("copy", B, List.of(), true, 0, 0, 0, customization);
-    var copied = MachineRecipeCopies.copy(source, A, settings);
+    var copied = MachineRecipeCopies.copy(source, A, settings, RegistryAccess.EMPTY);
     assertTrue(copied.getAsJsonArray("inputs").isEmpty());
     assertTrue(copied.getAsJsonArray("outputs").isEmpty());
     assertEquals(
@@ -145,9 +146,9 @@ class MachineRecipeCopiesTest {
   @Test
   void defaultCopyKeepsSourcePriorityAndExplicitZeroCanClearIt() {
     var source = JsonParser.parseString("{\"machine\":\"test:b\",\"duration\":20,\"priority\":9}").getAsJsonObject();
-    var copied = MachineRecipeCopies.copy(source, A, from("copy", B));
+    var copied = MachineRecipeCopies.copy(source, A, from("copy", B), RegistryAccess.EMPTY);
     assertEquals(9, copied.get("priority").getAsInt());
     var explicit = new RecipeAdapterImport("copy", B, List.of(), true, 0, 0, 0, RecipeAdapterCustomization.NONE, true);
-    assertEquals(0, MachineRecipeCopies.copy(source, A, explicit).get("priority").getAsInt());
+    assertEquals(0, MachineRecipeCopies.copy(source, A, explicit, RegistryAccess.EMPTY).get("priority").getAsInt());
   }
 }

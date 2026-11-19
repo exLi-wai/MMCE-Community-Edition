@@ -136,7 +136,7 @@ public final class RecipeAdapterImports {
           throw new IllegalArgumentException(machine.id() + ": Missing machine recipe adapter source " + sourceId);
         }
         var id = context.importedId(sourceId, "");
-        var declaration = MachineRecipeCopies.copy(source.getAsJsonObject(), machine.id(), settings);
+        var declaration = MachineRecipeCopies.copy(source.getAsJsonObject(), machine.id(), settings, registries);
         addGenerated(id, declaration, machine.id());
       }
     }
@@ -156,7 +156,8 @@ public final class RecipeAdapterImports {
       }
       for (var builder : builders) {
         var id = builder.id();
-        var declaration = RecipeAdapterCustomizations.apply(builder.toJson(registries), settings.customization());
+        var declaration = RecipeAdapterCustomizations
+            .apply(builder.toJson(registries), settings.customization(), registries);
         addGenerated(id, declaration, machine.id());
       }
     }

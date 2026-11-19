@@ -37,12 +37,14 @@ final class MachineEmiItemRecipe extends BasicEmiRecipe {
 
   @Override
   public void addWidgets(WidgetHolder widgets) {
-    widgets.addDrawable(
-        0,
-        0,
-        layout.width,
-        layout.height,
-        (graphics, mouseX, mouseY, delta) -> MachineRecipeDisplay.draw(graphics, recipe, layout));
+    widgets.addDrawable(0, 0, layout.width, layout.height, (graphics, mouseX, mouseY, delta) -> {
+      MachineRecipeDisplay.draw(graphics, recipe, layout);
+      for (var part : layout.parts) {
+        if (part.kind() == MachineRecipeLayout.Kind.CHEMICAL) {
+          MachineRecipeDisplay.drawChemical(graphics, recipe, part);
+        }
+      }
+    });
     // Native slots remain last so tooltips never hide the hovered ingredient
     // from EMI's recipe/uses shortcuts on compact layouts.
     widgets.addTooltipText(MachineRecipeDisplay.details(recipe), 0, Math.max(0, layout.height - 9), layout.width, 9);
@@ -62,6 +64,23 @@ final class MachineEmiItemRecipe extends BasicEmiRecipe {
                 fluid.isEmpty() ? List.of() : MachineRecipeDisplay
                     .fluidTooltip(recipe, fluid, part.input(), part.index())));
       } else {
+        if (layout.hasResource(recipe, part)) {
+          widgets.addTooltip(
+              (mouseX, mouseY) -> MachineRecipeDisplay.resourceTooltip(recipe, layout, part).stream()
+                  .map(line -> ClientTooltipComponent.create(line.getVisualOrderText())).toList(),
+              part.x(),
+              part.y(),
+              part.kind().width,
+              part.kind().height);
+        } else if (part.kind() == MachineRecipeLayout.Kind.CHEMICAL
+            && MachineRecipeDisplay.chemical(recipe, part) != null) {
+          widgets.addTooltipText(
+              MachineRecipeDisplay.chemicalTooltip(recipe, part),
+              part.x(),
+              part.y(),
+              part.kind().width,
+              part.kind().height);
+        }
         continue;
       }
       if (!part.input() && !slot.getStack().isEmpty()) {

@@ -18,6 +18,7 @@ import java.util.Set;
 @ApiStatus.Internal
 public final class RecipePlanner {
   private static final int DEFAULT_SEARCH_BUDGET = 65_536;
+  private static final int MAX_SNAPSHOT_INPUT_KEYS = 65_536;
   public static final int MAX_OUTPUT_SLOTS = 8192;
 
   private RecipePlanner() {
@@ -106,8 +107,7 @@ public final class RecipePlanner {
       Objects.requireNonNull(recipes, "recipes");
       this.outputOnly = outputOnly;
       candidates = recipes.entriesFor(snapshot, outputOnly, allowedIds);
-      if (snapshot.outputs().size() > MAX_OUTPUT_SLOTS
-          || snapshot.inputs().size() > CompiledRecipeSet.MAX_TOTAL_REQUIREMENTS) {
+      if (snapshot.outputs().size() > MAX_OUTPUT_SLOTS || snapshot.inputs().size() > MAX_SNAPSHOT_INPUT_KEYS) {
         throw new IllegalArgumentException("Snapshot exceeds planner support limits");
       }
       if (candidates.isEmpty()) {

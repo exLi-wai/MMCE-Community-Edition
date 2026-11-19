@@ -4,6 +4,8 @@ import com.lw.modularmachine.client.preview.ClientMachineCatalog;
 import com.lw.modularmachine.machine.recipe.MachineRecipe;
 import com.lw.modularmachine.client.recipe.MachineRecipeDisplay;
 import com.lw.modularmachine.client.recipe.MachineRecipeLayout;
+import com.lw.modularmachine.integration.mekanism.jei.MekanismRecipeIngredients;
+import com.lw.modularmachine.util.Mods;
 import com.lw.modularmachine.util.minecraft.registry.RegisteredMachineItems;
 import java.util.List;
 import mezz.jei.api.constants.VanillaTypes;
@@ -22,13 +24,12 @@ import net.minecraft.network.chat.Component;
 import net.minecraft.resources.ResourceLocation;
 import net.neoforged.neoforge.fluids.FluidStack;
 
-/** Adapter for MMCE CategoryDynamicRecipe / DynamicRecipeWrapper (GPL-3.0). */
 final class MachineItemRecipeJeiCategory implements IRecipeCategory<MachineRecipeJeiPage> {
   private final ResourceLocation machine;
   private final RecipeType<MachineRecipeJeiPage> type;
   private final MachineRecipeLayout layout;
   private final IIngredientType<FluidStack> fluidType;
-  private final IDrawable icon, cell, shell;
+  private final IDrawable icon, cell, shell, chemicalShell;
 
   @SuppressWarnings("unchecked")
   MachineItemRecipeJeiCategory(IJeiHelpers helpers, ResourceLocation machine, List<MachineRecipe> recipes) {
@@ -44,6 +45,7 @@ final class MachineItemRecipeJeiCategory implements IRecipeCategory<MachineRecip
         .createDrawableIngredient(VanillaTypes.ITEM_STACK, registeredController);
     cell = gui.createDrawable(MachineRecipeDisplay.TEXTURE, 54, 0, 18, 18);
     shell = gui.createDrawable(MachineRecipeDisplay.TEXTURE, 0, 0, 18, 18);
+    chemicalShell = gui.createDrawable(MachineRecipeDisplay.TEXTURE, 0, 18, 18, 18);
   }
 
   @Override
@@ -71,7 +73,18 @@ final class MachineItemRecipeJeiCategory implements IRecipeCategory<MachineRecip
   public void setRecipe(IRecipeLayoutBuilder builder, MachineRecipeJeiPage page, IFocusGroup focuses) {
     var recipe = page.recipes().getFirst().value();
     for (var part : layout.parts) {
-      if (part.kind() == MachineRecipeLayout.Kind.ENERGY) {
+      if (part.kind() == MachineRecipeLayout.Kind.CHEMICAL && Mods.MEKANISM.isLoaded()) {
+        var slot = part.input() ? builder.addInputSlot() : builder.addOutputSlot();
+        slot.setPosition(part.x() + 1, part.y() + 1).setBackground(cell, -1, -1).setOverlay(chemicalShell, -1, -1)
+            .setHoverPadding(1, 1, 1, 1);
+        var row = MachineRecipeDisplay.chemical(recipe, part);
+        if (row != null) {
+          MekanismRecipeIngredients.addChemical(slot, row);
+          slot.addRichTooltipCallback(
+              (view, tooltip) -> tooltip.addAll(MachineRecipeDisplay.chemicalTooltip(recipe, part)));
+        }
+      }
+      if (part.kind() != MachineRecipeLayout.Kind.ITEM && part.kind() != MachineRecipeLayout.Kind.FLUID) {
         continue;
       }
       var slot = part.input() ? builder.addInputSlot() : builder.addOutputSlot();
@@ -103,7 +116,15 @@ final class MachineItemRecipeJeiCategory implements IRecipeCategory<MachineRecip
 
   @Override
   public void draw(MachineRecipeJeiPage page, IRecipeSlotsView slots, GuiGraphics graphics, double mouseX, double mouseY) {
-    MachineRecipeDisplay.draw(graphics, page.recipes().getFirst().value(), layout);
+    var recipe = page.recipes().getFirst().value();
+    MachineRecipeDisplay.draw(graphics, recipe, layout);
+    if (!Mods.MEKANISM.isLoaded()) {
+      for (var part : layout.parts) {
+        if (part.kind() == MachineRecipeLayout.Kind.CHEMICAL) {
+          MachineRecipeDisplay.drawChemical(graphics, recipe, part);
+        }
+      }
+    }
   }
   @Override
   public void createRecipeExtras(IRecipeExtrasBuilder extras, MachineRecipeJeiPage page, IFocusGroup focuses) {
@@ -112,6 +133,17 @@ final class MachineItemRecipeJeiCategory implements IRecipeCategory<MachineRecip
         .setTooltip(MachineRecipeDisplay.details(recipe));
     extras.addTooltipArea(layout.arrowX, layout.arrowY, 22, 15)
         .setTooltip(List.of(MachineRecipeDisplay.duration(recipe)));
+    for (var part : layout.parts) {
+      if (layout.hasResource(recipe, part)) {
+        extras.addTooltipArea(part.x(), part.y(), part.kind().width, part.kind().height)
+            .setTooltip(tooltip -> tooltip.addAll(MachineRecipeDisplay.resourceTooltip(recipe, layout, part)));
+      } else if (part.kind() == MachineRecipeLayout.Kind.CHEMICAL
+          && !Mods.MEKANISM.isLoaded()
+          && MachineRecipeDisplay.chemical(recipe, part) != null) {
+        extras.addTooltipArea(part.x(), part.y(), part.kind().width, part.kind().height)
+            .setTooltip(MachineRecipeDisplay.chemicalTooltip(recipe, part));
+      }
+    }
   }
 
   @Override

@@ -18,6 +18,7 @@ import com.lw.modularmachine.api.recipe.TriggeredResourceData;
 import com.lw.modularmachine.api.smart.SmartNumberRequirement;
 import com.lw.modularmachine.machine.recipe.ItemStackSnapshots;
 import com.lw.modularmachine.machine.recipe.ResourceSelector;
+import com.lw.modularmachine.machine.recipe.adapter.RecipeAdapterNativeResources;
 import com.mojang.serialization.JsonOps;
 import java.math.BigDecimal;
 import java.util.ArrayList;
@@ -47,7 +48,7 @@ import org.jetbrains.annotations.ApiStatus;
  * closing.
  */
 @ApiStatus.Internal
-public final class KubeJSRecipeAdapterBuilder {
+public final class KubeJSRecipeAdapterBuilder extends KubeJSResourceRecipeBuilder<KubeJSRecipeAdapterBuilder> {
   private enum LastRequirement {
     NONE,
     ITEM_INPUT,
@@ -298,11 +299,29 @@ public final class KubeJSRecipeAdapterBuilder {
     this.id = id;
   }
 
-  private void requireMutable() {
+  @Override
+  void requireMutable() {
     owner.requireOpen();
     if (built || capturedTriggers != null) {
       throw owner.reject("Recipe adapter builder has already been finalized");
     }
+  }
+
+  @Override
+  HolderLookup.Provider resourceRegistries() {
+    return registries();
+  }
+
+  @Override
+  void requireResourceOverride(ResourceLocation id) {
+    RecipeAdapterNativeResources.requireCustomizable(id);
+  }
+
+  @Override
+  KubeJSRecipeAdapterBuilder clearLastResourceRow() {
+    last = LastRequirement.NONE;
+    lastChemicals = null;
+    return this;
   }
 
   public KubeJSRecipeAdapterBuilder addFuelItemInput(Number requiredTotalBurnTime) {
@@ -1500,7 +1519,7 @@ public final class KubeJSRecipeAdapterBuilder {
           chemicalPerTickOutputs,
           fluidPerTickInputs,
           fluidPerTickOutputs,
-          new RecipeAdapterCustomization.ResourceAdditions(resourceAdditions().toString()));
+          new RecipeAdapterCustomization.ResourceAdditions(resourceAdditions().toString(), captureAdapterResources()));
       owner.register(
           machine,
           new RecipeAdapterImport(

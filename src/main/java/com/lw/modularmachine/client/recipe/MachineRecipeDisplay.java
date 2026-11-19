@@ -1,7 +1,6 @@
 package com.lw.modularmachine.client.recipe;
 
 import com.lw.modularmachine.machine.recipe.MachineRecipe;
-import com.lw.modularmachine.machine.recipe.resource.RecipeResourceDefinitions;
 import com.lw.modularmachine.api.recipe.ChemicalRequirement;
 import com.lw.modularmachine.api.recipe.IngredientArrayData;
 import com.lw.modularmachine.api.component.ChemicalStackData;
@@ -18,6 +17,7 @@ import net.minecraft.client.gui.screens.Screen;
 import net.minecraft.client.resources.language.I18n;
 import net.minecraft.network.chat.Component;
 import net.minecraft.resources.ResourceLocation;
+import net.minecraft.world.inventory.InventoryMenu;
 import net.minecraft.world.item.ItemStack;
 import net.neoforged.neoforge.fluids.FluidStack;
 import com.lw.modularmachine.api.recipe.RecipeModifier;
@@ -45,6 +45,11 @@ public final class MachineRecipeDisplay {
         graphics.blit(TEXTURE, part.x(), part.y(), 36, 0, 18, 54, 256, 256);
         if (recipe.energyPerTick() > 0) {
           graphics.blit(TEXTURE, part.x(), part.y(), 18, 0, 18, 54, 256, 256);
+        }
+      } else {
+        var resource = layout.resource(recipe, part);
+        if (resource != null) {
+          resource.artwork().draw(graphics, part.x(), part.y(), tick);
         }
       }
     }
@@ -100,91 +105,51 @@ public final class MachineRecipeDisplay {
                 requirement.maximum()));
       }
     }
-    int conditions = recipe.resourceData().get(RecipeResourceDefinitions.ENVIRONMENT).requirements().size();
-    if (conditions > 0) {
-      result.add(Component.translatable("jei.mmcece.machine_item.environment_required", conditions));
-    }
-    long laser = recipe.resourceData().get(RecipeResourceDefinitions.LASER).input();
-    if (laser > 0) {
-      result.add(
-          Component
-              .translatable("jei.mmcece.machine_item.laser_input", NumberFormat.getIntegerInstance().format(laser)));
-    }
-
-    var ember = recipe.resourceData().get(RecipeResourceDefinitions.EMBER);
-    if (ember.micros() > 0) {
-      var format = NumberFormat.getNumberInstance();
-      format.setMaximumFractionDigits(6);
-      result.add(Component.translatable("jei.mmcece.machine_item.ember_input", format.format(ember.amount())));
-    }
-    var mana = recipe.resourceData().get(RecipeResourceDefinitions.MANA);
-    appendAmount(result, "mana_input", mana.input());
-    appendAmount(result, "mana_output", mana.output());
-    appendAmount(result, "aura_input", recipe.resourceData().get(RecipeResourceDefinitions.AURA).input());
-    appendWorldPool(result, "aura_world", recipe.resourceData().get(RecipeResourceDefinitions.AURA_WORLD));
-    appendWorldPool(result, "will", recipe.resourceData().get(RecipeResourceDefinitions.WILL));
-    appendWorldPool(result, "vis", recipe.resourceData().get(RecipeResourceDefinitions.VIS));
-    appendWorldPool(result, "flux", recipe.resourceData().get(RecipeResourceDefinitions.FLUX));
-    var lifeEssence = recipe.resourceData().get(RecipeResourceDefinitions.LIFE_ESSENCE);
-    appendAmount(result, "life_essence_input", lifeEssence.input());
-    appendAmount(result, "life_essence_output", lifeEssence.output());
-    recipe.resourceData().get(RecipeResourceDefinitions.METEOR).output().ifPresent(
-        launch -> result
-            .add(Component.translatable("jei.mmcece.machine_item.meteor_output", launch.catalyst(), launch.count())));
-    appendKeyed(result, "essentia", recipe.resourceData().get(RecipeResourceDefinitions.ESSENTIA), 1);
-    appendKeyed(result, "starlight", recipe.resourceData().get(RecipeResourceDefinitions.STARLIGHT), 1_000);
-    recipe.resourceData().get(RecipeResourceDefinitions.CONSTELLATION).active()
-        .forEach(key -> result.add(Component.translatable("jei.mmcece.machine_item.constellation", key)));
-    var heat = recipe.resourceData().get(RecipeResourceDefinitions.HEAT);
-    appendAmount(result, "heat_input", heat.input());
-    appendAmount(result, "heat_output", heat.output());
-    var air = recipe.resourceData().get(RecipeResourceDefinitions.COMPRESSED_AIR);
-    air.input().ifPresent(
-        amount -> result.add(
-            Component.translatable(
-                "jei.mmcece.machine_item.compressed_air_input",
-                NumberFormat.getIntegerInstance().format(amount.air()),
-                amount.pressure())));
-    air.output().ifPresent(amount -> appendAmount(result, "compressed_air_output", amount.air()));
     return List.copyOf(result);
   }
 
-  private static void appendAmount(List<Component> lines, String key, long count) {
-    if (count > 0) {
-      lines.add(
-          Component.translatable("jei.mmcece.machine_item." + key, NumberFormat.getIntegerInstance().format(count)));
+  public static List<Component> resourceTooltip(MachineRecipe recipe, MachineRecipeLayout layout, MachineRecipeLayout.Part part) {
+    var resource = layout.resource(recipe, part);
+    return resource == null ? List.of() : resource.tooltip().get();
+  }
+
+  static int chemicalCount(MachineRecipe recipe, boolean input) {
+    var chemicals = recipe.chemicals();
+    return input ? chemicals.inputs().size() + chemicals.perTick().size() : chemicals.outputs().size() + chemicals
+        .perTickOutputs().size();
+  }
+
+  public static ChemicalRequirement chemical(MachineRecipe recipe, MachineRecipeLayout.Part part) {
+    var chemicals = recipe.chemicals();
+    var batch = part.input() ? chemicals.inputs() : chemicals.outputs();
+    if (part.index() < batch.size()) {
+      return batch.get(part.index());
     }
+    int index = part.index() - batch.size();
+    var tick = part.input() ? chemicals.perTick() : chemicals.perTickOutputs();
+    return index < tick.size() ? tick.get(index) : null;
   }
 
-  private static void appendKeyed(List<Component> lines, String key, com.lw.modularmachine.api.recipe.KeyedAmountRecipeData data, int unit) {
-    var format = NumberFormat.getNumberInstance();
-    data.input().entrySet().stream().sorted(java.util.Map.Entry.comparingByKey()).forEach(
-        entry -> lines.add(
-            Component.translatable(
-                "jei.mmcece.machine_item." + key + "_input",
-                entry.getKey(),
-                format.format(java.math.BigDecimal.valueOf(entry.getValue(), unit == 1 ? 0 : 3)))));
-    data.output().entrySet().stream().sorted(java.util.Map.Entry.comparingByKey()).forEach(
-        entry -> lines.add(
-            Component.translatable(
-                "jei.mmcece.machine_item." + key + "_output",
-                entry.getKey(),
-                format.format(java.math.BigDecimal.valueOf(entry.getValue(), unit == 1 ? 0 : 3)))));
+  public static List<Component> chemicalTooltip(MachineRecipe recipe, MachineRecipeLayout.Part part) {
+    var row = chemical(recipe, part);
+    boolean perTick = part
+        .index() >= (part.input() ? recipe.chemicals().inputs().size() : recipe.chemicals().outputs().size());
+    return row == null ? List.of() : chemicalTooltip(row, part.input(), perTick);
   }
 
-  private static void appendWorldPool(List<Component> lines, String key, com.lw.modularmachine.api.recipe.WorldPoolRecipeData data) {
-    data.input().ifPresent(claim -> appendPoolClaim(lines, key + "_input", claim));
-    data.output().ifPresent(claim -> appendPoolClaim(lines, key + "_output", claim));
-  }
-
-  private static void appendPoolClaim(List<Component> lines, String key, com.lw.modularmachine.api.recipe.WorldPoolRecipeData.Claim claim) {
-    lines.add(
-        Component.translatable(
-            "jei.mmcece.machine_item." + key,
-            claim.amount(),
-            claim.kind(),
-            claim.radius(),
-            claim.limit()));
+  public static void drawChemical(GuiGraphics graphics, MachineRecipe recipe, MachineRecipeLayout.Part part) {
+    int x = part.x();
+    int y = part.y();
+    graphics.blit(TEXTURE, x, y, 54, 0, 18, 18, 256, 256);
+    var row = chemical(recipe, part);
+    if (row != null) {
+      var appearance = ChemicalDisplay.describe(new ChemicalStackData(row.chemical(), row.amount()));
+      var sprite = Minecraft.getInstance().getTextureAtlas(InventoryMenu.BLOCK_ATLAS).apply(appearance.texture());
+      LegacyRecipeResources.tint(graphics, appearance.tint());
+      graphics.blit(x, y, 0, 18, 18, sprite);
+      graphics.setColor(1, 1, 1, 1);
+    }
+    graphics.blit(TEXTURE, x, y, 0, 18, 18, 18, 256, 256);
   }
 
   public static List<Component> itemTooltip(MachineRecipe.ItemAmount amount, boolean input) {
@@ -296,14 +261,6 @@ public final class MachineRecipeDisplay {
       }
       result.add(selector(row.selector()));
     }
-    for (boolean input : new boolean[]{true, false}) {
-      for (boolean tick : new boolean[]{false, true}) {
-        var chemicals = tick ? input ? recipe.chemicals().perTick() : recipe.chemicals()
-            .perTickOutputs() : input ? recipe.chemicals().inputs() : recipe.chemicals().outputs();
-        chemicals.forEach(row -> result.addAll(chemicalTooltip(row, input, tick)));
-      }
-    }
-
     return List.copyOf(result);
   }
 

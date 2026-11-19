@@ -15,6 +15,7 @@ import java.util.List;
 import java.util.ArrayList;
 import java.util.LinkedHashMap;
 import java.util.Optional;
+import net.minecraft.core.HolderLookup;
 import org.jetbrains.annotations.ApiStatus;
 import net.minecraft.resources.ResourceLocation;
 
@@ -27,7 +28,7 @@ final class RecipeAdapterCustomizations {
   private RecipeAdapterCustomizations() {
   }
 
-  static JsonObject apply(JsonObject original, RecipeAdapterCustomization customization) {
+  static JsonObject apply(JsonObject original, RecipeAdapterCustomization customization, HolderLookup.Provider registries) {
     if (customization.equals(RecipeAdapterCustomization.NONE)) {
       return original;
     }
@@ -142,6 +143,7 @@ final class RecipeAdapterCustomizations {
     customization.maxThreads().ifPresent(value -> result.addProperty("max_threads", value));
     addScriptOptions(result, customization, originalOutputRows);
     resolveItemOnlySource(result);
+    RecipeAdapterNativeResources.apply(result, customization.resourceAdditions().nativeResources(), registries);
 
     return result;
   }
