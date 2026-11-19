@@ -31,6 +31,7 @@ import net.minecraft.world.inventory.InventoryMenu;
 import net.minecraft.world.item.ItemStack;
 import net.minecraft.world.item.Items;
 import org.jetbrains.annotations.Nullable;
+import java.awt.Color;
 
 final class LegacyRecipeResources {
   private static final String KEY = "jei.mmcece.machine_item.";
@@ -283,7 +284,7 @@ final class LegacyRecipeResources {
     return (graphics, x, y, tick) -> {
       graphics.blit(MANA, x, y, 0, 0, 5, 63, 256, 256);
       graphics.blit(MANA, x + 1, y + 1, 5, 0, 3, 61, 256, 256);
-      int color = java.awt.Color.HSBtoRGB(.55F, (float) Math.min(1, Math.sin(tick / 4) * .5 + 1), 1);
+      int color = Color.HSBtoRGB(.55F, (float) Math.min(1, Math.sin(tick / 4) * .5 + 1), 1);
       tint(graphics, color);
       graphics.blit(MANA, x + 1, y + 1 + empty, 5, empty, 3, fill, 256, 256);
       graphics.setColor(1, 1, 1, 1);

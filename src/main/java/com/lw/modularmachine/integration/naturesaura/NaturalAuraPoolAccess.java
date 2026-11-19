@@ -11,6 +11,7 @@ import net.minecraft.server.level.ServerLevel;
 import net.minecraft.world.level.ChunkPos;
 import net.minecraft.world.level.chunk.LevelChunk;
 import org.jetbrains.annotations.ApiStatus;
+import net.minecraft.nbt.CompoundTag;
 
 @ApiStatus.Internal
 public final class NaturalAuraPoolAccess implements WorldPoolExecution.Access {
@@ -85,9 +86,9 @@ public final class NaturalAuraPoolAccess implements WorldPoolExecution.Access {
         };
       }
 
-      private void restore(IAuraChunk aura, net.minecraft.nbt.CompoundTag saved) {
+      private void restore(IAuraChunk aura, CompoundTag saved) {
         if (saved == null) {
-          aura.deserializeNBT(level.registryAccess(), new net.minecraft.nbt.CompoundTag());
+          aura.deserializeNBT(level.registryAccess(), new CompoundTag());
           chunk.removeData(attachment);
         } else {
           aura.deserializeNBT(level.registryAccess(), saved);

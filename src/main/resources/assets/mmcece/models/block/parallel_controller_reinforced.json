@@ -1,7 +1,7 @@
 {
-  "parent": "mmcece:block/ported_shell",
+  "parent": "mmcece:block/framed_ported_shell",
   "textures": {
-    "overlay": "mmcece:block/overlay/controllers/overlay_parallel_controller_reinforced",
-    "casing": "mmcece:block/blockcasing_plain"
+    "casing": "mmcece:block/blockcasing_plain",
+    "icon": "mmcece:block/overlay/port_icons/controllers/overlay_parallel_controller_reinforced"
   }
 }

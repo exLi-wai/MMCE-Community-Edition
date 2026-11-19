@@ -33,6 +33,10 @@ import net.minecraft.server.level.ServerLevel;
 import net.minecraft.world.level.block.state.BlockState;
 import net.neoforged.neoforge.registries.DeferredHolder;
 import org.jetbrains.annotations.ApiStatus;
+import com.lw.modularmachine.menu.LegacyHatchMenu;
+import java.util.List;
+import java.util.Map;
+import net.minecraft.world.entity.player.Player;
 
 @ApiStatus.Internal
 public abstract class StarlightHatch<N extends TransmissionNode> extends TileEntityNetwork<N, TileEntityNetwork.Data> implements MachineColorable, TickingRecipeHatchBlock.ServerTicking, KeyedResourcePort {
@@ -60,11 +64,10 @@ public abstract class StarlightHatch<N extends TransmissionNode> extends TileEnt
         .is(MachineRegistries.STARLIGHT_INPUT_TRAIT.get()) ? StarlightInputTier.TRAIT : StarlightInputTier.BASIC;
   }
 
-  void openMenu(net.minecraft.world.entity.player.Player player) {
-    com.lw.modularmachine.menu.LegacyHatchMenu
-        .open(player, com.lw.modularmachine.menu.LegacyHatchMenu.Kind.STARLIGHT, this, index -> {
-          throw new IndexOutOfBoundsException(index);
-        }, this::storedStarlight, () -> capacity, () -> (int) stock.amount(SKY), () -> (int) stock.amount(UNATTUNED));
+  void openMenu(Player player) {
+    LegacyHatchMenu.open(player, LegacyHatchMenu.Kind.STARLIGHT, this, index -> {
+      throw new IndexOutOfBoundsException(index);
+    }, this::storedStarlight, () -> capacity, () -> (int) stock.amount(SKY), () -> (int) stock.amount(UNATTUNED));
   }
 
   @Override
@@ -143,8 +146,8 @@ public abstract class StarlightHatch<N extends TransmissionNode> extends TileEnt
   }
 
   @Override
-  public final java.util.List<ResourceLocation> inputKeys(ResourceLocation requested) {
-    return KeyedAmountRecipeData.ANY_STARLIGHT.equals(requested) ? stock.keys() : java.util.List.of(requested);
+  public final List<ResourceLocation> inputKeys(ResourceLocation requested) {
+    return KeyedAmountRecipeData.ANY_STARLIGHT.equals(requested) ? stock.keys() : List.of(requested);
   }
 
   @Override
@@ -262,7 +265,7 @@ public abstract class StarlightHatch<N extends TransmissionNode> extends TileEnt
 
   private static final class InitialData extends Data {
     private InitialData() {
-      super(0L, false, java.util.Map.of(), true);
+      super(0L, false, Map.of(), true);
     }
   }
 

@@ -5,6 +5,7 @@ import com.lw.modularmachine.client.controller.ControllerClientPublisher;
 import com.lw.modularmachine.client.controller.ControllerGeoRenderer;
 import com.lw.modularmachine.client.preview.CachedPreviewRenderer;
 import com.lw.modularmachine.client.preview.WorldProjection;
+import com.lw.modularmachine.integration.athena.AthenaConnectedTextures;
 import com.lw.modularmachine.util.Mods;
 import net.minecraft.server.packs.resources.ResourceManagerReloadListener;
 import net.neoforged.fml.event.lifecycle.FMLClientSetupEvent;
@@ -42,6 +43,9 @@ public final class ClientRenderRegistration {
   }
 
   public static void wrapComponentModels(ModelEvent.ModifyBakingResult event) {
+    if (Mods.ATHENA.isLoaded()) {
+      AthenaConnectedTextures.wrapModels(event);
+    }
     MachineVisibilityClient.wrapModels(event);
   }
 

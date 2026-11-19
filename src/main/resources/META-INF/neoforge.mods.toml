@@ -59,6 +59,13 @@ Retain Its Original Flavor MMCE
 
 # Optional integrations remain available through compileOnly + localRuntime in Gradle.
 [[dependencies.${mod_id}]]
+    modId="athena"
+    type="optional"
+    versionRange="[4.0.6,5)"
+    ordering="AFTER"
+    side="CLIENT"
+
+[[dependencies.${mod_id}]]
     modId="appmek"
     type="optional"
     versionRange="[1.6.3,2)"

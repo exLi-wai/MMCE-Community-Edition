@@ -86,6 +86,7 @@ import net.minecraft.world.level.block.state.BlockState;
 import org.jetbrains.annotations.ApiStatus;
 import com.lw.modularmachine.machine.factory.FactoryThreadPreset;
 import com.lw.modularmachine.machine.recipe.RecipeTickPreparation;
+import java.util.HashSet;
 
 public final class FactoryControllerBlockEntity extends BlockEntity implements MenuProvider, UpgradeBusOwner, ControllerScriptStateOwner, ControllerCommandSubject {
   private static final int FACTORY_SCHEMA = 7;
@@ -619,7 +620,7 @@ public final class FactoryControllerBlockEntity extends BlockEntity implements M
   private boolean threadStartAllowed(String threadId) {
     var definition = StructureService.definition(machineId);
     var preset = definition == null ? FactoryThreadPreset.defaults() : definition.factoryPreset();
-    var occupied = new java.util.HashSet<>(runState.startingThreads());
+    var occupied = new HashSet<>(runState.startingThreads());
     for (var entry : runState.view().entrySet()) {
       if (!entry.getValue().runs().isEmpty()) {
         occupied.add(entry.getKey());

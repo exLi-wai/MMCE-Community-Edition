@@ -15,6 +15,7 @@ public enum Mods {
   ASTRAL_SORCERY("astralsorcery"),
   PNEUMATIC_CRAFT("pneumaticcraft"),
   GTM("gtceu"),
+  ATHENA("athena"),
   GECKOLIB("geckolib"),
   JEC("jecharacters");
 

@@ -20,7 +20,6 @@ import java.util.function.Predicate;
 import net.minecraft.client.Minecraft;
 import net.minecraft.client.renderer.GameRenderer;
 import net.minecraft.core.BlockPos;
-import net.minecraft.core.Direction;
 import net.minecraft.core.SectionPos;
 import net.minecraft.world.inventory.InventoryMenu;
 import net.minecraft.world.level.block.state.BlockState;
@@ -37,7 +36,6 @@ import org.joml.Vector3f;
  */
 @ApiStatus.Internal
 public final class SectionMeshCache implements AutoCloseable {
-  private static final Direction[] FACES = Direction.values();
   private static final long GPU_BYTES = 96L << 20;
   private static final int UPLOAD_BYTES = 2 << 20;
   private static final int IN_FLIGHT_BUILDS = 4;
@@ -122,22 +120,28 @@ public final class SectionMeshCache implements AutoCloseable {
       }
     }
     if (step != previousStep) {
-      // Only changed alternatives and their immediate neighbors affect geometry.
+      // Connected faces also depend on the diagonal neighbor across a section edge.
       for (var entry : scene.animated()) {
         if (Math.floorMod(previousStep, entry.states().size()) == Math.floorMod(step, entry.states().size())) {
           continue;
         }
-        invalidateAt(entry.position());
-        for (var face : FACES) {
-          invalidateAt(entry.position().relative(face));
-        }
+        invalidateNeighbors(entry.position());
       }
     }
   }
 
-  private void invalidateAt(BlockPos position) {
-    for (var section : scene.atSection(SectionPos.asLong(position))) {
-      invalidate(section);
+  private void invalidateNeighbors(BlockPos position) {
+    int maxX = SectionPos.blockToSectionCoord(position.getX() + 1);
+    int maxY = SectionPos.blockToSectionCoord(position.getY() + 1);
+    int maxZ = SectionPos.blockToSectionCoord(position.getZ() + 1);
+    for (int x = SectionPos.blockToSectionCoord(position.getX() - 1); x <= maxX; x++) {
+      for (int y = SectionPos.blockToSectionCoord(position.getY() - 1); y <= maxY; y++) {
+        for (int z = SectionPos.blockToSectionCoord(position.getZ() - 1); z <= maxZ; z++) {
+          for (var section : scene.atSection(SectionPos.asLong(x, y, z))) {
+            invalidate(section);
+          }
+        }
+      }
     }
   }
   private static boolean intersects(PreviewRenderScene.Section section, int layer) {

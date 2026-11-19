@@ -20,6 +20,7 @@ import net.minecraft.server.level.ServerLevel;
 import net.minecraft.world.item.ItemStack;
 import net.minecraft.world.level.block.state.BlockState;
 import org.jetbrains.annotations.ApiStatus;
+import net.minecraft.world.level.levelgen.Heightmap;
 
 @ApiStatus.Internal
 public final class MeteorHatchBlockEntity extends MachineCasingBlockEntity implements TickingRecipeHatchBlock.ServerTicking, MeteorPort {
@@ -129,8 +130,7 @@ public final class MeteorHatchBlockEntity extends MachineCasingBlockEntity imple
       return null;
     }
     var target = origin;
-    var top = server
-        .getHeight(net.minecraft.world.level.levelgen.Heightmap.Types.WORLD_SURFACE, origin.getX(), origin.getZ());
+    var top = server.getHeight(Heightmap.Types.WORLD_SURFACE, origin.getX(), origin.getZ());
     for (int height = origin.getY() + 1; height < top; height++) {
       var position = origin.atY(height);
       if (!server.getBlockState(position).isAir()) {

@@ -22,6 +22,7 @@ import net.minecraft.core.HolderLookup;
 import net.minecraft.resources.ResourceLocation;
 import net.minecraft.world.item.ItemStack;
 import net.neoforged.neoforge.fluids.FluidStack;
+import java.util.Optional;
 
 /** Builds a validated machine-recipe data-pack resource. */
 public final class MachineRecipeBuilder {
@@ -264,7 +265,7 @@ public final class MachineRecipeBuilder {
   public MachineRecipeBuilder auraOutput(WorldPoolRecipeData.Claim output) {
     return setResource(
         RecipeResourceDefinitions.AURA_WORLD,
-        new WorldPoolRecipeData(java.util.Optional.empty(), java.util.Optional.of(output)));
+        new WorldPoolRecipeData(Optional.empty(), Optional.of(output)));
   }
 
   public MachineRecipeBuilder will(WorldPoolRecipeData declaration) {
@@ -290,7 +291,7 @@ public final class MachineRecipeBuilder {
   public MachineRecipeBuilder meteorOutput(ResourceLocation catalyst, int count) {
     return setResource(
         RecipeResourceDefinitions.METEOR,
-        new MeteorRecipeData(java.util.Optional.of(new MeteorRecipeData.Launch(catalyst, count))));
+        new MeteorRecipeData(Optional.of(new MeteorRecipeData.Launch(catalyst, count))));
   }
 
   public MachineRecipeBuilder essentia(KeyedAmountRecipeData declaration) {

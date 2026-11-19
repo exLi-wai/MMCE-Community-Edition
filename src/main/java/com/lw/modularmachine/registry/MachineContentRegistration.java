@@ -51,6 +51,7 @@ import static com.lw.modularmachine.registry.MachineRegistries.PARALLEL_CONTROLL
 import static com.lw.modularmachine.registry.MachineRegistries.PORTS;
 import static com.lw.modularmachine.registry.MachineRegistries.SMART_INTERFACE;
 import static com.lw.modularmachine.registry.MachineRegistries.UPGRADE_BUSES;
+import java.util.function.Supplier;
 
 /**
  * Ordered block/item variants; called from the identity table after its base
@@ -94,7 +95,7 @@ final class MachineContentRegistration {
     return properties().strength(3F, 10F);
   }
 
-  static DeferredBlock<TickingRecipeHatchBlock> registerTickingHatch(String id, java.util.function.Supplier<TickingRecipeHatchBlock> block) {
+  static DeferredBlock<TickingRecipeHatchBlock> registerTickingHatch(String id, Supplier<TickingRecipeHatchBlock> block) {
     var hatch = BLOCKS.register(id, block);
     MachineRegistries.TICKING_RECIPE_HATCHES.put(id, hatch);
     ITEMS.registerSimpleBlockItem(hatch);

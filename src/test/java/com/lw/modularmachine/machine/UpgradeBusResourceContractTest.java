@@ -29,16 +29,19 @@ class UpgradeBusResourceContractTest {
           "mmcece:block/upgrade_bus_" + tier,
           resource("/assets/mmcece/models/item/" + block + ".json").get("parent").getAsString());
       var model = resource("/assets/mmcece/models/block/" + block + ".json");
-      assertEquals("mmcece:block/ported_shell", model.get("parent").getAsString());
+      boolean normal = tier.equals("normal");
       assertEquals(
-          "mmcece:block/overlay/upgrades/overlay_upgrade_bus_" + tier,
-          model.getAsJsonObject("textures").get("overlay").getAsString());
-      try (var overlay = Objects.requireNonNull(
-          getClass().getResourceAsStream(
-              "/assets/mmcece/textures/block/overlay/upgrades/overlay_upgrade_bus_" + tier + ".png"))) {
-        BufferedImage image = ImageIO.read(overlay);
-        assertEquals(32, image.getWidth());
-        assertEquals(32, image.getHeight());
+          normal ? "mmcece:block/ported_shell" : "mmcece:block/framed_ported_shell",
+          model.get("parent").getAsString());
+      var textures = model.getAsJsonObject("textures");
+      assertEquals("mmcece:block/blockcasing_plain", textures.get("casing").getAsString());
+      String texture = "mmcece:block/overlay/" + (normal ? "" : "port_icons/") + "upgrades/overlay_upgrade_bus_" + tier;
+      assertEquals(texture, textures.get(normal ? "overlay" : "icon").getAsString());
+      BufferedImage image = texture(texture);
+      assertEquals(32, image.getWidth());
+      assertEquals(32, image.getHeight());
+      if (!normal) {
+        assertStaticOverlayMatchesOriginal(tier, image);
       }
       assertEquals(
           "mmcece:" + block,
@@ -82,6 +85,39 @@ class UpgradeBusResourceContractTest {
         assertTrue(!colors.contains(0xFFFF00FF), "Scrollbar contains missing-texture magenta");
       }
       assertTrue(differentStates, "Enabled and disabled thumbs must be distinct");
+    }
+  }
+
+  private void assertStaticOverlayMatchesOriginal(String tier, BufferedImage icon) throws Exception {
+    var parent = resource("/assets/mmcece/models/block/framed_ported_shell.json");
+    String frameTexture = parent.getAsJsonObject("textures").get("frame").getAsString();
+    assertEquals("mmcece:block/overlay/casings/overlay_reinforced", frameTexture);
+    BufferedImage frame = texture(frameTexture);
+    assertEquals(16, frame.getWidth());
+    assertEquals(16, frame.getHeight());
+    BufferedImage original = texture("mmcece:block/overlay/upgrades/overlay_upgrade_bus_" + tier);
+    assertEquals(icon.getWidth(), original.getWidth());
+    assertEquals(icon.getHeight(), original.getHeight());
+    for (int y = 0; y < icon.getHeight(); y++) {
+      for (int x = 0; x < icon.getWidth(); x++) {
+        int framePixel = frame.getRGB(x / 2, y / 2);
+        int iconPixel = icon.getRGB(x, y);
+        if ((framePixel >>> 24) != 0) {
+          assertEquals(255, framePixel >>> 24);
+          assertEquals(0, iconPixel >>> 24, "Icon must not redraw the shared frame: " + tier);
+        }
+        assertEquals(
+            original.getRGB(x, y),
+            (framePixel >>> 24) == 0 ? iconPixel : framePixel,
+            "Static overlay changed for " + tier + " at " + x + "," + y);
+      }
+    }
+  }
+
+  private BufferedImage texture(String location) throws Exception {
+    String path = "/assets/mmcece/textures/" + location.substring("mmcece:".length()) + ".png";
+    try (var input = Objects.requireNonNull(getClass().getResourceAsStream(path), path)) {
+      return Objects.requireNonNull(ImageIO.read(input), path);
     }
   }
 

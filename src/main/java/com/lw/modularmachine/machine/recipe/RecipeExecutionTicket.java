@@ -209,7 +209,7 @@ public final class RecipeExecutionTicket {
     return componentPositions(Set.of(block));
   }
 
-  public java.util.Iterator<BlockPos> componentPositionCandidates(Block block) {
+  public Iterator<BlockPos> componentPositionCandidates(Block block) {
     requireServerThread();
     var pattern = proof.registration.pattern;
     return pattern.componentIndices(Set.of(block)).stream().map(pattern::position).iterator();

@@ -24,6 +24,7 @@ import net.minecraft.resources.ResourceLocation;
 import net.minecraft.server.level.ServerLevel;
 import net.minecraft.world.level.block.state.BlockState;
 import org.jetbrains.annotations.ApiStatus;
+import java.util.List;
 
 @ApiStatus.Internal
 public final class MeEssentiaHatch extends EssentiaHatch implements IInWorldGridNodeHost, IActionHost {
@@ -265,7 +266,7 @@ public final class MeEssentiaHatch extends EssentiaHatch implements IInWorldGrid
     }
   }
 
-  private ResourceLocation nextOutputKey(java.util.List<ResourceLocation> keys) {
+  private ResourceLocation nextOutputKey(List<ResourceLocation> keys) {
     return keys.isEmpty() ? null : keys.get(Math.floorMod(outputCursor++, keys.size()));
   }
 

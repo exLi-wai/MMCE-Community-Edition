@@ -23,6 +23,12 @@ import net.minecraft.world.level.block.Block;
 import net.minecraft.world.level.block.entity.BlockEntity;
 import net.neoforged.neoforge.gametest.GameTestHolder;
 import net.neoforged.neoforge.gametest.PrefixGameTestTemplate;
+import com.lw.modularmachine.integration.botania.SparkManaHatchBlockEntity;
+import com.lw.modularmachine.integration.mekanism.HeatHatchBlockEntity;
+import com.lw.modularmachine.machine.recipe.resource.pneumatic.CompressedAirPort;
+import java.util.function.Supplier;
+import me.desht.pneumaticcraft.api.PNCCapabilities;
+import net.minecraft.core.Direction;
 
 @GameTestHolder("mmcece")
 @PrefixGameTestTemplate(false)
@@ -105,7 +111,7 @@ public final class LegacyAddonGameTests {
     if (Mods.BOTANIA.isLoaded()) {
       coloredStructure(helper, "test_spark_mana_input_color", MachineRegistries.SPARK_MANA_INPUT.get());
       var fixture = coloredStructure(helper, "test_spark_mana_output_color", MachineRegistries.SPARK_MANA_OUTPUT.get());
-      var output = (com.lw.modularmachine.integration.botania.SparkManaHatchBlockEntity) fixture.hatch();
+      var output = (SparkManaHatchBlockEntity) fixture.hatch();
       long reserved = Math.min(1_000, output.capacity());
       long produced = Math.min(400, output.capacity());
       try (var lease = output.acquireRecipeBuffer()) {
@@ -129,11 +135,11 @@ public final class LegacyAddonGameTests {
     if (Mods.MEKANISM.isLoaded()) {
       coloredStructure(helper, "test_heat_input_color", MachineRegistries.HEAT_INPUT.get());
       var fixture = coloredStructure(helper, "test_heat_output_color", MachineRegistries.HEAT_OUTPUT.get());
-      var output = (com.lw.modularmachine.integration.mekanism.HeatHatchBlockEntity) fixture.hatch();
+      var output = (HeatHatchBlockEntity) fixture.hatch();
       var level = helper.getLevel();
       var inputPos = output.getBlockPos().above();
       level.setBlockAndUpdate(inputPos, MachineRegistries.HEAT_INPUT.get().defaultBlockState());
-      var input = (com.lw.modularmachine.integration.mekanism.HeatHatchBlockEntity) level.getBlockEntity(inputPos);
+      var input = (HeatHatchBlockEntity) level.getBlockEntity(inputPos);
       long produced = Math.min(10_000, output.capacity());
       try (var lease = output.acquireRecipeBuffer()) {
         helper.assertTrue(lease.insertExact(produced), "Heat output rejected production");
@@ -159,19 +165,16 @@ public final class LegacyAddonGameTests {
           "test_compressed_air_input_color",
           MachineRegistries.COMPRESSED_AIR_INPUT.get()).hatch();
       var level = helper.getLevel();
-      var handler = level.getCapability(
-          me.desht.pneumaticcraft.api.PNCCapabilities.AIR_HANDLER_MACHINE,
-          input.getBlockPos(),
-          net.minecraft.core.Direction.NORTH);
+      var handler = level.getCapability(PNCCapabilities.AIR_HANDLER_MACHINE, input.getBlockPos(), Direction.NORTH);
       helper.assertTrue(handler != null, "PneumaticCraft air capability was not registered");
       handler.addAir(32_000);
-      var port = (com.lw.modularmachine.machine.recipe.resource.pneumatic.CompressedAirPort) input;
+      var port = (CompressedAirPort) input;
       helper.assertTrue(port.air() == 32_000 && port.volume() == 16_000, "Native pressure and recipe stock differ");
       port.acquireAirChange(port.air(), -4_000).resolve(false);
       helper.assertTrue(handler.getAir() == 32_000, "Air input rollback changed the native stock");
       port.acquireAirChange(port.air(), -4_000).resolve(true);
       helper.assertTrue(handler.getAir() == 28_000, "Air debit was not committed to the native handler");
-      var output = (com.lw.modularmachine.machine.recipe.resource.pneumatic.CompressedAirPort) coloredStructure(
+      var output = (CompressedAirPort) coloredStructure(
           helper,
           "test_compressed_air_output_color",
           MachineRegistries.COMPRESSED_AIR_OUTPUT.get()).hatch();
@@ -208,7 +211,7 @@ public final class LegacyAddonGameTests {
     helper.succeed();
   }
 
-  private static void color(GameTestHelper helper, String path, java.util.function.Supplier<? extends Block> block) {
+  private static void color(GameTestHelper helper, String path, Supplier<? extends Block> block) {
     if (block != null) {
       coloredStructure(helper, "test_" + path + "_color", block.get());
     }

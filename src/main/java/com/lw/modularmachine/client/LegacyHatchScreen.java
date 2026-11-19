@@ -8,6 +8,7 @@ import net.minecraft.client.gui.screens.inventory.AbstractContainerScreen;
 import net.minecraft.network.chat.Component;
 import net.minecraft.resources.ResourceLocation;
 import net.minecraft.world.entity.player.Inventory;
+import com.lw.modularmachine.integration.pneumaticcraft.CompressedAirGauge;
 
 final class LegacyHatchScreen extends AbstractContainerScreen<LegacyHatchMenu> {
   private static final ResourceLocation TINY = ResourceLocation
@@ -51,7 +52,7 @@ final class LegacyHatchScreen extends AbstractContainerScreen<LegacyHatchMenu> {
       graphics.fill(x, y, x + 1, y + 17, 0xFF373737);
     }
     if (Mods.PNEUMATIC_CRAFT.isLoaded() && menu.value(1) > 0) {
-      com.lw.modularmachine.integration.pneumaticcraft.CompressedAirGauge.render(
+      CompressedAirGauge.render(
           graphics,
           font,
           menu.value(0) / (float) menu.value(1),

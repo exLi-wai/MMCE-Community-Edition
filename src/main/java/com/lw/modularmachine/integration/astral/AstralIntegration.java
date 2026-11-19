@@ -9,13 +9,15 @@ import net.minecraft.core.BlockPos;
 import net.neoforged.bus.api.IEventBus;
 import net.neoforged.neoforge.registries.DeferredRegister;
 import org.jetbrains.annotations.ApiStatus;
+import hellfirepvp.astralsorcery.common.linking.LinkContainer;
+import net.neoforged.neoforge.registries.DeferredHolder;
 
 @ApiStatus.Internal
 public final class AstralIntegration {
   private static final DeferredRegister<TransmissionNodeProvider<?>> NODES = DeferredRegister
       .create(RegistriesAS.KEY_TRANSMISSION_NODES, ModularMachine.MODID);
 
-  static final net.neoforged.neoforge.registries.DeferredHolder<TransmissionNodeProvider<?>, OutputProvider> OUTPUT = NODES
+  static final DeferredHolder<TransmissionNodeProvider<?>, OutputProvider> OUTPUT = NODES
       .register("starlight_output", OutputProvider::new);
 
   private AstralIntegration() {
@@ -28,7 +30,7 @@ public final class AstralIntegration {
   static final class OutputProvider implements TransmissionSourceNodeProvider<StarlightOutputNode> {
     @Override
     public StarlightOutputNode provideNewNode(BlockPos position) {
-      return new StarlightOutputNode(position, new hellfirepvp.astralsorcery.common.linking.LinkContainer());
+      return new StarlightOutputNode(position, new LinkContainer());
     }
 
     @Override

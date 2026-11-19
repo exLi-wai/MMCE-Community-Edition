@@ -24,6 +24,11 @@ import java.util.Set;
 import net.minecraft.core.HolderLookup;
 import net.minecraft.resources.ResourceLocation;
 import org.jetbrains.annotations.ApiStatus;
+import java.math.BigDecimal;
+import java.util.Arrays;
+import java.util.List;
+import java.util.Locale;
+import java.util.Optional;
 
 @ApiStatus.Internal
 public abstract class KubeJSResourceRecipeBuilder<B extends KubeJSResourceRecipeBuilder<B>> {
@@ -224,7 +229,7 @@ public abstract class KubeJSResourceRecipeBuilder<B extends KubeJSResourceRecipe
     if (prior.isPresent()) {
       throw new IllegalArgumentException("Only one declaration per chunk resource direction: " + type.id());
     }
-    var claim = java.util.Optional.of(
+    var claim = Optional.of(
         new WorldPoolRecipeData.Claim(
             kind,
             KubeJSRecipeArguments.integer(amount, "chunk amount", 1, Long.MAX_VALUE),
@@ -300,7 +305,7 @@ public abstract class KubeJSResourceRecipeBuilder<B extends KubeJSResourceRecipe
     requireMutable();
     var captured = resourceDeclarations.get(type.id());
     var previous = captured == null ? KeyedAmountRecipeData.NONE : type.dataClass().cast(captured.data());
-    var quantities = new java.util.LinkedHashMap<>(output ? previous.output() : previous.input());
+    var quantities = new LinkedHashMap<>(output ? previous.output() : previous.input());
     long units = type == RecipeResourceDefinitions.STARLIGHT ? toMilli(amount, "starlight") : KubeJSRecipeArguments
         .integer(amount, "essentia", 1, Long.MAX_VALUE);
     quantities.merge(ResourceLocation.parse(id), units, Math::addExact);
@@ -316,8 +321,8 @@ public abstract class KubeJSResourceRecipeBuilder<B extends KubeJSResourceRecipe
     requireMutable();
     var type = RecipeResourceDefinitions.CONSTELLATION;
     var captured = resourceDeclarations.get(type.id());
-    var active = new java.util.ArrayList<>(
-        captured == null ? java.util.List.<ResourceLocation>of() : type.dataClass().cast(captured.data()).active());
+    var active = new ArrayList<>(
+        captured == null ? List.<ResourceLocation>of() : type.dataClass().cast(captured.data()).active());
     active.add(ResourceLocation.parse(constellation));
     return putResource(RecipeResourceBuilderDeclarations.capture(type, new ConstellationRecipeData(active)));
   }
@@ -331,8 +336,7 @@ public abstract class KubeJSResourceRecipeBuilder<B extends KubeJSResourceRecipe
     return putResource(
         RecipeResourceBuilderDeclarations.capture(
             type,
-            new MeteorRecipeData(
-                java.util.Optional.of(new MeteorRecipeData.Launch(ResourceLocation.parse(catalyst), 1)))));
+            new MeteorRecipeData(Optional.of(new MeteorRecipeData.Launch(ResourceLocation.parse(catalyst), 1)))));
   }
 
   public B addHeatInput(Number amount) {
@@ -367,7 +371,7 @@ public abstract class KubeJSResourceRecipeBuilder<B extends KubeJSResourceRecipe
 
   private static long nonNegativeMilli(Number amount, String resource) {
     try {
-      long exact = new java.math.BigDecimal(amount.toString()).movePointRight(3).longValueExact();
+      long exact = new BigDecimal(amount.toString()).movePointRight(3).longValueExact();
       if (exact < 0) {
         throw new IllegalArgumentException(resource + " must not be negative");
       }
@@ -386,7 +390,7 @@ public abstract class KubeJSResourceRecipeBuilder<B extends KubeJSResourceRecipe
     return putResource(
         RecipeResourceBuilderDeclarations.capture(
             RecipeResourceDefinitions.COMPRESSED_AIR,
-            new CompressedAirRecipeData(java.util.Optional.of(amount), previous.output())));
+            new CompressedAirRecipeData(Optional.of(amount), previous.output())));
   }
 
   public B addCompressedAirOutput(float pressure, Number air) {
@@ -396,7 +400,7 @@ public abstract class KubeJSResourceRecipeBuilder<B extends KubeJSResourceRecipe
     return putResource(
         RecipeResourceBuilderDeclarations.capture(
             RecipeResourceDefinitions.COMPRESSED_AIR,
-            new CompressedAirRecipeData(previous.input(), java.util.Optional.of(amount))));
+            new CompressedAirRecipeData(previous.input(), Optional.of(amount))));
   }
 
   private CompressedAirRecipeData compressedAirDeclaration() {
@@ -405,7 +409,7 @@ public abstract class KubeJSResourceRecipeBuilder<B extends KubeJSResourceRecipe
         .cast(previous.data());
   }
 
-  private static CompressedAirRecipeData.Amount compressedAirAmount(float pressure, Number air, java.util.Optional<CompressedAirRecipeData.Amount> previous) {
+  private static CompressedAirRecipeData.Amount compressedAirAmount(float pressure, Number air, Optional<CompressedAirRecipeData.Amount> previous) {
     long amount = KubeJSRecipeArguments.integer(air, "compressed air", 1, Long.MAX_VALUE);
     if (previous.isPresent()) {
       var prior = previous.orElseThrow();
@@ -420,13 +424,13 @@ public abstract class KubeJSResourceRecipeBuilder<B extends KubeJSResourceRecipe
   public B setDimension(String... dimensions) {
     return addEnvironment(
         new EnvironmentRequirement.Dimension(
-            java.util.Arrays.stream(dimensions).map(id -> KubeJSRecipeArguments.identifier(id, "dimension")).toList()));
+            Arrays.stream(dimensions).map(id -> KubeJSRecipeArguments.identifier(id, "dimension")).toList()));
   }
 
   public B setBiome(String... biomes) {
     return addEnvironment(
         new EnvironmentRequirement.Biome(
-            java.util.Arrays.stream(biomes).map(id -> KubeJSRecipeArguments.identifier(id, "biome")).toList()));
+            Arrays.stream(biomes).map(id -> KubeJSRecipeArguments.identifier(id, "biome")).toList()));
   }
 
   public B setTime(int begin, int end) {
@@ -434,7 +438,7 @@ public abstract class KubeJSResourceRecipeBuilder<B extends KubeJSResourceRecipe
   }
 
   public B setMoonPhase(int... phases) {
-    return addEnvironment(new EnvironmentRequirement.MoonPhase(java.util.Arrays.stream(phases).boxed().toList()));
+    return addEnvironment(new EnvironmentRequirement.MoonPhase(Arrays.stream(phases).boxed().toList()));
   }
 
   public B setAltitude(int begin, int end) {
@@ -444,7 +448,7 @@ public abstract class KubeJSResourceRecipeBuilder<B extends KubeJSResourceRecipe
   public B setWeather(String weather) {
     return addEnvironment(
         new EnvironmentRequirement.Weather(
-            EnvironmentRequirement.Weather.Kind.valueOf(weather.toUpperCase(java.util.Locale.ROOT))));
+            EnvironmentRequirement.Weather.Kind.valueOf(weather.toUpperCase(Locale.ROOT))));
   }
 
   private B addEnvironment(EnvironmentRequirement requirement) {

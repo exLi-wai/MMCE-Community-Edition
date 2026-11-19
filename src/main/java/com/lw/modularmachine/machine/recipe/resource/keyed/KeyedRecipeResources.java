@@ -11,6 +11,7 @@ import java.util.Set;
 import java.util.function.Supplier;
 import net.minecraft.world.level.block.Block;
 import org.jetbrains.annotations.ApiStatus;
+import java.util.stream.Stream;
 
 @ApiStatus.Internal
 public final class KeyedRecipeResources {
@@ -39,7 +40,7 @@ public final class KeyedRecipeResources {
       if (!Mods.THAUMATURGE.isLoaded()) {
         throw new IllegalArgumentException("Essentia requires Thaumaturge");
       }
-      java.util.stream.Stream.concat(data.input().keySet().stream(), data.output().keySet().stream()).forEach(key -> {
+      Stream.concat(data.input().keySet().stream(), data.output().keySet().stream()).forEach(key -> {
         if (EssentiaHatch.resolveAspect(registries, key) == null) {
           throw new IllegalArgumentException("Unknown essentia aspect: " + key);
         }
