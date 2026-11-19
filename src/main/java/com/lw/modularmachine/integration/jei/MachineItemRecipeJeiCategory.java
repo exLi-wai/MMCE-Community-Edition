@@ -8,6 +8,7 @@ import com.lw.modularmachine.integration.mekanism.jei.MekanismRecipeIngredients;
 import com.lw.modularmachine.util.Mods;
 import com.lw.modularmachine.util.minecraft.registry.RegisteredMachineItems;
 import java.util.List;
+import java.util.Map;
 import mezz.jei.api.constants.VanillaTypes;
 import mezz.jei.api.gui.builder.IRecipeLayoutBuilder;
 import mezz.jei.api.gui.drawable.IDrawable;
@@ -27,7 +28,8 @@ import net.neoforged.neoforge.fluids.FluidStack;
 final class MachineItemRecipeJeiCategory implements IRecipeCategory<MachineRecipeJeiPage> {
   private final ResourceLocation machine;
   private final RecipeType<MachineRecipeJeiPage> type;
-  private final MachineRecipeLayout layout;
+  private final Map<MachineRecipe, MachineRecipeLayout> layouts;
+  private final int width, height;
   private final IIngredientType<FluidStack> fluidType;
   private final IDrawable icon, cell, shell, chemicalShell;
 
@@ -37,7 +39,9 @@ final class MachineItemRecipeJeiCategory implements IRecipeCategory<MachineRecip
     type = new RecipeType<>(
         ResourceLocation.fromNamespaceAndPath("mmcece", "machine/" + machine.getNamespace() + "/" + machine.getPath()),
         MachineRecipeJeiPage.class);
-    layout = new MachineRecipeLayout(recipes);
+    layouts = MachineRecipeLayout.perRecipe(recipes);
+    width = layouts.values().stream().mapToInt(layout -> layout.width).max().orElse(34);
+    height = layouts.values().stream().mapToInt(layout -> layout.height).max().orElse(18);
     var gui = helpers.getGuiHelper();
     fluidType = ((IPlatformFluidHelper<FluidStack>) helpers.getPlatformFluidHelper()).getFluidIngredientType();
     var registeredController = RegisteredMachineItems.controller(machine);
@@ -62,17 +66,17 @@ final class MachineItemRecipeJeiCategory implements IRecipeCategory<MachineRecip
   }
   @Override
   public int getWidth() {
-    return layout.width;
+    return width;
   }
   @Override
   public int getHeight() {
-    return layout.height;
+    return height;
   }
 
   @Override
   public void setRecipe(IRecipeLayoutBuilder builder, MachineRecipeJeiPage page, IFocusGroup focuses) {
     var recipe = page.recipes().getFirst().value();
-    for (var part : layout.parts) {
+    for (var part : layouts.get(recipe).parts) {
       if (part.kind() == MachineRecipeLayout.Kind.CHEMICAL && Mods.MEKANISM.isLoaded()) {
         var slot = part.input() ? builder.addInputSlot() : builder.addOutputSlot();
         slot.setPosition(part.x() + 1, part.y() + 1).setBackground(cell, -1, -1).setOverlay(chemicalShell, -1, -1)
@@ -117,6 +121,7 @@ final class MachineItemRecipeJeiCategory implements IRecipeCategory<MachineRecip
   @Override
   public void draw(MachineRecipeJeiPage page, IRecipeSlotsView slots, GuiGraphics graphics, double mouseX, double mouseY) {
     var recipe = page.recipes().getFirst().value();
+    var layout = layouts.get(recipe);
     MachineRecipeDisplay.draw(graphics, recipe, layout);
     if (!Mods.MEKANISM.isLoaded()) {
       for (var part : layout.parts) {
@@ -129,6 +134,7 @@ final class MachineItemRecipeJeiCategory implements IRecipeCategory<MachineRecip
   @Override
   public void createRecipeExtras(IRecipeExtrasBuilder extras, MachineRecipeJeiPage page, IFocusGroup focuses) {
     var recipe = page.recipes().getFirst().value();
+    var layout = layouts.get(recipe);
     extras.addTooltipArea(0, Math.max(0, layout.height - 9), layout.width, 9)
         .setTooltip(MachineRecipeDisplay.details(recipe));
     extras.addTooltipArea(layout.arrowX, layout.arrowY, 22, 15)

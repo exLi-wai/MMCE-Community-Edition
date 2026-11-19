@@ -1,13 +1,18 @@
 package com.lw.modularmachine.client.recipe;
 
 import com.lw.modularmachine.machine.recipe.MachineRecipe;
+import it.unimi.dsi.fastutil.ints.IntArrayList;
+import it.unimi.dsi.fastutil.ints.IntList;
 import java.util.ArrayList;
+import java.util.HashMap;
 import java.util.IdentityHashMap;
 import java.util.List;
 import java.util.Map;
 import net.minecraft.client.Minecraft;
 
 public final class MachineRecipeLayout {
+  private static final List<Kind> KINDS = List.of(Kind.values());
+
   public enum Kind {
     ENERGY(18, 63, 0),
     MANA(5, 63, 4),
@@ -40,18 +45,82 @@ public final class MachineRecipeLayout {
   }
   public record Part(Kind kind, boolean input, int index, int x, int y) {
   }
-  private final Map<MachineRecipe, LegacyRecipeResources> resources = new IdentityHashMap<>();
+  private record Geometry(List<Part> parts, int width, int height, int arrowX, int arrowY, boolean hasAdditional) {
+  }
+
+  private record TextSize(int width, int height) {
+  }
+
+  private final Map<MachineRecipe, LegacyRecipeResources> resources;
   public final List<Part> parts;
   public final int width, height, arrowX, arrowY;
 
   public MachineRecipeLayout(List<MachineRecipe> recipes) {
-    var result = new ArrayList<Part>();
+    this(buildResources(recipes), recipes);
+  }
+
+  private MachineRecipeLayout(Map<MachineRecipe, LegacyRecipeResources> resources, List<MachineRecipe> recipes) {
+    this(resources, geometry(maxCounts(recipes, resources)), measureText(recipes), false);
+  }
+
+  private MachineRecipeLayout(Map<MachineRecipe, LegacyRecipeResources> resources, Geometry geometry, TextSize text, boolean perRecipe) {
+    this.resources = resources;
+    parts = geometry.parts();
+    arrowX = geometry.arrowX();
+    arrowY = geometry.arrowY();
+    width = Math.max(geometry.width(), text.width() + 4);
+    int contentHeight = perRecipe ? Math.max(geometry.height(), arrowY + 15) : geometry.height();
+    height = Math.max(18, contentHeight + Math.max(text.height(), geometry.hasAdditional() ? 9 : 0));
+  }
+
+  public static Map<MachineRecipe, MachineRecipeLayout> perRecipe(List<MachineRecipe> recipes) {
+    var layouts = new IdentityHashMap<MachineRecipe, MachineRecipeLayout>();
+    var geometries = new HashMap<IntList, Geometry>();
+    var resources = buildResources(recipes);
+    for (var recipe : recipes) {
+      var geometry = geometries.computeIfAbsent(counts(recipe, resources.get(recipe)), MachineRecipeLayout::geometry);
+      layouts.put(recipe, new MachineRecipeLayout(resources, geometry, measureText(recipe), true));
+    }
+    return layouts;
+  }
+
+  private static Map<MachineRecipe, LegacyRecipeResources> buildResources(List<MachineRecipe> recipes) {
+    var resources = new IdentityHashMap<MachineRecipe, LegacyRecipeResources>();
     recipes.forEach(recipe -> resources.put(recipe, new LegacyRecipeResources(recipe)));
-    int x = 4, highest = 0, arrow = 8;
-    var kinds = List.of(Kind.values());
+    return resources;
+  }
+
+  private static IntList maxCounts(List<MachineRecipe> recipes, Map<MachineRecipe, LegacyRecipeResources> resources) {
+    var maximums = new IntArrayList(new int[KINDS.size() * 2]);
+    for (var recipe : recipes) {
+      var counts = counts(recipe, resources.get(recipe));
+      for (int index = 0; index < counts.size(); index++) {
+        maximums.set(index, Math.max(maximums.getInt(index), counts.getInt(index)));
+      }
+    }
+    return maximums;
+  }
+
+  private static IntList counts(MachineRecipe recipe, LegacyRecipeResources resources) {
+    var counts = new IntArrayList(KINDS.size() * 2);
     for (boolean input : new boolean[]{true, false}) {
-      for (Kind kind : input ? kinds : kinds.reversed()) {
-        int count = recipes.stream().mapToInt(recipe -> count(recipe, kind, input)).max().orElse(0);
+      for (Kind kind : KINDS) {
+        counts.add(count(recipe, resources, kind, input));
+      }
+    }
+    return counts;
+  }
+
+  private static Geometry geometry(IntList counts) {
+    var result = new ArrayList<Part>();
+    int nextX = 4, highest = 0, arrowX = 8;
+    for (boolean input : new boolean[]{true, false}) {
+      int offset = input ? 0 : KINDS.size();
+      for (Kind kind : input ? KINDS : KINDS.reversed()) {
+        int count = counts.getInt(offset + kind.ordinal());
+        if (count == 0) {
+          continue;
+        }
         int columns = switch (kind) {
           case ITEM -> itemColumns(count);
           case FLUID, CHEMICAL, ESSENTIA, STARLIGHT -> Math.max((count + 3) / 4, 1);
@@ -59,48 +128,63 @@ public final class MachineRecipeLayout {
           case CONSTELLATION -> Math.max((count + 1) / 2, 1);
           default -> 1;
         };
-        int start = x;
-        for (int i = 0; i < count; i++) {
-          int px = start + i % columns * (kind.width + kind.gap);
-          int py = i / columns * (kind.height + kind.gap);
-          result.add(new Part(kind, input, i, px, py));
-          x = Math.max(x, px + kind.width + kind.gap);
-          highest = Math.max(highest, py + kind.height);
+        int start = nextX;
+        for (int index = 0; index < count; index++) {
+          int partX = start + index % columns * (kind.width + kind.gap);
+          int partY = index / columns * (kind.height + kind.gap);
+          result.add(new Part(kind, input, index, partX, partY));
+          nextX = Math.max(nextX, partX + kind.width + kind.gap);
+          highest = Math.max(highest, partY + kind.height);
         }
       }
       if (input) {
-        x += 4;
-        arrow = x;
-        x += 26;
+        arrowX = nextX + 4;
+        nextX = arrowX + 26;
       }
     }
-    parts = List.copyOf(result);
-    arrowX = arrow;
-    arrowY = highest / 2 / 2;
-    int textWidth = recipes.stream().flatMap(recipe -> MachineRecipeDisplay.text(recipe).stream())
-        .mapToInt(Minecraft.getInstance().font::width).max().orElse(0);
-    width = Math.max(x, textWidth + 4);
+    int arrowY = highest / 2 / 2;
     boolean hasAdditional = result.stream().anyMatch(part -> switch (part.kind()) {
       case ENERGY, FLUID, ITEM -> false;
       default -> true;
     });
-    int textHeight = recipes.stream()
-        .mapToInt(
-            recipe -> (recipe.energyPerTick() > 0 ? 2 : 0) + MachineRecipeDisplay.text(recipe).size() * 9 + (recipe
-                .interfaceInputs().isEmpty() ? 0 : 2))
-        .max().orElse(0);
-    height = Math
-        .max(18, Math.max(highest, hasAdditional ? arrowY + 15 : 0) + Math.max(textHeight, hasAdditional ? 9 : 0));
+    return new Geometry(
+        List.copyOf(result),
+        nextX,
+        Math.max(highest, hasAdditional ? arrowY + 15 : 0),
+        arrowX,
+        arrowY,
+        hasAdditional);
   }
 
-  private int count(MachineRecipe recipe, Kind kind, boolean input) {
+  private static TextSize measureText(List<MachineRecipe> recipes) {
+    int width = 0;
+    int height = 0;
+    for (var recipe : recipes) {
+      var text = measureText(recipe);
+      width = Math.max(width, text.width());
+      height = Math.max(height, text.height());
+    }
+    return new TextSize(width, height);
+  }
+
+  private static TextSize measureText(MachineRecipe recipe) {
+    var text = MachineRecipeDisplay.text(recipe);
+    int width = 0;
+    for (var line : text) {
+      width = Math.max(width, Minecraft.getInstance().font.width(line));
+    }
+    int height = text.size() * 9 + (recipe.energyPerTick() > 0 ? 2 : 0) + (recipe.interfaceInputs().isEmpty() ? 0 : 2);
+    return new TextSize(width, height);
+  }
+
+  private static int count(MachineRecipe recipe, LegacyRecipeResources resources, Kind kind, boolean input) {
     return switch (kind) {
       case ENERGY -> input && recipe.energyPerTick() > 0 ? 1 : 0;
       case FLUID -> input ? recipe.fluidInputs().size() + recipe.fluidPerTickInputs().size() : recipe.fluidOutputs()
           .size() + recipe.fluidPerTickOutputs().size();
       case ITEM -> input ? recipe.inputs().size() : recipe.outputs().size();
       case CHEMICAL -> MachineRecipeDisplay.chemicalCount(recipe, input);
-      default -> resources.get(recipe).count(kind, input);
+      default -> resources.count(kind, input);
     };
   }
 
