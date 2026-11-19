@@ -143,7 +143,10 @@ final class RecipeAdapterCustomizations {
     customization.maxThreads().ifPresent(value -> result.addProperty("max_threads", value));
     addScriptOptions(result, customization, originalOutputRows);
     resolveItemOnlySource(result);
-    RecipeAdapterNativeResources.apply(result, customization.resourceAdditions().nativeResources(), registries);
+    var nativeResources = customization.resourceAdditions().nativeResources();
+    if (!nativeResources.isEmpty()) {
+      RecipeAdapterNativeResources.apply(result, nativeResources, registries);
+    }
 
     return result;
   }
