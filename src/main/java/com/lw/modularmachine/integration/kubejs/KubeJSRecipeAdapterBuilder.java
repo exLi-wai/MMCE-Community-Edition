@@ -117,7 +117,7 @@ public final class KubeJSRecipeAdapterBuilder extends KubeJSResourceRecipeBuilde
   private final List<ItemPaymentData.Fuel> fuelInputs = new ArrayList<>();
   private final List<IngredientArrayData.Group> ingredientArrays = new ArrayList<>(),
       randomItemOutputs = new ArrayList<>();
-  private final List<KubeJSIngredientArrayBuilder.IngredientArrayPrimer> arrayCallbacks = new ArrayList<>();
+  private final List<KubeJSIngredientArrayBuilder.GroupCallbacks> arrayCallbacks = new ArrayList<>();
   private final Map<Integer, long[]> outputRanges = new LinkedHashMap<>();
   private Optional<Boolean> loadJei = Optional.empty();
   private final Map<RecipeAdapterCustomization.Phase, String> selectors = new EnumMap<>(
@@ -170,10 +170,7 @@ public final class KubeJSRecipeAdapterBuilder extends KubeJSResourceRecipeBuilde
     };
   }
 
-  private void prepareTriggeredResources() {
-    if (capturedTriggers != null) {
-      return;
-    }
+  private int[] prepareTriggeredResources() {
     var captured = new JsonArray();
     var removals = new HashMap<TriggerPhase, Set<Integer>>();
     for (var entry : triggers.entrySet()) {
@@ -183,8 +180,21 @@ public final class KubeJSRecipeAdapterBuilder extends KubeJSResourceRecipeBuilde
       captured.add(captureTriggeredRow(entry.getKey(), entry.getValue()));
       removals.computeIfAbsent(entry.getKey().phase(), ignored -> new HashSet<>()).add(entry.getKey().row());
     }
+    var removedOutputs = removals.getOrDefault(TriggerPhase.ITEM_OUTPUT, Set.of());
+    int[] outputRows = new int[itemOutputs.size()];
+    int nextRow = 0;
+    for (int index = 0; index < outputRows.length; index++) {
+      outputRows[index] = removedOutputs.contains(index) ? -1 : nextRow++;
+    }
+    if (!removedOutputs.isEmpty() && !outputRanges.isEmpty()) {
+      var retainedRanges = new LinkedHashMap<Integer, long[]>();
+      outputRanges.forEach((row, range) -> retainedRanges.put(outputRows[row], range));
+      outputRanges.clear();
+      outputRanges.putAll(retainedRanges);
+    }
     removals.forEach(this::removeTriggeredRows);
     capturedTriggers = captured;
+    return outputRows;
   }
 
   private JsonObject captureTriggeredRow(TriggerTarget target, TriggerSettings timing) {
@@ -217,11 +227,13 @@ public final class KubeJSRecipeAdapterBuilder extends KubeJSResourceRecipeBuilde
       }
       row.add("item", source.remove("stack"));
     } else if (phase == TriggerPhase.ITEM_OUTPUT) {
-      if (outputRanges.containsKey(index)
-          || callbacks.compile(machine, adapter, id).bindings().stream().anyMatch(binding -> binding.addedOutput())) {
-        throw owner.reject("Triggered outputs cannot combine random quantities or appended item callbacks");
-      }
       var output = itemOutputs.get(index);
+      if (output.encodedPreview().isPresent()) {
+        throw owner.reject("Triggered item rows cannot use an item preview");
+      }
+      if (outputRanges.containsKey(index)) {
+        throw owner.reject("Triggered outputs cannot combine random quantities");
+      }
       source = new JsonObject();
       source.addProperty("amount", output.amount());
       source.addProperty("chance", output.chance());
@@ -266,15 +278,6 @@ public final class KubeJSRecipeAdapterBuilder extends KubeJSResourceRecipeBuilde
       durableInputs.clear();
       durableInputs.putAll(indexed);
     }
-    if (phase == TriggerPhase.ITEM_OUTPUT && !outputRanges.isEmpty()) {
-      var indexed = new LinkedHashMap<Integer, long[]>();
-      outputRanges.forEach((index, range) -> {
-        int shifted = index - (int) removed.stream().filter(row -> row < index).count();
-        indexed.put(shifted, range);
-      });
-      outputRanges.clear();
-      outputRanges.putAll(indexed);
-    }
     List<?> rows = switch (phase) {
       case ITEM_INPUT -> itemInputs;
       case ITEM_OUTPUT -> itemOutputs;
@@ -287,7 +290,6 @@ public final class KubeJSRecipeAdapterBuilder extends KubeJSResourceRecipeBuilde
   }
 
   private void addTriggeredResources(JsonObject additions) {
-    prepareTriggeredResources();
     if (!capturedTriggers.isEmpty()) {
       additions.add("triggered_resources", capturedTriggers.deepCopy());
     }
@@ -728,8 +730,9 @@ public final class KubeJSRecipeAdapterBuilder extends KubeJSResourceRecipeBuilde
 
   public KubeJSRecipeAdapterBuilder addIngredientArrayInput(KubeJSIngredientArrayBuilder.IngredientArrayPrimer ingredients) {
     requireMutable();
-    add(ingredientArrays, ingredients.snapshot(owner.registries()), "ingredient array");
-    arrayCallbacks.add(ingredients);
+    var group = ingredients.snapshot(owner.registries());
+    add(ingredientArrays, group, "ingredient array");
+    arrayCallbacks.add(ingredients.callbacksFor(group));
     last = LastRequirement.INGREDIENT_ARRAY;
 
     return this;
@@ -769,7 +772,7 @@ public final class KubeJSRecipeAdapterBuilder extends KubeJSResourceRecipeBuilde
     var group = ingredients.snapshotForOutput(owner.registries());
     IngredientArrayData.validateRandomOutput(group);
     add(randomItemOutputs, group, "random output group");
-    arrayCallbacks.add(ingredients);
+    arrayCallbacks.add(ingredients.callbacksFor(group));
     last = LastRequirement.RANDOM_OUTPUT;
 
     return this;
@@ -1441,8 +1444,8 @@ public final class KubeJSRecipeAdapterBuilder extends KubeJSResourceRecipeBuilde
   public void build() {
     requireMutable();
     try {
-      prepareTriggeredResources();
-      var compiledCallbacks = callbacks.compile(machine, adapter, id);
+      int[] retainedOutputRows = prepareTriggeredResources();
+      var compiledCallbacks = callbacks.compile(machine, adapter, id, retainedOutputRows);
       var customization = new RecipeAdapterCustomization(
           modifiers,
           interfaceInputs,
@@ -1481,7 +1484,7 @@ public final class KubeJSRecipeAdapterBuilder extends KubeJSResourceRecipeBuilde
       compiledCallbacks.checkers().forEach(RecipeScriptCallbacks::adapterChecker);
       compiledCallbacks.modifiers().forEach(RecipeScriptCallbacks::adapterModifier);
       compiledCallbacks.inputModifiers().forEach(RecipeScriptCallbacks::adapterInputModifier);
-      arrayCallbacks.forEach(KubeJSIngredientArrayBuilder.IngredientArrayPrimer::captureAdapterCallbacks);
+      arrayCallbacks.forEach(KubeJSIngredientArrayBuilder.GroupCallbacks::captureAdapterCallbacks);
       built = true;
     } catch (RuntimeException invalid) {
       throw owner.reject("Invalid adapter declaration: " + invalid.getMessage());

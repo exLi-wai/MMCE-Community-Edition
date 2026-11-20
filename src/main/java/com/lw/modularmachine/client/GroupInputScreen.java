@@ -80,10 +80,12 @@ public final class GroupInputScreen extends AbstractContainerScreen<GroupInputMe
       int value = Integer.parseInt(input.getValue());
       if (value > 0 && value != status.group()) {
         menu.requestGroup(value);
+        return;
       }
     } catch (NumberFormatException ignored) {
-      input.setValue(Integer.toString(status.preferredGroup()));
+      // Empty or out-of-range drafts use the last confirmed value.
     }
+    input.setValue(Integer.toString(status.preferredGroup()));
   }
 
   @Override

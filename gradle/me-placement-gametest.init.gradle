@@ -8,7 +8,7 @@ allprojects {
                 'curse.maven:applied-energistics-2-223794',
                 'curse.maven:guideme-1173950',
                 'curse.maven:mek-268560',
-                'maven.modrinth:applied-mekanistics'
+                'curse.maven:appmek-574300'
             ] as Set
             configurations.named('localRuntime') {
                 withDependencies { dependencies ->
@@ -20,14 +20,7 @@ allprojects {
                 systemProperty 'neoforge.enabledGameTestNamespaces', 'mmcece_placement'
                 logLevel = org.slf4j.event.Level.INFO
             }
-            def fixtures = tasks.register('prepareMePlacementFixtures', Copy) {
-                from project.file('src/gameTest/resources/data/mmcece/mmcece/machines')
-                into project.file('build/gametest-me-placement/config/modularmachinery/machinery')
-                include '**/*.json'
-            }
-            tasks.named('runGameTestServer') {
-                dependsOn fixtures
-            }
+            project.apply from: project.file('gradle/recipe-gametest-fixtures.gradle')
         }
     }
 }

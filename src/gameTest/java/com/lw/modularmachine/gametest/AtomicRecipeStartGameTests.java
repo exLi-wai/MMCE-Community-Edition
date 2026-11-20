@@ -3,16 +3,25 @@ package com.lw.modularmachine.gametest;
 import com.lw.modularmachine.block.MachineControllerBlock;
 import com.lw.modularmachine.blockentity.MachineControllerBlockEntity;
 import com.lw.modularmachine.blockentity.MachinePortBlockEntity;
+import com.lw.modularmachine.config.MachineConfig;
 import com.lw.modularmachine.machine.PortKind;
 import com.lw.modularmachine.api.orientation.MachineOrientation;
 import com.lw.modularmachine.machine.recipe.AtomicRecipeStarter;
 import com.lw.modularmachine.machine.recipe.FrozenRecipeRun;
+import com.lw.modularmachine.machine.recipe.ItemResourceKey;
+import com.lw.modularmachine.machine.recipe.MachineRecipe;
+import com.lw.modularmachine.machine.recipe.RecipeExecutionTicket;
 import com.lw.modularmachine.machine.recipe.RecipeStartPlan;
+import com.lw.modularmachine.machine.recipe.search.RecipeCandidate;
+import com.lw.modularmachine.machine.recipe.search.RecipeCatalog;
 import com.lw.modularmachine.machine.recipe.search.RecipeSearch;
 import com.lw.modularmachine.machine.structure.StructureService;
 import com.lw.modularmachine.registry.MachineRegistries;
 import com.mojang.authlib.GameProfile;
+import com.google.gson.JsonParser;
+import com.mojang.serialization.JsonOps;
 import java.util.List;
+import java.util.Map;
 import java.util.UUID;
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.atomic.AtomicReference;
@@ -159,6 +168,11 @@ public final class AtomicRecipeStartGameTests {
     long revision = input.resourceRevision();
     var plan = plan(controller);
     helper.assertTrue(plan.recipe().id().endsWith("test_native_b"), "B occupancy did not select B before start");
+    helper.assertTrue(
+        plan.start(0) == AtomicRecipeStarter.Result.BUSY
+            && controller.runningRecipe().isEmpty()
+            && input.resourceRevision() == revision,
+        "An exhausted start budget consumed inputs or installed a run");
     helper.assertTrue(plan.start() == AtomicRecipeStarter.Result.STARTED, "Native paid start failed");
     var run = controller.runningRecipe().orElseThrow();
     helper.assertTrue(
@@ -173,7 +187,7 @@ public final class AtomicRecipeStartGameTests {
             && run.progress() == 0,
         "Start generated outputs or lost frozen recipe metadata");
     helper.assertTrue(
-        plan.start() == AtomicRecipeStarter.Result.ALREADY_RUNNING && RecipeSearch.begin(controller).isEmpty(),
+        plan.start(0) == AtomicRecipeStarter.Result.ALREADY_RUNNING && RecipeSearch.begin(controller).isEmpty(),
         "Repeated start consumed twice or selected another recipe");
     fill(output, ItemStack.EMPTY);
     input.inventory().setStackInSlot(0, new ItemStack(Items.DIRT, 5));
@@ -240,6 +254,91 @@ public final class AtomicRecipeStartGameTests {
         "Repair did not restore preserved run identity");
   }
 
+  private static void checkFuelLimits(GameTestHelper helper, MachineControllerBlockEntity controller, MachinePortBlockEntity input) {
+    var definition = MachineRecipe.CODEC.codec()
+        .parse(
+            helper.getLevel().registryAccess().createSerializationContext(JsonOps.INSTANCE),
+            JsonParser.parseString("""
+                {"machine":"mmcece:test_recipe_resources","duration":1,"inputs":[],
+                 "outputs":[{"stack":{"id":"minecraft:iron_ingot"},"amount":1}],
+                 "item_payments":{"fuels":[{"burn_time":1600}]}}
+                """))
+        .getOrThrow();
+    var candidate = new RecipeCandidate<ItemResourceKey>("mmcece:fuel_limit", 0, List.of(), List.of());
+    var catalog = RecipeCatalog.fromDefinitions(
+        controller.structureMachineId(),
+        List.of(candidate),
+        Map.of(candidate.id(), definition),
+        () -> true,
+        null,
+        List.of());
+    var ticket = RecipeExecutionTicket.capture(controller).orElseThrow();
+    var plan = RecipeStartPlan.prepared(ticket, catalog, candidate, List.of(), List.of(), 1, null);
+    helper.assertTrue(
+        plan.maxRepeatableInputs(0) == 0
+            && plan.maxRepeatableInputs(1) == 1
+            && plan.maxRepeatableInputs(3) == 2
+            && input.inventory().getStackInSlot(0).getCount() == 2,
+        "Fuel admission exceeded its request, ignored physical fuel, or consumed it while probing");
+    helper.assertTrue(
+        plan.start() == AtomicRecipeStarter.Result.UNMANAGED_RECIPE && controller.runningRecipe().isEmpty(),
+        "A current input plan from an unpublished fuel catalog passed managed-recipe admission");
+  }
+
+  @GameTest(template = "empty16", batch = "atomic_start_budget", timeoutTicks = 600)
+  public static void ordinary_search_and_start_share_one_tick_budget(GameTestHelper helper) {
+    var server = helper.getLevel().getServer();
+    server.reloadResources(server.getPackRepository().getSelectedIds())
+        .whenComplete((ignored, failure) -> server.execute(() -> {
+          if (failure != null) {
+            helper.runAfterDelay(1, () -> helper.fail("Budget test catalog setup failed: " + failure));
+            return;
+          }
+          try {
+            checkOrdinarySearchBudget(helper);
+          } catch (RuntimeException | AssertionError error) {
+            helper.runAfterDelay(1, () -> helper.fail("Ordinary search budget: " + error));
+          }
+        }));
+  }
+
+  private static void checkOrdinarySearchBudget(GameTestHelper helper) {
+    var controller = standard(helper);
+    var input = port(helper, controller, "item_in");
+    input.inventory().setStackInSlot(0, new ItemStack(Items.COAL, 2));
+    checkFuelLimits(helper, controller, input);
+    input.inventory().setStackInSlot(0, new ItemStack(Items.DIRT, 2));
+    var measured = RecipeSearch.begin(controller).orElseThrow().advance(10_000);
+    int budget = measured.workUsed() + 1;
+    var search = RecipeSearch.begin(controller).orElseThrow().advance(budget);
+    helper.assertTrue(
+        search.plan().isPresent() && budget - search.workUsed() == 1,
+        "Expected one unit left after selection, measured " + measured.status() + "/" + measured
+            .workUsed() + ", bounded " + search.status() + "/" + search.workUsed());
+    long revision = input.resourceRevision();
+    int configured = MachineConfig.RECIPE_OUTPUT_WORK.get();
+    try {
+      MachineConfig.RECIPE_OUTPUT_WORK.set(budget);
+      controller.serverTick();
+      helper.assertTrue(
+          controller.runningRecipe().isEmpty() && input.resourceRevision() == revision,
+          "An ordinary controller spent a second budget on the tick that selected its recipe");
+    } finally {
+      MachineConfig.RECIPE_OUTPUT_WORK.set(configured);
+    }
+    helper.runAfterDelay(1, () -> {
+      if (controller.runningRecipe().isEmpty()) {
+        controller.serverTick();
+      }
+      helper.assertTrue(
+          controller.runningRecipe().isPresent()
+              && input.inventory().getStackInSlot(0).isEmpty()
+              && input.resourceRevision() == revision + 1,
+          "The selected recipe did not charge exactly once with the next tick's start budget");
+      helper.succeed();
+    });
+  }
+
   private static void stalePlansAndThreadGuards(GameTestHelper helper) {
     var controller = standard(helper);
     var input = port(helper, controller, "item_in");
@@ -266,9 +365,11 @@ public final class AtomicRecipeStartGameTests {
         denied && input.inventory().getStackInSlot(0).getCount() == 2 && controller.runningRecipe().isEmpty(),
         "Worker reached live recipe mutation");
     StructureService.reorient(controller, MachineOrientation.of(Direction.NORTH, 1));
+    var result = current.start();
+    int remaining = input.inventory().getStackInSlot(0).getCount();
     helper.assertTrue(
-        current.start() == AtomicRecipeStarter.Result.STALE && input.inventory().getStackInSlot(0).getCount() == 2,
-        "Pending orientation charged input");
+        result == AtomicRecipeStarter.Result.STALE && remaining == 2,
+        "Pending orientation returned " + result + " with " + remaining + " input remaining");
   }
 
   private static FrozenRecipeRun multiBusStart(GameTestHelper helper) {
@@ -355,11 +456,13 @@ public final class AtomicRecipeStartGameTests {
     final var initialPlan = plan;
     TestPredicateBlock.CALLBACK.set(() -> nested.set(initialPlan.start()));
     try {
+      var result = plan.start();
+      int remaining = input.inventory().getStackInSlot(0).getCount();
       helper.assertTrue(
-          plan.start() == AtomicRecipeStarter.Result.STARTED
+          result == AtomicRecipeStarter.Result.STARTED
               && nested.get() == AtomicRecipeStarter.Result.BUSY
-              && input.inventory().getStackInSlot(0).isEmpty(),
-          "Reentrant start duplicated consumption");
+              && remaining == 0,
+          "Reentrant start returned " + result + ", nested " + nested.get() + ", remaining " + remaining);
     } finally {
       TestPredicateBlock.CALLBACK.set(null);
     }

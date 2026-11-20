@@ -158,15 +158,20 @@ public final class FactorySearchCoordinator {
   }
 
   private void startSelected(FactoryThreadState thread, RecipeSearch activeSearch, RecipeStartPlan plan, long now, int workBudget) {
-    int resourceLimit = Math
-        .min(host.parallelLimit(thread.threadId()), Math.min(plan.maxRepeatableInputs(), plan.maxRepeatableOutputs()));
-    int upper = Math.min(resourceLimit, host.maximumUpgradeRuns());
     var nativeRecipe = host.definitionForStart(plan);
     if (nativeRecipe == null) {
       invalidateThread(thread.threadId(), now);
       backoffSearch(thread.threadId(), now);
       return;
     }
+    int threadLimit = host.parallelLimit(thread.threadId());
+    int upgradeLimit = host.maximumUpgradeRuns();
+    // A single resource check distinguishes missing upgrade costs from missing
+    // inputs.
+    int probeLimit = Math
+        .min(nativeRecipe.parallelized() ? threadLimit : Math.min(threadLimit, 1), Math.max(1, upgradeLimit));
+    int resourceLimit = plan.maxRepeatableInputs(Math.min(probeLimit, plan.maxRepeatableOutputs()));
+    int upper = Math.min(resourceLimit, upgradeLimit);
     int maxInstances = upper == 0 ? 0 : plan.prepareParallel(nativeRecipe, upper, workBudget);
     if (maxInstances < 0) {
       host.updateThreadState(thread, FactoryThreadState.State.WAITING, FactoryThreadState.Reason.SEARCH_BUDGET);

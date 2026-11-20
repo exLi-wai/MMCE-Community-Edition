@@ -221,18 +221,7 @@ public final class MachineRecipeDisplay {
         amount.minimumAmount() == amount.amount() ? Component
             .translatable("jei.mmcece.machine_item.amount", amount.amount()) : Component
                 .translatable("jei.mmcece.machine_item.amount_range", amount.minimumAmount(), amount.amount()));
-    if (amount.chance() < 1) {
-      var format = NumberFormat.getNumberInstance();
-      format.setMaximumFractionDigits(2);
-      String chance = amount.chance() < .0001D ? "< 0.01%" : format.format(amount.chance() * 100) + "%";
-      String key;
-      if (input) {
-        key = amount.chance() == 0 ? "tooltip.machinery.chance.in.never" : "tooltip.machinery.chance.in";
-      } else {
-        key = amount.chance() == 0 ? "tooltip.machinery.chance.out.never" : "tooltip.machinery.chance.out";
-      }
-      result.add(Component.translatable(key, chance));
-    }
+    addChanceTooltip(result, amount.chance(), input);
     result.add(selector(amount.selector()));
 
     return List.copyOf(result);
@@ -264,14 +253,7 @@ public final class MachineRecipeDisplay {
             perTick ? "jei.mmcece.legacy.fluid_tick" : "jei.mmcece.machine_item.fluid_amount",
             fluid.getAmount()));
     result.add(selector(selector));
-    if (row.chance() < 1) {
-      var format = NumberFormat.getNumberInstance();
-      format.setMaximumFractionDigits(2);
-      String chance = row.chance() < .0001D ? "< 0.01%" : format.format(row.chance() * 100) + "%";
-      String key = input ? row.chance() == 0 ? "tooltip.machinery.chance.in.never" : "tooltip.machinery.chance.in" : row
-          .chance() == 0 ? "tooltip.machinery.chance.out.never" : "tooltip.machinery.chance.out";
-      result.add(Component.translatable(key, chance));
-    }
+    addChanceTooltip(result, row.chance(), input);
     if (!fluid.getComponentsPatch().isEmpty()) {
       result.add(
           Component.translatable("jei.mmcece.machine_item.fluid_components", fluid.getComponentsPatch().toString()));
@@ -352,16 +334,25 @@ public final class MachineRecipeDisplay {
     var name = ChemicalDisplay.describe(new ChemicalStackData(row.chemical(), row.amount())).name();
     result.add(Component.literal(input ? "→ " : "← ").append(name).append(" ×" + row.amount() + (perTick ? "/t" : "")));
     result.add(selector(row.selector()));
-    if (row.chance() < 1) {
-      var format = NumberFormat.getNumberInstance();
-      format.setMaximumFractionDigits(2);
-      String chance = row.chance() < .0001D ? "< 0.01%" : format.format(row.chance() * 100) + "%";
-      String key = input ? row.chance() == 0 ? "tooltip.machinery.chance.in.never" : "tooltip.machinery.chance.in" : row
-          .chance() == 0 ? "tooltip.machinery.chance.out.never" : "tooltip.machinery.chance.out";
-      result.add(Component.translatable(key, chance));
-    }
+    addChanceTooltip(result, row.chance(), input);
 
     return List.copyOf(result);
+  }
+
+  private static void addChanceTooltip(List<Component> lines, double probability, boolean input) {
+    if (probability >= 1) {
+      return;
+    }
+    var format = NumberFormat.getNumberInstance();
+    format.setMaximumFractionDigits(2);
+    String chance = probability < .0001D ? "< 0.01%" : format.format(probability * 100) + "%";
+    String key;
+    if (input) {
+      key = probability == 0 ? "tooltip.machinery.chance.in.never" : "tooltip.machinery.chance.in";
+    } else {
+      key = probability == 0 ? "tooltip.machinery.chance.out.never" : "tooltip.machinery.chance.out";
+    }
+    lines.add(Component.translatable(key, chance));
   }
 
   public static Component duration(MachineRecipe recipe) {

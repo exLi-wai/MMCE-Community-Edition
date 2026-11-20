@@ -31,9 +31,8 @@ final class ParallelRecipeAdmission {
     this.plan = plan;
     this.definition = definition;
     this.aggregateDefinition = aggregateDefinition;
-    int high = Math.min(
-        definition.parallelized() ? limit : Math.min(limit, 1),
-        Math.min(plan.maxRepeatableInputs(), plan.maxRepeatableOutputs()));
+    int high = definition.parallelized() ? limit : Math.min(limit, 1);
+    high = plan.maxRepeatableInputs(Math.min(high, plan.maxRepeatableOutputs()));
     high = ChemicalTransactions.arithmeticLimit(definition, high, aggregateDefinition);
     high = RecipeTriggeredResources.arithmeticLimit(definition, high, aggregateDefinition, upgrades);
     high = RecipeRandomItemOutputs.arithmeticLimit(definition, high, aggregateDefinition);

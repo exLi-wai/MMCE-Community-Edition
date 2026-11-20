@@ -2,7 +2,9 @@ package com.lw.modularmachine.client;
 
 import com.lw.modularmachine.blockentity.SmartInterfaceBlockEntity;
 import com.lw.modularmachine.menu.SmartInterfaceMenu;
+import com.lw.modularmachine.network.SmartInterfacePayloads;
 import java.util.List;
+import java.util.UUID;
 import net.minecraft.client.gui.GuiGraphics;
 import net.minecraft.client.gui.components.Button;
 import net.minecraft.client.gui.components.EditBox;
@@ -25,6 +27,17 @@ public final class SmartInterfaceScreen extends AbstractContainerScreen<SmartInt
   private Button next;
   private BlockPos selectedOwner;
   private String selectedType;
+  private EditTarget displayedTarget;
+
+  record EditTarget(UUID instance, SmartInterfaceBlockEntity.Entry entry) {
+    boolean matches(SmartInterfacePayloads.Status status, SmartInterfaceBlockEntity.Entry entry) {
+      return status != null
+          && instance.equals(status.instance())
+          && entry != null
+          && entry.editable()
+          && this.entry.binding().equals(entry.binding());
+    }
+  }
 
   public SmartInterfaceScreen(SmartInterfaceMenu menu, Inventory inventory, Component title) {
     super(menu, inventory, title);
@@ -45,6 +58,7 @@ public final class SmartInterfaceScreen extends AbstractContainerScreen<SmartInt
         new EditBox(font, leftPos + 98, topPos + 35, 70, 10, Component.translatable("menu.mmcece.smart.value_input")));
     input.setMaxLength(32);
     input.setFilter(text -> text.matches("[-+0-9.eE]*"));
+    displayedTarget = null;
     previous = addRenderableWidget(
         Button.builder(Component.translatable("menu.mmcece.smart.previous"), button -> select(index() - 1))
             .bounds(leftPos + 7, topPos + 58, 40, 20).build());
@@ -78,6 +92,7 @@ public final class SmartInterfaceScreen extends AbstractContainerScreen<SmartInt
       var entry = entries.get(Math.clamp(index, 0, entries.size() - 1));
       selectedOwner = entry.binding().controller();
       selectedType = entry.binding().type();
+      displayedTarget = null;
       if (input != null) {
         input.setValue("");
       }
@@ -94,7 +109,16 @@ public final class SmartInterfaceScreen extends AbstractContainerScreen<SmartInt
     next.visible = input.visible;
     previous.active = index > 0;
     next.active = index + 1 < entries.size();
-    input.setEditable(!entries.isEmpty() && entries.get(index).editable());
+    var selected = entries.isEmpty() ? null : entries.get(index);
+    boolean editable = selected != null && selected.editable();
+    input.setEditable(editable);
+    if (displayedTarget != null && !displayedTarget.matches(menu.status(), selected)) {
+      input.setValue("");
+      displayedTarget = null;
+    }
+    if (displayedTarget == null && editable) {
+      displayedTarget = new EditTarget(menu.status().instance(), selected);
+    }
   }
 
   @Override
@@ -133,17 +157,19 @@ public final class SmartInterfaceScreen extends AbstractContainerScreen<SmartInt
   public boolean keyPressed(int key, int scanCode, int modifiers) {
     if (input.isFocused() && (key == GLFW.GLFW_KEY_ENTER || key == GLFW.GLFW_KEY_KP_ENTER)) {
       var entries = entries();
-      if (!entries.isEmpty()) {
-        var entry = entries.get(index());
+      var entry = entries.isEmpty() ? null : entries.get(index());
+      if (displayedTarget != null && displayedTarget.matches(menu.status(), entry)) {
         try {
           double value = Double.parseDouble(input.getValue());
-          if (entry.editable() && entry.specification().accepts(value)) {
-            menu.requestValue(entry, value);
+          if (entry.specification().accepts(value)) {
+            menu.requestValue(displayedTarget.instance(), displayedTarget.entry(), value);
             input.setValue("");
           }
         } catch (NumberFormatException invalid) {
           return true;
         }
+      } else {
+        input.setValue("");
       }
       return true;
     }

@@ -51,11 +51,19 @@ public final class ControllerRunState {
    * publishes after resolving all ports.
    */
   public RunStartLease acquireStart() {
+    var lease = tryAcquireStart();
+    if (lease == null) {
+      throw new IllegalStateException("Controller cannot accept another recipe start");
+    }
+    return lease;
+  }
+
+  public RunStartLease tryAcquireStart() {
     if (!host.onServerThread()) {
       throw new IllegalStateException("Recipe start outside server thread");
     }
     if (busy() || runningRecipe != null || !host.current()) {
-      throw new IllegalStateException("Controller cannot accept another recipe start");
+      return null;
     }
     recipeStart = new RunStartLease();
     return recipeStart;

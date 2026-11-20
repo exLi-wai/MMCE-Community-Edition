@@ -4,6 +4,7 @@ import com.lw.modularmachine.item.MachineBlueprintItem;
 import com.lw.modularmachine.machine.controller.DedicatedControllerCatalog;
 import com.lw.modularmachine.machine.structure.StructureService;
 import com.lw.modularmachine.network.MachinePayloads;
+import com.lw.modularmachine.presentation.ControllerStatusFormat;
 import java.util.Locale;
 import net.minecraft.client.gui.Font;
 import net.minecraft.client.gui.GuiGraphics;
@@ -21,7 +22,7 @@ final class ControllerStatusLabels {
   }
 
   /** Blueprint machine name, or null when the blueprint slot is empty. */
-  static Component blueprint(AbstractContainerMenu menu) {
+  static Component blueprintName(AbstractContainerMenu menu) {
     if (menu == null || menu.slots.size() <= BLUEPRINT_SLOT) {
       return null;
     }
@@ -29,9 +30,19 @@ final class ControllerStatusLabels {
     return stack.getItem() instanceof MachineBlueprintItem item ? item.machineName() : null;
   }
 
-  /** Found machine name, or null until the structure is confirmed. */
-  static Component structure(String state, ResourceLocation machine) {
-    return "CONFIRMED".equals(state) && machine != null ? machine(machine) : null;
+  static Component blueprintLine(Component blueprintName) {
+    return Component.translatable("menu.mmcece.controller.blueprint", blueprintName == null ? none() : blueprintName);
+  }
+
+  static Component structureLine(String state, ResourceLocation machineId) {
+    Component name = "CONFIRMED".equals(state) && machineId != null ? machine(machineId) : none();
+    return Component.translatable("menu.mmcece.controller.structure", name);
+  }
+
+  static Component progressLine(int progressTicks, int durationTicks) {
+    return Component.translatable(
+        "menu.mmcece.controller.progress",
+        ControllerStatusFormat.progressPercent(progressTicks, durationTicks));
   }
 
   static Component state(MachinePayloads.ControllerStatusPayload status) {
@@ -101,7 +112,7 @@ final class ControllerStatusLabels {
     return Component.translatable(
         "menu.mmcece.controller.performance",
         averageTickMicros,
-        String.format(Locale.ROOT, "%.2f", averageSearchMicros / 1000.0));
+        ControllerStatusFormat.searchMilliseconds(averageSearchMicros));
   }
 
   /** Draws the average line and a second green WorkMode line. */
@@ -119,14 +130,7 @@ final class ControllerStatusLabels {
         true);
   }
 
-  static int percent(int progress, int duration) {
-    if (duration <= 0) {
-      return 0;
-    }
-    return (int) Math.max(0L, Math.min(100L, (long) progress * 100L / duration));
-  }
-
-  static Component none() {
+  private static Component none() {
     return tr("menu.mmcece.controller.none");
   }
 

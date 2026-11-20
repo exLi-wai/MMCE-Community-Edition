@@ -53,17 +53,11 @@ public final class MachineControllerScreen extends AbstractContainerScreen<Machi
     int y = 12;
     var status = menu.status();
     boolean formed = status != null && "CONFIRMED".equals(status.structureState());
-    Component blueprint = ControllerStatusLabels.blueprint(menu);
+    Component blueprint = ControllerStatusLabels.blueprintName(menu);
     // Original layout: once the machine is formed without a blueprint item, the
     // "found blueprint" line disappears instead of saying "none".
     if (blueprint != null || !formed) {
-      y = draw(
-          graphics,
-          Component.translatable(
-              "menu.mmcece.controller.blueprint",
-              blueprint == null ? ControllerStatusLabels.none() : blueprint),
-          x,
-          y) + 5;
+      y = draw(graphics, ControllerStatusLabels.blueprintLine(blueprint), x, y) + 5;
     }
 
     if (status == null) {
@@ -72,27 +66,14 @@ public final class MachineControllerScreen extends AbstractContainerScreen<Machi
       return;
     }
 
-    Component structure = ControllerStatusLabels.structure(status.structureState(), status.machineId());
-    y = draw(
-        graphics,
-        Component.translatable(
-            "menu.mmcece.controller.structure",
-            structure == null ? ControllerStatusLabels.none() : structure),
-        x,
-        y) + 5;
+    y = draw(graphics, ControllerStatusLabels.structureLine(status.structureState(), status.machineId()), x, y) + 5;
     y = draw(
         graphics,
         Component.translatable("menu.mmcece.controller.status", ControllerStatusLabels.state(status)),
         x,
         y) + 5;
     if (status.duration() > 0) {
-      y = draw(
-          graphics,
-          Component.translatable(
-              "menu.mmcece.controller.progress",
-              ControllerStatusLabels.percent(status.progress(), status.duration()) + "%"),
-          x,
-          y) + 5;
+      y = draw(graphics, ControllerStatusLabels.progressLine(status.progress(), status.duration()), x, y) + 5;
     }
     ControllerStatusLabels
         .drawPerformance(graphics, font, x, y, status.averageTickMicros(), status.averageSearchMicros());

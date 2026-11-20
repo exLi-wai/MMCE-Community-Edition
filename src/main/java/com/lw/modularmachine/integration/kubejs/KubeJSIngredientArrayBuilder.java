@@ -73,6 +73,25 @@ public final class KubeJSIngredientArrayBuilder {
             group.recipeModifiers()));
   }
 
+  record GroupCallbacks(
+      Map<ResourceLocation, RecipeItemCallbacks.Checker> checkers,
+      Map<ResourceLocation, RecipeItemCallbacks.Modifier> modifiers) {
+    GroupCallbacks {
+      checkers = Map.copyOf(checkers);
+      modifiers = Map.copyOf(modifiers);
+    }
+
+    void captureCallbacks() {
+      checkers.forEach(RecipeScriptCallbacks::checker);
+      modifiers.forEach(RecipeScriptCallbacks::modifier);
+    }
+
+    void captureAdapterCallbacks() {
+      checkers.forEach(RecipeScriptCallbacks::adapterChecker);
+      modifiers.forEach(RecipeScriptCallbacks::adapterModifier);
+    }
+  }
+
   public static final class IngredientArrayPrimer {
     private final Thread owner = Thread.currentThread();
     private final List<Choice> alternatives = new ArrayList<>();
@@ -303,14 +322,18 @@ public final class KubeJSIngredientArrayBuilder {
       return new IngredientArrayData.Group(resolved, 1, false, "");
     }
 
-    void captureCallbacks() {
-      checkers.forEach(RecipeScriptCallbacks::checker);
-      modifiers.forEach(RecipeScriptCallbacks::modifier);
-    }
-
-    void captureAdapterCallbacks() {
-      checkers.forEach(RecipeScriptCallbacks::adapterChecker);
-      modifiers.forEach(RecipeScriptCallbacks::adapterModifier);
+    GroupCallbacks callbacksFor(IngredientArrayData.Group group) {
+      var groupCheckers = new LinkedHashMap<ResourceLocation, RecipeItemCallbacks.Checker>();
+      var groupModifiers = new LinkedHashMap<ResourceLocation, RecipeItemCallbacks.Modifier>();
+      for (var choice : group.alternatives()) {
+        choice.checker().filter(checkers::containsKey).ifPresent(id -> groupCheckers.put(id, checkers.get(id)));
+        for (var id : choice.modifiers()) {
+          if (modifiers.containsKey(id)) {
+            groupModifiers.put(id, modifiers.get(id));
+          }
+        }
+      }
+      return new GroupCallbacks(groupCheckers, groupModifiers);
     }
 
     private IngredientArrayPrimer addItem(ItemStack stack, long amount) {

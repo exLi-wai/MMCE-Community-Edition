@@ -407,7 +407,7 @@ public final class FactoryParallelStarter {
     if (definition == null) {
       return new Admission(Result.STALE, null);
     }
-    if (plans.size() > first.maxRepeatableInputs() || plans.size() > 1 && !definition.parallelized()) {
+    if (plans.size() > 1 && !definition.parallelized() || plans.size() > first.maxRepeatableInputs(plans.size())) {
       return new Admission(Result.LIMIT_REACHED, null);
     }
     int energyLimit = FrozenRecipeFactory.factoryTickLimit(

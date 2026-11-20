@@ -485,6 +485,16 @@ public final class RecipeStartPlan {
   }
 
   public int maxRepeatableInputs() {
+    return maxRepeatableInputs(Integer.MAX_VALUE);
+  }
+
+  public int maxRepeatableInputs(int limit) {
+    if (limit < 0) {
+      throw new IllegalArgumentException("Negative input admission limit");
+    }
+    if (limit == 0) {
+      return 0;
+    }
     var available = new HashMap<ItemResourceKey, Long>();
     var required = new HashMap<ItemResourceKey, Long>();
     var fixed = new HashMap<ItemResourceKey, Long>();
@@ -506,7 +516,7 @@ public final class RecipeStartPlan {
         }
       }
     }
-    long result = source.patternSource() == null ? Integer.MAX_VALUE : source.patternSource().startLimit();
+    long result = source.patternSource() == null ? limit : Math.min(limit, source.patternSource().startLimit());
     for (var entry : fixed.entrySet()) {
       if (available.getOrDefault(entry.getKey(), 0L) < entry.getValue()) {
         return 0;
@@ -602,6 +612,10 @@ public final class RecipeStartPlan {
 
   public AtomicRecipeStarter.Result start() {
     return AtomicRecipeStarter.start(this);
+  }
+
+  public AtomicRecipeStarter.Result start(int workBudget) {
+    return AtomicRecipeStarter.start(this, workBudget);
   }
 
   public record Deduction(ItemSlotRef slot, ItemResourceKey key, long count) {

@@ -3,9 +3,9 @@ package com.lw.modularmachine.integration.jade;
 import com.lw.modularmachine.api.controller.MachineControllerApi;
 import com.lw.modularmachine.blockentity.FactoryControllerBlockEntity;
 import com.lw.modularmachine.machine.recipe.ControllerMetrics;
+import com.lw.modularmachine.presentation.ControllerStatusFormat;
 import com.lw.modularmachine.machine.structure.StructureService;
 import java.util.Locale;
-import net.minecraft.ChatFormatting;
 import net.minecraft.nbt.CompoundTag;
 import net.minecraft.network.chat.Component;
 import net.minecraft.resources.ResourceLocation;
@@ -102,18 +102,16 @@ final class FactoryControllerTooltipProvider implements IBlockComponentProvider,
       if (data.getBoolean(key + "has_run")) {
         int progress = data.getInt(key + "progress");
         int duration = data.getInt(key + "duration");
-        int percent = duration <= 0 ? 0 : Math.min(100, progress * 100 / duration);
-        tooltip.add(Component.translatable("jade.mmcece.factory.progress", percent + "%"));
+        tooltip.add(
+            Component.translatable(
+                "jade.mmcece.factory.progress",
+                ControllerStatusFormat.progressPercent(progress, duration)));
       }
     }
-    tooltip.add(
-        Component.translatable(
-            "jade.mmcece.performance",
-            data.getInt(PREFIX + "tick_micros"),
-            String.format(Locale.ROOT, "%.2f", data.getInt(PREFIX + "search_micros") / 1000.0)));
-    tooltip.add(
-        Component.translatable(
-            "jade.mmcece.workmode",
-            Component.literal(StructureService.workMode()).withStyle(ChatFormatting.GREEN)));
+    ControllerDiagnosticTooltip.appendPerformance(
+        tooltip,
+        data.getInt(PREFIX + "tick_micros"),
+        data.getInt(PREFIX + "search_micros"),
+        StructureService.workMode());
   }
 }

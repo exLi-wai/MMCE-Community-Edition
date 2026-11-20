@@ -56,12 +56,18 @@ final class KubeJSAdapterCallbackBindings {
 
     return callbackRows.computeIfAbsent(key, ignored -> new CallbackRow(io, index, addedOutput));
   }
-  CompiledCallbacks compile(ResourceLocation machine, ResourceLocation adapter, String id) {
+  CompiledCallbacks compile(ResourceLocation machine, ResourceLocation adapter, String id, int[] retainedOutputRows) {
     var bindings = new ArrayList<RecipeAdapterCustomization.CallbackBinding>();
     var checkers = new LinkedHashMap<ResourceLocation, RecipeItemCallbacks.Checker>();
     var outputModifiers = new LinkedHashMap<ResourceLocation, RecipeItemCallbacks.Modifier>();
     var inputModifiers = new LinkedHashMap<ResourceLocation, RecipeItemCallbacks.InputModifier>();
     for (var row : callbackRows.values()) {
+      int bindingRow = row.addedOutput ? retainedOutputRows[row.row] : row.row;
+      if (bindingRow < 0) {
+        throw new IllegalArgumentException("Triggered item rows cannot attach item callbacks");
+      }
+      // Inline function IDs follow the declaration row even when an earlier output
+      // moves to a trigger.
       String role = "adapter/" + adapter + "/" + id + "/" + row.io.serialized() + "/" + row.addedOutput + "/" + row.row;
       var checker = row.checker;
       if (row.inlineChecker != null) {
@@ -86,7 +92,7 @@ final class KubeJSAdapterCallbackBindings {
       }
       bindings.add(
           new RecipeAdapterCustomization.CallbackBinding(
-              new RecipeScriptOptions.ItemCallbacks(row.io, row.row, checker, modifierIds),
+              new RecipeScriptOptions.ItemCallbacks(row.io, bindingRow, checker, modifierIds),
               row.addedOutput));
     }
 

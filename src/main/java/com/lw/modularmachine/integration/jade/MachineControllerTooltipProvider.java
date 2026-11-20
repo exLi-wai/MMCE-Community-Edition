@@ -3,11 +3,11 @@ package com.lw.modularmachine.integration.jade;
 import com.lw.modularmachine.api.recipe.RecipeRunState;
 import com.lw.modularmachine.api.controller.MachineControllerApi;
 import com.lw.modularmachine.machine.recipe.ControllerMetrics;
+import com.lw.modularmachine.presentation.ControllerStatusFormat;
 import com.lw.modularmachine.machine.structure.StructureService;
 import com.lw.modularmachine.blockentity.MachineControllerBlockEntity;
 import com.lw.modularmachine.api.controller.VerificationState;
 import java.util.Locale;
-import net.minecraft.ChatFormatting;
 import net.minecraft.nbt.CompoundTag;
 import net.minecraft.network.chat.Component;
 import net.minecraft.resources.ResourceLocation;
@@ -126,8 +126,8 @@ final class MachineControllerTooltipProvider implements IBlockComponentProvider,
         tooltip.add(Component.translatable("jade.mmcece.run." + runState.name().toLowerCase(Locale.ROOT)));
         int progress = data.getInt("mmcece:progress_value");
         int duration = data.getInt("mmcece:duration_value");
-        int percent = duration <= 0 ? 0 : Math.min(100, progress * 100 / duration);
-        tooltip.add(Component.translatable("jade.mmcece.progress", percent + "%"));
+        tooltip.add(
+            Component.translatable("jade.mmcece.progress", ControllerStatusFormat.progressPercent(progress, duration)));
       }
       String status = data.getString(RUN_STATUS);
       if (resourceWait(status)) {
@@ -138,15 +138,11 @@ final class MachineControllerTooltipProvider implements IBlockComponentProvider,
           .add(Component.translatable("jade.mmcece.run_status." + data.getString(RUN_STATUS).toLowerCase(Locale.ROOT)));
     }
     if (data.contains(PERFORMANCE + "_tick")) {
-      tooltip.add(
-          Component.translatable(
-              "jade.mmcece.performance",
-              data.getInt(PERFORMANCE + "_tick"),
-              String.format(Locale.ROOT, "%.2f", data.getInt(PERFORMANCE + "_search") / 1000.0)));
-      tooltip.add(
-          Component.translatable(
-              "jade.mmcece.workmode",
-              Component.literal(StructureService.workMode()).withStyle(ChatFormatting.GREEN)));
+      ControllerDiagnosticTooltip.appendPerformance(
+          tooltip,
+          data.getInt(PERFORMANCE + "_tick"),
+          data.getInt(PERFORMANCE + "_search"),
+          StructureService.workMode());
     }
   }
 

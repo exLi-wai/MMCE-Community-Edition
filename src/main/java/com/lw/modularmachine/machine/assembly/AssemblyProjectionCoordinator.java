@@ -197,13 +197,27 @@ final class AssemblyProjectionCoordinator {
    */
   void stop(ServerPlayer player, long expectedRequest) {
     ServerThreadGuard.require(player.serverLevel(), "Projection cancelled");
-    var job = projections.get(player.getUUID());
+    removeRequest(player.getUUID(), expectedRequest);
+  }
+
+  private boolean removeRequest(UUID player, long expectedRequest) {
+    var job = projections.get(player);
     if (job != null && job.request == expectedRequest) {
-      projections.remove(player.getUUID());
+      projections.remove(player);
+      return true;
     }
-    var pending = pendingProjections.get(player.getUUID());
+    var pending = pendingProjections.get(player);
     if (pending != null && pending.request == expectedRequest) {
-      removePending(player.getUUID());
+      removePending(player);
+      return true;
+    }
+    return false;
+  }
+
+  private void invalidate(ServerPlayer player, long expectedRequest) {
+    if (removeRequest(player.getUUID(), expectedRequest)) {
+      ProjectionPayloads.clear(player, expectedRequest);
+      player.displayClientMessage(Component.translatable("message.mmcece.projection.cancelled"), true);
     }
   }
 
@@ -220,7 +234,7 @@ final class AssemblyProjectionCoordinator {
       return;
     }
     if (!current(player, pending)) {
-      cancel(player);
+      invalidate(player, pending.request);
       return;
     }
     if (System.nanoTime() >= deadline) {
@@ -228,7 +242,11 @@ final class AssemblyProjectionCoordinator {
     }
     try {
       var ready = pending.preparation.advance(deadline);
-      if (!current(player, pending) || pendingProjections.get(player.getUUID()) != pending) {
+      if (pendingProjections.get(player.getUUID()) != pending) {
+        return;
+      }
+      if (!current(player, pending)) {
+        invalidate(player, pending.request);
         return;
       }
       if (ready != null) {
@@ -246,7 +264,7 @@ final class AssemblyProjectionCoordinator {
       }
     } catch (RuntimeException failure) {
       ModularMachine.LOGGER.warn("Projection preparation failed at {}", pending.origin, failure);
-      cancel(player);
+      invalidate(player, pending.request);
     }
   }
 
@@ -269,7 +287,7 @@ final class AssemblyProjectionCoordinator {
     int packets = 0;
     var projection = projections.get(player.getUUID());
     if (projection != null && !projection.current(player)) {
-      cancel(player);
+      invalidate(player, projection.request);
     } else if (projection != null) {
       for (int sent = 0; sent < packetBudget
           && packets < packetBudget

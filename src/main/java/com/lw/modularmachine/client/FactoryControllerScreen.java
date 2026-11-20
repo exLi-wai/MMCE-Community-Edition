@@ -571,27 +571,18 @@ public final class FactoryControllerScreen extends AbstractContainerScreen<Facto
     int infoY = 12;
     var status = menu.status();
     boolean formed = status != null && "CONFIRMED".equals(status.structureState());
-    Component blueprint = ControllerStatusLabels.blueprint(menu);
+    Component blueprint = ControllerStatusLabels.blueprintName(menu);
     if (blueprint != null || !formed) {
-      infoY = drawWrapped(
-          graphics,
-          Component.translatable(
-              "menu.mmcece.controller.blueprint",
-              blueprint == null ? ControllerStatusLabels.none() : blueprint),
-          infoX,
-          infoY) + 5;
+      infoY = drawWrapped(graphics, ControllerStatusLabels.blueprintLine(blueprint), infoX, infoY) + 5;
     }
     if (status == null) {
       drawWrapped(graphics, Component.translatable("menu.mmcece.controller.status_waiting"), infoX, infoY);
       graphics.pose().popPose();
       return;
     }
-    Component structure = ControllerStatusLabels.structure(status.structureState(), status.machineId());
     infoY = drawWrapped(
         graphics,
-        Component.translatable(
-            "menu.mmcece.controller.structure",
-            structure == null ? ControllerStatusLabels.none() : structure),
+        ControllerStatusLabels.structureLine(status.structureState(), status.machineId()),
         infoX,
         infoY) + 5;
     infoY = drawWrapped(
@@ -650,9 +641,7 @@ public final class FactoryControllerScreen extends AbstractContainerScreen<Facto
     if (thread.duration() > 0) {
       graphics.drawString(
           font,
-          Component.translatable(
-              "menu.mmcece.controller.progress",
-              ControllerStatusLabels.percent(thread.progress(), thread.duration()) + "%"),
+          ControllerStatusLabels.progressLine(thread.progress(), thread.duration()),
           x,
           y + 22,
           FONT_COLOR,

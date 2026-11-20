@@ -120,10 +120,11 @@ public final class ControllerRecipeSearch {
         idleAppearance = ControllerAppearanceState.PAUSED;
       }
     }
+    int startBudget = MachineConfig.RECIPE_OUTPUT_WORK.get();
     if (preparedRecipe == null) {
       long searchStarted = System.nanoTime();
       try {
-        var result = recipeSearch.advance(MachineConfig.RECIPE_OUTPUT_WORK.get());
+        var result = recipeSearch.advance(startBudget);
         if (result.status() == Status.BUDGET_EXHAUSTED) {
           return;
         }
@@ -137,17 +138,21 @@ public final class ControllerRecipeSearch {
           return;
         }
         preparedRecipe = result.plan().orElseThrow();
+        startBudget -= result.workUsed();
       } finally {
         ControllerMetrics.recordSearch(System.nanoTime() - searchStarted, serverTick);
       }
     }
-    var result = preparedRecipe.start();
+    var result = preparedRecipe.start(startBudget);
     interfaceFailure = "";
     idleRecipeStatus = RecipeRunStatus.IDLE;
     idleAppearance = result == Result.FAILED ? ControllerAppearanceState.ERROR : ControllerAppearanceState.PAUSED;
-    if (result == Result.STARTED) {
+    if (result.committed()) {
+      recipeSearch = null;
+      preparedRecipe = null;
       host.started();
       wakeRetry(now);
+      return;
     }
     if (result == Result.CHECK_REJECTED && recipeSearch.rejectSelected(preparedRecipe)) {
       preparedRecipe = null;
@@ -159,7 +164,7 @@ public final class ControllerRecipeSearch {
       preparedRecipe = null;
       if (result == Result.STALE) {
         wakeRetry(now);
-      } else if (result != Result.STARTED) {
+      } else {
         backoffRecipeRetry(now);
       }
     }

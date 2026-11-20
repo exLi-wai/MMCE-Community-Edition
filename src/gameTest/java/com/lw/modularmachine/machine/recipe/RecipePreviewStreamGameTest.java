@@ -2,7 +2,10 @@ package com.lw.modularmachine.machine.recipe;
 
 import com.google.gson.JsonObject;
 import com.google.gson.JsonParser;
+import com.mojang.datafixers.util.Pair;
+import com.mojang.serialization.DynamicOps;
 import com.mojang.serialization.JsonOps;
+import com.mojang.serialization.MapLike;
 import com.lw.modularmachine.machine.recipe.resource.RecipeResourceDefinitions;
 import com.lw.modularmachine.machine.recipe.resource.RecipeResourceExecutionRegistry;
 import com.lw.modularmachine.machine.recipe.search.RecipeCatalog;
@@ -11,6 +14,7 @@ import java.util.List;
 import java.util.Map;
 import java.util.UUID;
 import java.util.concurrent.atomic.AtomicReference;
+import java.util.stream.Stream;
 import net.minecraft.resources.ResourceLocation;
 import net.minecraft.nbt.ListTag;
 import io.netty.buffer.Unpooled;
@@ -190,6 +194,68 @@ public final class RecipePreviewStreamGameTest {
         copy.chemicals().outputs().getFirst().amount() == 8,
         "Freezing a run mutated the source definition");
     helper.succeed();
+  }
+
+  @GameTest(template = "empty16", timeoutTicks = 80)
+  public static void resource_fields_are_routed_once_with_native_defaults_and_errors(GameTestHelper helper) {
+    var registries = helper.getLevel().registryAccess();
+    var source = JsonParser.parseString("""
+        {"heat_output":7,"inputs":[],"machine":"mmcece:codec_test","energy_per_tick":12,"outputs":[]}
+        """);
+    checkResourceFields(helper, registries.createSerializationContext(JsonOps.INSTANCE), source);
+    checkResourceFields(
+        helper,
+        registries.createSerializationContext(NbtOps.INSTANCE),
+        JsonOps.INSTANCE.convertTo(NbtOps.INSTANCE, source));
+    helper.succeed();
+  }
+
+  private static <T> void checkResourceFields(GameTestHelper helper, DynamicOps<T> ops, T source) {
+    var input = ops.getMap(source).getOrThrow();
+    var singlePass = new MapLike<T>() {
+      int scans;
+
+      @Override
+      public T get(T key) {
+        return input.get(key);
+      }
+
+      @Override
+      public T get(String key) {
+        return input.get(key);
+      }
+
+      @Override
+      public Stream<Pair<T, T>> entries() {
+        scans++;
+        return input.entries();
+      }
+    };
+    var decoded = RecipeResourceDefinitions.CODEC.decode(ops, singlePass).getOrThrow();
+    helper.assertValueEqual(singlePass.scans, 1, "top-level recipe field scans");
+    var types = RecipeResourceDefinitions.snapshot();
+    helper.assertValueEqual(decoded.entries().size(), types.size(), "decoded resource count including defaults");
+    for (int index = 0; index < types.size(); index++) {
+      var type = types.get(index);
+      var entry = decoded.entries().get(index);
+      helper.assertTrue(entry.type() == type, "Resource registration order changed at " + type.id());
+      var expected = type.nativeCodec().decode(ops, input).getOrThrow();
+      helper.assertValueEqual(entry.data(), expected, "native value for " + type.id());
+    }
+    var codec = RecipeResourceDefinitions.CODEC.codec();
+    helper.assertTrue(
+        codec.parse(ops, ops.remove(source, "inputs")).error().isPresent(),
+        "Missing required item inputs were accepted");
+    var unknown = codec.parse(ops, ops.set(source, "unregistered_test_field", ops.createInt(1)));
+    helper.assertTrue(
+        unknown.error().orElseThrow().message().contains("unregistered_test_field"),
+        "Unknown resource field lost its diagnostic");
+    var malformed = ops.set(source, "energy_per_tick", ops.createString("invalid"));
+    var nativeError = RecipeResourceDefinitions.decodeOwned(RecipeResourceDefinitions.ENERGY, ops, malformed);
+    helper.assertValueEqual(
+        codec.parse(ops, malformed).error().orElseThrow().message(),
+        nativeError.error().orElseThrow().message(),
+        "malformed resource diagnostic");
   }
 
   @GameTest(template = "empty16", timeoutTicks = 80)

@@ -241,6 +241,23 @@ public final class RecipeAdapterGameTests {
     helper.assertTrue(
         server.getRecipeManager().byKey(recipeId).isPresent(),
         "RecipeBuilder did not keep the user KubeJS recipe ID in the actual manager");
+    var zeroTrigger = MachineRecipeService
+        .definition(server, ResourceLocation.parse("kubejs:builder_smoke/zero_trigger_preview")).orElseThrow();
+    helper.assertTrue(
+        zeroTrigger.triggeredResources().isEmpty() && zeroTrigger.outputs().getFirst().displayStack().is(Items.DIAMOND),
+        "A zero trigger must keep the completion row and its preview");
+    var itemArguments = MachineRecipeService
+        .definition(server, ResourceLocation.parse("kubejs:builder_smoke/item_argument_types")).orElseThrow();
+    var groups = itemArguments.ingredientArrays().inputs();
+    helper.assertTrue(
+        groups.size() == 2
+            && groups.getFirst().alternatives().size() > 1
+            && groups.getFirst().alternatives().getFirst().amount() == 2
+            && groups.getLast().alternatives().getFirst().amount() == 3,
+        "A tag and a native ingredient must retain their alternatives and explicit amounts");
+    helper.assertTrue(
+        itemArguments.outputs().getFirst().amount() == 9_007_199_254_740_993L,
+        "An ItemStack must keep its exact decimal-string amount");
     helper.assertTrue(
         MachineRecipeService
             .definition(server, ResourceLocation.fromNamespaceAndPath("kubejs", "mmcece/builder_smoke/iron_to_gold"))

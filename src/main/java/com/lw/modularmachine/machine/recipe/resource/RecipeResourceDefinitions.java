@@ -13,6 +13,7 @@ import com.lw.modularmachine.api.recipe.ConstellationRecipeData;
 import com.lw.modularmachine.api.recipe.resource.RecipeResourceType;
 import com.lw.modularmachine.machine.component.ResourceTypeRegistry;
 import com.lw.modularmachine.api.recipe.resource.RecipeResources;
+import com.mojang.datafixers.util.Pair;
 import com.mojang.serialization.DataResult;
 import com.mojang.serialization.DynamicOps;
 import com.mojang.serialization.JsonOps;
@@ -21,7 +22,7 @@ import com.mojang.serialization.MapLike;
 import com.mojang.serialization.RecordBuilder;
 import java.util.ArrayList;
 import java.util.LinkedHashMap;
-import java.util.LinkedHashSet;
+import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.Objects;
@@ -57,7 +58,7 @@ public final class RecipeResourceDefinitions {
       "_kubejs_changed_marker",
       "controller_command_actions");
   private static final Map<ResourceLocation, RecipeResourceType<?>> REGISTERED = new LinkedHashMap<>();
-  private static final Map<String, ResourceLocation> FIELD_OWNERS = new LinkedHashMap<>();
+  private static final Map<ResourceLocation, Set<String>> FIELDS_BY_TYPE = new HashMap<>();
   private static List<RecipeResourceType<?>> frozen;
 
   public static final RecipeResourceType<ItemRecipeData> ITEM = new RecipeResourceType<>(
@@ -225,22 +226,27 @@ public final class RecipeResourceDefinitions {
     public <T> DataResult<RecipeResources> decode(DynamicOps<T> ops, MapLike<T> input) {
       try {
         var types = snapshot();
-        var allowed = new LinkedHashSet<>(fieldNames());
-        allowed.addAll(RESERVED_FIELDS);
-        for (var entry : input.entries().toList()) {
-          var key = ops.getStringValue(entry.getFirst()).result();
-          if (key.isEmpty() || !allowed.contains(key.orElseThrow())) {
+        var grouped = new HashMap<ResourceLocation, List<Pair<T, T>>>();
+        var entries = input.entries().iterator();
+        while (entries.hasNext()) {
+          var entry = entries.next();
+          var key = ops.getStringValue(entry.getFirst()).result().orElse(null);
+          if (key != null && RESERVED_FIELDS.contains(key)) {
+            continue;
+          }
+          // snapshot() closes registration before we read the field index.
+          var owner = Fields.OWNERS.get(key);
+          if (owner == null) {
             return DataResult.error(() -> "Unsupported recipe resource field: " + entry.getFirst());
           }
+          grouped.computeIfAbsent(owner, ignored -> new ArrayList<>()).add(entry);
         }
-        DataResult<List<RecipeResources.Entry<?>>> decoded = DataResult.success(List.of());
+        DataResult<List<RecipeResources.Entry<?>>> decoded = DataResult.success(new ArrayList<>(types.size()));
         for (var type : types) {
-          decoded = decoded.flatMap(entries -> decodeEntry(type, ops, input).map(entry -> {
-            var next = new ArrayList<RecipeResources.Entry<?>>(entries.size() + 1);
-            next.addAll(entries);
-            next.add(entry);
-
-            return List.copyOf(next);
+          var owned = grouped.getOrDefault(type.id(), List.of());
+          decoded = decoded.flatMap(values -> decodeFields(type, ops, owned.stream()).map(data -> {
+            values.add(data);
+            return values;
           }));
         }
 
@@ -329,14 +335,12 @@ public final class RecipeResourceDefinitions {
       if (field.isBlank()
           || field.length() > 128
           || RESERVED_FIELDS.contains(field)
-          || FIELD_OWNERS.containsKey(field)) {
+          || Fields.OWNERS.containsKey(field)) {
         throw new IllegalArgumentException("Conflicting native resource field: " + field);
       }
     }
     REGISTERED.put(type.id(), type);
-    for (var field : fields) {
-      FIELD_OWNERS.put(field, type.id());
-    }
+    FIELDS_BY_TYPE.put(type.id(), Set.copyOf(fields));
     Fields.install(type.id(), fields);
   }
 
@@ -356,7 +360,7 @@ public final class RecipeResourceDefinitions {
 
   /** Key introspection alone does not close startup registration. */
   public static synchronized Set<String> fieldNames() {
-    return Set.copyOf(FIELD_OWNERS.keySet());
+    return Fields.names();
   }
 
   /** Builder lookup does not close startup integration registration. */
@@ -373,21 +377,20 @@ public final class RecipeResourceDefinitions {
 
   public static synchronized Set<String> fields(RecipeResourceType<?> type) {
     requireRegistered(type);
-    var owned = new LinkedHashSet<String>();
-    FIELD_OWNERS.forEach((field, owner) -> {
-      if (owner.equals(type.id())) {
-        owned.add(field);
-      }
-    });
-
-    return Set.copyOf(owned);
+    return FIELDS_BY_TYPE.get(type.id());
   }
 
   /** Decode this descriptor's fields from a complete native declaration. */
   public static <D, T> DataResult<D> decodeOwned(RecipeResourceType<D> type, DynamicOps<T> ops, T declaration) {
-    requireRegistered(type);
-
-    return ops.getMap(declaration).flatMap(input -> decodeEntry(type, ops, input).map(RecipeResources.Entry::data));
+    var allowed = fields(type);
+    return ops.getMap(declaration)
+        .flatMap(
+            input -> decodeFields(
+                type,
+                ops,
+                input.entries().filter(
+                    entry -> ops.getStringValue(entry.getFirst()).result().map(allowed::contains).orElse(false))))
+        .map(RecipeResources.Entry::data);
   }
 
   /**
@@ -397,13 +400,8 @@ public final class RecipeResourceDefinitions {
     return Fields.hasExtensions(declared);
   }
 
-  private static <D, T> DataResult<RecipeResources.Entry<D>> decodeEntry(RecipeResourceType<D> type, DynamicOps<T> ops, MapLike<T> input) {
-    var allowed = fields(type);
-    var owned = ops.createMap(
-        input.entries()
-            .filter(entry -> ops.getStringValue(entry.getFirst()).result().map(allowed::contains).orElse(false)));
-
-    return ops.getMap(owned).flatMap(values -> type.nativeCodec().decode(ops, values))
+  private static <D, T> DataResult<RecipeResources.Entry<D>> decodeFields(RecipeResourceType<D> type, DynamicOps<T> ops, Stream<Pair<T, T>> fields) {
+    return ops.getMap(ops.createMap(fields)).flatMap(values -> type.nativeCodec().decode(ops, values))
         .map(data -> new RecipeResources.Entry<>(type, data));
   }
 

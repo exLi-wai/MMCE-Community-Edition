@@ -25,6 +25,28 @@ ServerEvents.recipes(event => {
     .setParallelized(false)
     .build()
 
+  const triggerProbe = id => RecipeBuilder.newBuilder(event, 'kubejs:builder_smoke/' + id, 'mmcece:test_missing_resource_ports', 20)
+  const rejectPreview = builder => {
+    try {
+      builder.build()
+    } catch (error) {
+      if (String(error).includes('Triggered item rows cannot use an item preview')) return
+      throw error
+    }
+    throw new Error('A triggered item with a preview was accepted')
+  }
+  rejectPreview(triggerProbe('trigger_input_preview').addItemInput('minecraft:iron_ingot')
+    .setTriggerTime(2).setPreviewStack('minecraft:diamond').addItemOutput('minecraft:gold_ingot'))
+  rejectPreview(triggerProbe('trigger_output_preview').addItemInput('minecraft:iron_ingot')
+    .addItemOutput('minecraft:gold_ingot').setPreViewNBT({probe: 1}).setTriggerTime(2))
+  triggerProbe('zero_trigger_preview').addItemInput('minecraft:iron_ingot').addItemOutput('minecraft:gold_ingot')
+    .setTriggerTime(2).setPreviewStack('minecraft:diamond').setTriggerTime(0).build()
+  triggerProbe('item_argument_types')
+    .addItemInput('#minecraft:planks', '2')
+    .addItemInput(Ingredient.of('minecraft:iron_ingot'), 3)
+    .addItemOutput(Item.of('minecraft:gold_ingot'), '9007199254740993')
+    .build()
+
   for (const recipeId of ['builder_short_id', 'my_pack:gold', 'minecraft:builder_gold', 'mmcece:mmcece/builder_gold']) {
     RecipeBuilder.newBuilder(event, recipeId, 'mmcece:test_missing_resource_ports', 80)
       .addItemInput('minecraft:iron_ingot')

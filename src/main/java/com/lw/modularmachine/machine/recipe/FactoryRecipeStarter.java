@@ -71,7 +71,7 @@ public final class FactoryRecipeStarter {
         }
       }
       var checked = plan.checkedTicket();
-      if (checked.isEmpty() || plan.maxRepeatableInputs() < 1) {
+      if (checked.isEmpty() || plan.maxRepeatableInputs(1) < 1) {
         return Result.STALE;
       }
       var ticket = checked.orElseThrow();

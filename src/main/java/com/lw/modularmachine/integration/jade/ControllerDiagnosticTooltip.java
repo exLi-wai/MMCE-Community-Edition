@@ -1,7 +1,9 @@
 package com.lw.modularmachine.integration.jade;
 
 import com.lw.modularmachine.api.controller.MachineControllerApi.StructureDiagnostic;
+import com.lw.modularmachine.presentation.ControllerStatusFormat;
 import com.lw.modularmachine.presentation.MachineDiagnosticText;
+import net.minecraft.ChatFormatting;
 import net.minecraft.core.BlockPos;
 import net.minecraft.nbt.CompoundTag;
 import net.minecraft.network.chat.Component;
@@ -40,5 +42,15 @@ final class ControllerDiagnosticTooltip {
               "jade.mmcece.diagnostic.actual",
               MachineDiagnosticText.localized(data.getString(prefix + "_actual"))));
     }
+  }
+
+  static void appendPerformance(ITooltip tooltip, int tickMicros, int searchMicros, String workMode) {
+    tooltip.add(
+        Component.translatable(
+            "jade.mmcece.performance",
+            tickMicros,
+            ControllerStatusFormat.searchMilliseconds(searchMicros)));
+    tooltip.add(
+        Component.translatable("jade.mmcece.workmode", Component.literal(workMode).withStyle(ChatFormatting.GREEN)));
   }
 }

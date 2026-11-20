@@ -1,18 +1,97 @@
 package com.lw.modularmachine.integration.kubejs;
 
 import com.google.gson.JsonParser;
+import com.lw.modularmachine.api.recipe.RecipeItemCallbacks;
 import com.lw.modularmachine.machine.recipe.MachineRecipe;
 import com.lw.modularmachine.machine.recipe.resource.RecipeResourceDefinitions;
 import dev.latvian.mods.rhino.ContextFactory;
 import net.minecraft.resources.ResourceLocation;
 import net.minecraft.gametest.framework.GameTest;
 import net.minecraft.gametest.framework.GameTestHelper;
+import net.minecraft.nbt.CompoundTag;
+import net.minecraft.world.item.ItemStack;
+import net.minecraft.world.item.Items;
 import net.neoforged.neoforge.gametest.GameTestHolder;
 import net.neoforged.neoforge.gametest.PrefixGameTestTemplate;
 
 @GameTestHolder("mmcece_kubejs_adapter_resources")
 @PrefixGameTestTemplate(false)
 public final class KubeJSAdapterResourcesRhinoGameTest {
+  @GameTest(templateNamespace = "mmcece_adapter", template = "empty16")
+  public static void triggerKeepsOnlyRetainedAppendedOutputBindings(GameTestHelper helper) {
+    var registries = helper.getLevel().registryAccess();
+    var registration = new KubeJSRecipeAdapterRegistration(registries);
+    var stack = new ItemStack(Items.GOLD_INGOT);
+    registration.create("mmcece:ae", "minecraft:furnace").addItemOutputModifier(1, "kubejs:source").addItemOutput(stack)
+        .setTriggerTime(2).addItemOutput(stack).setTriggerTime(0).setPreviewStack(new ItemStack(Items.DIAMOND))
+        .setMinMaxAmount(1, 2).addItemModifier("kubejs:kept").build();
+    registration.seal();
+    var result = registration.snapshot().get(ResourceLocation.parse("mmcece:ae")).getFirst().customization();
+    var additions = JsonParser.parseString(result.resourceAdditions().encoded()).getAsJsonObject();
+    helper
+        .assertValueEqual(additions.getAsJsonArray("triggered_resources").size(), 1, "Only positive ticks move a row");
+    helper.assertValueEqual(
+        additions.getAsJsonArray("output_ranges").get(0).getAsJsonObject().get("row").getAsInt(),
+        0,
+        "Range follows retained output");
+    helper.assertTrue(
+        result.itemOutputs().size() == 1 && result.itemOutputs().getFirst().encodedPreview().isPresent(),
+        "Retained output keeps preview");
+    var source = result.itemCallbacks().getFirst();
+    var kept = result.itemCallbacks().getLast();
+    helper.assertTrue(!source.addedOutput() && source.callback().row() == 1, "Source callback index must not shift");
+    helper.assertTrue(kept.addedOutput() && kept.callback().row() == 0, "Appended callback must shift with its output");
+
+    var preview = new KubeJSRecipeAdapterRegistration(registries).create("mmcece:ae", "minecraft:furnace");
+    assertBuildRejected(
+        helper,
+        preview.addItemOutput(stack).setPreViewNBT(new CompoundTag()).setTriggerTime(2),
+        "preview");
+    var callback = new KubeJSRecipeAdapterRegistration(registries).create("mmcece:ae", "minecraft:furnace");
+    assertBuildRejected(
+        helper,
+        callback.addItemOutput(stack).setTriggerTime(2).addItemModifier("kubejs:conflict"),
+        "item callbacks");
+    helper.succeed();
+  }
+
+  private static void assertBuildRejected(GameTestHelper helper, KubeJSRecipeAdapterBuilder builder, String reason) {
+    try {
+      builder.build();
+    } catch (IllegalArgumentException rejected) {
+      helper.assertTrue(rejected.getMessage().contains(reason), rejected.getMessage());
+      return;
+    }
+    helper.fail("Expected adapter build to reject " + reason);
+  }
+
+  @GameTest(templateNamespace = "mmcece_adapter", template = "empty16")
+  public static void ingredientGroupFreezesOnlyReferencedInlineCallbacks(GameTestHelper helper) {
+    var registries = helper.getLevel().registryAccess();
+    RecipeItemCallbacks.Checker first = (context, stack) -> false;
+    RecipeItemCallbacks.Checker second = (context, stack) -> true;
+    var primer = KubeJSIngredientArrayBuilder.newBuilder().addIngredient(new ItemStack(Items.IRON_INGOT))
+        .setChecker(first);
+    var firstGroup = primer.snapshot(registries);
+    var firstCallbacks = primer.callbacksFor(firstGroup);
+    primer.setChecker(second).addItemModifier("kubejs:named");
+    var secondGroup = primer.snapshot(registries);
+    var secondCallbacks = primer.callbacksFor(secondGroup);
+    primer.setChecker("kubejs:named");
+    helper.assertTrue(
+        firstCallbacks.checkers().size() == 1
+            && firstCallbacks.checkers().get(firstGroup.alternatives().getFirst().checker().orElseThrow()) == first,
+        "Previously attached group must keep its checker");
+    helper.assertTrue(
+        secondCallbacks.checkers().size() == 1
+            && secondCallbacks.checkers().get(secondGroup.alternatives().getFirst().checker().orElseThrow()) == second,
+        "Replaced checkers must not occupy callback slots");
+    helper.assertTrue(
+        secondCallbacks.modifiers().isEmpty() && primer.callbacksFor(primer.snapshot(registries)).checkers().isEmpty(),
+        "Named callbacks must not install inline functions");
+    helper.succeed();
+  }
+
   @GameTest(templateNamespace = "mmcece_structure_nbt", template = "empty16")
   public static void adapterChainCapturesChemicalAndEachLegacyResourceFamily(GameTestHelper helper) {
     var registration = new KubeJSRecipeAdapterRegistration(helper.getLevel().registryAccess());

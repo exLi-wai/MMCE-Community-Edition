@@ -1,0 +1,19 @@
+// Recipe-only runs need the machines referenced by the test datapack at catalog reload.
+def recipes = fileTree('src/gameTest/resources/data/mmcece/recipe/mmcece') { include '**/*.json' }
+def machineDir = file('src/gameTest/resources/data/mmcece/mmcece/machines')
+def machines = fileTree(machineDir) { include '**/*.json' }
+def fixtures = tasks.register('prepareRecipeGameTestFixtures', Sync) {
+    inputs.files(recipes)
+    from(machines) {
+        def declarations = recipes.files.collect { new groovy.json.JsonSlurper().parse(it) }
+        include(declarations.findAll { it.type == 'mmcece:machine' }.collect {
+            it.machine.replaceFirst('^mmcece:', '').replace(':', '/') + '.json'
+        } as Set)
+    }
+    into neoForge.runs.named('gameTestServer').flatMap { it.gameDirectory.dir('config/modularmachinery/machinery') }
+    // Remove obsolete fixture copies from previous runs, preserving other local configuration.
+    preserve { exclude(machines.files.collect { fixture ->
+        machineDir.toPath().relativize(fixture.toPath()).toString().replace(File.separatorChar, '/' as char)
+    }) }
+}
+tasks.named('runGameTestServer') { dependsOn fixtures }

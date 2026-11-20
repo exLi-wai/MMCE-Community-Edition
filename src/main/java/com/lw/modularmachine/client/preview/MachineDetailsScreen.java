@@ -26,8 +26,7 @@ public final class MachineDetailsScreen extends StructurePreviewScreen {
   }
 
   private MachineDetailsScreen(ResourceLocation machineId, ClientMachineCatalog.Machine machine) {
-    super(Component
-        .translatable("jei.mmcece.details.title", Component.translatable(ClientMachineCatalog.translation(machineId))));
+    super(detailsTitle(machineId));
     this.machineId = Objects.requireNonNull(machineId);
     this.machine = machine;
     if (machine != null) {
@@ -35,10 +34,14 @@ public final class MachineDetailsScreen extends StructurePreviewScreen {
     }
   }
 
+  private static Component detailsTitle(ResourceLocation machineId) {
+    return Component
+        .translatable("jei.mmcece.details.title", Component.translatable(ClientMachineCatalog.translation(machineId)));
+  }
+
   @Override
   protected Component headerTitle() {
-    var name = Component
-        .translatable("jei.mmcece.details.title", Component.translatable(ClientMachineCatalog.translation(machineId)));
+    var name = detailsTitle(machineId);
     return machine == null || machine.prefix().isEmpty() ? name : Component.translatable(machine.prefix()).append(" ")
         .append(name);
   }

@@ -3,6 +3,7 @@ package com.lw.modularmachine.menu;
 import com.lw.modularmachine.blockentity.SmartInterfaceBlockEntity;
 import com.lw.modularmachine.network.SmartInterfacePayloads;
 import com.lw.modularmachine.registry.MachineRegistries;
+import java.util.UUID;
 import net.minecraft.network.FriendlyByteBuf;
 import net.minecraft.server.level.ServerPlayer;
 import net.minecraft.world.entity.player.Inventory;
@@ -51,18 +52,16 @@ public final class SmartInterfaceMenu extends AbstractContainerMenu {
     }
   }
 
-  public void requestValue(SmartInterfaceBlockEntity.Entry entry, double value) {
-    if (status != null) {
-      PacketDistributor.sendToServer(
-          new SmartInterfacePayloads.Action(
-              containerId,
-              smart.getBlockPos(),
-              status.instance(),
-              entry.binding().controller(),
-              entry.binding().type(),
-              entry.binding().revision(),
-              value));
-    }
+  public void requestValue(UUID instance, SmartInterfaceBlockEntity.Entry entry, double value) {
+    PacketDistributor.sendToServer(
+        new SmartInterfacePayloads.Action(
+            containerId,
+            smart.getBlockPos(),
+            instance,
+            entry.binding().controller(),
+            entry.binding().type(),
+            entry.binding().revision(),
+            value));
   }
 
   public void refreshStatus() {

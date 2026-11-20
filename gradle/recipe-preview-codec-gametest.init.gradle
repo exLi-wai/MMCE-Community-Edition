@@ -20,14 +20,7 @@ allprojects {
                 systemProperty 'neoforge.enabledGameTestNamespaces', 'mmcece_recipe_codec'
                 logLevel = org.slf4j.event.Level.INFO
             }
-            def fixtures = tasks.register('prepareRecipePreviewCodecFixtures', Copy) {
-                from project.file('src/gameTest/resources/data/mmcece/mmcece/machines')
-                into project.file('build/gametest-recipe-preview-codec/config/modularmachinery/machinery')
-                include '**/*.json'
-            }
-            tasks.named('runGameTestServer') {
-                dependsOn fixtures
-            }
+            project.apply from: project.file('gradle/recipe-gametest-fixtures.gradle')
         }
     }
 }

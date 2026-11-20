@@ -49,7 +49,7 @@ import net.minecraft.world.item.component.CustomData;
 import net.minecraft.resources.ResourceLocation;
 import net.minecraft.world.item.ItemStack;
 import net.minecraft.world.item.crafting.Ingredient;
-import net.minecraft.core.registries.BuiltInRegistries;
+import dev.latvian.mods.kubejs.plugin.builtin.wrapper.ItemWrapper;
 import net.neoforged.neoforge.fluids.FluidStack;
 import org.jetbrains.annotations.ApiStatus;
 
@@ -137,7 +137,7 @@ public final class KubeJSRecipeBuilder {
     private final List<RecipePreparationHandlers.Handler> preparationHandlers = new ArrayList<>();
     private final List<IngredientArrayData.Group> ingredientArrays = new ArrayList<>();
     private final List<IngredientArrayData.Group> randomItemOutputs = new ArrayList<>();
-    private final List<KubeJSIngredientArrayBuilder.IngredientArrayPrimer> ingredientArrayCallbacks = new ArrayList<>();
+    private final List<KubeJSIngredientArrayBuilder.GroupCallbacks> ingredientArrayCallbacks = new ArrayList<>();
     private long energyPerTick;
     private long energyOutputPerTick;
     private int energyRequirements;
@@ -188,42 +188,41 @@ public final class KubeJSRecipeBuilder {
       return this;
     }
 
-    public RecipeBuilder addItemInput(ItemStack stack) {
-      return addItemInput(stack, stack == null ? null : stack.getCount());
+    public RecipeBuilder addItemInput(Context context, Object ingredient) {
+      return addScriptItem(context, inputs, ingredient, null);
     }
 
-    public RecipeBuilder addItemInput(Ingredient ingredient) {
-      return addItemInput(ingredient, 1);
+    public RecipeBuilder addItemInput(Context context, Object ingredient, Object amount) {
+      return addScriptItem(context, inputs, ingredient, scriptItemAmount(amount));
     }
 
-    public RecipeBuilder addItemInput(Ingredient ingredient, Number amount) {
-      return addIngredientArrayInput(KubeJSIngredientArrayBuilder.newBuilder().addIngredient(ingredient, amount));
+    private static long scriptItemAmount(Object amount) {
+      if (amount instanceof Number number) {
+        return KubeJSRecipeArguments.integer(number, "item amount", 1, Long.MAX_VALUE);
+      }
+      if (amount instanceof CharSequence text) {
+        return KubeJSRecipeArguments.integer(text.toString(), "item amount", 1, Long.MAX_VALUE);
+      }
+      throw new IllegalArgumentException("Expected a numeric item amount or an exact decimal string");
     }
 
-    public RecipeBuilder addItemInput(Ingredient ingredient, String amount) {
-      return addIngredientArrayInput(KubeJSIngredientArrayBuilder.newBuilder().addIngredient(ingredient, amount));
-    }
-
-    public RecipeBuilder addItemInput(String ingredient) {
-      return addItemInput(ingredient, 1);
-    }
-
-    public RecipeBuilder addItemInput(String ingredient, Number amount) {
-      return ingredient != null && ingredient.startsWith("#") ? addItemInput(
-          KubeJSIngredientArrayBuilder.tagIngredient(ingredient),
-          amount) : addItemInput(itemPrototype(ingredient), amount);
-    }
-
-    public RecipeBuilder addItemInput(String ingredient, String amount) {
-      return ingredient != null && ingredient.startsWith("#") ? addItemInput(
-          KubeJSIngredientArrayBuilder.tagIngredient(ingredient),
-          amount) : addItemInput(itemPrototype(ingredient), amount);
-    }
-
-    private static ItemStack itemPrototype(String item) {
-      var id = KubeJSRecipeArguments.identifier(item, "item");
-      return new ItemStack(
-          BuiltInRegistries.ITEM.getOptional(id).orElseThrow(() -> new IllegalArgumentException("Unknown item " + id)));
+    // Rhino gives ItemStack and Ingredient equal conversion priority for script
+    // strings.
+    private RecipeBuilder addScriptItem(Context context, List<ItemRow> rows, Object value, Long amount) {
+      if (value instanceof CharSequence text && text.toString().startsWith("#")) {
+        value = KubeJSIngredientArrayBuilder.tagIngredient(text.toString());
+      }
+      if (value instanceof Ingredient ingredient) {
+        long count = amount == null ? 1L : amount;
+        if (rows == inputs) {
+          return addIngredientArrayInput(
+              KubeJSIngredientArrayBuilder.newBuilder().addIngredient(ingredient, Long.valueOf(count)));
+        }
+        var prototype = KubeJSIngredientArrayBuilder.itemCandidates(ingredient, event.registries.access()).getFirst();
+        return addItem(outputs, prototype, count);
+      }
+      var stack = value instanceof ItemStack item ? item : ItemWrapper.wrap(context, value);
+      return addItem(rows, stack, amount == null ? stack.getCount() : amount);
     }
 
     public RecipeBuilder addIngredientArrayInput(KubeJSIngredientArrayBuilder.IngredientArrayPrimer ingredients) {
@@ -232,8 +231,9 @@ public final class KubeJSRecipeBuilder {
       if (ingredientArrays.size() >= IngredientArrayData.MAX_GROUPS) {
         throw new IllegalArgumentException("Too many ingredient array inputs");
       }
-      ingredientArrays.add(ingredients.snapshot(event.registries.access()));
-      ingredientArrayCallbacks.add(ingredients);
+      var group = ingredients.snapshot(event.registries.access());
+      ingredientArrays.add(group);
+      ingredientArrayCallbacks.add(ingredients.callbacksFor(group));
       last = LastRequirement.INGREDIENT_ARRAY;
       lastItem = null;
       lastChemical = null;
@@ -243,7 +243,7 @@ public final class KubeJSRecipeBuilder {
     }
 
     public RecipeBuilder addInput(ItemStack stack) {
-      return addItemInput(stack);
+      return addItem(inputs, stack, stack.getCount());
     }
 
     public RecipeBuilder addRandomItemOutput(KubeJSIngredientArrayBuilder.IngredientArrayPrimer ingredients) {
@@ -255,7 +255,7 @@ public final class KubeJSRecipeBuilder {
         throw new IllegalArgumentException("Too many random item output groups");
       }
       randomItemOutputs.add(group);
-      ingredientArrayCallbacks.add(ingredients);
+      ingredientArrayCallbacks.add(ingredients.callbacksFor(group));
       last = LastRequirement.RANDOM_OUTPUT;
       lastItem = null;
 
@@ -296,7 +296,7 @@ public final class KubeJSRecipeBuilder {
     }
 
     public RecipeBuilder addOutput(ItemStack stack) {
-      return addItemOutput(stack);
+      return addItem(outputs, stack, stack.getCount());
     }
 
     public RecipeBuilder addOutput(FluidStack stack) {
@@ -316,9 +316,9 @@ public final class KubeJSRecipeBuilder {
       for (Object value : Objects.requireNonNull(stacks, "resources")) {
         if (value instanceof ItemStack item) {
           if (output) {
-            addItemOutput(item);
+            addItem(outputs, item, item.getCount());
           } else {
-            addItemInput(item);
+            addItem(inputs, item, item.getCount());
           }
         } else if (value instanceof FluidStack fluid) {
           if (output) {
@@ -334,10 +334,6 @@ public final class KubeJSRecipeBuilder {
       lastItem = null;
       lastFluid = null;
       return this;
-    }
-
-    public RecipeBuilder addItemInput(ItemStack stack, Number amount) {
-      return addItem(inputs, stack, KubeJSRecipeArguments.integer(amount, "item amount", 1, Long.MAX_VALUE));
     }
 
     public RecipeBuilder addFuelItemInput(Number requiredTotalBurnTime) {
@@ -376,10 +372,6 @@ public final class KubeJSRecipeBuilder {
       return this;
     }
 
-    public RecipeBuilder addItemInput(ItemStack stack, String amount) {
-      return addItem(inputs, stack, KubeJSRecipeArguments.integer(amount, "item amount", 1, Long.MAX_VALUE));
-    }
-
     public RecipeBuilder addItemInputIgnoringComponents(ItemStack stack) {
       return addItemInputIgnoringComponents(stack, stack == null ? null : stack.getCount());
     }
@@ -402,48 +394,12 @@ public final class KubeJSRecipeBuilder {
       return this;
     }
 
-    public RecipeBuilder addItemOutput(ItemStack stack) {
-      return addItemOutput(stack, stack == null ? null : stack.getCount());
+    public RecipeBuilder addItemOutput(Context context, Object ingredient) {
+      return addScriptItem(context, outputs, ingredient, null);
     }
 
-    public RecipeBuilder addItemOutput(Ingredient ingredient) {
-      return addItemOutput(ingredient, 1);
-    }
-
-    public RecipeBuilder addItemOutput(Ingredient ingredient, Number amount) {
-      return addItemOutput(
-          KubeJSIngredientArrayBuilder.itemCandidates(ingredient, event.registries.access()).getFirst(),
-          amount);
-    }
-
-    public RecipeBuilder addItemOutput(Ingredient ingredient, String amount) {
-      return addItemOutput(
-          KubeJSIngredientArrayBuilder.itemCandidates(ingredient, event.registries.access()).getFirst(),
-          amount);
-    }
-
-    public RecipeBuilder addItemOutput(String ingredient) {
-      return addItemOutput(ingredient, 1);
-    }
-
-    public RecipeBuilder addItemOutput(String ingredient, Number amount) {
-      return ingredient != null && ingredient.startsWith("#") ? addItemOutput(
-          KubeJSIngredientArrayBuilder.tagIngredient(ingredient),
-          amount) : addItemOutput(itemPrototype(ingredient), amount);
-    }
-
-    public RecipeBuilder addItemOutput(String ingredient, String amount) {
-      return ingredient != null && ingredient.startsWith("#") ? addItemOutput(
-          KubeJSIngredientArrayBuilder.tagIngredient(ingredient),
-          amount) : addItemOutput(itemPrototype(ingredient), amount);
-    }
-
-    public RecipeBuilder addItemOutput(ItemStack stack, Number amount) {
-      return addItem(outputs, stack, KubeJSRecipeArguments.integer(amount, "item amount", 1, Long.MAX_VALUE));
-    }
-
-    public RecipeBuilder addItemOutput(ItemStack stack, String amount) {
-      return addItem(outputs, stack, KubeJSRecipeArguments.integer(amount, "item amount", 1, Long.MAX_VALUE));
+    public RecipeBuilder addItemOutput(Context context, Object ingredient, Object amount) {
+      return addScriptItem(context, outputs, ingredient, scriptItemAmount(amount));
     }
 
     public RecipeBuilder addItemInputs(List<ItemStack> stacks) {
@@ -1392,7 +1348,7 @@ public final class KubeJSRecipeBuilder {
     private void captureCallbacks() {
       lifecycleHandlers.forEach(RecipeScriptCallbacks::lifecycle);
       preparationHandlers.forEach(RecipeScriptCallbacks::preparation);
-      ingredientArrayCallbacks.forEach(KubeJSIngredientArrayBuilder.IngredientArrayPrimer::captureCallbacks);
+      ingredientArrayCallbacks.forEach(KubeJSIngredientArrayBuilder.GroupCallbacks::captureCallbacks);
       for (var rows : List.of(inputs, outputs)) {
         for (var row : rows) {
           if (row.inlineChecker != null) {
@@ -1572,6 +1528,9 @@ public final class KubeJSRecipeBuilder {
       for (var source : List.of(inputs, outputs)) {
         for (var row : source) {
           if (row.triggerTime > 0) {
+            if (row.preview != null) {
+              throw new IllegalStateException("Triggered item rows cannot use an item preview");
+            }
             if (row.minAmount != 0 || row.maxAmount != 0 || row.consumeDurability != 0) {
               throw new IllegalStateException(
                   "Triggered item rows cannot combine random quantities or durability payment");

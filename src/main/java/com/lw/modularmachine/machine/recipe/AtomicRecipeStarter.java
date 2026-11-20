@@ -42,10 +42,21 @@ public final class AtomicRecipeStarter {
     STALE,
     CHECK_REJECTED,
     UNMANAGED_RECIPE,
-    FAILED
+    FAILED;
+
+    public boolean committed() {
+      return this == STARTED || this == STARTED_WITH_NOTIFICATION_ERROR;
+    }
   }
 
   public static Result start(RecipeStartPlan plan) {
+    return start(plan, MachineConfig.RECIPE_OUTPUT_WORK.get());
+  }
+
+  static Result start(RecipeStartPlan plan, int budget) {
+    if (budget < 0) {
+      throw new IllegalArgumentException("Negative recipe start budget");
+    }
     Objects.requireNonNull(plan, "plan");
     plan.source().requireServerThread();
     var controller = plan.source().controller();
@@ -58,6 +69,24 @@ public final class AtomicRecipeStarter {
     if (!controller.schemaSupported() || controller.isRemoved()) {
       return Result.STALE;
     }
+    if (budget == 0) {
+      return Result.BUSY;
+    }
+    // A structure predicate can reenter this controller during validation.
+    try (var owner = controller.runState().tryAcquireStart()) {
+      return owner == null ? Result.STALE : start(plan, budget, owner);
+    }
+  }
+
+  private static Result start(RecipeStartPlan plan, int budget, ControllerRunState.RunStartLease owner) {
+    var controller = plan.source().controller();
+    if (!plan.validateForStart()) {
+      var source = plan.source();
+      if (plan.catalog().isCurrent() && source.revalidateStructure() && itemPortsBusy(source)) {
+        return Result.BUSY;
+      }
+      return Result.STALE;
+    }
     var nativeRecipe = MachineRecipeService.definitionForStart(controller, plan);
     if (nativeRecipe.isEmpty()) {
       return Result.UNMANAGED_RECIPE;
@@ -65,13 +94,9 @@ public final class AtomicRecipeStarter {
     if (!nativeRecipe.orElseThrow().executionOptions().threadName().isEmpty()) {
       return Result.STALE;
     }
-    if (!plan.validateForStart()) {
-      return Result.STALE;
-    }
     if (RecipeResourceRequirements.missing(plan.source(), nativeRecipe.orElseThrow()).isPresent()) {
       return Result.STALE;
     }
-    int budget = MachineConfig.RECIPE_OUTPUT_WORK.get();
     var checks = plan.advanceFactoryChecks(controller, "main", budget);
     budget -= checks.workUsed();
     if (checks.status() == UpgradeRecipeCheckHandlers.Status.PENDING) {
@@ -110,7 +135,7 @@ public final class AtomicRecipeStarter {
     }
     var effectivePlan = plan.scaled(instances);
     var ports = indexPorts(effectivePlan.source());
-    if (itemPortsBusy(ports)) {
+    if (itemPortsBusy(effectivePlan.source())) {
       return Result.BUSY;
     }
     var leases = new ArrayList<MachinePortBlockEntity.ItemStartLease>();
@@ -123,10 +148,9 @@ public final class AtomicRecipeStarter {
     var itemResources = resourceTransaction.phase();
     var fluidResources = resourceTransaction.phase();
     resourceTransaction.phase().track(upgradeLeases, UpgradeBusBlockEntity.StartCostLease::resolve);
-    var ownerResources = resourceTransaction.phase();
+    resourceTransaction.phase().enlist(owner, ControllerRunState.RunStartLease::resolve);
     var additionalResourcePhase = resourceTransaction.phase();
     boolean committed = false;
-    var owner = ownerResources.enlist(controller.runState().acquireStart(), ControllerRunState.RunStartLease::resolve);
     FrozenRecipeRun startedRun = null;
     try {
       var checked = effectivePlan.checkedTicket();
@@ -287,11 +311,12 @@ public final class AtomicRecipeStarter {
     return ports;
   }
 
-  private static boolean itemPortsBusy(Map<String, RecipePortSnapshot> ports) {
-    for (var port : ports.values()) {
+  private static boolean itemPortsBusy(RecipeExecutionTicket ticket) {
+    for (var port : ticket.ports()) {
       if (!port.patternInput()
           && port.kind().resource() == ResourceType.ITEM
-          && port.identity().itemStartInProgress()) {
+          && port.identity().itemStartInProgress()
+          && port.sameLiveStamp(ticket.level())) {
         return true;
       }
     }

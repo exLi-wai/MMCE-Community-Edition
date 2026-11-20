@@ -5,7 +5,7 @@ allprojects {
             configurations.named('localRuntime') {
                 withDependencies { dependencies ->
                     dependencies.removeAll { dependency ->
-                        dependency.group == 'curse.maven' && dependency.name == 'thaumaturge-1628024'
+                        dependency.group == 'curse.maven' && dependency.name in ['thaumaturge-1628024', 'apptt-1718689']
                     }
                 }
             }
@@ -15,18 +15,13 @@ allprojects {
                 systemProperty 'mmcece.adapter.kubejsSmoke', 'true'
                 logLevel = org.slf4j.event.Level.INFO
             }
-            def fixtures = tasks.register('prepareRecipeAdapterFixtures', Copy) {
-                from project.file('src/gameTest/resources/data/mmcece/mmcece/machines')
-                into project.file('build/gametest-adapter-smelting/config/modularmachinery/machinery')
-                include '**/*.json'
-            }
+            project.apply from: project.file('gradle/recipe-gametest-fixtures.gradle')
             def script = tasks.register('prepareRecipeAdapterCrtScript', Copy) {
                 from project.file('src/gameTest/scripts/recipe_adapter_crt.js')
                 into project.file('build/gametest-adapter-smelting/kubejs/server_scripts')
                 rename 'recipe_adapter_crt[.]js', 'test_recipe_adapter_crt.js'
             }
             tasks.named('runGameTestServer') {
-                dependsOn fixtures
                 dependsOn script
             }
         }
