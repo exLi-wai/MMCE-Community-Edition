@@ -1,12 +1,10 @@
 package com.lw.modularmachine.machine.recipe;
 
-import com.lw.modularmachine.machine.recipe.search.CompiledRecipeSet;
 import com.lw.modularmachine.machine.recipe.search.RecipeCatalog;
 import com.lw.modularmachine.machine.recipe.search.RecipeCandidate;
 import com.lw.modularmachine.machine.recipe.resource.RecipeResourceExecutionRegistry;
 import com.lw.modularmachine.machine.upgrade.UpgradeRecipeCheckHandlers;
 import com.lw.modularmachine.api.recipe.RecipeModifier;
-import com.lw.modularmachine.api.recipe.RecipeSelectors;
 import com.lw.modularmachine.api.recipe.adapter.RecipeAdapterTags;
 import com.google.gson.JsonElement;
 import com.lw.modularmachine.blockentity.FactoryControllerBlockEntity;
@@ -38,7 +36,6 @@ import net.neoforged.neoforge.event.AddReloadListenerEvent;
 import net.neoforged.neoforge.event.OnDatapackSyncEvent;
 import net.neoforged.neoforge.event.server.ServerStartedEvent;
 import net.neoforged.neoforge.event.server.ServerStoppedEvent;
-import net.neoforged.neoforge.fluids.FluidStack;
 import net.neoforged.neoforge.server.ServerLifecycleHooks;
 import org.jetbrains.annotations.ApiStatus;
 import com.lw.modularmachine.machine.recipe.resource.chemical.ChemicalResourceExecution;
@@ -223,19 +220,8 @@ public final class MachineRecipeService {
         result.put(machine, previous);
         return;
       }
-      var recipes = new CompiledRecipeSet<>(values);
-      var definitions = grouped.getOrDefault(machine, Map.of());
-      var fluids = new HashMap<String, List<FluidStack>>();
-      var outputs = new HashMap<String, List<FluidStack>>();
-      var selectors = new HashMap<String, RecipeSelectors>();
-      definitions.forEach((id, definition) -> {
-        fluids.put(id, definition.fluidInputs());
-        outputs.put(id, definition.guaranteedFluidOutputs());
-        selectors.put(id, definition.selectors());
-      });
-      result.put(
-          machine,
-          new RecipeCatalog(machine, recipes, fluids, outputs, () -> false, null, definitions, List.of(), selectors));
+      var definitions = grouped.get(machine);
+      result.put(machine, RecipeCatalog.fromDefinitions(machine, values, definitions, () -> false, null, List.of()));
     });
     return Map.copyOf(result);
   }

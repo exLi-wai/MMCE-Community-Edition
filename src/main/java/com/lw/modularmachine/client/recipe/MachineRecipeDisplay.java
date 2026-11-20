@@ -254,7 +254,7 @@ public final class MachineRecipeDisplay {
             .get(index - tickRows.size());
     String selector;
     if (perTick) {
-      selector = row.selector().isEmpty() && input ? recipe.selectors().fluidPerTick() : row.selector();
+      selector = input ? row.selector(recipe.selectors().fluidPerTick()) : row.selector();
     } else {
       selector = input ? recipe.selectors().fluidInput() : recipe.selectors().fluidOutput();
     }

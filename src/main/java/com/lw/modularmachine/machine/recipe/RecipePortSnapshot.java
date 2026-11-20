@@ -7,11 +7,13 @@ import com.lw.modularmachine.machine.network.pattern.PatternResourceKey;
 import com.lw.modularmachine.blockentity.MachinePortBlockEntity;
 import com.lw.modularmachine.api.component.ChemicalStackData;
 import com.lw.modularmachine.machine.PortKind;
+import com.lw.modularmachine.machine.recipe.search.ItemSlotDomain;
 import com.lw.modularmachine.util.thread.ServerThreadGuard;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.UUID;
 import net.minecraft.core.BlockPos;
+import net.minecraft.core.NonNullList;
 import net.minecraft.server.level.ServerLevel;
 import net.minecraft.world.item.ItemStack;
 import net.neoforged.neoforge.fluids.FluidStack;
@@ -199,6 +201,41 @@ public final class RecipePortSnapshot {
   public List<ItemStack> items() {
     ServerThreadGuard.require(level, "Recipe resource access");
     return items.stream().map(stack -> ItemStackSnapshots.detached(stack, level.registryAccess())).toList();
+  }
+
+  int itemSlotCount() {
+    ServerThreadGuard.require(level, "Recipe resource access");
+    return items.size();
+  }
+
+  boolean matchesItem(int slot, ItemResourceKey key) {
+    ServerThreadGuard.require(level, "Recipe resource access");
+    return key.matches(items.get(slot));
+  }
+
+  long remainingItemOutputCapacity(ItemResourceKey key) {
+    if (kind != PortKind.ITEM_OUTPUT || !selector.equals(key.selector())) {
+      return 0;
+    }
+    ServerThreadGuard.require(level, "Recipe resource access");
+    long remaining = 0;
+    for (int slot = 0; slot < items.size(); slot++) {
+      var stack = items.get(slot);
+      if (stack.isEmpty() || key.matches(stack)) {
+        var domain = new ItemSlotDomain(limits.get(slot), selector, bulkItems);
+        remaining = Math.addExact(remaining, Math.max(0, domain.capacityFor(key) - itemAmount(slot)));
+      }
+    }
+    return remaining;
+  }
+
+  NonNullList<ItemStack> copyItemContents() {
+    ServerThreadGuard.require(level, "Recipe resource access");
+    var copy = NonNullList.withSize(items.size(), ItemStack.EMPTY);
+    for (int slot = 0; slot < items.size(); slot++) {
+      copy.set(slot, ItemStackSnapshots.detached(items.get(slot), level.registryAccess()));
+    }
+    return copy;
   }
 
   public List<Integer> slotLimits() {

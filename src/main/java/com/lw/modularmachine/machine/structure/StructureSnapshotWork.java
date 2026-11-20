@@ -50,15 +50,7 @@ final class StructureSnapshotWork {
         return 1;
       }
       try {
-        var result = completed.join();
-        if (result.matched()) {
-          registration.modifiers.acceptSnapshot(result.modifiers());
-        }
-        boolean accepted = registration.verifier
-            .applySnapshot(captureRevision, result.failure(), result.failedIndex(), now);
-        if (accepted && result.failure() == VerificationFailure.MISMATCH) {
-          StructureService.definiteStructureMismatch(registration.controller);
-        }
+        applyMatchResult(completed.join(), now);
       } catch (RuntimeException failure) {
         LOGGER.warn("Async structure matching failed at {}", registration.controller.structurePosition(), failure);
         registration.verifier.rejectProof(VerificationFailure.CHECK_ERROR, -1, now);
@@ -86,15 +78,7 @@ final class StructureSnapshotWork {
       var detached = currentCapture.finish();
       if (StructureService.gameTestMode()) {
         try {
-          var result = detached.match();
-          if (result.matched()) {
-            registration.modifiers.acceptSnapshot(result.modifiers());
-          }
-          boolean accepted = registration.verifier
-              .applySnapshot(captureRevision, result.failure(), result.failedIndex(), now);
-          if (accepted && result.failure() == VerificationFailure.MISMATCH) {
-            StructureService.definiteStructureMismatch(registration.controller);
-          }
+          applyMatchResult(detached.match(), now);
         } catch (RuntimeException failure) {
           LOGGER.warn("Structure matching failed at {}", registration.controller.structurePosition(), failure);
           registration.verifier.rejectProof(VerificationFailure.CHECK_ERROR, -1, now);
@@ -121,4 +105,14 @@ final class StructureSnapshotWork {
     return used;
   }
 
+  private void applyMatchResult(StructureSnapshot.Result result, long now) {
+    if (result.matched()) {
+      registration.modifiers.acceptSnapshot(result.modifiers());
+    }
+    boolean accepted = registration.verifier
+        .applySnapshot(captureRevision, result.failure(), result.failedIndex(), now);
+    if (accepted && result.failure() == VerificationFailure.MISMATCH) {
+      StructureService.definiteStructureMismatch(registration.controller);
+    }
+  }
 }

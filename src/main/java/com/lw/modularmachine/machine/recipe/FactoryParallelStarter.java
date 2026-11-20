@@ -8,7 +8,6 @@ import com.lw.modularmachine.blockentity.FactoryControllerBlockEntity;
 import com.lw.modularmachine.config.MachineConfig;
 import com.lw.modularmachine.machine.PortKind;
 import com.lw.modularmachine.machine.factory.FactoryParallelBatch;
-import com.lw.modularmachine.machine.factory.FactoryThreadState;
 import com.lw.modularmachine.api.upgrade.UpgradeSnapshot;
 import java.util.ArrayList;
 import java.util.HashMap;
@@ -122,8 +121,7 @@ public final class FactoryParallelStarter {
       if (!prepareItemDeductions(plans, resources, ports, replacements)) {
         return Result.STALE;
       }
-      var upgrades = factory.scheduler().channels().stream().filter(thread -> thread.threadId().equals(threadId))
-          .map(FactoryThreadState::upgradeSnapshot).findFirst().orElseThrow();
+      var upgrades = factory.scheduler().requireChannel(threadId).upgradeSnapshot();
       var startCosts = plans.getFirst().prepareFactoryStartup(factory, threadId, plans.size());
       if (!startCosts.current()) {
         return Result.STALE;
@@ -394,8 +392,7 @@ public final class FactoryParallelStarter {
   public static Admission admit(FactoryControllerBlockEntity factory, String threadId, List<RecipeStartPlan> plans, int inputCapacity, int outputCapacity, int startBudget) {
     Objects.requireNonNull(factory, "factory");
     Objects.requireNonNull(plans, "plans");
-    var thread = factory.scheduler().channels().stream().filter(candidate -> candidate.threadId().equals(threadId))
-        .findFirst().orElse(null);
+    var thread = threadId == null ? null : factory.scheduler().channel(threadId);
     if (thread == null || plans.isEmpty()) {
       return new Admission(plans.isEmpty() ? Result.EMPTY : Result.STALE, null);
     }

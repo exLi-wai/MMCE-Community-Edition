@@ -45,6 +45,34 @@ public final class KubeJSIngredientArrayBuilder {
     return new IngredientArrayPrimer();
   }
 
+  static void setLastGroupChance(List<IngredientArrayData.Group> groups, double chance) {
+    var group = groups.getLast();
+    replaceLastGroup(groups, group, chance, group.parallelUnaffected(), group.selector());
+  }
+
+  static void setLastGroupParallelUnaffected(List<IngredientArrayData.Group> groups, boolean unaffected) {
+    var group = groups.getLast();
+    replaceLastGroup(groups, group, group.chance(), unaffected, group.selector());
+  }
+
+  static void setLastGroupSelector(List<IngredientArrayData.Group> groups, String selector) {
+    var group = groups.getLast();
+    replaceLastGroup(groups, group, group.chance(), group.parallelUnaffected(), selector);
+  }
+
+  private static void replaceLastGroup(List<IngredientArrayData.Group> groups, IngredientArrayData.Group group, double chance, boolean unaffected, String selector) {
+    groups.set(
+        groups.size() - 1,
+        new IngredientArrayData.Group(
+            group.alternatives(),
+            chance,
+            unaffected,
+            selector,
+            group.optional(),
+            group.tooltips(),
+            group.recipeModifiers()));
+  }
+
   public static final class IngredientArrayPrimer {
     private final Thread owner = Thread.currentThread();
     private final List<Choice> alternatives = new ArrayList<>();

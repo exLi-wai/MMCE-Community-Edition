@@ -389,15 +389,7 @@ public final class RecipeItemPayments {
   }
 
   private static NonNullList<ItemStack> replacementContents(Slot slot, Map<String, NonNullList<ItemStack>> replacements) {
-    return replacements.computeIfAbsent(slot.port.partId(), ignored -> {
-      var values = slot.port.items();
-      var copy = NonNullList.withSize(values.size(), ItemStack.EMPTY);
-      for (int index = 0; index < values.size(); index++) {
-        copy.set(index, values.get(index));
-      }
-
-      return copy;
-    });
+    return replacements.computeIfAbsent(slot.port.partId(), ignored -> slot.port.copyItemContents());
   }
 
   private static boolean toolMatches(ItemStack prototype, ItemStack actual) {

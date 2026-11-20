@@ -33,6 +33,7 @@ final class EmiStructurePreviewWidget extends Widget {
   private final int x, y, width, height;
   private final ClientMachineCatalog.Machine machine;
   private final PreviewSceneData scene;
+  private final float sceneExtent;
   private final PreviewRenderer renderer = PreviewRenderer.create();
   private final PreviewCamera camera = new PreviewCamera();
   private long lastCycle = Util.getMillis();
@@ -50,6 +51,7 @@ final class EmiStructurePreviewWidget extends Widget {
         machine.color(),
         machine.parts().stream().map(part -> new PreviewSceneData.Entry(part.offset(), part.alternatives(), List.of()))
             .toList());
+    sceneExtent = scene.extent();
   }
 
   @Override
@@ -69,7 +71,7 @@ final class EmiStructurePreviewWidget extends Widget {
       lastCycle = Util.getMillis();
     }
     int previewHeight = previewHeight();
-    float scale = Math.max(.1F, Math.min(24F, Math.min(width, previewHeight) * .55F / scene.extent()));
+    float scale = Math.max(.1F, Math.min(24F, Math.min(width, previewHeight) * .55F / sceneExtent));
     renderer.render(
         graphics,
         new PreviewViewport(x, y, width, previewHeight, scale),

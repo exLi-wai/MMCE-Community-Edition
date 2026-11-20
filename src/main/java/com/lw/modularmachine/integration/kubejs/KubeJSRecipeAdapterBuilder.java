@@ -41,6 +41,7 @@ import net.neoforged.neoforge.fluids.FluidStack;
 import com.google.gson.JsonParser;
 import com.google.gson.JsonArray;
 import com.google.gson.JsonObject;
+import com.google.gson.JsonPrimitive;
 import org.jetbrains.annotations.ApiStatus;
 
 /**
@@ -864,26 +865,9 @@ public final class KubeJSRecipeAdapterBuilder extends KubeJSResourceRecipeBuilde
           fuelInputs.size() - 1,
           new ItemPaymentData.Fuel(fuel.burnTime(), chance.doubleValue(), fuel.parallelUnaffected(), fuel.selector()));
     } else if (last == LastRequirement.RANDOM_OUTPUT) {
-      var group = randomItemOutputs.getLast();
-      randomItemOutputs.set(
-          randomItemOutputs.size() - 1,
-          new IngredientArrayData.Group(
-              group.alternatives(),
-              chance.doubleValue(),
-              group.parallelUnaffected(),
-              group.selector()));
+      KubeJSIngredientArrayBuilder.setLastGroupChance(randomItemOutputs, chance.doubleValue());
     } else if (last == LastRequirement.INGREDIENT_ARRAY) {
-      var group = ingredientArrays.getLast();
-      ingredientArrays.set(
-          ingredientArrays.size() - 1,
-          new IngredientArrayData.Group(
-              group.alternatives(),
-              chance.doubleValue(),
-              group.parallelUnaffected(),
-              group.selector(),
-              group.optional(),
-              group.tooltips(),
-              group.recipeModifiers()));
+      KubeJSIngredientArrayBuilder.setLastGroupChance(ingredientArrays, chance.doubleValue());
     } else if (last == LastRequirement.ITEM_OUTPUT) {
       var previous = itemOutputs.getLast();
       itemOutputs.set(
@@ -904,10 +888,7 @@ public final class KubeJSRecipeAdapterBuilder extends KubeJSResourceRecipeBuilde
         || last == LastRequirement.FLUID_OUTPUT
         || last == LastRequirement.FLUID_PER_TICK
         || last == LastRequirement.FLUID_PER_TICK_OUTPUT) {
-      var rows = lastFluidRows();
-      var encoded = JsonParser.parseString(rows.getLast().encoded()).getAsJsonObject();
-      encoded.addProperty("chance", chance.doubleValue());
-      rows.set(rows.size() - 1, new RecipeAdapterCustomization.FluidResource(encoded.toString()));
+      setLastFluidProperty("chance", new JsonPrimitive(chance.doubleValue()));
     } else {
       throw owner.reject("Adapter chance requires the last single item output, chemical or fluid row");
     }
@@ -923,12 +904,7 @@ public final class KubeJSRecipeAdapterBuilder extends KubeJSResourceRecipeBuilde
       throw owner.reject("Invalid adapter selector: " + invalid.getMessage());
     }
     switch (last) {
-      case RANDOM_OUTPUT -> {
-        var group = randomItemOutputs.getLast();
-        randomItemOutputs.set(
-            randomItemOutputs.size() - 1,
-            new IngredientArrayData.Group(group.alternatives(), group.chance(), group.parallelUnaffected(), selector));
-      }
+      case RANDOM_OUTPUT -> KubeJSIngredientArrayBuilder.setLastGroupSelector(randomItemOutputs, selector);
       case ITEM_INPUT -> itemInputs.getLast().addProperty("selector", selector);
       case FUEL -> {
         var fuel = fuelInputs.getLast();
@@ -936,19 +912,7 @@ public final class KubeJSRecipeAdapterBuilder extends KubeJSResourceRecipeBuilde
             fuelInputs.size() - 1,
             new ItemPaymentData.Fuel(fuel.burnTime(), fuel.chance(), fuel.parallelUnaffected(), selector));
       }
-      case INGREDIENT_ARRAY -> {
-        var group = ingredientArrays.getLast();
-        ingredientArrays.set(
-            ingredientArrays.size() - 1,
-            new IngredientArrayData.Group(
-                group.alternatives(),
-                group.chance(),
-                group.parallelUnaffected(),
-                selector,
-                group.optional(),
-                group.tooltips(),
-                group.recipeModifiers()));
-      }
+      case INGREDIENT_ARRAY -> KubeJSIngredientArrayBuilder.setLastGroupSelector(ingredientArrays, selector);
       case ITEM_OUTPUT -> {
         var previous = itemOutputs.getLast();
         itemOutputs.set(
@@ -969,12 +933,7 @@ public final class KubeJSRecipeAdapterBuilder extends KubeJSResourceRecipeBuilde
       }
       case FLUID_INPUT -> cohort(RecipeAdapterCustomization.Phase.FLUID_INPUT, selector);
       case FLUID_OUTPUT -> cohort(RecipeAdapterCustomization.Phase.FLUID_OUTPUT, selector);
-      case FLUID_PER_TICK, FLUID_PER_TICK_OUTPUT -> {
-        var rows = lastFluidRows();
-        var encoded = JsonParser.parseString(rows.getLast().encoded()).getAsJsonObject();
-        encoded.addProperty("selector", selector);
-        rows.set(rows.size() - 1, new RecipeAdapterCustomization.FluidResource(encoded.toString()));
-      }
+      case FLUID_PER_TICK, FLUID_PER_TICK_OUTPUT -> setLastFluidProperty("selector", new JsonPrimitive(selector));
       case ENERGY -> {
         if (energyRequirements != 1) {
           throw owner.reject("Adapter energy tags require one energy requirement");
@@ -993,14 +952,17 @@ public final class KubeJSRecipeAdapterBuilder extends KubeJSResourceRecipeBuilde
     return this;
   }
 
-  private List<RecipeAdapterCustomization.FluidResource> lastFluidRows() {
-    return switch (last) {
+  private void setLastFluidProperty(String property, JsonPrimitive value) {
+    var rows = switch (last) {
       case FLUID_INPUT -> fluidInputs;
       case FLUID_OUTPUT -> fluidOutputs;
       case FLUID_PER_TICK -> fluidPerTickInputs;
       case FLUID_PER_TICK_OUTPUT -> fluidPerTickOutputs;
       default -> throw owner.reject("No last fluid requirement");
     };
+    var encoded = JsonParser.parseString(rows.getLast().encoded()).getAsJsonObject();
+    encoded.add(property, value);
+    rows.set(rows.size() - 1, new RecipeAdapterCustomization.FluidResource(encoded.toString()));
   }
 
   public KubeJSRecipeAdapterBuilder setFluidInputTag(String selector) {
@@ -1051,22 +1013,9 @@ public final class KubeJSRecipeAdapterBuilder extends KubeJSResourceRecipeBuilde
   public KubeJSRecipeAdapterBuilder setParallelizeUnaffected(boolean enabled) {
     requireMutable();
     if (last == LastRequirement.RANDOM_OUTPUT) {
-      var group = randomItemOutputs.getLast();
-      randomItemOutputs.set(
-          randomItemOutputs.size() - 1,
-          new IngredientArrayData.Group(group.alternatives(), group.chance(), enabled, group.selector()));
+      KubeJSIngredientArrayBuilder.setLastGroupParallelUnaffected(randomItemOutputs, enabled);
     } else if (last == LastRequirement.INGREDIENT_ARRAY) {
-      var group = ingredientArrays.getLast();
-      ingredientArrays.set(
-          ingredientArrays.size() - 1,
-          new IngredientArrayData.Group(
-              group.alternatives(),
-              group.chance(),
-              enabled,
-              group.selector(),
-              group.optional(),
-              group.tooltips(),
-              group.recipeModifiers()));
+      KubeJSIngredientArrayBuilder.setLastGroupParallelUnaffected(ingredientArrays, enabled);
     } else if (last == LastRequirement.ITEM_INPUT) {
       itemInputs.getLast().addProperty("parallel_unaffected", enabled);
     } else if (last == LastRequirement.FUEL) {
@@ -1086,10 +1035,7 @@ public final class KubeJSRecipeAdapterBuilder extends KubeJSResourceRecipeBuilde
               previous.encodedPreview(),
               enabled));
     } else if (last == LastRequirement.FLUID_INPUT || last == LastRequirement.FLUID_OUTPUT) {
-      var rows = last == LastRequirement.FLUID_INPUT ? fluidInputs : fluidOutputs;
-      var encoded = JsonParser.parseString(rows.getLast().encoded()).getAsJsonObject();
-      encoded.addProperty("parallel_unaffected", enabled);
-      rows.set(rows.size() - 1, new RecipeAdapterCustomization.FluidResource(encoded.toString()));
+      setLastFluidProperty("parallel_unaffected", new JsonPrimitive(enabled));
     } else {
       throw owner
           .reject("Adapter parallel-unaffected applies only to the last single item or startup/output fluid row");

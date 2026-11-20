@@ -1,11 +1,9 @@
 package com.lw.modularmachine.machine.recipe;
 
-import com.lw.modularmachine.machine.recipe.search.CompiledRecipeSet;
 import com.lw.modularmachine.machine.recipe.search.RecipeCatalog;
 import com.lw.modularmachine.machine.recipe.search.RecipeCandidate;
 import com.lw.modularmachine.machine.recipe.resource.RecipeResourceExecutionRegistry;
 import com.lw.modularmachine.api.recipe.RecipeModifier;
-import com.lw.modularmachine.api.recipe.RecipeSelectors;
 import com.lw.modularmachine.ModularMachine;
 import com.lw.modularmachine.machine.structure.MachineDefinition;
 import java.util.ArrayList;
@@ -15,7 +13,6 @@ import java.util.Map;
 import java.util.function.BooleanSupplier;
 import net.minecraft.core.HolderLookup;
 import net.minecraft.resources.ResourceLocation;
-import net.neoforged.neoforge.fluids.FluidStack;
 
 /**
  * Bounded preparation per rule signature; never falls back to unmodified
@@ -83,24 +80,7 @@ final class ModifiedRecipeCatalogCompiler {
         used++;
       }
       if (cursor == ids.size()) {
-        var inputs = new HashMap<String, List<FluidStack>>();
-        var outputs = new HashMap<String, List<FluidStack>>();
-        var selectors = new HashMap<String, RecipeSelectors>();
-        definitions.forEach((id, recipe) -> {
-          inputs.put(id, recipe.fluidInputs());
-          outputs.put(id, recipe.guaranteedFluidOutputs());
-          selectors.put(id, recipe.selectors());
-        });
-        result = new RecipeCatalog(
-            base.machineId(),
-            new CompiledRecipeSet<>(candidates),
-            inputs,
-            outputs,
-            authority,
-            base,
-            definitions,
-            rules,
-            selectors);
+        result = RecipeCatalog.fromDefinitions(base.machineId(), candidates, definitions, authority, base, rules);
         candidates.clear();
         definitions.clear();
       }

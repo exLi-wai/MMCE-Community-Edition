@@ -6,7 +6,6 @@ import com.mojang.serialization.JsonOps;
 import com.lw.modularmachine.machine.recipe.resource.RecipeResourceDefinitions;
 import com.lw.modularmachine.machine.recipe.resource.RecipeResourceExecutionRegistry;
 import com.lw.modularmachine.machine.recipe.search.RecipeCatalog;
-import com.lw.modularmachine.machine.recipe.search.CompiledRecipeSet;
 import com.lw.modularmachine.machine.PortKind;
 import java.util.List;
 import java.util.Map;
@@ -195,16 +194,26 @@ public final class RecipePreviewStreamGameTest {
 
   @GameTest(template = "empty16", timeoutTicks = 80)
   public static void published_catalogs_reuse_compilation_with_distinct_authority(GameTestHelper helper) {
-    var recipe = roundTrip(helper, root());
+    var source = root();
+    source.add("selectors", JsonParser.parseString("""
+        {"fluid_input":"coolant","fluid_output":"waste"}
+        """));
+    source.add("fluid_inputs", JsonParser.parseString("""
+        [{"id":"minecraft:water","amount":32}]
+        """));
+    source.add("fluid_outputs", JsonParser.parseString("""
+        [{"id":"minecraft:lava","amount":16},
+         {"id":"minecraft:water","amount":8,"chance":0.5},
+         {"id":"minecraft:lava","amount":4,"ignore_output_check":true}]
+        """));
+    var recipe = roundTrip(helper, source);
     var id = ResourceLocation.fromNamespaceAndPath("mmcece", "catalog_publication");
-    var prepared = new RecipeCatalog(
+    var prepared = RecipeCatalog.fromDefinitions(
         recipe.machineId(),
-        new CompiledRecipeSet<>(List.of(recipe.compile(id, helper.getLevel().registryAccess()))),
-        Map.of(),
-        Map.of(),
+        List.of(recipe.compile(id, helper.getLevel().registryAccess())),
+        Map.of(id.toString(), recipe),
         () -> false,
         null,
-        Map.of(id.toString(), recipe),
         List.of());
     // Bind each view to its own publication, never to a reusable config value.
     var generation = new AtomicReference<Object>(new Object());
@@ -221,6 +230,15 @@ public final class RecipePreviewStreamGameTest {
     helper.assertTrue(
         first.recipes() == second.recipes() && first.definition(id.toString()) == recipe,
         "Publication rebuilt or changed prepared recipe data");
+    var inputs = second.fluidInputs(id.toString());
+    var outputs = second.fluidOutputs(id.toString());
+    helper.assertTrue(
+        inputs.size() == 1
+            && inputs.getFirst().getAmount() == 32
+            && outputs.size() == 1
+            && outputs.getFirst().getAmount() == 16
+            && second.selectors(id.toString()).equals(recipe.selectors()),
+        "Published indexes lost fluid routing or included outputs exempt from startup capacity");
     helper.succeed();
   }
 

@@ -334,20 +334,13 @@ public final class AtomicRecipeStarter {
         return null;
       }
       if (port.patternInput()) {
-        if (!deduction.key().matches(port.items().get(deduction.slot().slot()))) {
+        if (!port.matchesItem(ref.slot(), deduction.key())) {
           return null;
         }
         patterns.consumeItem(port, deduction.slot().slot(), deduction.count());
         continue;
       }
-      var contents = replacements.computeIfAbsent(ref.partId(), ignored -> {
-        var values = port.items();
-        var copy = NonNullList.withSize(values.size(), ItemStack.EMPTY);
-        for (int i = 0; i < values.size(); i++) {
-          copy.set(i, values.get(i));
-        }
-        return copy;
-      });
+      var contents = replacements.computeIfAbsent(ref.partId(), ignored -> port.copyItemContents());
       if (ref.slot() >= contents.size()) {
         return null;
       }

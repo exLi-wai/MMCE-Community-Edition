@@ -69,20 +69,13 @@ final class FactoryStartupResources {
       return new DeductionTarget(null, false);
     }
     if (port.patternInput()) {
-      if (!deduction.key().matches(port.items().get(deduction.slot().slot()))) {
+      if (!port.matchesItem(deduction.slot().slot(), deduction.key())) {
         return new DeductionTarget(null, false);
       }
       patterns.consumeItem(port, deduction.slot().slot(), deduction.count());
       return new DeductionTarget(null, true);
     }
-    var contents = replacements.computeIfAbsent(deduction.slot().partId(), ignored -> {
-      var values = port.items();
-      var copy = NonNullList.withSize(values.size(), ItemStack.EMPTY);
-      for (int i = 0; i < values.size(); i++) {
-        copy.set(i, values.get(i));
-      }
-      return copy;
-    });
+    var contents = replacements.computeIfAbsent(deduction.slot().partId(), ignored -> port.copyItemContents());
     return new DeductionTarget(contents, true);
   }
 

@@ -92,14 +92,7 @@ public final class StructureModifierTracker {
         }
         active[condition.group()] &= result == CheckResult.MATCH;
       }
-      var rules = new ArrayList<RecipeModifier>();
-      for (int index = 0; index < groups.size(); index++) {
-        if (active[index]) {
-          rules.addAll(groups.get(index).modifiers());
-        }
-      }
-
-      return new Reference(this, active, List.copyOf(rules), VerificationFailure.NONE, -1, checks);
+      return activeReference(active, checks);
     }
 
     Reference referenceSnapshot(IntFunction<BlockState> states) {
@@ -127,6 +120,10 @@ public final class StructureModifierTracker {
             && condition.rule().matches(state)
             && (condition.script() == null || scripts.test(index));
       }
+      return activeReference(active, checks);
+    }
+
+    private Reference activeReference(boolean[] active, int checks) {
       var rules = new ArrayList<RecipeModifier>();
       for (int index = 0; index < groups.size(); index++) {
         if (active[index]) {

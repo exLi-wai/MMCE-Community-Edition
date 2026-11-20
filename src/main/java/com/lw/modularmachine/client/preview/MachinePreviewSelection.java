@@ -13,6 +13,7 @@ import net.minecraft.core.BlockPos;
 import net.minecraft.world.item.Item;
 import net.minecraft.world.item.Items;
 import org.jetbrains.annotations.ApiStatus;
+import org.jetbrains.annotations.Nullable;
 
 /**
  * Internal client-only display choices. Inclusion affects the bill of
@@ -26,6 +27,7 @@ public final class MachinePreviewSelection {
   private final boolean[] included;
   private List<Part> parts = List.of();
   private List<Map<Item, Integer>> groupCounts = List.of();
+  @Nullable
   private Map<Item, Integer> materials = Map.of();
   private PreviewSceneData scene;
   private float extent = 1;
@@ -99,7 +101,7 @@ public final class MachinePreviewSelection {
 
   public void toggleIncluded(int group) {
     included[group] = !included[group];
-    updateMaterials();
+    materials = null;
   }
 
   public boolean building() {
@@ -138,7 +140,7 @@ public final class MachinePreviewSelection {
         scene = complete;
         extent = scene.extent();
         pending = null;
-        updateMaterials();
+        materials = null;
       }
     } catch (IllegalArgumentException | ArithmeticException invalid) {
       pending = null;
@@ -147,7 +149,10 @@ public final class MachinePreviewSelection {
     return used;
   }
 
-  private void updateMaterials() {
+  public Map<Item, Integer> materials() {
+    if (materials != null) {
+      return materials;
+    }
     var counts = new LinkedHashMap<Item, Integer>();
     for (int group = 0; group < groupCounts.size(); group++) {
       if (included[group]) {
@@ -155,9 +160,6 @@ public final class MachinePreviewSelection {
       }
     }
     materials = Collections.unmodifiableMap(counts);
-  }
-
-  public Map<Item, Integer> materials() {
     return materials;
   }
 

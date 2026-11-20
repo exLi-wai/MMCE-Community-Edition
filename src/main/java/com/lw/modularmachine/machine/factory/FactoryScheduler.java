@@ -6,6 +6,7 @@ import java.util.HashMap;
 import java.util.HashSet;
 import java.util.List;
 import java.util.Map;
+import java.util.NoSuchElementException;
 import java.util.Objects;
 
 /**
@@ -74,6 +75,14 @@ public final class FactoryScheduler {
    */
   public FactoryThreadState channel(String threadId) {
     return byId.get(threadId);
+  }
+
+  public FactoryThreadState requireChannel(String threadId) {
+    var thread = channel(threadId);
+    if (thread == null) {
+      throw new NoSuchElementException("Missing factory thread: " + threadId);
+    }
+    return thread;
   }
 
   public int cursor() {

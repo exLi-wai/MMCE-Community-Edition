@@ -152,52 +152,69 @@ public final class RecipeLifecycleEvents {
       controllerPosition = controllerPosition.immutable();
       before = List.copyOf(before);
       after = List.copyOf(after);
+      boolean reportsShortage = type == Type.RESOURCE_FAILURE || type == Type.DISCARDED;
+      String thread = threadId.orElse(null);
       if (tick < 0
-          || threadId.isPresent()
-              && (!factory || threadId.orElseThrow().isBlank() || threadId.orElseThrow().length() > 64)
+          || thread != null && (!factory || thread.isBlank() || thread.length() > 64)
           || type != Type.MACHINE_TICK && factory != threadId.isPresent()
-          || (type == Type.RESOURCE_FAILURE || type == Type.DISCARDED) != resourceFailure.isPresent()) {
+          || reportsShortage != resourceFailure.isPresent()) {
         throw new IllegalArgumentException("Invalid recipe event identity");
       }
-      if (type == Type.MACHINE_TICK && (!before.isEmpty() || !after.isEmpty() || threadId.isPresent())
-          || type == Type.STARTED
-              && (!before.isEmpty()
-                  || after.isEmpty()
-                  || after.stream().anyMatch(run -> run.progress() != 0 || run.state() != RecipeRunState.RUNNING))
-          || type == Type.FINISHED
-              && (!after.isEmpty()
-                  || before.isEmpty()
-                  || before.stream().anyMatch(run -> run.state() != RecipeRunState.OUTPUT_PENDING))
-          || type == Type.DISCARDED
-              && (!after.isEmpty()
-                  || before.isEmpty()
-                  || before.stream().anyMatch(run -> run.state() != RecipeRunState.RUNNING))) {
+      switch (type) {
+        case MACHINE_TICK -> requireBoundary(before.isEmpty() && after.isEmpty() && threadId.isEmpty());
+        case STARTED -> requireBoundary(
+            before.isEmpty()
+                && !after.isEmpty()
+                && after.stream().allMatch(run -> run.state() == RecipeRunState.RUNNING && run.progress() == 0));
+        case FINISHED -> requireBoundary(
+            after.isEmpty()
+                && !before.isEmpty()
+                && before.stream().allMatch(run -> run.state() == RecipeRunState.OUTPUT_PENDING));
+        case DISCARDED -> requireBoundary(
+            after.isEmpty()
+                && !before.isEmpty()
+                && before.stream().allMatch(run -> run.state() == RecipeRunState.RUNNING));
+        case TICK, RESOURCE_FAILURE -> validateTransitions(type, tick, before, after);
+      }
+      requireUniqueRunIds(before);
+      requireUniqueRunIds(after);
+    }
+
+    private static void requireBoundary(boolean valid) {
+      if (!valid) {
         throw new IllegalArgumentException("Invalid recipe event boundary");
       }
-      if (type == Type.TICK || type == Type.RESOURCE_FAILURE) {
-        if (before.isEmpty() || before.size() != after.size()) {
-          throw new IllegalArgumentException("Unpaired recipe event transition");
-        }
-        for (int index = 0; index < before.size(); index++) {
-          var previous = before.get(index);
-          var current = after.get(index);
-          if (!previous.runId().equals(current.runId())
-              || !previous.recipeId().equals(current.recipeId())
-              || previous.parallelInstances() != current.parallelInstances()
-              || previous.duration() != current.duration()
-              || previous.state() != RecipeRunState.RUNNING
-              || current.lastProgressTick() != tick
-              || previous.lastProgressTick() >= current.lastProgressTick()
-              || type == Type.TICK && current.progress() <= previous.progress()
-              || type == Type.RESOURCE_FAILURE
-                  && (current.progress() > previous.progress() || current.state() != RecipeRunState.RUNNING)) {
-            throw new IllegalArgumentException("Invalid recipe event transition");
-          }
+    }
+
+    private static void validateTransitions(Type type, long tick, List<RunSnapshot> before, List<RunSnapshot> after) {
+      if (before.isEmpty() || before.size() != after.size()) {
+        throw new IllegalArgumentException("Unpaired recipe event transition");
+      }
+      for (int index = 0; index < before.size(); index++) {
+        var previous = before.get(index);
+        var current = after.get(index);
+        boolean validProgress = type == Type.TICK ? current.progress() > previous
+            .progress() : current.progress() <= previous.progress() && current.state() == RecipeRunState.RUNNING;
+        if (!previous.runId().equals(current.runId())
+            || !previous.recipeId().equals(current.recipeId())
+            || previous.parallelInstances() != current.parallelInstances()
+            || previous.duration() != current.duration()
+            || previous.state() != RecipeRunState.RUNNING
+            || current.lastProgressTick() != tick
+            || previous.lastProgressTick() >= tick
+            || !validProgress) {
+          throw new IllegalArgumentException("Invalid recipe event transition");
         }
       }
-      for (var snapshots : List.of(before, after)) {
-        var ids = new HashSet<UUID>();
-        if (snapshots.stream().anyMatch(run -> !ids.add(run.runId()))) {
+    }
+
+    private static void requireUniqueRunIds(List<RunSnapshot> snapshots) {
+      if (snapshots.size() < 2) {
+        return;
+      }
+      var ids = new HashSet<UUID>();
+      for (var run : snapshots) {
+        if (!ids.add(run.runId())) {
           throw new IllegalArgumentException("Duplicate recipe event run");
         }
       }

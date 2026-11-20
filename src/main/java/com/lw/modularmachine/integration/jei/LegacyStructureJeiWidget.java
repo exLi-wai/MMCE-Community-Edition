@@ -34,6 +34,7 @@ final class LegacyStructureJeiWidget implements IRecipeWidget, IJeiGuiEventListe
       2);
   private final ClientMachineCatalog.Machine machine;
   private final PreviewSceneData scene;
+  private final float sceneExtent;
   private final PreviewRenderer renderer = PreviewRenderer.create();
   private final PreviewCamera camera = new PreviewCamera();
   private boolean dragging, initialized;
@@ -44,6 +45,7 @@ final class LegacyStructureJeiWidget implements IRecipeWidget, IJeiGuiEventListe
         machine.color(),
         machine.parts().stream().map(part -> new PreviewSceneData.Entry(part.offset(), part.alternatives(), List.of()))
             .toList());
+    sceneExtent = scene.extent();
   }
 
   @Override
@@ -71,7 +73,7 @@ final class LegacyStructureJeiWidget implements IRecipeWidget, IJeiGuiEventListe
     int height = getArea().height();
     int buttonHeight = detailsButtonHeight(height);
     int previewHeight = Math.max(1, height - buttonHeight);
-    float baseScale = Math.max(.1F, Math.min(24F, Math.min(width, previewHeight) * .55F / scene.extent()));
+    float baseScale = Math.max(.1F, Math.min(24F, Math.min(width, previewHeight) * .55F / sceneExtent));
     renderer.render(
         graphics,
         new PreviewViewport(0, 0, width, previewHeight, baseScale),

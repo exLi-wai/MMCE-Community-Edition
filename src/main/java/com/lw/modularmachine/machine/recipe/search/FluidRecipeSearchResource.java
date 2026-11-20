@@ -12,7 +12,6 @@ import java.util.List;
 import java.util.Map;
 import net.neoforged.neoforge.fluids.FluidStack;
 import org.jetbrains.annotations.ApiStatus;
-import com.lw.modularmachine.api.recipe.FluidRequirement;
 
 /**
  * Fluid identity coarse filter, component/count checks and exact output layout.
@@ -56,11 +55,8 @@ final class FluidRecipeSearchResource implements RecipeSearchResource {
       @Override
       public boolean available(String recipeId, MachineRecipe definition) {
         var selectors = definition == null ? catalog.selectors(recipeId) : definition.selectors();
-        var requiredInputs = definition == null ? inputs.getOrDefault(recipeId, List.of()) : definition
-            .fluidInputRequirements().stream().map(FluidRequirement::stack).toList();
-        var requiredOutputs = definition == null ? outputs.getOrDefault(recipeId, List.of()) : definition
-            .fluidOutputRequirements().stream().filter(row -> row.chance() == 1 && !row.ignoreOutputCheck())
-            .map(FluidRequirement::stack).toList();
+        var requiredInputs = definition == null ? inputs.getOrDefault(recipeId, List.of()) : definition.fluidInputs();
+        var requiredOutputs = requiredOutputs(recipeId, definition);
 
         return fluids.inputsAvailable(requiredInputs, selectors.fluidInput())
             && fluids.outputsAvailable(requiredOutputs, selectors.fluidOutput());
@@ -71,15 +67,16 @@ final class FluidRecipeSearchResource implements RecipeSearchResource {
         if (layout == null) {
           layout = new FluidOutputLayout(ticket, ticket.level().registryAccess());
         }
-        var required = definition == null ? outputs.getOrDefault(recipeId, List.of()) : definition
-            .fluidOutputRequirements().stream().filter(row -> row.chance() == 1 && !row.ignoreOutputCheck())
-            .map(FluidRequirement::stack).toList();
         var planning = layout.plan(
-            required,
+            requiredOutputs(recipeId, definition),
             definition == null ? catalog.selectors(recipeId).fluidOutput() : definition.selectors().fluidOutput());
 
         return new ResourcePlanningAdapter<>(planning::status, planning::advance);
       }
     };
+  }
+
+  private List<FluidStack> requiredOutputs(String recipeId, MachineRecipe definition) {
+    return definition == null ? outputs.getOrDefault(recipeId, List.of()) : definition.guaranteedFluidOutputs();
   }
 }

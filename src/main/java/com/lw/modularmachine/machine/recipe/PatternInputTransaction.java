@@ -69,7 +69,7 @@ public final class PatternInputTransaction implements RecipeResourceParticipant 
     var source = port.patternSource();
     if (!port.patternInput()
         || slot < 0
-        || slot >= port.items().size()
+        || slot >= port.itemSlotCount()
         || amount <= 0
         || amount > port.itemAmount(slot)) {
       throw new IllegalStateException("Invalid pattern item debit");
@@ -80,11 +80,7 @@ public final class PatternInputTransaction implements RecipeResourceParticipant 
     }
     var participant = participant(source);
     if (participant.items == null) {
-      var values = port.items();
-      participant.items = NonNullList.withSize(values.size(), ItemStack.EMPTY);
-      for (int i = 0; i < values.size(); i++) {
-        participant.items.set(i, values.get(i));
-      }
+      participant.items = port.copyItemContents();
     }
     var before = participant.items.get(slot);
     if (before.getCount() < amount) {

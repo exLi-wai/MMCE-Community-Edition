@@ -105,8 +105,7 @@ public final class FactoryRunState {
     if (runs.stream().anyMatch(run -> !host.recipeAllowed(threadId, run.recipeId(), run.executionOptions()))) {
       throw new IllegalStateException("Recipe factory thread admission changed before installation");
     }
-    var thread = threadConfiguration.scheduler().channels().stream()
-        .filter(candidate -> candidate.threadId().equals(threadId)).findFirst().orElseThrow();
+    var thread = threadConfiguration.scheduler().requireChannel(threadId);
     if (runs.size() > parallelAdmissionLimits.getOrDefault(threadId, thread.parallelLimit())) {
       throw new IllegalArgumentException("Batch exceeds current factory thread parallel limit");
     }
@@ -227,9 +226,10 @@ public final class FactoryRunState {
       if (runSet.runs().isEmpty()) {
         throw new IllegalArgumentException("Empty factory run set entry");
       }
-      var thread = threadConfiguration.scheduler().channels().stream()
-          .filter(candidate -> candidate.threadId().equals(threadId)).findFirst()
-          .orElseThrow(() -> new IllegalArgumentException("Run refers to missing factory thread"));
+      var thread = threadConfiguration.scheduler().channel(threadId);
+      if (thread == null) {
+        throw new IllegalArgumentException("Run refers to missing factory thread");
+      }
       threadConfiguration.replaceRuntime(
           threadConfiguration.scheduler()
               .replace(thread.withState(FactoryThreadState.State.RUNNING, FactoryThreadState.Reason.NONE)));

@@ -3,7 +3,6 @@ package com.lw.modularmachine.client.preview;
 import com.lw.modularmachine.api.client.preview.PreviewRenderer;
 import com.lw.modularmachine.api.client.preview.PreviewSceneData;
 import java.util.LinkedHashMap;
-import java.util.List;
 import java.util.Map;
 import net.minecraft.Util;
 import org.jetbrains.annotations.ApiStatus;
@@ -31,7 +30,7 @@ final class PreviewDisplayState {
   final Map<String, Boolean> includedGroups = new LinkedHashMap<>();
   final PreviewRenderer renderer = PreviewRenderer.create();
   PreviewSceneData scene;
-  List<PreviewSceneData.Entry> animated = List.of();
+  boolean hasAnimatedEntries;
   int step;
   long lastCycle;
   PreviewSceneStatistics statistics;
@@ -84,7 +83,7 @@ final class PreviewDisplayState {
       scene = null;
       statistics = null;
       shownY = null;
-      animated = List.of();
+      hasAnimatedEntries = false;
       host.sceneChanged();
       renderer.close();
       host.cleared();
@@ -126,7 +125,7 @@ final class PreviewDisplayState {
     }
     if (selection != null && selection.scene() != scene && selection.scene() != null) {
       scene = selection.scene();
-      animated = scene.entries().stream().filter(entry -> entry.states().size() > 1).toList();
+      hasAnimatedEntries = scene.entries().stream().anyMatch(entry -> entry.states().size() > 1);
       renderer.setScene(scene);
       statistics = new PreviewSceneStatistics(scene);
       host.sceneChanged();
@@ -137,7 +136,7 @@ final class PreviewDisplayState {
     if (shownY != null && statistics != null && statistics.ready() && !statistics.layers.containsKey(shownY)) {
       host.showLayer(null);
     }
-    if (cycle && !animated.isEmpty() && Util.getMillis() - lastCycle >= 1500) {
+    if (cycle && hasAnimatedEntries && Util.getMillis() - lastCycle >= 1500) {
       step++;
       lastCycle = Util.getMillis();
     }

@@ -45,6 +45,7 @@ import com.lw.modularmachine.api.recipe.ItemPaymentData;
 import com.lw.modularmachine.api.recipe.RecipeModifier;
 import java.util.stream.IntStream;
 import com.lw.modularmachine.api.recipe.ChemicalRequirement;
+import org.jetbrains.annotations.ApiStatus;
 
 /**
  * Native data definition. This recipe cannot assemble through a crafting grid
@@ -414,7 +415,8 @@ public final class MachineRecipe implements Recipe<RecipeInput> {
    * Startup capacity covers guaranteed outputs; sampled claims are planned at
    * completion.
    */
-  List<FluidStack> guaranteedFluidOutputs() {
+  @ApiStatus.Internal
+  public List<FluidStack> guaranteedFluidOutputs() {
     return fluidOutputRequirements().stream().filter(output -> output.chance() == 1.0D && !output.ignoreOutputCheck())
         .map(FluidRequirement::stack).toList();
   }

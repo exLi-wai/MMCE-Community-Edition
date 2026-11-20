@@ -41,6 +41,31 @@ public final class RecipeCatalog {
   private final List<RecipeSearchResource> resourceSearches;
   private final BitSet dynamicInputRanks;
 
+  /**
+   * Both base and controller-specific catalogs index the effective definitions
+   * for their candidates.
+   */
+  public static RecipeCatalog fromDefinitions(ResourceLocation machineId, Collection<RecipeCandidate<ItemResourceKey>> candidates, Map<String, MachineRecipe> definitions, BooleanSupplier authority, RecipeCatalog root, List<RecipeModifier> contextRules) {
+    var inputs = new HashMap<String, List<FluidStack>>();
+    var outputs = new HashMap<String, List<FluidStack>>();
+    var selectors = new HashMap<String, RecipeSelectors>();
+    definitions.forEach((id, recipe) -> {
+      inputs.put(id, recipe.fluidInputs());
+      outputs.put(id, recipe.guaranteedFluidOutputs());
+      selectors.put(id, recipe.selectors());
+    });
+    return new RecipeCatalog(
+        machineId,
+        new CompiledRecipeSet<>(candidates),
+        inputs,
+        outputs,
+        authority,
+        root,
+        definitions,
+        contextRules,
+        selectors);
+  }
+
   public RecipeCatalog(ResourceLocation machineId, Collection<RecipeCandidate<ItemResourceKey>> candidates) {
     this(machineId, new CompiledRecipeSet<>(candidates), Map.of(), Map.of(), () -> true);
   }

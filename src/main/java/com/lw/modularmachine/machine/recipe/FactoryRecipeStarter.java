@@ -6,7 +6,6 @@ import com.lw.modularmachine.machine.recipe.search.RecipeResourceRequirements;
 import com.lw.modularmachine.ModularMachine;
 import com.lw.modularmachine.blockentity.FactoryControllerBlockEntity;
 import com.lw.modularmachine.config.MachineConfig;
-import com.lw.modularmachine.machine.factory.FactoryThreadState;
 import java.util.HashMap;
 import java.util.List;
 import net.minecraft.core.NonNullList;
@@ -148,8 +147,7 @@ public final class FactoryRecipeStarter {
         case READY -> {
         }
       }
-      var upgrades = factory.scheduler().channels().stream().filter(thread -> thread.threadId().equals(threadId))
-          .map(FactoryThreadState::upgradeSnapshot).findFirst().orElseThrow();
+      var upgrades = factory.scheduler().requireChannel(threadId).upgradeSnapshot();
       var preparedRuns = plan.preparedOutputRuns(1);
       var run = !preparedRuns.isEmpty() ? preparedRuns.getFirst()
           .atStartTick(factory.getLevel().getGameTime()) : FrozenRecipeFactory.freeze(

@@ -172,9 +172,8 @@ public final class FactoryRunCoordinator {
       advancePendingOutput(threadId, currentSet);
       return;
     }
-    var current = threadConfiguration.scheduler().channels().stream()
-        .filter(candidate -> candidate.threadId().equals(threadId)).findFirst().orElse(thread);
-    host.updateThreadState(current, threadState, threadReason);
+    var current = threadConfiguration.scheduler().channel(threadId);
+    host.updateThreadState(current == null ? thread : current, threadState, threadReason);
   }
 
   private void advancePendingOutput(String threadId, FactoryRunSet completed) {

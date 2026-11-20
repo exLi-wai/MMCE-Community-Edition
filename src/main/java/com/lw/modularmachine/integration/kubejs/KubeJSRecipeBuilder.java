@@ -929,22 +929,9 @@ public final class KubeJSRecipeBuilder {
             fuelInputs.size() - 1,
             new ItemPaymentData.Fuel(fuel.burnTime(), value, fuel.parallelUnaffected(), fuel.selector()));
       } else if (last == LastRequirement.RANDOM_OUTPUT) {
-        var group = randomItemOutputs.getLast();
-        randomItemOutputs.set(
-            randomItemOutputs.size() - 1,
-            new IngredientArrayData.Group(group.alternatives(), value, group.parallelUnaffected(), group.selector()));
+        KubeJSIngredientArrayBuilder.setLastGroupChance(randomItemOutputs, value);
       } else if (last == LastRequirement.INGREDIENT_ARRAY) {
-        var group = ingredientArrays.getLast();
-        ingredientArrays.set(
-            ingredientArrays.size() - 1,
-            new IngredientArrayData.Group(
-                group.alternatives(),
-                value,
-                group.parallelUnaffected(),
-                group.selector(),
-                group.optional(),
-                group.tooltips(),
-                group.recipeModifiers()));
+        KubeJSIngredientArrayBuilder.setLastGroupChance(ingredientArrays, value);
       } else if (last == LastRequirement.CHEMICAL && lastChemical != null) {
         lastChemical.chance = value;
       } else if ((last == LastRequirement.FLUID_INPUT
@@ -968,25 +955,12 @@ public final class KubeJSRecipeBuilder {
             fuelInputs.size() - 1,
             new ItemPaymentData.Fuel(fuel.burnTime(), fuel.chance(), unaffected, fuel.selector()));
       } else if (last == LastRequirement.RANDOM_OUTPUT) {
-        var group = randomItemOutputs.getLast();
-        randomItemOutputs.set(
-            randomItemOutputs.size() - 1,
-            new IngredientArrayData.Group(group.alternatives(), group.chance(), unaffected, group.selector()));
+        KubeJSIngredientArrayBuilder.setLastGroupParallelUnaffected(randomItemOutputs, unaffected);
       } else if (last == LastRequirement.INGREDIENT_ARRAY) {
-        var group = ingredientArrays.getLast();
-        if (group.resource().equals("chemical")) {
+        if (ingredientArrays.getLast().resource().equals("chemical")) {
           throw new IllegalStateException("Fixed parallel quantities are not supported for chemical ingredients");
         }
-        ingredientArrays.set(
-            ingredientArrays.size() - 1,
-            new IngredientArrayData.Group(
-                group.alternatives(),
-                group.chance(),
-                unaffected,
-                group.selector(),
-                group.optional(),
-                group.tooltips(),
-                group.recipeModifiers()));
+        KubeJSIngredientArrayBuilder.setLastGroupParallelUnaffected(ingredientArrays, unaffected);
       } else if ((last == LastRequirement.FLUID_INPUT || last == LastRequirement.FLUID_OUTPUT) && lastFluid != null) {
         lastFluid.parallelUnaffected = unaffected;
       } else {
@@ -1042,22 +1016,9 @@ public final class KubeJSRecipeBuilder {
             fuelInputs.size() - 1,
             new ItemPaymentData.Fuel(fuel.burnTime(), fuel.chance(), fuel.parallelUnaffected(), selector));
       } else if (last == LastRequirement.RANDOM_OUTPUT) {
-        var group = randomItemOutputs.getLast();
-        randomItemOutputs.set(
-            randomItemOutputs.size() - 1,
-            new IngredientArrayData.Group(group.alternatives(), group.chance(), group.parallelUnaffected(), selector));
+        KubeJSIngredientArrayBuilder.setLastGroupSelector(randomItemOutputs, selector);
       } else if (last == LastRequirement.INGREDIENT_ARRAY) {
-        var group = ingredientArrays.getLast();
-        ingredientArrays.set(
-            ingredientArrays.size() - 1,
-            new IngredientArrayData.Group(
-                group.alternatives(),
-                group.chance(),
-                group.parallelUnaffected(),
-                selector,
-                group.optional(),
-                group.tooltips(),
-                group.recipeModifiers()));
+        KubeJSIngredientArrayBuilder.setLastGroupSelector(ingredientArrays, selector);
       } else if (last == LastRequirement.ENERGY && energyRequirements == 1) {
         setEnergyInputTag(selector);
       } else if (last == LastRequirement.ENERGY_OUTPUT && energyOutputRequirements == 1) {

@@ -6,7 +6,6 @@ import com.lw.modularmachine.blockentity.FactoryControllerBlockEntity;
 import com.lw.modularmachine.machine.recipe.resource.RecipeResourceExecutionRegistry;
 import com.lw.modularmachine.machine.recipe.search.RecipeCatalog;
 import com.lw.modularmachine.machine.recipe.search.ResourceSnapshot;
-import com.lw.modularmachine.machine.recipe.search.ItemSlotDomain;
 import com.lw.modularmachine.machine.recipe.search.RecipeCandidate;
 import com.lw.modularmachine.machine.upgrade.UpgradeRecipeCheckHandlers;
 import com.lw.modularmachine.blockentity.MachineControllerBlockEntity;
@@ -359,8 +358,9 @@ public final class RecipeStartPlan {
       if (port.kind() != PortKind.ITEM_INPUT) {
         continue;
       }
-      for (int slot = 0; slot < port.items().size(); slot++) {
-        var stack = port.items().get(slot);
+      var stacks = port.items();
+      for (int slot = 0; slot < stacks.size(); slot++) {
+        var stack = stacks.get(slot);
         if (stack.isEmpty()) {
           continue;
         }
@@ -494,8 +494,9 @@ public final class RecipeStartPlan {
     }
     for (var port : source.ports()) {
       if (port.kind() == PortKind.ITEM_INPUT) {
-        for (int slot = 0; slot < port.items().size(); slot++) {
-          var stack = port.items().get(slot);
+        var stacks = port.items();
+        for (int slot = 0; slot < stacks.size(); slot++) {
+          var stack = stacks.get(slot);
           if (!stack.isEmpty()) {
             available.merge(
                 inputKey(recipe, ItemResourceKey.of(stack).withSelector(port.selector())),
@@ -551,17 +552,7 @@ public final class RecipeStartPlan {
     for (var key : keys) {
       long capacity = 0;
       for (var port : source.ports()) {
-        if (port.kind() != PortKind.ITEM_OUTPUT || !port.selector().equals(key.selector())) {
-          continue;
-        }
-        var stacks = port.items();
-        for (int slot = 0; slot < stacks.size(); slot++) {
-          var stack = stacks.get(slot);
-          if (stack.isEmpty() || key.matches(stack)) {
-            var domain = new ItemSlotDomain(port.slotLimits().get(slot), port.selector(), port.bulkItems());
-            capacity = Math.addExact(capacity, Math.max(0, domain.capacityFor(key) - port.itemAmount(slot)));
-          }
-        }
+        capacity = Math.addExact(capacity, port.remainingItemOutputCapacity(key));
       }
       long base = fixed.getOrDefault(key, 0L);
       if (capacity < base) {
