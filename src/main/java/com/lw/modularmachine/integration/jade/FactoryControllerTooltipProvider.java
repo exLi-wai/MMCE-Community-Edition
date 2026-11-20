@@ -79,8 +79,7 @@ final class FactoryControllerTooltipProvider implements IBlockComponentProvider,
       tooltip.add(Component.translatable("jade.mmcece.factory.structure." + structure));
     }
     if ("invalid".equals(structure)) {
-      tooltip.add(
-          Component.translatable("jade.mmcece.failure." + data.getString(PREFIX + "failure").toLowerCase(Locale.ROOT)));
+      tooltip.add(ControllerStatusFormat.structureFailure(data.getString(PREFIX + "failure")));
     }
     ControllerDiagnosticTooltip.append(tooltip, data, DIAGNOSTIC);
     int count = Math.min(data.getInt(PREFIX + "count"), 8);
@@ -90,14 +89,11 @@ final class FactoryControllerTooltipProvider implements IBlockComponentProvider,
           Component.translatable(
               "jade.mmcece.factory.thread",
               data.getString(key + "id"),
-              Component.translatable(
-                  "menu.mmcece.factory.thread_state." + data.getString(key + "state").toLowerCase(Locale.ROOT))));
+              ControllerStatusFormat.factoryThreadState(data.getString(key + "state"))));
       String reason = data.getString(key + "reason");
       if (!"NONE".equals(reason)) {
         tooltip.add(
-            Component.translatable(
-                "jade.mmcece.factory.reason",
-                Component.translatable("menu.mmcece.factory.reason." + reason.toLowerCase(Locale.ROOT))));
+            Component.translatable("jade.mmcece.factory.reason", ControllerStatusFormat.factoryThreadReason(reason)));
       }
       if (data.getBoolean(key + "has_run")) {
         int progress = data.getInt(key + "progress");

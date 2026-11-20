@@ -105,6 +105,37 @@ public final class FactoryThreadConfiguration {
     scheduler = Objects.requireNonNull(replacement, "replacement");
   }
 
+  void updateThreadState(String threadId, FactoryThreadState.State state, FactoryThreadState.Reason reason) {
+    var current = scheduler.channel(threadId);
+    if (current != null && replaceThreadState(current, state, reason)) {
+      host.markChanged();
+    }
+  }
+
+  void publishRuntimeStates(FactoryScheduler next) {
+    if (next != scheduler) {
+      replaceRuntime(next);
+      host.markChanged();
+    }
+  }
+
+  void restoreRunningThread(String threadId) {
+    var current = scheduler.channel(threadId);
+    if (current == null) {
+      throw new IllegalArgumentException("Run refers to missing factory thread");
+    }
+    replaceThreadState(current, FactoryThreadState.State.RUNNING, FactoryThreadState.Reason.NONE);
+  }
+
+  private boolean replaceThreadState(FactoryThreadState current, FactoryThreadState.State state, FactoryThreadState.Reason reason) {
+    var next = current.withState(state, reason);
+    if (next == current) {
+      return false;
+    }
+    scheduler = scheduler.replace(next);
+    return true;
+  }
+
   public void resetState() {
     scheduler = new FactoryScheduler(List.of());
     threadsInitialized = false;

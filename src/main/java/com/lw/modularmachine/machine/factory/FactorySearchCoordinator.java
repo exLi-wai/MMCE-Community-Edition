@@ -42,7 +42,6 @@ public final class FactorySearchCoordinator {
     MachineRecipe definitionForStart(RecipeStartPlan plan);
     FactoryRecipeStarter.Result startSingle(String threadId, RecipeStartPlan plan, int workBudget);
     FactoryParallelStarter.Result startParallel(String threadId, RecipeStartPlan plan, int count, int workBudget);
-    void updateThreadState(FactoryThreadState previous, FactoryThreadState.State state, FactoryThreadState.Reason reason);
   }
 
   public FactorySearchCoordinator(FactoryThreadConfiguration threadConfiguration, Host host) {
@@ -83,7 +82,10 @@ public final class FactorySearchCoordinator {
     }
     if (!host.startAllowed(thread.threadId())) {
       invalidateThread(thread.threadId(), now);
-      host.updateThreadState(thread, FactoryThreadState.State.WAITING, FactoryThreadState.Reason.THREAD_LIMIT);
+      threadConfiguration.updateThreadState(
+          thread.threadId(),
+          FactoryThreadState.State.WAITING,
+          FactoryThreadState.Reason.THREAD_LIMIT);
       return;
     }
     var search = searches.get(thread.threadId());
@@ -100,7 +102,10 @@ public final class FactorySearchCoordinator {
       try {
         search = host.beginSearch(thread.threadId(), catalog, allowed);
       } catch (UpgradeRecipeCheckHandlers.FailedException invalid) {
-        host.updateThreadState(thread, FactoryThreadState.State.WAITING, FactoryThreadState.Reason.CHECK_ERROR);
+        threadConfiguration.updateThreadState(
+            thread.threadId(),
+            FactoryThreadState.State.WAITING,
+            FactoryThreadState.Reason.CHECK_ERROR);
         backoffSearch(thread.threadId(), now);
         recordSearchAttempt(thread.threadId());
         return;
@@ -108,7 +113,7 @@ public final class FactorySearchCoordinator {
       if (search == null) {
         var reason = thread.upgradeSnapshot().recipeModifiers()
             .isEmpty() ? FactoryThreadState.Reason.STALE_RESOURCES : FactoryThreadState.Reason.SEARCH_BUDGET;
-        host.updateThreadState(thread, FactoryThreadState.State.WAITING, reason);
+        threadConfiguration.updateThreadState(thread.threadId(), FactoryThreadState.State.WAITING, reason);
         backoffSearch(thread.threadId(), now);
         recordSearchAttempt(thread.threadId());
         return;
@@ -125,8 +130,10 @@ public final class FactorySearchCoordinator {
             startSelected(thread, activeSearch, plan, now, budget - result.workUsed());
           });
         }
-        case BUDGET_EXHAUSTED ->
-          host.updateThreadState(thread, FactoryThreadState.State.WAITING, FactoryThreadState.Reason.SEARCH_BUDGET);
+        case BUDGET_EXHAUSTED -> threadConfiguration.updateThreadState(
+            thread.threadId(),
+            FactoryThreadState.State.WAITING,
+            FactoryThreadState.Reason.SEARCH_BUDGET);
         case NO_MATCH -> {
           String interfaceFailure = search.interfaceFailure();
           var missing = search.missingResource();
@@ -138,7 +145,7 @@ public final class FactorySearchCoordinator {
           } else {
             reason = FactoryThreadState.Reason.INPUT_MISSING;
           }
-          host.updateThreadState(thread, FactoryThreadState.State.WAITING, reason);
+          threadConfiguration.updateThreadState(thread.threadId(), FactoryThreadState.State.WAITING, reason);
           invalidateThread(thread.threadId(), now);
           if (!interfaceFailure.isEmpty()) {
             interfaceFailures.put(thread.threadId(), interfaceFailure);
@@ -152,7 +159,7 @@ public final class FactorySearchCoordinator {
       invalidateThread(thread.threadId(), now);
       backoffSearch(thread.threadId(), now);
       var reason = failure instanceof UpgradeRecipeCheckHandlers.StaleException ? FactoryThreadState.Reason.STALE_RESOURCES : FactoryThreadState.Reason.CHECK_ERROR;
-      host.updateThreadState(thread, FactoryThreadState.State.WAITING, reason);
+      threadConfiguration.updateThreadState(thread.threadId(), FactoryThreadState.State.WAITING, reason);
     }
     recordSearchAttempt(thread.threadId());
   }
@@ -174,7 +181,10 @@ public final class FactorySearchCoordinator {
     int upper = Math.min(resourceLimit, upgradeLimit);
     int maxInstances = upper == 0 ? 0 : plan.prepareParallel(nativeRecipe, upper, workBudget);
     if (maxInstances < 0) {
-      host.updateThreadState(thread, FactoryThreadState.State.WAITING, FactoryThreadState.Reason.SEARCH_BUDGET);
+      threadConfiguration.updateThreadState(
+          thread.threadId(),
+          FactoryThreadState.State.WAITING,
+          FactoryThreadState.Reason.SEARCH_BUDGET);
       return;
     }
     var startResult = FactoryRecipeStarter.Result.STALE;
@@ -197,7 +207,8 @@ public final class FactorySearchCoordinator {
       startResult = host.startSingle(thread.threadId(), plan, plan.parallelBudgetRemaining());
     }
     if (startResult == FactoryRecipeStarter.Result.STARTED) {
-      host.updateThreadState(thread, FactoryThreadState.State.RUNNING, FactoryThreadState.Reason.NONE);
+      threadConfiguration
+          .updateThreadState(thread.threadId(), FactoryThreadState.State.RUNNING, FactoryThreadState.Reason.NONE);
       resetSearchRetry(thread.threadId(), now);
     } else {
       var reason = switch (startResult) {
@@ -207,7 +218,7 @@ public final class FactorySearchCoordinator {
         case UPGRADE_COST_MISSING -> FactoryThreadState.Reason.UPGRADE_COST_MISSING;
         default -> FactoryThreadState.Reason.STALE_RESOURCES;
       };
-      host.updateThreadState(thread, FactoryThreadState.State.WAITING, reason);
+      threadConfiguration.updateThreadState(thread.threadId(), FactoryThreadState.State.WAITING, reason);
       if (startResult == FactoryRecipeStarter.Result.CHECK_REJECTED && activeSearch.rejectSelected(plan)) {
         resetSearchRetry(thread.threadId(), now);
         return;
@@ -258,7 +269,7 @@ public final class FactorySearchCoordinator {
     int visitBudget = Math.min(MachineConfig.FACTORY_THREADS_PER_TICK.get(), channels.size());
     for (var thread : threadConfiguration.visitWindow(visitBudget)) {
       if (thread.enabled() && thread.state() != FactoryThreadState.State.RUNNING) {
-        host.updateThreadState(thread, FactoryThreadState.State.WAITING, reason);
+        threadConfiguration.updateThreadState(thread.threadId(), FactoryThreadState.State.WAITING, reason);
       }
     }
   }

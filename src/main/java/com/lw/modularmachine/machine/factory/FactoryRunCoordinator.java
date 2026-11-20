@@ -39,7 +39,6 @@ public final class FactoryRunCoordinator {
     FactoryOutputEngine.Result advanceOutput(FactoryOutputEngine engine, String threadId, FactoryRunSet set);
     void advanced(String threadId, List<FrozenRecipeRun> before, List<FrozenRecipeRun> after);
     void markChanged();
-    void updateThreadState(FactoryThreadState previous, FactoryThreadState.State state, FactoryThreadState.Reason reason);
   }
 
   public FactoryRunCoordinator(FactoryThreadConfiguration threads, FactoryRunState runs, Host host) {
@@ -87,7 +86,8 @@ public final class FactoryRunCoordinator {
     var active = entry.getValue().runs().stream()
         .filter(run -> !run.pendingOutput() && run.lastProgressTick() < host.gameTime()).toList();
     if (!active.isEmpty() && !host.beforeTick(threadId, active)) {
-      host.updateThreadState(thread, FactoryThreadState.State.WAITING, FactoryThreadState.Reason.NONE);
+      threadConfiguration
+          .updateThreadState(thread.threadId(), FactoryThreadState.State.WAITING, FactoryThreadState.Reason.NONE);
       return;
     }
     if (entry.getValue().runs().size() > 1
@@ -99,7 +99,7 @@ public final class FactoryRunCoordinator {
         || UpgradeCatalogService.snapshot().hasTickWork()) {
       var result = host.tickParallel(threadId, entry.getValue());
       var status = FactoryRunStatus.from(result);
-      host.updateThreadState(thread, status.state(), status.reason());
+      threadConfiguration.updateThreadState(thread.threadId(), status.state(), status.reason());
       if (result == FactoryRunResourceResult.ADVANCED) {
         advancePendingOutput(threadId, runState.runSet(threadId));
       }
@@ -146,7 +146,7 @@ public final class FactoryRunCoordinator {
     }
     if (threadReason == FactoryThreadState.Reason.STALE_RESOURCES) {
       // All free-run replacements are still private; reject the whole batch.
-      host.updateThreadState(thread, threadState, threadReason);
+      threadConfiguration.updateThreadState(thread.threadId(), threadState, threadReason);
       return;
     }
     if (!replacements.isEmpty()) {
@@ -172,8 +172,7 @@ public final class FactoryRunCoordinator {
       advancePendingOutput(threadId, currentSet);
       return;
     }
-    var current = threadConfiguration.scheduler().channel(threadId);
-    host.updateThreadState(current == null ? thread : current, threadState, threadReason);
+    threadConfiguration.updateThreadState(threadId, threadState, threadReason);
   }
 
   private void advancePendingOutput(String threadId, FactoryRunSet completed) {
@@ -186,19 +185,32 @@ public final class FactoryRunCoordinator {
     }
     var result = advanceOutput(threadId, completed);
     switch (result) {
-      case PLANNING ->
-        host.updateThreadState(thread, FactoryThreadState.State.WAITING, FactoryThreadState.Reason.OUTPUT_PLANNING);
-      case BLOCKED ->
-        host.updateThreadState(thread, FactoryThreadState.State.BLOCKED, FactoryThreadState.Reason.OUTPUT_BLOCKED);
-      case STALE ->
-        host.updateThreadState(thread, FactoryThreadState.State.WAITING, FactoryThreadState.Reason.STALE_RESOURCES);
-      case COMMITTED -> host.updateThreadState(thread, FactoryThreadState.State.IDLE, FactoryThreadState.Reason.NONE);
-      case UPGRADE_PENDING -> host
-          .updateThreadState(thread, FactoryThreadState.State.WAITING, FactoryThreadState.Reason.UPGRADE_DATA_PENDING);
-      case WAITING_UPGRADE -> host
-          .updateThreadState(thread, FactoryThreadState.State.WAITING, FactoryThreadState.Reason.WAITING_UPGRADE_COST);
-      case UPGRADE_ERROR ->
-        host.updateThreadState(thread, FactoryThreadState.State.WAITING, FactoryThreadState.Reason.UPGRADE_ERROR);
+      case PLANNING -> threadConfiguration.updateThreadState(
+          thread.threadId(),
+          FactoryThreadState.State.WAITING,
+          FactoryThreadState.Reason.OUTPUT_PLANNING);
+      case BLOCKED -> threadConfiguration.updateThreadState(
+          thread.threadId(),
+          FactoryThreadState.State.BLOCKED,
+          FactoryThreadState.Reason.OUTPUT_BLOCKED);
+      case STALE -> threadConfiguration.updateThreadState(
+          thread.threadId(),
+          FactoryThreadState.State.WAITING,
+          FactoryThreadState.Reason.STALE_RESOURCES);
+      case COMMITTED -> threadConfiguration
+          .updateThreadState(thread.threadId(), FactoryThreadState.State.IDLE, FactoryThreadState.Reason.NONE);
+      case UPGRADE_PENDING -> threadConfiguration.updateThreadState(
+          thread.threadId(),
+          FactoryThreadState.State.WAITING,
+          FactoryThreadState.Reason.UPGRADE_DATA_PENDING);
+      case WAITING_UPGRADE -> threadConfiguration.updateThreadState(
+          thread.threadId(),
+          FactoryThreadState.State.WAITING,
+          FactoryThreadState.Reason.WAITING_UPGRADE_COST);
+      case UPGRADE_ERROR -> threadConfiguration.updateThreadState(
+          thread.threadId(),
+          FactoryThreadState.State.WAITING,
+          FactoryThreadState.Reason.UPGRADE_ERROR);
     }
   }
 

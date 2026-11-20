@@ -70,7 +70,7 @@ public final class AssemblyService {
       lengths = definition.defaultDynamicLengths(layers);
     }
     if (!build) {
-      player.displayClientMessage(Component.translatable("message.mmcece.projection.length", layers), true);
+      player.displayClientMessage(ProjectionMessages.length(layers), true);
       var id = player.getUUID();
       CONSTRUCTIONS.invalidateLengths(id, owner, definition, lengths);
       PROJECTIONS.request(player, owner, definition, orientation, lengths, layers);
@@ -116,7 +116,7 @@ public final class AssemblyService {
     if (player.containerMenu != player.inventoryMenu) {
       player.containerMenu.broadcastChanges();
     }
-    player.displayClientMessage(Component.translatable("message.mmcece.projection.length", layers), true);
+    player.displayClientMessage(ProjectionMessages.length(layers), true);
   }
 
   @ApiStatus.Internal

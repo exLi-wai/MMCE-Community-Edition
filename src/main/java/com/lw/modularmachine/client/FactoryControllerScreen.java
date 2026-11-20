@@ -4,6 +4,7 @@ import com.lw.modularmachine.api.component.ChemicalStackData;
 import com.lw.modularmachine.api.recipe.ChemicalRequirement;
 import com.lw.modularmachine.menu.FactoryControllerMenu;
 import com.lw.modularmachine.network.MachinePayloads;
+import com.lw.modularmachine.presentation.ControllerStatusFormat;
 import com.lw.modularmachine.machine.recipe.MachineRecipe;
 import com.lw.modularmachine.machine.recipe.MachineRecipeRegistries;
 import com.lw.modularmachine.util.client.gui.GuiTextures;
@@ -600,7 +601,7 @@ public final class FactoryControllerScreen extends AbstractContainerScreen<Facto
           graphics,
           Component.translatable(
               "menu.mmcece.factory.structure_failure",
-              Component.translatable("jade.mmcece.failure." + status.structureFailure().toLowerCase(Locale.ROOT))),
+              ControllerStatusFormat.structureFailure(status.structureFailure())),
           infoX,
           infoY) + 5;
     }
@@ -626,10 +627,9 @@ public final class FactoryControllerScreen extends AbstractContainerScreen<Facto
     int x = (int) ((THREAD_X + 2) / .72F);
     int y = (int) ((THREAD_Y + row * THREAD_STEP + 2) / .72F);
     graphics.drawString(font, Component.literal(thread.threadId()), x, y, FONT_COLOR, false);
-    Component threadState = Component
-        .translatable("menu.mmcece.factory.thread_state." + thread.state().toLowerCase(Locale.ROOT));
+    Component threadState = ControllerStatusFormat.factoryThreadState(thread.state());
     if (thread.duration() > 0 && "WAITING".equals(thread.state()) && !"NONE".equals(thread.reason())) {
-      threadState = Component.translatable("menu.mmcece.factory.reason." + thread.reason().toLowerCase(Locale.ROOT));
+      threadState = ControllerStatusFormat.factoryThreadReason(thread.reason());
     }
     if (!thread.recipeFailureMessage().isEmpty()) {
       threadState = Component.translatable(thread.recipeFailureMessage());
@@ -649,9 +649,8 @@ public final class FactoryControllerScreen extends AbstractContainerScreen<Facto
     } else if (!"NONE".equals(thread.reason())) {
       graphics.drawString(
           font,
-          thread.recipeFailureMessage().isEmpty() ? Component
-              .translatable("menu.mmcece.factory.reason." + thread.reason().toLowerCase(Locale.ROOT)) : Component
-                  .translatable(thread.recipeFailureMessage()),
+          thread.recipeFailureMessage().isEmpty() ? ControllerStatusFormat
+              .factoryThreadReason(thread.reason()) : Component.translatable(thread.recipeFailureMessage()),
           x,
           y + 22,
           FONT_COLOR,

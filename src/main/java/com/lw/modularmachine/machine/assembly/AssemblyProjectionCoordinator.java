@@ -18,7 +18,6 @@ import java.util.Map;
 import java.util.Optional;
 import java.util.UUID;
 import net.minecraft.core.BlockPos;
-import net.minecraft.network.chat.Component;
 import net.minecraft.server.level.ServerLevel;
 import net.minecraft.server.level.ServerPlayer;
 import org.jetbrains.annotations.ApiStatus;
@@ -189,7 +188,7 @@ final class AssemblyProjectionCoordinator {
     projections.remove(player.getUUID());
     removePending(player.getUUID());
     ProjectionPayloads.clear(player, request = Math.incrementExact(request));
-    player.displayClientMessage(Component.translatable("message.mmcece.projection.cancelled"), true);
+    player.displayClientMessage(ProjectionMessages.cancelled(), true);
   }
 
   /**
@@ -217,7 +216,7 @@ final class AssemblyProjectionCoordinator {
   private void invalidate(ServerPlayer player, long expectedRequest) {
     if (removeRequest(player.getUUID(), expectedRequest)) {
       ProjectionPayloads.clear(player, expectedRequest);
-      player.displayClientMessage(Component.translatable("message.mmcece.projection.cancelled"), true);
+      player.displayClientMessage(ProjectionMessages.cancelled(), true);
     }
   }
 
@@ -260,7 +259,7 @@ final class AssemblyProjectionCoordinator {
             .debug("Projection {} ready: {} entries at {}", pending.request, ready.entries().size(), pending.origin);
         pendingProjections.remove(player.getUUID());
         projections.put(player.getUUID(), job);
-        player.displayClientMessage(Component.translatable("message.mmcece.projection.length", pending.layers), true);
+        player.displayClientMessage(ProjectionMessages.length(pending.layers), true);
       }
     } catch (RuntimeException failure) {
       ModularMachine.LOGGER.warn("Projection preparation failed at {}", pending.origin, failure);

@@ -500,12 +500,8 @@ public final class KubeJSUpgradeDeclarations {
 
     private <T> void put(Map<ResourceLocation, T> handlers, String text, T handler) {
       requireOpen();
-      ResourceLocation id = ResourceLocation.tryParse(text);
+      ResourceLocation id = KubeJSRegistrationIds.parse(text);
       if (id == null
-          || !id.getNamespace().equals("kubejs")
-          || id.getPath().isEmpty()
-          || id.toString().length() > 256
-          || !id.toString().equals(text)
           || handler == null
           || handlers.containsKey(id)
           || !identifiers.contains(id) && identifiers.size() >= ServerCallbackRegistry.MAX_HANDLERS) {

@@ -226,13 +226,7 @@ public final class FactoryRunState {
       if (runSet.runs().isEmpty()) {
         throw new IllegalArgumentException("Empty factory run set entry");
       }
-      var thread = threadConfiguration.scheduler().channel(threadId);
-      if (thread == null) {
-        throw new IllegalArgumentException("Run refers to missing factory thread");
-      }
-      threadConfiguration.replaceRuntime(
-          threadConfiguration.scheduler()
-              .replace(thread.withState(FactoryThreadState.State.RUNNING, FactoryThreadState.Reason.NONE)));
+      threadConfiguration.restoreRunningThread(threadId);
     }
   }
 }

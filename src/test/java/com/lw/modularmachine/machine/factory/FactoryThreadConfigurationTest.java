@@ -190,6 +190,29 @@ class FactoryThreadConfigurationTest {
         UpgradeSnapshot.identity(0));
   }
 
+  @Test
+  void runtimeTransitionsKeepTheConfigurationWatermarkAndRestoreSilently() {
+    var host = new Host();
+    var configuration = host.configuration;
+    configuration.replaceThreads(List.of(thread("a")));
+    long watermark = configuration.revision();
+    long before = configuration.scheduler().channel("a").revision();
+    host.effects.clear();
+    configuration.updateThreadState("missing", FactoryThreadState.State.WAITING, FactoryThreadState.Reason.NO_RECIPE);
+    configuration.updateThreadState("a", FactoryThreadState.State.WAITING, FactoryThreadState.Reason.NO_RECIPE);
+    configuration.updateThreadState("a", FactoryThreadState.State.WAITING, FactoryThreadState.Reason.NO_RECIPE);
+    assertEquals(before + 1, configuration.scheduler().channel("a").revision());
+    assertEquals(List.of("dirty"), host.effects);
+    host.effects.clear();
+    configuration.restoreRunningThread("a");
+    configuration.restoreRunningThread("a");
+    assertThrows(IllegalArgumentException.class, () -> configuration.restoreRunningThread("missing"));
+    assertEquals(FactoryThreadState.State.RUNNING, configuration.scheduler().channel("a").state());
+    assertEquals(before + 2, configuration.scheduler().channel("a").revision());
+    assertEquals(watermark, configuration.revision());
+    assertTrue(host.effects.isEmpty());
+  }
+
   private static final class Host implements FactoryThreadConfiguration.Host {
     private final FactoryThreadConfiguration configuration = new FactoryThreadConfiguration(this);
     private final List<String> effects = new ArrayList<>();

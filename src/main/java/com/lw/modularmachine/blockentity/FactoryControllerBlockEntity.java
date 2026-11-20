@@ -137,10 +137,6 @@ public final class FactoryControllerBlockEntity extends BlockEntity implements M
     public boolean persistentStateValid() {
       return persistentStateValid;
     }
-    @Override
-    public void markChanged() {
-      setChanged();
-    }
   }
 
   private final class UpgradeSourcesHost implements FactoryUpgradeSources.Host {
@@ -167,10 +163,6 @@ public final class FactoryControllerBlockEntity extends BlockEntity implements M
     @Override
     public void invalidateSearch(String threadId, long tick) {
       searchCoordinator.invalidateThread(threadId, tick);
-    }
-    @Override
-    public void updateThreadState(FactoryThreadState previous, FactoryThreadState.State state, FactoryThreadState.Reason reason) {
-      FactoryControllerBlockEntity.this.updateThreadState(previous, state, reason);
     }
   }
 
@@ -262,10 +254,6 @@ public final class FactoryControllerBlockEntity extends BlockEntity implements M
     public void markChanged() {
       setChanged();
     }
-    @Override
-    public void updateThreadState(FactoryThreadState previous, FactoryThreadState.State state, FactoryThreadState.Reason reason) {
-      FactoryControllerBlockEntity.this.updateThreadState(previous, state, reason);
-    }
   }
 
   private final class RunStateHost implements FactoryRunState.Host {
@@ -355,10 +343,6 @@ public final class FactoryControllerBlockEntity extends BlockEntity implements M
     public FactoryParallelStarter.Result startParallel(String threadId, RecipeStartPlan plan, int count, int workBudget) {
       return FactoryParallelStarter
           .commit(FactoryControllerBlockEntity.this, threadId, Collections.nCopies(count, plan), workBudget);
-    }
-    @Override
-    public void updateThreadState(FactoryThreadState previous, FactoryThreadState.State state, FactoryThreadState.Reason reason) {
-      FactoryControllerBlockEntity.this.updateThreadState(previous, state, reason);
     }
   }
 
@@ -516,8 +500,9 @@ public final class FactoryControllerBlockEntity extends BlockEntity implements M
   public void initializePlayerOwner(UUID playerId) {
     ControllerOwnershipService.requireInitialization(this);
     checkBlueprintWrite();
-    if (ownership.valid() && ownership.ownerId().isEmpty()) {
-      ownership = ControllerOwnershipState.ownedBy(playerId);
+    var claimed = ownership.claimIfUnowned(playerId);
+    if (claimed != ownership) {
+      ownership = claimed;
       setChanged();
       ControllerOwnershipService.synchronize(this);
     }
@@ -1008,18 +993,6 @@ public final class FactoryControllerBlockEntity extends BlockEntity implements M
   @Override
   public UpgradeRuntimeWork upgradeRuntimeWork() {
     return runtimeUpgrades;
-  }
-
-  private void updateThreadState(FactoryThreadState previous, FactoryThreadState.State state, FactoryThreadState.Reason reason) {
-    var current = threadConfiguration.scheduler().channel(previous.threadId());
-    if (current == null) {
-      return;
-    }
-    var next = current.withState(state, reason);
-    if (next != current) {
-      threadConfiguration.replaceRuntime(threadConfiguration.scheduler().replace(next));
-      setChanged();
-    }
   }
 
   private boolean orientationAllowed() {

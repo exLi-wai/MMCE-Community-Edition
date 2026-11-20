@@ -5,7 +5,6 @@ import com.lw.modularmachine.machine.controller.DedicatedControllerCatalog;
 import com.lw.modularmachine.machine.structure.StructureService;
 import com.lw.modularmachine.network.MachinePayloads;
 import com.lw.modularmachine.presentation.ControllerStatusFormat;
-import java.util.Locale;
 import net.minecraft.client.gui.Font;
 import net.minecraft.client.gui.GuiGraphics;
 import net.minecraft.network.chat.Component;
@@ -47,45 +46,17 @@ final class ControllerStatusLabels {
 
   static Component state(MachinePayloads.ControllerStatusPayload status) {
     if (!"CONFIRMED".equals(status.structureState())) {
-      return "PENDING".equals(status.structureState()) ? tr(STATE + "pending") : tr(STATE + "missing_structure");
+      return unconfirmedStructure(status.structureState());
     }
     if (!status.recipeFailureMessage().isEmpty()) {
       return Component.translatable(status.recipeFailureMessage());
     }
-    return switch (status.recipeStatus()) {
-      case "IDLE" -> status.recipeId().isEmpty() ? tr(STATE + "no_recipe") : tr(STATE + "idle");
-      case "ADVANCED", "WAITING_TICK" -> tr(STATE + "crafting");
-      case "WAITING_ENERGY" -> tr(STATE + "missing_energy");
-      case "WAITING_FLUID" -> tr(STATE + "missing_fluid");
-      case "WAITING_RESOURCE" -> tr(STATE + "waiting_resource");
-      case "MISSING_RESOURCE_INPUT" -> tr(STATE + "missing_resource_input");
-      case "WAITING_CHEMICAL" -> tr(STATE + "waiting_chemical");
-      case "MISSING_ITEM_INPUT" -> tr(STATE + "missing_item_input");
-      case "MISSING_ITEM_OUTPUT" -> tr(STATE + "missing_item_output");
-      case "MISSING_ENERGY_INPUT" -> tr(STATE + "missing_energy_input");
-      case "MISSING_ENERGY_OUTPUT" -> tr(STATE + "missing_energy_output");
-      case "MISSING_FLUID_INPUT" -> tr(STATE + "missing_fluid_input");
-      case "MISSING_FLUID_OUTPUT" -> tr(STATE + "missing_fluid_output");
-      case "MISSING_CHEMICAL_INPUT" -> tr(STATE + "missing_chemical_input");
-      case "MISSING_CHEMICAL_OUTPUT" -> tr(STATE + "missing_chemical_output");
-      case "OUTPUT_PLANNING" -> tr(STATE + "output_planning");
-      case "OUTPUT_BLOCKED" -> tr(STATE + "output_blocked");
-      case "FINISHED" -> tr(STATE + "finished");
-      case "PAUSED" -> tr(STATE + "paused");
-      case "BINDING_CHANGED" -> tr(STATE + "binding_changed");
-      case "STALE" -> tr(STATE + "stale");
-      case "ERROR" -> tr(STATE + "error");
-      case "WAITING_UPGRADE_COST" -> tr(STATE + "waiting_upgrade_cost");
-      case "UPGRADE_DATA_PENDING" -> tr(STATE + "upgrade_data_pending");
-      case "UPGRADE_CONFLICT" -> tr(STATE + "upgrade_conflict");
-      case "UPGRADE_ERROR" -> tr(STATE + "upgrade_error");
-      default -> tr(STATE + status.recipeStatus().toLowerCase(Locale.ROOT));
-    };
+    return ControllerStatusFormat.menuRecipeStatus(status.recipeStatus(), !status.recipeId().isEmpty());
   }
 
   static Component factoryState(MachinePayloads.FactoryStatusPayload status) {
     if (!"CONFIRMED".equals(status.structureState())) {
-      return "PENDING".equals(status.structureState()) ? tr(STATE + "pending") : tr(STATE + "missing_structure");
+      return unconfirmedStructure(status.structureState());
     }
     if (!status.persistentStateValid()) {
       return tr(STATE + "opaque");
@@ -98,7 +69,7 @@ final class ControllerStatusLabels {
         return Component.translatable(thread.recipeFailureMessage());
       }
       if (!"IDLE".equals(thread.state()) && !"NONE".equals(thread.reason())) {
-        return tr("menu.mmcece.factory.reason." + thread.reason().toLowerCase(Locale.ROOT));
+        return ControllerStatusFormat.factoryThreadReason(thread.reason());
       }
     }
     if (status.threads().stream().anyMatch(thread -> !"IDLE".equals(thread.state()))) {
@@ -132,6 +103,10 @@ final class ControllerStatusLabels {
 
   private static Component none() {
     return tr("menu.mmcece.controller.none");
+  }
+
+  private static Component unconfirmedStructure(String state) {
+    return tr(STATE + ("PENDING".equals(state) ? "pending" : "missing_structure"));
   }
 
   private static Component machine(ResourceLocation id) {

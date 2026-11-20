@@ -247,8 +247,9 @@ public final class MachineControllerBlockEntity extends BlockEntity implements M
   public void initializePlayerOwner(UUID playerId) {
     ControllerOwnershipService.requireInitialization(this);
     checkBlueprintWrite();
-    if (ownership.valid() && ownership.ownerId().isEmpty()) {
-      ownership = ControllerOwnershipState.ownedBy(playerId);
+    var claimed = ownership.claimIfUnowned(playerId);
+    if (claimed != ownership) {
+      ownership = claimed;
       setChanged();
       ControllerOwnershipService.synchronize(this);
     }

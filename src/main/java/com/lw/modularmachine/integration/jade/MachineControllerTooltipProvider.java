@@ -100,7 +100,7 @@ final class MachineControllerTooltipProvider implements IBlockComponentProvider,
         Component.translatable(
             data.getBoolean(PRODUCTION) ? "jade.mmcece.production.ready" : "jade.mmcece.production.paused"));
     if (structure == VerificationState.INVALID) {
-      tooltip.add(Component.translatable("jade.mmcece.failure." + data.getString(FAILURE).toLowerCase(Locale.ROOT)));
+      tooltip.add(ControllerStatusFormat.structureFailure(data.getString(FAILURE)));
       ControllerDiagnosticTooltip.append(tooltip, data, DIAGNOSTIC);
     }
     if (data.contains(INPUT_DIAGNOSTIC + "_count")) {
@@ -119,7 +119,8 @@ final class MachineControllerTooltipProvider implements IBlockComponentProvider,
                 .translatable("jade.mmcece.input.shortage", data.getLong(INPUT_DIAGNOSTIC + "_missing_" + i), item));
       }
     }
-    if (data.getBoolean("mmcece:has_run")) {
+    boolean hasRun = data.getBoolean("mmcece:has_run");
+    if (hasRun) {
       var runState = enumValue(RecipeRunState.class, data.getString(RUN_STATE));
       if (runState != null) {
         tooltip.add(Component.translatable("jade.mmcece.recipe", data.getString(RECIPE)));
@@ -129,14 +130,8 @@ final class MachineControllerTooltipProvider implements IBlockComponentProvider,
         tooltip.add(
             Component.translatable("jade.mmcece.progress", ControllerStatusFormat.progressPercent(progress, duration)));
       }
-      String status = data.getString(RUN_STATUS);
-      if (resourceWait(status)) {
-        tooltip.add(Component.translatable("jade.mmcece.run_status." + status.toLowerCase(Locale.ROOT)));
-      }
-    } else {
-      tooltip
-          .add(Component.translatable("jade.mmcece.run_status." + data.getString(RUN_STATUS).toLowerCase(Locale.ROOT)));
     }
+    ControllerStatusFormat.jadeRecipeStatus(data.getString(RUN_STATUS), hasRun).ifPresent(tooltip::add);
     if (data.contains(PERFORMANCE + "_tick")) {
       ControllerDiagnosticTooltip.appendPerformance(
           tooltip,
@@ -154,13 +149,4 @@ final class MachineControllerTooltipProvider implements IBlockComponentProvider,
     }
   }
 
-  private static boolean resourceWait(String status) {
-    return switch (status) {
-      case "WAITING_RESOURCE", "MISSING_RESOURCE_INPUT", "WAITING_ENERGY", "WAITING_FLUID", "WAITING_CHEMICAL",
-          "OUTPUT_BLOCKED", "OUTPUT_PLANNING", "MISSING_ITEM_INPUT", "MISSING_ITEM_OUTPUT", "MISSING_ENERGY_INPUT",
-          "MISSING_FLUID_INPUT", "MISSING_FLUID_OUTPUT", "MISSING_CHEMICAL_INPUT", "MISSING_CHEMICAL_OUTPUT" ->
-        true;
-      default -> false;
-    };
-  }
 }

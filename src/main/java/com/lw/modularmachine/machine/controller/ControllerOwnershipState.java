@@ -30,6 +30,10 @@ public final class ControllerOwnershipState {
     return new ControllerOwnershipState(Objects.requireNonNull(ownerId, "ownerId"), null);
   }
 
+  public ControllerOwnershipState claimIfUnowned(UUID playerId) {
+    return valid() && ownerId == null ? ownedBy(playerId) : this;
+  }
+
   public static ControllerOwnershipState load(CompoundTag root) {
     if (!root.contains(NBT_KEY)) {
       return empty();

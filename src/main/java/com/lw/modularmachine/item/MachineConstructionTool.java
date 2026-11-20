@@ -1,6 +1,7 @@
 package com.lw.modularmachine.item;
 
 import com.lw.modularmachine.machine.assembly.AssemblyService;
+import com.lw.modularmachine.machine.assembly.ProjectionMessages;
 import com.lw.modularmachine.machine.structure.StructureService;
 import com.lw.modularmachine.registry.MachineDataComponents;
 import java.util.List;
@@ -85,8 +86,6 @@ public final class MachineConstructionTool extends Item {
   @Override
   public void appendHoverText(ItemStack stack, TooltipContext context, List<Component> tooltip, TooltipFlag flag) {
     tooltip.add(Component.translatable("tooltip.mmcece.machine_projector").withStyle(ChatFormatting.WHITE));
-    tooltip.add(
-        Component.translatable("message.mmcece.projection.length", projectionLayers(stack))
-            .withStyle(ChatFormatting.GRAY));
+    tooltip.add(ProjectionMessages.length(projectionLayers(stack)).withStyle(ChatFormatting.GRAY));
   }
 }

@@ -38,7 +38,6 @@ public final class FactoryUpgradeSources {
     void markChanged();
     void invalidateSearch();
     void invalidateSearch(String threadId, long tick);
-    void updateThreadState(FactoryThreadState previous, FactoryThreadState.State state, FactoryThreadState.Reason reason);
   }
   private final UpgradeBusOwner owner;
   private final FactoryThreadConfiguration configuration;
@@ -291,7 +290,7 @@ public final class FactoryUpgradeSources {
           .valid() ? FactoryThreadState.Reason.CHECK_ERROR : FactoryThreadState.Reason.UPGRADE_CONFLICT;
       for (var thread : List.copyOf(configuration.scheduler().channels())) {
         if (host.idle(thread.threadId())) {
-          host.updateThreadState(thread, FactoryThreadState.State.WAITING, reason);
+          configuration.updateThreadState(thread.threadId(), FactoryThreadState.State.WAITING, reason);
         }
       }
       return;
@@ -324,7 +323,10 @@ public final class FactoryUpgradeSources {
     if (!upgradeSourcesValid) {
       for (var thread : List.copyOf(configuration.scheduler().channels())) {
         if (host.idle(thread.threadId())) {
-          host.updateThreadState(thread, FactoryThreadState.State.WAITING, FactoryThreadState.Reason.CHECK_ERROR);
+          configuration.updateThreadState(
+              thread.threadId(),
+              FactoryThreadState.State.WAITING,
+              FactoryThreadState.Reason.CHECK_ERROR);
         }
       }
       return;

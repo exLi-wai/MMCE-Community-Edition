@@ -11,7 +11,6 @@ public final class FactoryExecutionCoordinator {
   public interface Host {
     VerificationState verificationState();
     boolean persistentStateValid();
-    void markChanged();
   }
   private final FactoryThreadConfiguration threadConfiguration;
   private final FactoryUpgradeSources upgrades;
@@ -63,10 +62,7 @@ public final class FactoryExecutionCoordinator {
       }
       next = next.replace(thread.withState(target, reason));
     }
-    if (next != threadConfiguration.scheduler()) {
-      threadConfiguration.replaceRuntime(next);
-      host.markChanged();
-    }
+    threadConfiguration.publishRuntimeStates(next);
   }
 
   private void refreshLockedRecipeGates(ServerLevel server) {
@@ -88,10 +84,7 @@ public final class FactoryExecutionCoordinator {
               .withState(FactoryThreadState.State.INVALID, FactoryThreadState.Reason.LOCKED_RECIPE_MISSING);
       next = next.replace(desired);
     }
-    if (next != threadConfiguration.scheduler()) {
-      threadConfiguration.replaceRuntime(next);
-      host.markChanged();
-    }
+    threadConfiguration.publishRuntimeStates(next);
   }
 
 }
