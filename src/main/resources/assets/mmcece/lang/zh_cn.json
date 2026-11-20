@@ -974,6 +974,7 @@
   "tooltip.machinery.duration.seconds": "加工时间：%.1f 秒",
   "tooltip.machinery.duration.tick": "（%s Tick）",
   "tooltip.machinery.energy.in": "能量消耗：",
+  "tooltip.machinery.energy.out": "能量产出：",
   "tooltip.machinery.energy.tick": "%s %s/t",
   "tooltip.machinery.energy.total": "总计：%s %s",
 

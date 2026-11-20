@@ -30,7 +30,6 @@ public final class MachineEmiPlugin implements EmiPlugin {
   public void register(EmiRegistry registry) {
     EmiPreviewInput.register();
     Map<ResourceLocation, MachineEmiCategory> recipeCategories = new LinkedHashMap<>();
-    Map<ResourceLocation, MachineRecipeLayout> layouts = new LinkedHashMap<>();
     Map<ResourceLocation, ArrayList<RecipeHolder<MachineRecipe>>> recipes = new LinkedHashMap<>();
     registry.getRecipeManager().getAllRecipesFor(MachineRecipeRegistries.ITEM_TYPE.get()).stream()
         .filter(holder -> holder.value().scriptOptions().loadJei())
@@ -55,10 +54,6 @@ public final class MachineEmiPlugin implements EmiPlugin {
         continue;
       }
       var recipe = new MachineEmiCategory(categoryId(machine, "recipe"), icon(machine), display, false);
-      layouts.put(
-          machine,
-          new MachineRecipeLayout(
-              recipes.getOrDefault(machine, new ArrayList<>()).stream().map(holder -> holder.value()).toList()));
       recipeCategories.put(machine, recipe);
       registry.addCategory(recipe);
       addRecipeWorkstations(registry, recipe, machine);
@@ -71,8 +66,10 @@ public final class MachineEmiPlugin implements EmiPlugin {
         }
         var recipe = recipeCategories.get(machine);
         if (recipe != null) {
-          for (var holder : recipes.getOrDefault(machine, new ArrayList<>())) {
-            add.accept(new MachineEmiItemRecipe(recipe, holder.id(), holder.value(), layouts.get(machine)));
+          var pages = recipes.getOrDefault(machine, new ArrayList<>());
+          var layouts = MachineRecipeLayout.perRecipe(pages.stream().map(RecipeHolder::value).toList());
+          for (var holder : pages) {
+            add.accept(new MachineEmiItemRecipe(recipe, holder.id(), holder.value(), layouts.get(holder.value())));
           }
         }
       }

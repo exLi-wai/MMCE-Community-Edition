@@ -19,15 +19,17 @@ import net.minecraft.network.chat.Component;
 import net.minecraft.resources.ResourceLocation;
 import net.minecraft.world.inventory.InventoryMenu;
 import net.minecraft.world.item.ItemStack;
+import net.neoforged.neoforge.client.extensions.common.IClientFluidTypeExtensions;
 import net.neoforged.neoforge.fluids.FluidStack;
 import com.lw.modularmachine.api.recipe.RecipeModifier;
 import com.lw.modularmachine.client.preview.ClientMachineCatalog;
 import java.util.IllegalFormatException;
 import java.util.Locale;
+import org.joml.Vector3f;
 
 /** Shared recipe artwork, quantities and descriptions for JEI and EMI. */
 public final class MachineRecipeDisplay {
-  public static final ResourceLocation TEXTURE = ResourceLocation
+  private static final ResourceLocation TEXTURE = ResourceLocation
       .fromNamespaceAndPath("mmcece", "textures/gui/jeirecipeicons_ce.png");
 
   private MachineRecipeDisplay() {
@@ -41,25 +43,38 @@ public final class MachineRecipeDisplay {
       graphics.blit(TEXTURE, layout.arrowX, layout.arrowY, 72, 15, Math.min(22, width), 15, 256, 256);
     }
     for (var part : layout.parts) {
-      if (part.kind() == MachineRecipeLayout.Kind.ENERGY) {
-        graphics.blit(TEXTURE, part.x(), part.y(), 36, 0, 18, 54, 256, 256);
-        if (recipe.energyPerTick() > 0) {
-          graphics.blit(TEXTURE, part.x(), part.y(), 18, 0, 18, 54, 256, 256);
+      int x = part.x();
+      int y = part.y();
+      switch (part.kind()) {
+        case ENERGY -> {
+          graphics.blit(TEXTURE, x, y, 36, 0, 18, 54, 256, 256);
+          graphics.blit(TEXTURE, x, y, 18, 0, 18, 54, 256, 256);
         }
-      } else {
-        var resource = layout.resource(recipe, part);
-        if (resource != null) {
-          resource.artwork().draw(graphics, part.x(), part.y(), tick);
+        case ITEM -> {
+          drawCell(graphics, x, y);
+          var item = layout.item(part);
+          drawItem(graphics, item.stack(), item.amount(), x + 1, y + 1);
         }
+        case FLUID -> {
+          drawCell(graphics, x, y);
+          drawFluid(graphics, layout.fluid(part), x, y);
+          graphics.blit(TEXTURE, x, y, 0, 0, 18, 18, 256, 256);
+        }
+        case CHEMICAL -> {
+          drawCell(graphics, x, y);
+          drawChemical(graphics, chemical(recipe, part), x + 1, y + 1);
+          graphics.blit(TEXTURE, x, y, 0, 18, 18, 18, 256, 256);
+        }
+        default -> layout.resource(part).artwork().draw(graphics, x, y, tick);
       }
     }
     var text = text(recipe);
-    int y = layout.height - text.size() * 9 - (recipe.energyPerTick() > 0 ? 2 : 0) - (recipe.interfaceInputs()
-        .isEmpty() ? 0 : 2);
+    int y = layout.height - textHeight(recipe, text.size());
+    int energyLines = energyLines(recipe);
     for (int index = 0; index < text.size(); index++) {
       graphics.drawString(Minecraft.getInstance().font, text.get(index), 4, y, 0xFFFFFFFF, true);
       y += 9;
-      if (index == 1 && recipe.energyPerTick() > 0) {
+      if (index < energyLines && index % 2 == 1) {
         y += 2;
       }
     }
@@ -67,20 +82,8 @@ public final class MachineRecipeDisplay {
 
   public static List<Component> text(MachineRecipe recipe) {
     var result = new ArrayList<Component>();
-    if (recipe.energyPerTick() > 0) {
-      result.add(
-          Component.literal(
-              I18n.get("tooltip.machinery.energy.in") + I18n.get(
-                  "tooltip.machinery.energy.tick",
-                  EnergyDisplay.format(recipe.energyPerTick()),
-                  EnergyDisplay.unitComponent().getString())));
-      result.add(
-          Component.translatable(
-              "tooltip.machinery.energy.total",
-              EnergyDisplay
-                  .format(BigInteger.valueOf(recipe.energyPerTick()).multiply(BigInteger.valueOf(recipe.duration()))),
-              EnergyDisplay.unitComponent()));
-    }
+    addEnergyText(result, "tooltip.machinery.energy.in", recipe.energyPerTick(), recipe.duration());
+    addEnergyText(result, "tooltip.machinery.energy.out", recipe.energyOutputPerTick(), recipe.duration());
     for (var requirement : recipe.interfaceInputs()) {
       var machine = ClientMachineCatalog.machines().get(recipe.machineId());
       var type = machine == null ? null : machine.interfaces().get(requirement.type());
@@ -108,8 +111,31 @@ public final class MachineRecipeDisplay {
     return List.copyOf(result);
   }
 
+  private static void addEnergyText(List<Component> lines, String label, long amount, int duration) {
+    if (amount <= 0) {
+      return;
+    }
+    var unit = EnergyDisplay.unitComponent();
+    lines.add(
+        Component.translatable(label)
+            .append(Component.translatable("tooltip.machinery.energy.tick", EnergyDisplay.format(amount), unit)));
+    var total = BigInteger.valueOf(amount).multiply(BigInteger.valueOf(duration));
+    lines.add(Component.translatable("tooltip.machinery.energy.total", EnergyDisplay.format(total), unit));
+  }
+
+  static int textHeight(MachineRecipe recipe, int lineCount) {
+    return lineCount * 9 + energyLines(recipe) + (recipe.interfaceInputs().isEmpty() ? 0 : 2);
+  }
+
+  private static int energyLines(MachineRecipe recipe) {
+    return (recipe.energyPerTick() > 0 ? 2 : 0) + (recipe.energyOutputPerTick() > 0 ? 2 : 0);
+  }
+
   public static List<Component> resourceTooltip(MachineRecipe recipe, MachineRecipeLayout layout, MachineRecipeLayout.Part part) {
-    var resource = layout.resource(recipe, part);
+    if (part.kind() == MachineRecipeLayout.Kind.ENERGY) {
+      return List.of(selector(part.input() ? recipe.selectors().energyInput() : recipe.selectors().energyOutput()));
+    }
+    var resource = layout.resource(part);
     return resource == null ? List.of() : resource.tooltip().get();
   }
 
@@ -137,36 +163,65 @@ public final class MachineRecipeDisplay {
     return row == null ? List.of() : chemicalTooltip(row, part.input(), perTick);
   }
 
-  public static void drawChemical(GuiGraphics graphics, MachineRecipe recipe, MachineRecipeLayout.Part part) {
-    int x = part.x();
-    int y = part.y();
+  private static void drawCell(GuiGraphics graphics, int x, int y) {
     graphics.blit(TEXTURE, x, y, 54, 0, 18, 18, 256, 256);
-    var row = chemical(recipe, part);
-    if (row != null) {
-      var appearance = ChemicalDisplay.describe(new ChemicalStackData(row.chemical(), row.amount()));
-      var sprite = Minecraft.getInstance().getTextureAtlas(InventoryMenu.BLOCK_ATLAS).apply(appearance.texture());
-      LegacyRecipeResources.tint(graphics, appearance.tint());
-      graphics.blit(x, y, 0, 18, 18, sprite);
+  }
+
+  private static void drawChemical(GuiGraphics graphics, ChemicalRequirement row, int x, int y) {
+    var appearance = ChemicalDisplay.describe(new ChemicalStackData(row.chemical(), row.amount()));
+    var sprite = Minecraft.getInstance().getTextureAtlas(InventoryMenu.BLOCK_ATLAS).apply(appearance.texture());
+    LegacyRecipeResources.tint(graphics, appearance.tint());
+    try {
+      graphics.blit(x, y, 0, 16, 16, sprite);
+    } finally {
       graphics.setColor(1, 1, 1, 1);
     }
-    graphics.blit(TEXTURE, x, y, 0, 18, 18, 18, 256, 256);
+  }
+
+  private static void drawFluid(GuiGraphics graphics, FluidStack fluid, int x, int y) {
+    var extensions = IClientFluidTypeExtensions.of(fluid.getFluid());
+    var texture = extensions.getStillTexture(fluid);
+    if (texture == null) {
+      return;
+    }
+    var sprite = Minecraft.getInstance().getTextureAtlas(InventoryMenu.BLOCK_ATLAS).apply(texture);
+    int color = extensions.getTintColor(fluid);
+    int alpha = color >>> 24;
+    float red = (color >> 16 & 255) / 255F;
+    float green = (color >> 8 & 255) / 255F;
+    float blue = (color & 255) / 255F;
+    float opacity = alpha == 0 ? 1F : alpha / 255F;
+    int tileWidth = sprite.contents().width();
+    int tileHeight = sprite.contents().height();
+    var pose = graphics.pose().last().pose();
+    var topLeft = pose.transformPosition(new Vector3f(x, y, 0));
+    var bottomRight = pose.transformPosition(new Vector3f(x + 18, y + 18, 0));
+    graphics.flush();
+    graphics.enableScissor(
+        (int) Math.floor(Math.min(topLeft.x, bottomRight.x)),
+        (int) Math.floor(Math.min(topLeft.y, bottomRight.y)),
+        (int) Math.ceil(Math.max(topLeft.x, bottomRight.x)),
+        (int) Math.ceil(Math.max(topLeft.y, bottomRight.y)));
+    try {
+      // Keep the tank filled and anchor each tile at the lower edge.
+      for (int dx = 0; dx < 18; dx += tileWidth) {
+        for (int dy = 0; dy < 18; dy += tileHeight) {
+          graphics.blit(x + dx, y + 18 - dy - tileHeight, 0, tileWidth, tileHeight, sprite, red, green, blue, opacity);
+        }
+      }
+      graphics.flush();
+    } finally {
+      graphics.disableScissor();
+    }
   }
 
   public static List<Component> itemTooltip(MachineRecipe.ItemAmount amount, boolean input) {
-    return itemTooltip(amount, input, true);
-  }
-
-  public static List<Component> itemTooltipWithoutChance(MachineRecipe.ItemAmount amount) {
-    return itemTooltip(amount, false, false);
-  }
-
-  private static List<Component> itemTooltip(MachineRecipe.ItemAmount amount, boolean input, boolean includeChance) {
     var result = new ArrayList<Component>();
     result.add(
         amount.minimumAmount() == amount.amount() ? Component
             .translatable("jei.mmcece.machine_item.amount", amount.amount()) : Component
                 .translatable("jei.mmcece.machine_item.amount_range", amount.minimumAmount(), amount.amount()));
-    if (includeChance && amount.chance() < 1) {
+    if (amount.chance() < 1) {
       var format = NumberFormat.getNumberInstance();
       format.setMaximumFractionDigits(2);
       String chance = amount.chance() < .0001D ? "< 0.01%" : format.format(amount.chance() * 100) + "%";
@@ -319,7 +374,7 @@ public final class MachineRecipeDisplay {
     return Component.translatable("jei.mmcece.machine_item.selector", selector.isEmpty() ? "-" : selector);
   }
 
-  public static void drawItem(GuiGraphics graphics, ItemStack stack, long amount, int x, int y) {
+  private static void drawItem(GuiGraphics graphics, ItemStack stack, long amount, int x, int y) {
     if (stack.isEmpty()) {
       return;
     }

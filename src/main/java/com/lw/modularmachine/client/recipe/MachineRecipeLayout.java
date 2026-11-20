@@ -9,6 +9,8 @@ import java.util.IdentityHashMap;
 import java.util.List;
 import java.util.Map;
 import net.minecraft.client.Minecraft;
+import net.minecraft.world.item.ItemStack;
+import net.neoforged.neoforge.fluids.FluidStack;
 
 public final class MachineRecipeLayout {
   private static final List<Kind> KINDS = List.of(Kind.values());
@@ -45,60 +47,48 @@ public final class MachineRecipeLayout {
   }
   public record Part(Kind kind, boolean input, int index, int x, int y) {
   }
+  record ItemDisplay(ItemStack stack, long amount) {
+    ItemDisplay(MachineRecipe.ItemAmount amount) {
+      this(amount.displayStack(), amount.amount());
+    }
+  }
+
   private record Geometry(List<Part> parts, int width, int height, int arrowX, int arrowY, boolean hasAdditional) {
   }
 
-  private record TextSize(int width, int height) {
-  }
-
-  private final Map<MachineRecipe, LegacyRecipeResources> resources;
+  private final LegacyRecipeResources resources;
+  private final List<ItemDisplay> inputItems, outputItems;
+  private final List<FluidStack> inputFluids, outputFluids;
   public final List<Part> parts;
   public final int width, height, arrowX, arrowY;
 
-  public MachineRecipeLayout(List<MachineRecipe> recipes) {
-    this(buildResources(recipes), recipes);
-  }
-
-  private MachineRecipeLayout(Map<MachineRecipe, LegacyRecipeResources> resources, List<MachineRecipe> recipes) {
-    this(resources, geometry(maxCounts(recipes, resources)), measureText(recipes), false);
-  }
-
-  private MachineRecipeLayout(Map<MachineRecipe, LegacyRecipeResources> resources, Geometry geometry, TextSize text, boolean perRecipe) {
+  private MachineRecipeLayout(MachineRecipe recipe, LegacyRecipeResources resources, Geometry geometry) {
     this.resources = resources;
+    inputItems = recipe.inputs().stream().map(ItemDisplay::new).toList();
+    outputItems = recipe.outputs().stream().map(ItemDisplay::new).toList();
+    inputFluids = MachineRecipeDisplay.fluids(recipe, true);
+    outputFluids = MachineRecipeDisplay.fluids(recipe, false);
     parts = geometry.parts();
     arrowX = geometry.arrowX();
     arrowY = geometry.arrowY();
-    width = Math.max(geometry.width(), text.width() + 4);
-    int contentHeight = perRecipe ? Math.max(geometry.height(), arrowY + 15) : geometry.height();
-    height = Math.max(18, contentHeight + Math.max(text.height(), geometry.hasAdditional() ? 9 : 0));
+    var lines = MachineRecipeDisplay.text(recipe);
+    int textWidth = lines.stream().mapToInt(Minecraft.getInstance().font::width).max().orElse(0);
+    width = Math.max(geometry.width(), textWidth + 4);
+    height = Math.max(
+        18,
+        geometry.height() + Math
+            .max(MachineRecipeDisplay.textHeight(recipe, lines.size()), geometry.hasAdditional() ? 9 : 0));
   }
 
   public static Map<MachineRecipe, MachineRecipeLayout> perRecipe(List<MachineRecipe> recipes) {
     var layouts = new IdentityHashMap<MachineRecipe, MachineRecipeLayout>();
     var geometries = new HashMap<IntList, Geometry>();
-    var resources = buildResources(recipes);
     for (var recipe : recipes) {
-      var geometry = geometries.computeIfAbsent(counts(recipe, resources.get(recipe)), MachineRecipeLayout::geometry);
-      layouts.put(recipe, new MachineRecipeLayout(resources, geometry, measureText(recipe), true));
+      var resources = new LegacyRecipeResources(recipe);
+      var geometry = geometries.computeIfAbsent(counts(recipe, resources), MachineRecipeLayout::geometry);
+      layouts.put(recipe, new MachineRecipeLayout(recipe, resources, geometry));
     }
     return layouts;
-  }
-
-  private static Map<MachineRecipe, LegacyRecipeResources> buildResources(List<MachineRecipe> recipes) {
-    var resources = new IdentityHashMap<MachineRecipe, LegacyRecipeResources>();
-    recipes.forEach(recipe -> resources.put(recipe, new LegacyRecipeResources(recipe)));
-    return resources;
-  }
-
-  private static IntList maxCounts(List<MachineRecipe> recipes, Map<MachineRecipe, LegacyRecipeResources> resources) {
-    var maximums = new IntArrayList(new int[KINDS.size() * 2]);
-    for (var recipe : recipes) {
-      var counts = counts(recipe, resources.get(recipe));
-      for (int index = 0; index < counts.size(); index++) {
-        maximums.set(index, Math.max(maximums.getInt(index), counts.getInt(index)));
-      }
-    }
-    return maximums;
   }
 
   private static IntList counts(MachineRecipe recipe, LegacyRecipeResources resources) {
@@ -147,53 +137,34 @@ public final class MachineRecipeLayout {
       case ENERGY, FLUID, ITEM -> false;
       default -> true;
     });
-    return new Geometry(
-        List.copyOf(result),
-        nextX,
-        Math.max(highest, hasAdditional ? arrowY + 15 : 0),
-        arrowX,
-        arrowY,
-        hasAdditional);
-  }
-
-  private static TextSize measureText(List<MachineRecipe> recipes) {
-    int width = 0;
-    int height = 0;
-    for (var recipe : recipes) {
-      var text = measureText(recipe);
-      width = Math.max(width, text.width());
-      height = Math.max(height, text.height());
-    }
-    return new TextSize(width, height);
-  }
-
-  private static TextSize measureText(MachineRecipe recipe) {
-    var text = MachineRecipeDisplay.text(recipe);
-    int width = 0;
-    for (var line : text) {
-      width = Math.max(width, Minecraft.getInstance().font.width(line));
-    }
-    int height = text.size() * 9 + (recipe.energyPerTick() > 0 ? 2 : 0) + (recipe.interfaceInputs().isEmpty() ? 0 : 2);
-    return new TextSize(width, height);
+    return new Geometry(List.copyOf(result), nextX, Math.max(highest, arrowY + 15), arrowX, arrowY, hasAdditional);
   }
 
   private static int count(MachineRecipe recipe, LegacyRecipeResources resources, Kind kind, boolean input) {
     return switch (kind) {
-      case ENERGY -> input && recipe.energyPerTick() > 0 ? 1 : 0;
-      case FLUID -> input ? recipe.fluidInputs().size() + recipe.fluidPerTickInputs().size() : recipe.fluidOutputs()
-          .size() + recipe.fluidPerTickOutputs().size();
+      case ENERGY -> (input ? recipe.energyPerTick() : recipe.energyOutputPerTick()) > 0 ? 1 : 0;
+      case FLUID -> input ? recipe.fluidInputRequirements().size() + recipe.fluidPerTickInputs().size() : recipe
+          .fluidOutputRequirements().size() + recipe.fluidPerTickOutputs().size();
       case ITEM -> input ? recipe.inputs().size() : recipe.outputs().size();
       case CHEMICAL -> MachineRecipeDisplay.chemicalCount(recipe, input);
       default -> resources.count(kind, input);
     };
   }
 
-  LegacyRecipeResources.Entry resource(MachineRecipe recipe, Part part) {
-    return resources.get(recipe).entry(part);
+  ItemDisplay item(Part part) {
+    return (part.input() ? inputItems : outputItems).get(part.index());
   }
 
-  public boolean hasResource(MachineRecipe recipe, Part part) {
-    return resource(recipe, part) != null;
+  FluidStack fluid(Part part) {
+    return (part.input() ? inputFluids : outputFluids).get(part.index());
+  }
+
+  LegacyRecipeResources.Entry resource(Part part) {
+    return resources.entry(part);
+  }
+
+  public boolean hasResource(Part part) {
+    return part.kind() == Kind.ENERGY || resource(part) != null;
   }
 
   static int itemColumns(int count) {

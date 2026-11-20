@@ -2,7 +2,10 @@ package com.lw.modularmachine.integration.emi;
 
 import com.lw.modularmachine.client.recipe.MachineRecipeDisplay;
 import com.lw.modularmachine.client.recipe.MachineRecipeLayout;
+import com.lw.modularmachine.api.recipe.ChemicalRequirement;
+import com.lw.modularmachine.integration.mekanism.emi.MekanismEmiIngredients;
 import com.lw.modularmachine.machine.recipe.MachineRecipe;
+import com.lw.modularmachine.util.Mods;
 import dev.emi.emi.api.neoforge.NeoForgeEmiStack;
 import dev.emi.emi.api.recipe.BasicEmiRecipe;
 import dev.emi.emi.api.recipe.EmiRecipeCategory;
@@ -12,20 +15,15 @@ import dev.emi.emi.api.widget.SlotWidget;
 import dev.emi.emi.api.widget.WidgetHolder;
 import java.util.ArrayList;
 import java.util.List;
-import net.minecraft.client.Minecraft;
 import net.minecraft.client.gui.GuiGraphics;
 import net.minecraft.client.gui.screens.inventory.tooltip.ClientTooltipComponent;
 import net.minecraft.network.chat.Component;
 import net.minecraft.resources.ResourceLocation;
-import net.minecraft.world.inventory.InventoryMenu;
-import net.minecraft.world.item.ItemStack;
-import net.neoforged.neoforge.client.extensions.common.IClientFluidTypeExtensions;
-import net.neoforged.neoforge.fluids.FluidStack;
-import org.joml.Vector3f;
 
 final class MachineEmiItemRecipe extends BasicEmiRecipe {
   private final MachineRecipe recipe;
   private final MachineRecipeLayout layout;
+  private final boolean hasExactChemicalCosts;
 
   MachineEmiItemRecipe(EmiRecipeCategory category, ResourceLocation id, MachineRecipe recipe, MachineRecipeLayout layout) {
     super(category, id, layout.width, layout.height);
@@ -33,59 +31,87 @@ final class MachineEmiItemRecipe extends BasicEmiRecipe {
     this.layout = layout;
     inputs = allInputs(recipe);
     outputs = allOutputs(recipe);
+    long maxPerTick = Long.MAX_VALUE / recipe.duration();
+    var chemicals = recipe.chemicals();
+    int itemAndFluidCount = recipe.inputs().size() + recipe.outputs().size() + recipe.fluidInputRequirements()
+        .size() + recipe.fluidOutputRequirements()
+            .size() + recipe.fluidPerTickInputs().size() + recipe.fluidPerTickOutputs().size();
+    int chemicalCount = chemicals.inputs().size() + chemicals.outputs().size() + chemicals.perTick().size() + chemicals
+        .perTickOutputs().size();
+    hasExactChemicalCosts = inputs.size() + outputs.size() == itemAndFluidCount + chemicalCount
+        && chemicals.perTick().stream().noneMatch(row -> row.amount() > maxPerTick)
+        && chemicals.perTickOutputs().stream().noneMatch(row -> row.amount() > maxPerTick);
+  }
+
+  @Override
+  public boolean supportsRecipeTree() {
+    return super.supportsRecipeTree() && hasExactChemicalCosts;
   }
 
   @Override
   public void addWidgets(WidgetHolder widgets) {
-    widgets.addDrawable(0, 0, layout.width, layout.height, (graphics, mouseX, mouseY, delta) -> {
-      MachineRecipeDisplay.draw(graphics, recipe, layout);
-      for (var part : layout.parts) {
-        if (part.kind() == MachineRecipeLayout.Kind.CHEMICAL) {
-          MachineRecipeDisplay.drawChemical(graphics, recipe, part);
-        }
-      }
-    });
+    widgets.addDrawable(
+        0,
+        0,
+        layout.width,
+        layout.height,
+        (graphics, mouseX, mouseY, delta) -> MachineRecipeDisplay.draw(graphics, recipe, layout));
     // Native slots remain last so tooltips never hide the hovered ingredient
     // from EMI's recipe/uses shortcuts on compact layouts.
     widgets.addTooltipText(MachineRecipeDisplay.details(recipe), 0, Math.max(0, layout.height - 9), layout.width, 9);
     widgets.addTooltipText(List.of(MachineRecipeDisplay.duration(recipe)), layout.arrowX, layout.arrowY, 22, 15);
+    var fluidInputs = MachineRecipeDisplay.fluids(recipe, true);
+    var fluidOutputs = MachineRecipeDisplay.fluids(recipe, false);
     for (var part : layout.parts) {
-      SlotWidget slot;
-      if (part.kind() == MachineRecipeLayout.Kind.ITEM) {
-        var amounts = part.input() ? recipe.inputs() : recipe.outputs();
-        slot = widgets.add(new ItemSlot(part, part.index() < amounts.size() ? amounts.get(part.index()) : null));
-      } else if (part.kind() == MachineRecipeLayout.Kind.FLUID) {
-        var fluids = MachineRecipeDisplay.fluids(recipe, part.input());
-        var fluid = part.index() < fluids.size() ? fluids.get(part.index()) : FluidStack.EMPTY;
-        slot = widgets.add(
-            new FluidSlot(
-                part,
-                fluid,
-                fluid.isEmpty() ? List.of() : MachineRecipeDisplay
-                    .fluidTooltip(recipe, fluid, part.input(), part.index())));
-      } else {
-        if (layout.hasResource(recipe, part)) {
-          widgets.addTooltip(
-              (mouseX, mouseY) -> MachineRecipeDisplay.resourceTooltip(recipe, layout, part).stream()
-                  .map(line -> ClientTooltipComponent.create(line.getVisualOrderText())).toList(),
-              part.x(),
-              part.y(),
-              part.kind().width,
-              part.kind().height);
-        } else if (part.kind() == MachineRecipeLayout.Kind.CHEMICAL
-            && MachineRecipeDisplay.chemical(recipe, part) != null) {
-          widgets.addTooltipText(
-              MachineRecipeDisplay.chemicalTooltip(recipe, part),
-              part.x(),
-              part.y(),
-              part.kind().width,
-              part.kind().height);
+      switch (part.kind()) {
+        case ITEM -> {
+          var amounts = part.input() ? recipe.inputs() : recipe.outputs();
+          var amount = amounts.get(part.index());
+          addSlot(
+              widgets,
+              part,
+              EmiStack.of(amount.ingredientStack(), amount.amount()),
+              EmiStack.of(amount.displayStack(), amount.amount()),
+              MachineRecipeDisplay.itemTooltip(amount, part.input()));
         }
-        continue;
+        case FLUID -> {
+          var fluid = (part.input() ? fluidInputs : fluidOutputs).get(part.index());
+          var stack = NeoForgeEmiStack.of(fluid);
+          addSlot(
+              widgets,
+              part,
+              stack,
+              stack,
+              MachineRecipeDisplay.fluidTooltip(recipe, fluid, part.input(), part.index()));
+        }
+        case CHEMICAL -> {
+          var stack = chemicalStack(MachineRecipeDisplay.chemical(recipe, part));
+          var descriptions = MachineRecipeDisplay.chemicalTooltip(recipe, part);
+          if (stack.isEmpty()) {
+            widgets.addTooltipText(descriptions, part.x(), part.y(), part.kind().width, part.kind().height);
+          } else {
+            addSlot(widgets, part, stack, stack, descriptions);
+          }
+        }
+        default -> {
+          if (layout.hasResource(part)) {
+            widgets.addTooltip(
+                (mouseX, mouseY) -> MachineRecipeDisplay.resourceTooltip(recipe, layout, part).stream()
+                    .map(line -> ClientTooltipComponent.create(line.getVisualOrderText())).toList(),
+                part.x(),
+                part.y(),
+                part.kind().width,
+                part.kind().height);
+          }
+        }
       }
-      if (!part.input() && !slot.getStack().isEmpty()) {
-        slot.recipeContext(this);
-      }
+    }
+  }
+
+  private void addSlot(WidgetHolder widgets, MachineRecipeLayout.Part part, EmiStack ingredient, EmiStack tooltipStack, List<Component> descriptions) {
+    var slot = widgets.add(new RecipeSlot(part, ingredient, tooltipStack, descriptions));
+    if (!part.input()) {
+      slot.recipeContext(this);
     }
   }
 
@@ -102,6 +128,8 @@ final class MachineEmiItemRecipe extends BasicEmiRecipe {
     }
     recipe.fluidInputRequirements()
         .forEach(row -> result.add(NeoForgeEmiStack.of(row.stack()).setChance((float) row.chance())));
+    recipe.chemicals().inputs().forEach(row -> addChemical(result, row, 1));
+    recipe.chemicals().perTick().forEach(row -> addChemical(result, row, recipe.duration()));
 
     return List.copyOf(result);
   }
@@ -109,11 +137,16 @@ final class MachineEmiItemRecipe extends BasicEmiRecipe {
   private static List<EmiStack> allOutputs(MachineRecipe recipe) {
     var result = new ArrayList<EmiStack>();
     recipe.outputs().forEach(value -> result.add(item(value)));
-    recipe.fluidOutputs().forEach(fluid -> result.add(NeoForgeEmiStack.of(fluid)));
-    recipe.fluidPerTickOutputs().forEach(
-        row -> result.add(
-            NeoForgeEmiStack.of(row.stack()).setAmount((long) row.stack().getAmount() * recipe.duration())
-                .setChance((float) row.chance())));
+    recipe.fluidOutputRequirements()
+        .forEach(row -> result.add(NeoForgeEmiStack.of(row.stack()).setChance((float) row.chance())));
+    for (var row : recipe.fluidPerTickOutputs()) {
+      var perTick = row.stack();
+      result.add(
+          NeoForgeEmiStack.of(perTick).setAmount((long) perTick.getAmount() * recipe.duration())
+              .setChance((float) row.chance()));
+    }
+    recipe.chemicals().outputs().forEach(row -> addChemical(result, row, 1));
+    recipe.chemicals().perTickOutputs().forEach(row -> addChemical(result, row, recipe.duration()));
 
     return List.copyOf(result);
   }
@@ -122,100 +155,44 @@ final class MachineEmiItemRecipe extends BasicEmiRecipe {
     return EmiStack.of(amount.ingredientStack(), amount.amount()).setChance((float) amount.chance());
   }
 
-  private abstract static class RecipeSlot extends SlotWidget {
-    RecipeSlot(EmiStack stack, MachineRecipeLayout.Part part, List<Component> descriptions) {
-      super(stack, part.x(), part.y());
-      descriptions.forEach(this::appendTooltip);
+  private static void addChemical(List<? super EmiStack> result, ChemicalRequirement row, int ticks) {
+    var stack = chemicalStack(row);
+    if (!stack.isEmpty()) {
+      // The ingredient remains searchable when the full run exceeds EMI's quantity
+      // range.
+      if (row.amount() <= Long.MAX_VALUE / ticks) {
+        stack.setAmount(row.amount() * ticks);
+      }
+      stack.setChance((float) row.chance());
+      result.add(stack);
     }
-    @Override
-    public void drawBackground(GuiGraphics graphics, int mouseX, int mouseY, float delta) {
-      graphics.blit(MachineRecipeDisplay.TEXTURE, x, y, 54, 0, 18, 18, 256, 256);
-    }
-
   }
 
-  private static final class ItemSlot extends RecipeSlot {
-    private final ItemStack display;
-    private final long amount;
+  private static EmiStack chemicalStack(ChemicalRequirement row) {
+    return Mods.MEKANISM.isLoaded() ? MekanismEmiIngredients.stack(row) : EmiStack.EMPTY;
+  }
 
-    ItemSlot(MachineRecipeLayout.Part part, MachineRecipe.ItemAmount requirement) {
-      super(requirement == null ? EmiStack.EMPTY : item(requirement), part,
-          requirement == null ? List.of() : MachineRecipeDisplay.itemTooltipWithoutChance(requirement));
-      display = requirement == null ? ItemStack.EMPTY : requirement.displayStack();
-      amount = requirement == null ? 0 : requirement.amount();
+  /** The shared display paints the slot. EMI handles ingredient interactions. */
+  private static final class RecipeSlot extends SlotWidget {
+    private final EmiStack tooltipStack;
+
+    RecipeSlot(MachineRecipeLayout.Part part, EmiStack ingredient, EmiStack tooltipStack, List<Component> descriptions) {
+      super(ingredient, part.x(), part.y());
+      this.tooltipStack = tooltipStack;
+      drawBack(false);
+      descriptions.forEach(this::appendTooltip);
     }
 
     @Override
     public void drawStack(GuiGraphics graphics, int mouseX, int mouseY, float delta) {
-      MachineRecipeDisplay.drawItem(graphics, display, amount, x + 1, y + 1);
     }
 
     @Override
     public List<ClientTooltipComponent> getTooltip(int mouseX, int mouseY) {
-      if (display.isEmpty()) {
-        return List.of();
-      }
-      var result = new ArrayList<>(EmiStack.of(display, amount).getTooltip());
+      var result = new ArrayList<>(tooltipStack.getTooltip());
       addSlotTooltip(result);
 
       return result;
-    }
-  }
-
-  private static final class FluidSlot extends RecipeSlot {
-    private final FluidStack fluid;
-
-    FluidSlot(MachineRecipeLayout.Part part, FluidStack fluid, List<Component> descriptions) {
-      super(fluid.isEmpty() ? EmiStack.EMPTY : NeoForgeEmiStack.of(fluid), part, descriptions);
-      this.fluid = fluid.copy();
-    }
-
-    @Override
-    public void drawStack(GuiGraphics graphics, int mouseX, int mouseY, float delta) {
-      if (fluid.isEmpty()) {
-        return;
-      }
-      var extensions = IClientFluidTypeExtensions.of(fluid.getFluid());
-      var texture = extensions.getStillTexture(fluid);
-      if (texture == null) {
-        return;
-      }
-      var sprite = Minecraft.getInstance().getTextureAtlas(InventoryMenu.BLOCK_ATLAS).apply(texture);
-      int color = extensions.getTintColor(fluid);
-      int alpha = color >>> 24;
-      float red = (color >> 16 & 255) / 255F;
-      float green = (color >> 8 & 255) / 255F;
-      float blue = (color & 255) / 255F;
-      float opacity = alpha == 0 ? 1F : alpha / 255F;
-      int tileWidth = sprite.contents().width();
-      int tileHeight = sprite.contents().height();
-      var pose = graphics.pose().last().pose();
-      var topLeft = pose.transformPosition(new Vector3f(x, y, 0));
-      var bottomRight = pose.transformPosition(new Vector3f(x + 18, y + 18, 0));
-      graphics.flush();
-      graphics.enableScissor(
-          (int) Math.floor(Math.min(topLeft.x, bottomRight.x)),
-          (int) Math.floor(Math.min(topLeft.y, bottomRight.y)),
-          (int) Math.ceil(Math.max(topLeft.x, bottomRight.x)),
-          (int) Math.ceil(Math.max(topLeft.y, bottomRight.y)));
-      try {
-        // Match JEI's full 18px tank and upward tiling; capacity is display-only.
-        for (int dx = 0; dx < 18; dx += tileWidth) {
-          for (int dy = 0; dy < 18; dy += tileHeight) {
-            graphics
-                .blit(x + dx, y + 18 - dy - tileHeight, 0, tileWidth, tileHeight, sprite, red, green, blue, opacity);
-          }
-        }
-        graphics.flush();
-      } finally {
-        graphics.disableScissor();
-      }
-    }
-
-    @Override
-    public void drawOverlay(GuiGraphics graphics, int mouseX, int mouseY, float delta) {
-      graphics.blit(MachineRecipeDisplay.TEXTURE, x, y, 0, 0, 18, 18, 256, 256);
-      super.drawOverlay(graphics, mouseX, mouseY, delta);
     }
   }
 }

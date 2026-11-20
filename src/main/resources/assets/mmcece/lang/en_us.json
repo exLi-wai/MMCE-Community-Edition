@@ -974,6 +974,7 @@
   "tooltip.machinery.duration.seconds": "Processing Time：%.1f Seconds",
   "tooltip.machinery.duration.tick": "(%s Tick)",
   "tooltip.machinery.energy.in": "Required Energy:",
+  "tooltip.machinery.energy.out": "Generated Energy:",
   "tooltip.machinery.energy.tick": "%s %s/t",
   "tooltip.machinery.energy.total": "Total：%s %s",
 
