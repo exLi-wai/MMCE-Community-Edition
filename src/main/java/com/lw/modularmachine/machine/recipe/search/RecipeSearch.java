@@ -381,6 +381,9 @@ public final class RecipeSearch {
 
   private static Optional<RecipeSearch> begin(StructureService.StructureSubject owner, RecipeCatalog catalog, Set<String> allowedIds, String factoryThread) {
     Objects.requireNonNull(catalog, "catalog");
+    if (catalog.recipes().size() == 0) {
+      return Optional.empty();
+    }
     // capture enforces server affinity before the search reads any inventory or
     // compiles slot
     // limits.

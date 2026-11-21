@@ -1,10 +1,13 @@
 package com.lw.modularmachine.machine.factory;
 
 import com.lw.modularmachine.api.upgrade.UpgradeSnapshot;
+import java.util.ArrayList;
 import java.util.List;
+import java.util.Map;
 import net.minecraft.resources.ResourceLocation;
 import org.junit.jupiter.api.Test;
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertSame;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 
 class FactorySchedulerTest {
@@ -70,6 +73,33 @@ class FactorySchedulerTest {
     assertEquals(1, updated.cursor());
     assertEquals(FactoryThreadState.State.WAITING, updated.channels().get(1).state());
     assertEquals(1, updated.channels().get(1).revision());
+  }
+
+  @Test
+  void appliesOnlyTheStatusWindowAndKeepsTheProductionRound() {
+    var scheduler = new FactoryScheduler(
+        List.of(channel("a", true), channel("b", true), channel("c", true)),
+        1,
+        List.of("b", "a", "c"),
+        Map.of("c", 7));
+    var visits = new ArrayList<String>();
+    var updated = scheduler.updateStates(2, 2, thread -> {
+      visits.add(thread.threadId());
+      return thread.withState(FactoryThreadState.State.WAITING, FactoryThreadState.Reason.NO_RECIPE);
+    });
+    assertEquals(List.of("c", "a"), visits);
+    assertEquals(FactoryThreadState.Reason.NO_RECIPE, updated.channel("a").reason());
+    assertSame(scheduler.channel("b"), updated.channel("b"));
+    assertEquals(FactoryThreadState.Reason.NO_RECIPE, updated.channel("c").reason());
+    assertEquals(scheduler.cursor(), updated.cursor());
+    assertEquals(scheduler.roundOrder(), updated.roundOrder());
+    assertEquals(scheduler.waitingAges(), updated.waitingAges());
+    assertSame(
+        updated,
+        updated.updateStates(
+            2,
+            2,
+            thread -> thread.withState(FactoryThreadState.State.WAITING, FactoryThreadState.Reason.NO_RECIPE)));
   }
 
   @Test

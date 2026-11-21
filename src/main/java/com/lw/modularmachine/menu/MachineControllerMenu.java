@@ -83,8 +83,8 @@ public final class MachineControllerMenu extends ControllerBlueprintMenu {
     if (!(viewer instanceof ServerPlayer serverPlayer) || !stillValid(viewer)) {
       return;
     }
-    var current = ControllerInspection.inspectForMenu(controller).map(MachinePayloads.ControllerStatusPayload::from)
-        .orElse(null);
+    var current = ControllerInspection.inspectForMenu(controller)
+        .map(snapshot -> MachinePayloads.ControllerStatusPayload.from(snapshot, controller.performance())).orElse(null);
     if (current != null && !current.equals(lastSentStatus)) {
       lastSentStatus = current;
       PacketDistributor.sendToPlayer(serverPlayer, current);

@@ -63,6 +63,10 @@ public final class FactoryRunCoordinator {
     return host.advanceOutput(outputEngine, threadId, set);
   }
 
+  public boolean hasRuns(String threadId) {
+    return !runState.runSet(threadId).runs().isEmpty();
+  }
+
   public void advance() {
     if (!host.confirmed()) {
       outputEngine.invalidate();

@@ -6,6 +6,7 @@ import org.junit.jupiter.api.Test;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertInstanceOf;
 import static org.junit.jupiter.api.Assertions.assertTrue;
+import java.util.Locale;
 
 class ControllerStatusFormatTest {
   @Test
@@ -45,7 +46,7 @@ class ControllerStatusFormatTest {
     for (String resource : new String[]{"item", "fluid", "energy", "chemical"}) {
       for (String direction : new String[]{"input", "output"}) {
         String suffix = "missing_" + resource + "_" + direction;
-        var detail = ControllerStatusFormat.jadeRecipeStatus(suffix.toUpperCase(java.util.Locale.ROOT), true);
+        var detail = ControllerStatusFormat.jadeRecipeStatus(suffix.toUpperCase(Locale.ROOT), true);
         assertEquals(prefix + suffix, key(detail.orElseThrow()));
       }
     }

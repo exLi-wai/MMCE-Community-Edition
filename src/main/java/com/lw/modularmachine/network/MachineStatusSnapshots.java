@@ -6,7 +6,6 @@ import com.lw.modularmachine.blockentity.FactoryControllerBlockEntity;
 import com.lw.modularmachine.blockentity.MachinePortBlockEntity;
 import com.lw.modularmachine.machine.component.PortResourceAccess;
 import com.lw.modularmachine.machine.factory.FactoryThreadState;
-import com.lw.modularmachine.machine.recipe.ControllerMetrics;
 import com.lw.modularmachine.machine.recipe.FrozenRecipeRun;
 import java.util.UUID;
 import net.neoforged.neoforge.fluids.FluidStack;
@@ -32,6 +31,7 @@ final class MachineStatusSnapshots {
                 factory.run(thread.threadId()).orElse(null),
                 factory.recipeInterfaceFailure(thread.threadId())))
         .toList();
+    var performance = factory.performance();
     return new FactoryStatusPayload(
         PROTOCOL_VERSION,
         factory.getBlockPos(),
@@ -40,8 +40,8 @@ final class MachineStatusSnapshots {
         factory.persistentStateValid(),
         factory.verificationState().name(),
         factory.verificationFailure().name(),
-        ControllerMetrics.averageTickMicros(),
-        ControllerMetrics.averageSearchMicros(),
+        performance.tickMicros(),
+        performance.searchMicros(),
         threads);
   }
 

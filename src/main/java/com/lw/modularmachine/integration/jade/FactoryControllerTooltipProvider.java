@@ -2,7 +2,6 @@ package com.lw.modularmachine.integration.jade;
 
 import com.lw.modularmachine.api.controller.MachineControllerApi;
 import com.lw.modularmachine.blockentity.FactoryControllerBlockEntity;
-import com.lw.modularmachine.machine.recipe.ControllerMetrics;
 import com.lw.modularmachine.presentation.ControllerStatusFormat;
 import com.lw.modularmachine.machine.structure.StructureService;
 import java.util.Locale;
@@ -46,8 +45,9 @@ final class FactoryControllerTooltipProvider implements IBlockComponentProvider,
       MachineControllerApi.structureDiagnostic(level, factory.getBlockPos())
           .ifPresent(diagnostic -> ControllerDiagnosticTooltip.capture(data, DIAGNOSTIC, diagnostic));
     }
-    data.putInt(PREFIX + "tick_micros", ControllerMetrics.averageTickMicros());
-    data.putInt(PREFIX + "search_micros", ControllerMetrics.averageSearchMicros());
+    var performance = factory.performance();
+    data.putInt(PREFIX + "tick_micros", performance.tickMicros());
+    data.putInt(PREFIX + "search_micros", performance.searchMicros());
     var threads = factory.scheduler().channels();
     int count = Math.min(threads.size(), 8);
     data.putInt(PREFIX + "count", count);

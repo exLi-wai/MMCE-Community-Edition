@@ -5,7 +5,9 @@ import com.lw.modularmachine.ModularMachine;
 import com.lw.modularmachine.client.NetworkPortScreen;
 import com.lw.modularmachine.machine.recipe.MachineRecipe;
 import com.lw.modularmachine.machine.recipe.MachineRecipeRegistries;
+import com.lw.modularmachine.network.NetworkPortPayloads;
 import com.lw.modularmachine.registry.MachineRegistries;
+import com.lw.modularmachine.util.Mods;
 import com.lw.modularmachine.util.minecraft.registry.RegisteredMachineItems;
 import java.util.ArrayList;
 import java.util.Comparator;
@@ -20,6 +22,7 @@ import mezz.jei.api.registration.IGuiHandlerRegistration;
 import mezz.jei.api.registration.IRecipeCatalystRegistration;
 import mezz.jei.api.registration.IRecipeCategoryRegistration;
 import mezz.jei.api.registration.IRecipeRegistration;
+import mezz.jei.api.registration.IRecipeTransferRegistration;
 import mezz.jei.api.runtime.IJeiRuntime;
 import net.minecraft.client.Minecraft;
 import net.minecraft.resources.ResourceLocation;
@@ -29,6 +32,7 @@ import net.minecraft.world.item.crafting.RecipeHolder;
 @JeiPlugin
 public final class MachineJeiPlugin implements IModPlugin {
   private final Map<ResourceLocation, MachineItemRecipeJeiCategory> categories = new LinkedHashMap<>();
+  private final NetworkPortRecipeTransfer.Pending pendingTransfers = new NetworkPortRecipeTransfer.Pending();
   private MachineStructureJeiCategory structureOverview;
   private Map<ResourceLocation, List<RecipeHolder<MachineRecipe>>> recipes = Map.of();
   static IJeiRuntime runtime;
@@ -40,6 +44,18 @@ public final class MachineJeiPlugin implements IModPlugin {
   @Override
   public void registerGuiHandlers(IGuiHandlerRegistration registration) {
     registration.addGhostIngredientHandler(NetworkPortScreen.class, new NetworkPortGhostIngredientHandler());
+  }
+
+  @Override
+  public void registerRecipeTransferHandlers(IRecipeTransferRegistration registration) {
+    if (Mods.AE2.isLoaded()) {
+      for (var category : categories.values()) {
+        var type = category.getRecipeType();
+        registration.addRecipeTransferHandler(
+            new NetworkPortRecipeTransfer(type, registration.getTransferHelper(), pendingTransfers),
+            type);
+      }
+    }
   }
 
   @Override
@@ -113,9 +129,13 @@ public final class MachineJeiPlugin implements IModPlugin {
   @Override
   public void onRuntimeAvailable(IJeiRuntime value) {
     runtime = value;
+    NetworkPortPayloads.setRecipeResultReceiver(pendingTransfers::receive);
   }
   @Override
   public void onRuntimeUnavailable() {
     runtime = null;
+    NetworkPortPayloads.setRecipeResultReceiver(ignored -> {
+    });
+    pendingTransfers.rejectAll();
   }
 }

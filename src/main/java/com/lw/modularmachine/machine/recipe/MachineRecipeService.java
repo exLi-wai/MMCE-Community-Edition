@@ -94,8 +94,8 @@ public final class MachineRecipeService {
       throw new IllegalArgumentException(
           "Native machine recipe set is incomplete or contains an unvalidated recipe: missing " + missing + ", unvalidated " + unexpected);
     }
-    var imports = RecipeAdapterImports
-        .generate(manager, StructureService.definitionsSnapshot(), registries, tags, sources);
+    var machines = StructureService.definitionsSnapshot();
+    var imports = RecipeAdapterImports.generate(manager, machines, registries, tags, sources);
     var declarations = new LinkedHashMap<>(expected);
     var originalSources = new LinkedHashMap<>(sources);
     for (var entry : imports.recipes().entrySet()) {
@@ -149,6 +149,8 @@ public final class MachineRecipeService {
       candidates.computeIfAbsent(recipe.machineId(), ignored -> new ArrayList<>()).add(compiled);
       effective.put(entry.getKey(), recipe);
     }
+    // A validated machine with no recipes still has a published catalog.
+    machines.keySet().forEach(machine -> candidates.putIfAbsent(machine, List.of()));
     var catalogs = prepareCatalogs(candidates, effective, previousCatalogs);
     boolean changed = !imports.recipes().isEmpty()
         || effective.entrySet().stream().anyMatch(entry -> entry.getValue() != actual.get(entry.getKey()));
@@ -220,7 +222,7 @@ public final class MachineRecipeService {
         result.put(machine, previous);
         return;
       }
-      var definitions = grouped.get(machine);
+      var definitions = grouped.getOrDefault(machine, Map.of());
       result.put(machine, RecipeCatalog.fromDefinitions(machine, values, definitions, () -> false, null, List.of()));
     });
     return Map.copyOf(result);
@@ -232,7 +234,7 @@ public final class MachineRecipeService {
     }
     var published = current(level.getServer());
     var base = published == null ? null : published.catalogs.get(owner.structureMachineId());
-    if (base == null || owner instanceof FactoryControllerBlockEntity) {
+    if (base == null || base.recipes().size() == 0 || owner instanceof FactoryControllerBlockEntity) {
       return Optional.ofNullable(base);
     }
     if (owner instanceof MachineControllerBlockEntity ordinary) {
@@ -273,6 +275,9 @@ public final class MachineRecipeService {
     var thread = factory.scheduler().channel(threadId);
     if (published == null || thread == null || base == null || published.catalogs.get(factory.machineId()) != base) {
       return Optional.empty();
+    }
+    if (base.recipes().size() == 0) {
+      return Optional.of(base);
     }
     return contextCatalog(published, factory, base, thread.upgradeSnapshot().recipeModifiers(), true);
   }

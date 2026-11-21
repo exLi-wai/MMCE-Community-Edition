@@ -2,10 +2,12 @@ package com.lw.modularmachine.network;
 
 import com.lw.modularmachine.ModularMachine;
 import com.lw.modularmachine.api.component.ResourceType;
+import com.lw.modularmachine.machine.network.NetworkPortRecipePlan.Target;
 import com.lw.modularmachine.machine.network.NetworkPortResource;
 import com.lw.modularmachine.machine.network.NetworkPortSnapshot;
 import com.lw.modularmachine.menu.NetworkPortMenu;
 import java.util.ArrayList;
+import java.util.List;
 import java.util.Objects;
 import java.util.UUID;
 import java.util.function.Consumer;
@@ -28,7 +30,13 @@ public final class NetworkPortPayloads {
       ResourceLocation.fromNamespaceAndPath(ModularMachine.MODID, "network_port_action"));
   private static final CustomPacketPayload.Type<GhostAction> GHOST_ACTION = new CustomPacketPayload.Type<>(
       ResourceLocation.fromNamespaceAndPath(ModularMachine.MODID, "network_port_ghost_action"));
+  private static final CustomPacketPayload.Type<RecipeAction> RECIPE_ACTION = new CustomPacketPayload.Type<>(
+      ResourceLocation.fromNamespaceAndPath(ModularMachine.MODID, "network_port_recipe_action"));
+  private static final CustomPacketPayload.Type<RecipeResult> RECIPE_RESULT = new CustomPacketPayload.Type<>(
+      ResourceLocation.fromNamespaceAndPath(ModularMachine.MODID, "network_port_recipe_result"));
   private static Consumer<Status> receiver = ignored -> {
+  };
+  private static Consumer<RecipeResult> recipeResultReceiver = ignored -> {
   };
 
   private NetworkPortPayloads() {
@@ -119,12 +127,47 @@ public final class NetworkPortPayloads {
     }
   }
 
+  public record RecipeAction(
+      int containerId,
+      BlockPos position,
+      UUID session,
+      long revision,
+      ResourceLocation recipeId,
+      int transferId,
+      List<Target> previewTargets) implements CustomPacketPayload {
+    public RecipeAction {
+      position = position.immutable();
+      Objects.requireNonNull(session, "session");
+      Objects.requireNonNull(recipeId, "recipeId");
+      if (containerId < 0 || revision < 0 || transferId < 0 || previewTargets.isEmpty() || previewTargets.size() > 9) {
+        throw new IllegalArgumentException("Invalid network recipe configuration");
+      }
+      previewTargets = List.copyOf(previewTargets);
+    }
+
+    @Override
+    public Type<RecipeAction> type() {
+      return RECIPE_ACTION;
+    }
+  }
+
   public static void setClientReceiver(Consumer<Status> value) {
     receiver = Objects.requireNonNull(value, "receiver");
   }
 
+  public record RecipeResult(UUID session, int transferId, boolean applied) implements CustomPacketPayload {
+    @Override
+    public Type<RecipeResult> type() {
+      return RECIPE_RESULT;
+    }
+  }
+
+  public static void setRecipeResultReceiver(Consumer<RecipeResult> receiver) {
+    recipeResultReceiver = Objects.requireNonNull(receiver, "receiver");
+  }
+
   public static void register(RegisterPayloadHandlersEvent event) {
-    event.registrar("1")
+    event.registrar("2")
         .playToClient(
             STATUS,
             StreamCodec.of(NetworkPortPayloads::writeStatus, NetworkPortPayloads::readStatus),
@@ -146,7 +189,24 @@ public final class NetworkPortPayloads {
                   && player.containerMenu instanceof NetworkPortMenu menu) {
                 menu.apply(player, payload);
               }
-            }));
+            }))
+        .playToServer(
+            RECIPE_ACTION,
+            StreamCodec.of(NetworkPortPayloads::writeRecipeAction, NetworkPortPayloads::readRecipeAction),
+            (payload, context) -> context.enqueueWork(() -> {
+              if (context.player() instanceof ServerPlayer player) {
+                boolean applied = player.containerMenu instanceof NetworkPortMenu menu && menu.apply(player, payload);
+                if (payload.transferId() != 0) {
+                  context.reply(new RecipeResult(payload.session(), payload.transferId(), applied));
+                }
+              }
+            }))
+        .playToClient(RECIPE_RESULT, StreamCodec.of((buffer, result) -> {
+          buffer.writeUUID(result.session());
+          buffer.writeVarInt(result.transferId());
+          buffer.writeBoolean(result.applied());
+        }, buffer -> new RecipeResult(buffer.readUUID(), buffer.readVarInt(), buffer.readBoolean())),
+            (payload, context) -> context.enqueueWork(() -> recipeResultReceiver.accept(payload)));
   }
 
   private static void writeStatus(RegistryFriendlyByteBuf buffer, Status value) {
@@ -253,5 +313,37 @@ public final class NetworkPortPayloads {
         buffer.readVarLong(),
         buffer.readVarInt(),
         NetworkPortResource.STREAM_CODEC.decode(buffer));
+  }
+
+  private static void writeRecipeAction(RegistryFriendlyByteBuf buffer, RecipeAction value) {
+    buffer.writeVarInt(value.containerId());
+    buffer.writeBlockPos(value.position());
+    buffer.writeUUID(value.session());
+    buffer.writeVarLong(value.revision());
+    buffer.writeResourceLocation(value.recipeId());
+    buffer.writeVarInt(value.transferId());
+    buffer.writeVarInt(value.previewTargets().size());
+    for (var target : value.previewTargets()) {
+      NetworkPortResource.STREAM_CODEC.encode(buffer, target.resource());
+      buffer.writeVarInt(target.amount());
+    }
+  }
+
+  private static RecipeAction readRecipeAction(RegistryFriendlyByteBuf buffer) {
+    int containerId = buffer.readVarInt();
+    var position = buffer.readBlockPos();
+    var session = buffer.readUUID();
+    long revision = buffer.readVarLong();
+    var recipeId = buffer.readResourceLocation();
+    int transferId = buffer.readVarInt();
+    int size = buffer.readVarInt();
+    if (size < 1 || size > 9) {
+      throw new IllegalArgumentException("Invalid network recipe target count");
+    }
+    var previewTargets = new ArrayList<Target>(size);
+    for (int index = 0; index < size; index++) {
+      previewTargets.add(new Target(NetworkPortResource.STREAM_CODEC.decode(buffer), buffer.readVarInt()));
+    }
+    return new RecipeAction(containerId, position, session, revision, recipeId, transferId, previewTargets);
   }
 }

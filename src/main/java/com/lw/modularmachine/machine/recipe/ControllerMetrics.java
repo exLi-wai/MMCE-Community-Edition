@@ -1,62 +1,58 @@
 package com.lw.modularmachine.machine.recipe;
 
-/**
- * Server-wide controller timings. Each metric collects samples for one normal
- * 40-tick window (about two seconds at 20 TPS) and publishes the arithmetic
- * mean when that window closes. The published value is held until the next
- * completed window, so menu, Jade, and observer payloads see the same result.
- */
+import net.minecraft.server.level.ServerLevel;
+import net.minecraft.world.level.Level;
+
+/** Per-controller server timings for the last completed 40-tick window. */
 public final class ControllerMetrics {
   public static final long SAMPLE_WINDOW_TICKS = 40L;
-  private static final Window TICK = new Window();
-  private static final Window SEARCH = new Window();
+  private final Window tick = new Window();
+  private final Window search = new Window();
 
-  private ControllerMetrics() {
+  public void recordTick(long nanos, long gameTick) {
+    tick.record(nanos, gameTick);
   }
 
-  public static void recordTick(long nanos, long gameTick) {
-    TICK.record(nanos, gameTick);
+  public void recordSearch(long nanos, long gameTick) {
+    search.record(nanos, gameTick);
   }
 
-  public static void recordSearch(long nanos, long gameTick) {
-    SEARCH.record(nanos, gameTick);
+  public record Snapshot(int tickMicros, int searchMicros) {
   }
 
-  public static int averageTickMicros() {
-    return TICK.averageMicros();
+  public Snapshot snapshot(Level level) {
+    return level instanceof ServerLevel server ? snapshot(server.getServer().getTickCount()) : new Snapshot(0, 0);
   }
 
-  public static int averageSearchMicros() {
-    return SEARCH.averageMicros();
+  Snapshot snapshot(long gameTick) {
+    return new Snapshot(tick.averageMicros(gameTick), search.averageMicros(gameTick));
   }
 
   private static final class Window {
-    private long startTick = Long.MIN_VALUE;
+    private long window = Long.MIN_VALUE;
     private long totalMicros;
     private long samples;
     private int averageMicros;
 
-    synchronized void record(long nanos, long gameTick) {
+    void record(long nanos, long gameTick) {
+      advance(gameTick);
       long micros = Math.max(0L, nanos / 1_000L);
-      if (startTick == Long.MIN_VALUE) {
-        startTick = gameTick;
-      } else if (gameTick < startTick || gameTick - startTick >= SAMPLE_WINDOW_TICKS) {
-        publish();
-        startTick = gameTick;
-        totalMicros = 0L;
-        samples = 0L;
-      }
       totalMicros = totalMicros > Long.MAX_VALUE - micros ? Long.MAX_VALUE : totalMicros + micros;
       samples = samples == Long.MAX_VALUE ? Long.MAX_VALUE : samples + 1L;
     }
 
-    synchronized int averageMicros() {
+    int averageMicros(long gameTick) {
+      advance(gameTick);
       return averageMicros;
     }
 
-    private void publish() {
-      if (samples > 0L) {
-        averageMicros = clamp(totalMicros / samples);
+    private void advance(long gameTick) {
+      long next = Math.floorDiv(gameTick, SAMPLE_WINDOW_TICKS);
+      if (next != window) {
+        averageMicros = next == window + 1 && samples > 0L ? clamp(totalMicros / samples) : 0;
+        window = next;
+        samples = 0L;
+        totalMicros = 0L;
       }
     }
   }

@@ -8,6 +8,7 @@ import java.util.List;
 import java.util.Map;
 import java.util.NoSuchElementException;
 import java.util.Objects;
+import java.util.function.UnaryOperator;
 
 /**
  * Bounded fair rounds. Waiting age precedes priority; GUI order stays stable by
@@ -161,6 +162,27 @@ public final class FactoryScheduler {
     }
 
     return new FactoryScheduler(updated, cursor, cursor == 0 ? null : roundOrder, waiting);
+  }
+
+  /**
+   * Applies a circular slice of status changes without consuming production
+   * visits.
+   */
+  FactoryScheduler updateStates(int first, int count, UnaryOperator<FactoryThreadState> update) {
+    List<FactoryThreadState> updated = null;
+    for (int offset = 0; offset < count; offset++) {
+      int index = (first + offset) % channels.size();
+      var current = channels.get(index);
+      var next = update.apply(current);
+      if (next != current) {
+        if (updated == null) {
+          updated = new ArrayList<>(channels);
+        }
+        updated.set(index, next);
+      }
+    }
+
+    return updated == null ? this : new FactoryScheduler(updated, cursor, roundOrder, waiting);
   }
 
   public DispatchReport advance(int budget, Attempt attempt) {

@@ -3,6 +3,7 @@ package com.lw.modularmachine.machine.factory;
 import com.lw.modularmachine.machine.upgrade.UpgradeRecipeCheckHandlers;
 import com.lw.modularmachine.config.MachineConfig;
 import com.lw.modularmachine.machine.recipe.MachineRecipe;
+import com.lw.modularmachine.machine.recipe.ControllerMetrics;
 import com.lw.modularmachine.machine.recipe.RecipeStartPlan;
 import com.lw.modularmachine.machine.recipe.FactoryRecipeStarter;
 import com.lw.modularmachine.machine.recipe.FactoryParallelStarter;
@@ -33,7 +34,6 @@ public final class FactorySearchCoordinator {
   public interface Host {
     boolean available();
     long gameTime();
-    RecipeCatalog catalog();
     boolean hasRuns(String threadId);
     boolean startAllowed(String threadId);
     RecipeSearch beginSearch(String threadId, RecipeCatalog catalog, Set<String> allowed);
@@ -49,15 +49,9 @@ public final class FactorySearchCoordinator {
     this.host = Objects.requireNonNull(host, "host");
   }
 
-  public void advance() {
-    if (!host.available()) {
+  public void advance(RecipeCatalog catalog, ControllerMetrics metrics, long serverTick) {
+    if (!host.available() || catalog == null || catalog.recipes().size() == 0) {
       invalidate();
-      return;
-    }
-    var catalog = host.catalog();
-    if (catalog == null) {
-      invalidate();
-      updateWaitingThreads(FactoryThreadState.Reason.CONTROLLER_UNAVAILABLE);
       return;
     }
     var channels = threadConfiguration.scheduler().channels();
@@ -68,11 +62,11 @@ public final class FactorySearchCoordinator {
     long now = host.gameTime();
     var window = threadConfiguration.visitWindow(visitBudget);
     for (var visited : window) {
-      advanceThread(visited.threadId(), catalog, now);
+      advanceThread(visited.threadId(), catalog, now, metrics, serverTick);
     }
   }
 
-  private void advanceThread(String threadId, RecipeCatalog catalog, long now) {
+  private void advanceThread(String threadId, RecipeCatalog catalog, long now, ControllerMetrics metrics, long serverTick) {
     var thread = threadConfiguration.scheduler().channel(threadId);
     if (thread == null
         || !thread.enabled()
@@ -93,15 +87,21 @@ public final class FactorySearchCoordinator {
       invalidateThread(thread.threadId(), now);
       search = null;
     }
+    long beginNanos = 0L;
     if (search == null) {
       if (now < searchRetryAfter.getOrDefault(thread.threadId(), 0L)) {
         return;
       }
       interfaceFailures.remove(thread.threadId());
       var allowed = thread.lockedRecipe() == null ? null : Set.of(thread.lockedRecipe().toString());
+      long started = System.nanoTime();
       try {
         search = host.beginSearch(thread.threadId(), catalog, allowed);
-      } catch (UpgradeRecipeCheckHandlers.FailedException invalid) {
+      } catch (RuntimeException failure) {
+        metrics.recordSearch(System.nanoTime() - started, serverTick);
+        if (!(failure instanceof UpgradeRecipeCheckHandlers.FailedException)) {
+          throw failure;
+        }
         threadConfiguration.updateThreadState(
             thread.threadId(),
             FactoryThreadState.State.WAITING,
@@ -110,7 +110,9 @@ public final class FactorySearchCoordinator {
         recordSearchAttempt(thread.threadId());
         return;
       }
+      beginNanos = System.nanoTime() - started;
       if (search == null) {
+        metrics.recordSearch(beginNanos, serverTick);
         var reason = thread.upgradeSnapshot().recipeModifiers()
             .isEmpty() ? FactoryThreadState.Reason.STALE_RESOURCES : FactoryThreadState.Reason.SEARCH_BUDGET;
         threadConfiguration.updateThreadState(thread.threadId(), FactoryThreadState.State.WAITING, reason);
@@ -123,7 +125,13 @@ public final class FactorySearchCoordinator {
     try {
       var activeSearch = search;
       int budget = MachineConfig.FACTORY_SEARCH_WORK.get();
-      var result = search.advance(budget);
+      long started = System.nanoTime();
+      RecipeSearch.Result result;
+      try {
+        result = search.advance(budget);
+      } finally {
+        metrics.recordSearch(beginNanos + (System.nanoTime() - started), serverTick);
+      }
       switch (result.status()) {
         case SELECTED -> {
           result.plan().ifPresent(plan -> {
@@ -259,19 +267,6 @@ public final class FactorySearchCoordinator {
     int interval = searchRetryInterval.getOrDefault(threadId, SEARCH_RETRY_INITIAL);
     searchRetryAfter.put(threadId, now + interval);
     searchRetryInterval.put(threadId, Math.min(SEARCH_RETRY_MAX, interval << 1));
-  }
-
-  private void updateWaitingThreads(FactoryThreadState.Reason reason) {
-    var channels = threadConfiguration.scheduler().channels();
-    if (channels.isEmpty()) {
-      return;
-    }
-    int visitBudget = Math.min(MachineConfig.FACTORY_THREADS_PER_TICK.get(), channels.size());
-    for (var thread : threadConfiguration.visitWindow(visitBudget)) {
-      if (thread.enabled() && thread.state() != FactoryThreadState.State.RUNNING) {
-        threadConfiguration.updateThreadState(thread.threadId(), FactoryThreadState.State.WAITING, reason);
-      }
-    }
   }
 
   /**

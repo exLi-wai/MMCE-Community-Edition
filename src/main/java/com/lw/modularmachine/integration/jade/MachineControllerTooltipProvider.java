@@ -2,7 +2,6 @@ package com.lw.modularmachine.integration.jade;
 
 import com.lw.modularmachine.api.recipe.RecipeRunState;
 import com.lw.modularmachine.api.controller.MachineControllerApi;
-import com.lw.modularmachine.machine.recipe.ControllerMetrics;
 import com.lw.modularmachine.presentation.ControllerStatusFormat;
 import com.lw.modularmachine.machine.structure.StructureService;
 import com.lw.modularmachine.blockentity.MachineControllerBlockEntity;
@@ -57,8 +56,9 @@ final class MachineControllerTooltipProvider implements IBlockComponentProvider,
       data.putString(FAILURE, snapshot.structureFailure().name());
       data.putBoolean(PRODUCTION, snapshot.productionAllowed());
       data.putString(RUN_STATUS, snapshot.recipeRunStatus().name());
-      data.putInt(PERFORMANCE + "_tick", ControllerMetrics.averageTickMicros());
-      data.putInt(PERFORMANCE + "_search", ControllerMetrics.averageSearchMicros());
+      var performance = controller.performance();
+      data.putInt(PERFORMANCE + "_tick", performance.tickMicros());
+      data.putInt(PERFORMANCE + "_search", performance.searchMicros());
       snapshot.structureDiagnostic()
           .ifPresent(diagnostic -> ControllerDiagnosticTooltip.capture(data, DIAGNOSTIC, diagnostic));
       snapshot.recipeInputDiagnostic().ifPresent(diagnostic -> {

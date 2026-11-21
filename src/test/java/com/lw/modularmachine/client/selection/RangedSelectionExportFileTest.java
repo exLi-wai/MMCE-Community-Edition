@@ -24,6 +24,7 @@ import org.junit.jupiter.api.Assumptions;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
 import static org.junit.jupiter.api.Assertions.*;
+import java.util.ArrayDeque;
 
 class RangedSelectionExportFileTest {
   private static final String OUTPUT_PART = "{\"offset\":[0,0,0],\"block\":\"fluid_output\"}";
@@ -146,7 +147,7 @@ class RangedSelectionExportFileTest {
     Path variables = gameDirectory.resolve("blocks.var.json");
     Files.writeString(variables, "{\"INPUT_VAR\":\"item_input\"}");
     var selected = RangedSelectionExportFile.capture(gameDirectory, "machine");
-    var pending = new java.util.ArrayDeque<Runnable>();
+    var pending = new ArrayDeque<Runnable>();
     var attempt = RangedSelectionExportFile
         .merge(selected, snapshot(OUTPUT_PART), Design.defaults(), pending::add, Runnable::run);
     Files.writeString(variables, "{\"INPUT_VAR\":\"energy_output\"}");
@@ -256,7 +257,7 @@ class RangedSelectionExportFileTest {
     Files.writeString(file, MACHINE);
     Files.writeString(other, MACHINE);
     var selected = RangedSelectionExportFile.capture(gameDirectory, "machine");
-    var worker = new java.util.ArrayDeque<Runnable>();
+    var worker = new ArrayDeque<Runnable>();
     var attempt = RangedSelectionExportFile
         .merge(selected, snapshot(OUTPUT_PART), Design.defaults(), Runnable::run, worker::add);
     worker.remove().run();

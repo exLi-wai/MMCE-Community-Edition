@@ -5,6 +5,7 @@ import com.lw.modularmachine.api.component.ChemicalStackData;
 import com.lw.modularmachine.api.component.MachineColorable;
 import com.lw.modularmachine.machine.chemical.ChemicalPlatform;
 import com.lw.modularmachine.machine.network.MachineNetworkPlatform;
+import com.lw.modularmachine.machine.network.NetworkPortRecipePlan;
 import com.lw.modularmachine.machine.network.NetworkPortResource;
 import com.lw.modularmachine.machine.network.NetworkPortService;
 import com.lw.modularmachine.machine.network.NetworkPortSnapshot;
@@ -17,6 +18,8 @@ import com.lw.modularmachine.registry.MachineRegistries;
 import com.lw.modularmachine.storage.TransactionalChemicalTank;
 import com.lw.modularmachine.storage.TransactionalFluidTank;
 import java.util.ArrayList;
+import java.util.Arrays;
+import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.Objects;
@@ -353,6 +356,75 @@ public final class NetworkPortBlockEntity extends MachinePortBlockEntity {
     configRevision++;
     changed();
     return true;
+  }
+
+  public boolean configureRecipe(NetworkPortRecipePlan plan, long expectedRevision) {
+    if (!networkReadyToEdit()
+        || !kind().isInput()
+        || expectedRevision != configRevision
+        || plan.error() != NetworkPortRecipePlan.Error.NONE) {
+      return false;
+    }
+    var resources = new NetworkPortResource[configured.length];
+    var amounts = new int[targets.length];
+    long expectedResourceRevision = resourceRevision();
+    boolean same;
+    externalCall = true;
+    try {
+      var layout = arrangeRecipeTargets(plan.targets());
+      for (int slot = 0; slot < layout.length; slot++) {
+        var target = layout[slot];
+        if (target == null) {
+          continue;
+        }
+        if (target.resource().kind() != kind().resource() || !bufferAdapter().accepts(target.resource())) {
+          return false;
+        }
+        resources[slot] = copyResource(target.resource());
+        amounts[slot] = target.amount();
+      }
+      same = Arrays.equals(resources, configured) && Arrays.equals(amounts, targets);
+    } finally {
+      externalCall = false;
+    }
+    if (!networkReadyToEdit() || expectedRevision != configRevision || expectedResourceRevision != resourceRevision()) {
+      return false;
+    }
+    if (!same) {
+      System.arraycopy(resources, 0, configured, 0, configured.length);
+      System.arraycopy(amounts, 0, targets, 0, targets.length);
+      configRevision++;
+      changed();
+    }
+    return true;
+  }
+
+  private NetworkPortRecipePlan.Target[] arrangeRecipeTargets(List<NetworkPortRecipePlan.Target> recipeTargets) {
+    var remaining = new LinkedHashMap<NetworkPortResource, NetworkPortRecipePlan.Target>();
+    for (var target : recipeTargets) {
+      remaining.put(target.resource(), target);
+    }
+    var layout = new NetworkPortRecipePlan.Target[rows];
+    var availableSlots = new ArrayList<Integer>();
+    var occupiedSlots = new ArrayList<Integer>();
+    var adapter = bufferAdapter();
+    for (int slot = 0; slot < rows; slot++) {
+      var buffered = adapter.read(this, slot).resource();
+      if (buffered == null) {
+        availableSlots.add(slot);
+      } else {
+        layout[slot] = remaining.remove(buffered);
+        if (layout[slot] == null) {
+          occupiedSlots.add(slot);
+        }
+      }
+    }
+    availableSlots.addAll(occupiedSlots);
+    var slots = availableSlots.iterator();
+    for (var target : remaining.values()) {
+      layout[slots.next()] = target;
+    }
+    return layout;
   }
 
   private NetworkPortSnapshot.Row row(int index) {

@@ -32,6 +32,7 @@ import com.lw.modularmachine.machine.orientation.ControllerPlacementData;
 import com.lw.modularmachine.api.orientation.MachineOrientation;
 import com.lw.modularmachine.machine.parallel.ParallelCapacity;
 import com.lw.modularmachine.machine.recipe.FrozenRecipeRun;
+import com.lw.modularmachine.machine.recipe.ControllerMetrics;
 import com.lw.modularmachine.machine.recipe.search.RecipeSearch;
 import com.lw.modularmachine.machine.recipe.PatternRunSources;
 import com.lw.modularmachine.machine.recipe.PatternProductionService;
@@ -106,11 +107,13 @@ public final class MachineControllerBlockEntity extends BlockEntity implements M
       this::blueprintChanged);
   private final ControllerUpgrades upgrades = new ControllerUpgrades(this);
   private final UpgradeRuntimeWork runtimeUpgrades = new UpgradeRuntimeWork(this);
-  private final ControllerRecipeSearch recipeSearch = new ControllerRecipeSearch(new RecipeSearchHost());
+  private final ControllerMetrics metrics = new ControllerMetrics();
+  private final ControllerRecipeSearch recipeSearch = new ControllerRecipeSearch(new RecipeSearchHost(), metrics);
   private final ControllerExecutionCoordinator execution = new ControllerExecutionCoordinator(
       runState,
       recipeSearch,
       energyTransfer,
+      metrics,
       new ExecutionHost());
   private VerificationState detachedState = VerificationState.PENDING;
   private VerificationFailure detachedFailure = VerificationFailure.UNVERIFIED;
@@ -372,6 +375,10 @@ public final class MachineControllerBlockEntity extends BlockEntity implements M
         energyTransfer.transferred(),
         recipeSearch.idleAppearance());
     ControllerAppearance.sync(this, formed, hidden, appearance);
+  }
+
+  public ControllerMetrics.Snapshot performance() {
+    return metrics.snapshot(level);
   }
 
   public ResourceLocation machineId() {
@@ -824,7 +831,7 @@ public final class MachineControllerBlockEntity extends BlockEntity implements M
     if (snapshot.isEmpty()) {
       return;
     }
-    var payload = MachinePayloads.ControllerStatusPayload.from(snapshot.orElseThrow());
+    var payload = MachinePayloads.ControllerStatusPayload.from(snapshot.orElseThrow(), performance());
     for (ServerPlayer player : nearbyPlayers) {
       if (!payload.equals(lastObserverStatus) || !observerRecipients.contains(player.getUUID())) {
         PacketDistributor.sendToPlayer(player, payload);

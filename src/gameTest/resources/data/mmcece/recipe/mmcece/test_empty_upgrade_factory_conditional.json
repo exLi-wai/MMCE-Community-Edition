@@ -1,0 +1,8 @@
+{
+  "type": "mmcece:machine",
+  "neoforge:conditions": [{"type": "neoforge:mod_loaded", "modid": "mmcece_intentionally_absent"}],
+  "machine": "mmcece:test_upgrade_bus_binding",
+  "duration": 1,
+  "inputs": [{"stack": {"id": "minecraft:stone"}, "amount": 1}],
+  "outputs": [{"stack": {"id": "minecraft:dirt"}, "amount": 1}]
+}

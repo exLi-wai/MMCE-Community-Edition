@@ -356,7 +356,7 @@ public final class MachinePayloads {
       requireText(recipeFailureMessage);
     }
 
-    public static ControllerStatusPayload from(MachineControllerApi.Snapshot snapshot) {
+    public static ControllerStatusPayload from(MachineControllerApi.Snapshot snapshot, ControllerMetrics.Snapshot performance) {
       var run = snapshot.runningRun().orElse(null);
       var shortages = new ArrayList<Shortage>();
       snapshot.recipeInputDiagnostic().ifPresent(
@@ -380,8 +380,8 @@ public final class MachinePayloads {
           run == null ? "" : run.state().name(),
           run == null ? 0 : run.progress(),
           run == null ? 0 : run.duration(),
-          ControllerMetrics.averageTickMicros(),
-          ControllerMetrics.averageSearchMicros(),
+          performance.tickMicros(),
+          performance.searchMicros(),
           shortages,
           snapshot.recipeFailureMessage());
     }

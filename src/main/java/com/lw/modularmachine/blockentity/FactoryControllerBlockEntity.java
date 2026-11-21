@@ -86,10 +86,12 @@ import net.minecraft.world.level.block.state.BlockState;
 import org.jetbrains.annotations.ApiStatus;
 import com.lw.modularmachine.machine.factory.FactoryThreadPreset;
 import com.lw.modularmachine.machine.recipe.RecipeTickPreparation;
+import com.lw.modularmachine.machine.recipe.ControllerMetrics;
 import java.util.HashSet;
 
 public final class FactoryControllerBlockEntity extends BlockEntity implements MenuProvider, UpgradeBusOwner, ControllerScriptStateOwner, ControllerCommandSubject {
   private static final int FACTORY_SCHEMA = 7;
+  private final ControllerMetrics metrics = new ControllerMetrics();
   private final FactoryThreadConfiguration threadConfiguration = new FactoryThreadConfiguration(
       new ThreadConfigurationHost());
   private boolean persistentStateValid = true;
@@ -126,9 +128,14 @@ public final class FactoryControllerBlockEntity extends BlockEntity implements M
       upgrades,
       runCoordinator,
       searchCoordinator,
+      metrics,
       new ExecutionHost());
 
   private final class ExecutionHost implements FactoryExecutionCoordinator.Host {
+    @Override
+    public RecipeCatalog catalog() {
+      return MachineRecipeService.catalogFor(FactoryControllerBlockEntity.this).orElse(null);
+    }
     @Override
     public VerificationState verificationState() {
       return FactoryControllerBlockEntity.this.verificationState();
@@ -306,10 +313,6 @@ public final class FactoryControllerBlockEntity extends BlockEntity implements M
     @Override
     public long gameTime() {
       return level.getGameTime();
-    }
-    @Override
-    public RecipeCatalog catalog() {
-      return MachineRecipeService.catalogFor(FactoryControllerBlockEntity.this).orElse(null);
     }
     @Override
     public boolean hasRuns(String threadId) {
@@ -749,6 +752,10 @@ public final class FactoryControllerBlockEntity extends BlockEntity implements M
   @Override
   public boolean allowsStructureDefinition(MachineDefinition definition) {
     return !definition.requiresBlueprint() || definition.id().equals(blueprintInventory.machine());
+  }
+
+  public ControllerMetrics.Snapshot performance() {
+    return metrics.snapshot(level);
   }
 
   public ResourceLocation machineId() {

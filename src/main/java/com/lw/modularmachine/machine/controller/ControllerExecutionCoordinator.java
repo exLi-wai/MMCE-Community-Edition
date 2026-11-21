@@ -20,13 +20,15 @@ public final class ControllerExecutionCoordinator {
   private final ControllerRunState runState;
   private final ControllerRecipeSearch recipeSearch;
   private final ControllerEnergyTransfer energyTransfer;
+  private final ControllerMetrics metrics;
   private final RecipeRunEngine recipeEngine = new RecipeRunEngine();
   private final Host host;
 
-  public ControllerExecutionCoordinator(ControllerRunState runState, ControllerRecipeSearch recipeSearch, ControllerEnergyTransfer energyTransfer, Host host) {
+  public ControllerExecutionCoordinator(ControllerRunState runState, ControllerRecipeSearch recipeSearch, ControllerEnergyTransfer energyTransfer, ControllerMetrics metrics, Host host) {
     this.runState = runState;
     this.recipeSearch = recipeSearch;
     this.energyTransfer = energyTransfer;
+    this.metrics = metrics;
     this.host = host;
   }
   public void started() {
@@ -43,7 +45,7 @@ public final class ControllerExecutionCoordinator {
     if (runState.current() != null) {
       long tickStarted = System.nanoTime();
       var runResult = host.advanceRun(recipeEngine, server);
-      ControllerMetrics.recordTick(System.nanoTime() - tickStarted, server.getServer().getTickCount());
+      metrics.recordTick(System.nanoTime() - tickStarted, server.getServer().getTickCount());
       host.broadcastObserverStatus(server);
       if (runState.current() != null || runResult != RecipeRunStatus.FINISHED) {
         return;

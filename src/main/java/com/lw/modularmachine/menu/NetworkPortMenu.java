@@ -1,12 +1,17 @@
 package com.lw.modularmachine.menu;
 
 import com.lw.modularmachine.blockentity.NetworkPortBlockEntity;
+import com.lw.modularmachine.machine.network.NetworkPortRecipePlan;
 import com.lw.modularmachine.machine.network.NetworkPortResource;
+import com.lw.modularmachine.machine.recipe.MachineRecipeService;
 import com.lw.modularmachine.network.NetworkPortPayloads;
 import com.lw.modularmachine.registry.MachineRegistries;
+import java.util.List;
 import java.util.UUID;
 import net.minecraft.core.BlockPos;
 import net.minecraft.network.FriendlyByteBuf;
+import net.minecraft.network.chat.Component;
+import net.minecraft.resources.ResourceLocation;
 import net.minecraft.server.level.ServerPlayer;
 import net.minecraft.world.entity.player.Inventory;
 import net.minecraft.world.entity.player.Player;
@@ -50,7 +55,7 @@ public final class NetworkPortMenu extends AbstractContainerMenu {
   }
 
   public NetworkPortPayloads.Status status() {
-    return status;
+    return viewer instanceof ServerPlayer ? lastSent : status;
   }
 
   public void acceptStatus(NetworkPortPayloads.Status value) {
@@ -126,6 +131,46 @@ public final class NetworkPortMenu extends AbstractContainerMenu {
     }
     lastSent = null;
     broadcastChanges();
+  }
+
+  public boolean requestRecipe(ResourceLocation recipeId, int transferId, List<NetworkPortRecipePlan.Target> previewTargets) {
+    if (status == null || !status.editable() || !status.snapshot().input()) {
+      return false;
+    }
+    PacketDistributor.sendToServer(
+        new NetworkPortPayloads.RecipeAction(
+            containerId,
+            port.getBlockPos(),
+            status.session(),
+            status.snapshot().configRevision(),
+            recipeId,
+            transferId,
+            previewTargets));
+    return true;
+  }
+
+  public boolean apply(ServerPlayer player, NetworkPortPayloads.RecipeAction action) {
+    boolean applied = false;
+    String rejection = "gui.mmcece.network_port.transfer.rejected";
+    if (currentAction(player, action.containerId(), action.position(), action.session(), action.revision())) {
+      var plan = MachineRecipeService.definition(player.serverLevel().getServer(), action.recipeId())
+          .filter(recipe -> recipe.scriptOptions().loadJei())
+          .map(recipe -> NetworkPortRecipePlan.forRecipe(recipe, port.kind().resource())).orElse(null);
+      if (plan == null
+          || plan.error() != NetworkPortRecipePlan.Error.NONE
+          || !plan.targets().equals(action.previewTargets())) {
+        rejection = "gui.mmcece.network_port.transfer.recipe_changed";
+      } else {
+        applied = port.configureRecipe(plan, action.revision());
+      }
+    }
+    if (!applied) {
+      player.displayClientMessage(Component.translatable(rejection), true);
+    }
+    lastSent = null;
+    broadcastChanges();
+
+    return applied;
   }
 
   private boolean currentAction(ServerPlayer player, int expectedContainer, BlockPos position, UUID expectedSession, long revision) {
