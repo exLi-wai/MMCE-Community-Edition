@@ -23,6 +23,7 @@ final class AthenaQuadVariants {
 
   record Key(
       AthenaConnectedTextures.Layer layer,
+      Direction face,
       Direction direction,
       float depth,
       float minU,
@@ -97,14 +98,19 @@ final class AthenaQuadVariants {
   /**
    * Only full, axis-aligned faces with a complete sprite mapping can be stitched.
    */
-  static Key capture(BakedQuad quad, AthenaConnectedTextures.Layer layer) {
+  static Key capture(BakedQuad quad, AthenaConnectedTextures.Layer layer, Direction face) {
     var vertices = quad.getVertices();
     if (vertices.length != 4 * STRIDE) {
       return null;
     }
     Direction direction = quad.getDirection();
-    float depth = alongFace(vertices, 0, direction);
-    float boundary = direction.getAxisDirection() == Direction.AxisDirection.POSITIVE ? 1F : 0F;
+    // Both sides of a transparent window use the neighbors of its physical face.
+    if (direction != face
+        && !(layer == AthenaConnectedTextures.Layer.LIFE_ESSENCE_WINDOW && direction == face.getOpposite())) {
+      return null;
+    }
+    float depth = alongFace(vertices, 0, face);
+    float boundary = face.getAxisDirection() == Direction.AxisDirection.POSITIVE ? 1F : 0F;
     if (!near(depth, boundary, POSITION_EPSILON)) {
       return null;
     }
@@ -119,11 +125,11 @@ final class AthenaQuadVariants {
       if (vertices[i + COLOR] != color
           || vertices[i + UV2] != light
           || vertices[i + NORMAL] != normal
-          || !near(alongFace(vertices, i, direction), depth, POSITION_EPSILON)) {
+          || !near(alongFace(vertices, i, face), depth, POSITION_EPSILON)) {
         return null;
       }
-      float u = faceU(vertices, i, direction);
-      float v = faceV(vertices, i, direction);
+      float u = faceU(vertices, i, face);
+      float v = faceV(vertices, i, face);
       minU = Math.min(minU, u);
       minV = Math.min(minV, v);
       maxU = Math.max(maxU, u);
@@ -143,8 +149,8 @@ final class AthenaQuadVariants {
     float lowUv = Mth.lerp(sprite.uvShrinkRatio(), 0F, .5F);
     float highUv = Mth.lerp(sprite.uvShrinkRatio(), 1F, .5F);
     for (int i = 0; i < vertices.length; i += STRIDE) {
-      float u = faceU(vertices, i, direction);
-      float v = faceV(vertices, i, direction);
+      float u = faceU(vertices, i, face);
+      float v = faceV(vertices, i, face);
       boolean right = near(u, maxU, POSITION_EPSILON);
       boolean bottom = near(v, maxV, POSITION_EPSILON);
       if ((!right && !near(u, minU, POSITION_EPSILON)) || (!bottom && !near(v, minV, POSITION_EPSILON))) {
@@ -175,6 +181,7 @@ final class AthenaQuadVariants {
     }
     return new Key(
         layer,
+        face,
         direction,
         depth,
         minU,
@@ -201,7 +208,7 @@ final class AthenaQuadVariants {
       place(
           vertices,
           i,
-          key.direction(),
+          key.face(),
           key.depth(),
           Mth.lerp(u, key.minU(), key.maxU()),
           Mth.lerp(v, key.minV(), key.maxV()));

@@ -48,7 +48,8 @@ public final class AthenaConnectedTextures {
     GEARBOX("overlay/casings/overlay_gearbox", "machine_casing_gearbox"),
     REINFORCED("overlay/casings/overlay_reinforced", "machine_casing_reinforced"),
     VENT("overlay/casings/overlay_vent", "machine_casing_vent"),
-    ENVIRONMENT("overlay/interfaces/overlay_environmenthatch", "environment_hatch");
+    ENVIRONMENT("overlay/interfaces/overlay_environmenthatch", "environment_hatch"),
+    LIFE_ESSENCE_WINDOW("ctm/life_essence_window/particle", "life_essence_window");
 
     final ResourceLocation original;
     final String directory;
@@ -134,10 +135,10 @@ public final class AthenaConnectedTextures {
       int layers = 0;
       for (var quad : model.getQuads(state, direction, random, ModelData.EMPTY, null)) {
         var material = materials.get(quad.getSprite().contents().name());
-        if (material == null || quad.getDirection() != direction) {
+        if (material == null) {
           continue;
         }
-        var key = AthenaQuadVariants.capture(quad, material.layer());
+        var key = AthenaQuadVariants.capture(quad, material.layer(), direction);
         if (key == null) {
           continue;
         }
