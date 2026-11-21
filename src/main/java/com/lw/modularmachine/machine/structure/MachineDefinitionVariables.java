@@ -70,6 +70,11 @@ final class MachineDefinitionVariables {
 
   JsonObject expandParts(JsonObject root, String source) {
     JsonObject copy = root.deepCopy();
+    expandPartsInPlace(copy, source);
+    return copy;
+  }
+
+  void expandPartsInPlace(JsonObject copy, String source) {
     var budget = new ExpansionBudget();
     if (copy.has("parts") && copy.get("parts").isJsonArray()) {
       expandParts(copy.getAsJsonArray("parts"), source + ": $.parts", budget);
@@ -86,7 +91,6 @@ final class MachineDefinitionVariables {
         }
       }
     }
-    return copy;
   }
 
   private void expandParts(JsonArray parts, String path, ExpansionBudget budget) {

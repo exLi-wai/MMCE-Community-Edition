@@ -27,6 +27,13 @@ public final class RangedSelectionData {
   private RangedSelectionData() {
   }
 
+  private static BlockPos minimum(BlockPos first, BlockPos second) {
+    return new BlockPos(
+        Math.min(first.getX(), second.getX()),
+        Math.min(first.getY(), second.getY()),
+        Math.min(first.getZ(), second.getZ()));
+  }
+
   public enum PickTarget {
     NONE,
     MAIN,
@@ -60,6 +67,10 @@ public final class RangedSelectionData {
       first = Objects.requireNonNull(first).immutable();
       second = Objects.requireNonNull(second).immutable();
     }
+    public BlockPos minCorner() {
+      return minimum(first, second);
+    }
+
     public boolean contains(BlockPos position) {
       return position.getX() >= Math.min(first.getX(), second.getX())
           && position.getX() <= Math.max(first.getX(), second.getX())
@@ -143,7 +154,6 @@ public final class RangedSelectionData {
       String fileName,
       boolean append,
       String targetFile,
-      boolean deduplicate,
       boolean includeAir,
       @Nullable Box main,
       List<Segment> segments,
@@ -177,7 +187,7 @@ public final class RangedSelectionData {
       var uniqueKeys = new HashSet<String>();
       var normalized = new ArrayList<Segment>(segments.size());
       try {
-        long volume = volume(main);
+        long volume = append ? 0 : volume(main);
         for (int index = 0; index < segments.size(); index++) {
           String key = keys.get(index);
           if (!key.matches("[a-zA-Z0-9_.-]{1,64}") || !uniqueKeys.add(key)) {
@@ -202,6 +212,56 @@ public final class RangedSelectionData {
       partEdits = Map.copyOf(frozen);
     }
 
+    /**
+     * Append captures the new templates while retaining the old box as a coordinate
+     * reference.
+     */
+    public @Nullable Box captureMain() {
+      return append ? null : main;
+    }
+
+    public BlockPos previewOrigin() {
+      var anchor = append ? appendOrigin() : controller;
+      return anchor == null ? selectionCorner() : anchor;
+    }
+
+    private BlockPos selectionCorner() {
+      BlockPos corner = main == null ? null : main.minCorner();
+      for (var segment : segments) {
+        for (var box : new Box[]{segment.body(), segment.start(), segment.end()}) {
+          if (box != null) {
+            var next = box.minCorner();
+            corner = corner == null ? next : minimum(corner, next);
+          }
+        }
+      }
+      return corner == null ? BlockPos.ZERO : corner;
+    }
+
+    /**
+     * World-space origin for a target file's local offsets, when the draft supplies
+     * an anchor.
+     */
+    public @Nullable BlockPos appendOrigin() {
+      if (controller != null) {
+        return controller;
+      }
+      if (main != null) {
+        return main.minCorner();
+      }
+      for (var segment : segments) {
+        if (segment.body() != null && segment.settings().customOrigin()) {
+          try {
+            return SelectionGeometry
+                .local(segment.body().minCorner(), segment.settings().origin(), MachineOrientation.IDENTITY);
+          } catch (ArithmeticException outsideCoordinates) {
+            return null;
+          }
+        }
+      }
+      return null;
+    }
+
     public static Design defaults() {
       var settings = new Settings(
           "",
@@ -221,7 +281,6 @@ public final class RangedSelectionData {
           "",
           false,
           "",
-          true,
           false,
           null,
           List.of(new Segment(settings, null, null, null)),
@@ -240,7 +299,6 @@ public final class RangedSelectionData {
           fileName,
           append,
           targetFile,
-          deduplicate,
           includeAir,
           value,
           segments,
@@ -259,7 +317,6 @@ public final class RangedSelectionData {
           fileName,
           append,
           targetFile,
-          deduplicate,
           includeAir,
           main,
           values,
@@ -284,12 +341,11 @@ public final class RangedSelectionData {
       return withSegments(next, keys);
     }
 
-    public Design withOptions(String nextFileName, boolean nextAppend, String nextTargetFile, boolean nextDeduplicate, boolean nextIncludeAir) {
+    public Design withOptions(String nextFileName, boolean nextAppend, String nextTargetFile, boolean nextIncludeAir) {
       return new Design(
           nextFileName,
           nextAppend,
           nextTargetFile,
-          nextDeduplicate,
           nextIncludeAir,
           main,
           segments,
@@ -308,7 +364,6 @@ public final class RangedSelectionData {
           fileName,
           append,
           targetFile,
-          deduplicate,
           includeAir,
           main,
           segments,
@@ -327,7 +382,6 @@ public final class RangedSelectionData {
           fileName,
           append,
           targetFile,
-          deduplicate,
           includeAir,
           main,
           segments,
@@ -346,7 +400,6 @@ public final class RangedSelectionData {
           fileName,
           append,
           targetFile,
-          deduplicate,
           includeAir,
           main,
           segments,
@@ -373,7 +426,6 @@ public final class RangedSelectionData {
           fileName,
           append,
           targetFile,
-          deduplicate,
           includeAir,
           main,
           segments,
@@ -396,7 +448,6 @@ public final class RangedSelectionData {
           fileName,
           append,
           targetFile,
-          deduplicate,
           includeAir,
           main,
           segments,
@@ -503,11 +554,10 @@ public final class RangedSelectionData {
       int index,
       String value,
       Settings settings,
-      boolean deduplicate,
       boolean includeAir,
       PartEdit partEdit) {
-    public Request(UUID session, long revision, Action action, PickTarget target, int index, String value, Settings settings, boolean deduplicate, boolean includeAir) {
-      this(session, revision, action, target, index, value, settings, deduplicate, includeAir, null);
+    public Request(UUID session, long revision, Action action, PickTarget target, int index, String value, Settings settings, boolean includeAir) {
+      this(session, revision, action, target, index, value, settings, includeAir, null);
     }
     public Request {
       Objects.requireNonNull(session);
@@ -531,7 +581,6 @@ public final class RangedSelectionData {
       String fileToken,
       String fileLabel,
       String fileName,
-      boolean deduplicate,
       boolean includeAir,
       Box main,
       List<Segment> segments,

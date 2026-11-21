@@ -39,7 +39,7 @@ public final class SelectionBoxRenderer {
     pose.pushPose();
     try {
       pose.translate(-camera.x, -camera.y, -camera.z);
-      draw(pose, consumer, design.main(), .3F, .85F, 1F, 1F);
+      draw(pose, consumer, design.captureMain(), .3F, .85F, 1F, 1F);
       for (int index = 0; index < design.segments().size(); index++) {
         var segment = design.segments().get(index);
         float opacity = index == selected ? 1F : .4F;

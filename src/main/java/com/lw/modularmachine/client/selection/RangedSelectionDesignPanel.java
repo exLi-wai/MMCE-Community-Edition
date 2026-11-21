@@ -220,7 +220,6 @@ final class RangedSelectionDesignPanel {
       result.values.put("file_name", draft.fileName());
       result.values.put("target_file", draft.targetFile());
       result.values.put("append", Boolean.toString(draft.append()));
-      result.values.put("deduplicate", Boolean.toString(draft.deduplicate()));
       result.values.put("include_air", Boolean.toString(draft.includeAir()));
       result.values.put("requires_blueprint", Boolean.toString(draft.requiresBlueprint()));
       result.values.put("has_factory", Boolean.toString(draft.hasFactory()));
@@ -260,11 +259,10 @@ final class RangedSelectionDesignPanel {
 
   private void globalPage() {
     var draft = RangedSelectionClient.design();
-    label(tr("files_draft"));
+    label(tr("export_mode_help"));
     field("file_name", tr("file_name"), 256, false, !flag("append"));
     toggle("append");
     field("target_file", tr("target_file"), 256, false, flag("append"));
-    toggle("deduplicate");
     toggle("include_air");
     field("color", tr("color"), 7, false, true);
     label(tr("color_help"));
@@ -576,14 +574,13 @@ final class RangedSelectionDesignPanel {
   private boolean applyGlobal() {
     var draft = RangedSelectionClient.design();
     String fileName = value("file_name").strip(), targetFile = value("target_file").strip();
-    boolean append = flag("append"), deduplicate = flag("deduplicate"), includeAir = flag("include_air");
+    boolean append = flag("append"), includeAir = flag("include_air");
     boolean requiresBlueprint = flag("requires_blueprint"), hasFactory = flag("has_factory"),
         factoryOnly = flag("factory_only");
     String color = colorValue();
     if (draft.fileName().equals(fileName)
         && draft.targetFile().equals(targetFile)
         && draft.append() == append
-        && draft.deduplicate() == deduplicate
         && draft.includeAir() == includeAir
         && draft.requiresBlueprint() == requiresBlueprint
         && draft.hasFactory() == hasFactory
@@ -591,9 +588,9 @@ final class RangedSelectionDesignPanel {
         && draft.color().equals(color)) {
       return true;
     }
-    boolean capture = draft.deduplicate() != deduplicate || draft.includeAir() != includeAir;
+    boolean capture = draft.append() != append || draft.includeAir() != includeAir;
     return RangedSelectionClient.update(
-        current -> current.withOptions(fileName, append, targetFile, deduplicate, includeAir)
+        current -> current.withOptions(fileName, append, targetFile, includeAir)
             .withMachineFlags(requiresBlueprint, hasFactory, factoryOnly).withColor(color),
         capture,
         false);

@@ -394,12 +394,7 @@ public record MachineDefinition(
       var part = template.get(index);
       var offset = DynamicPatternDefinition
           .translated(part.offset(), pattern.startOffset(), pattern.step(), repetition);
-      String prefix = "dynamic:" + pattern.id() + ":" + group + ":" + repetition + ":";
-      String localId = part.id();
-      if (prefix.length() + localId.length() > 128) {
-        localId = UUID.nameUUIDFromBytes(localId.getBytes(StandardCharsets.UTF_8)).toString();
-      }
-      String id = prefix + localId;
+      String id = expandedPartId(pattern.id(), group, repetition, part.id());
       if (offset.equals(BlockPos.ZERO) || !positions.add(offset) || !ids.add(id)) {
         throw new IllegalArgumentException("Dynamic layout overlaps a part/controller: " + id + " at " + offset);
       }
@@ -414,6 +409,14 @@ public record MachineDefinition(
               part.interfaceType(),
               part.scriptCondition()));
     }
+  }
+
+  static String expandedPartId(String segment, String group, int repetition, String localId) {
+    String prefix = "dynamic:" + segment + ":" + group + ":" + repetition + ":";
+    if (prefix.length() + localId.length() > 128) {
+      localId = UUID.nameUUIDFromBytes(localId.getBytes(StandardCharsets.UTF_8)).toString();
+    }
+    return prefix + localId;
   }
 
   static boolean validBox(AABB box) {

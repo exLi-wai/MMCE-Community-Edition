@@ -9,8 +9,6 @@ import com.lw.modularmachine.ModularMachine;
 import com.lw.modularmachine.machine.orientation.StateOrientationAdapters;
 import com.mojang.logging.LogUtils;
 import java.io.IOException;
-import java.nio.charset.StandardCharsets;
-import java.nio.file.Files;
 import java.nio.file.Path;
 import java.util.Arrays;
 import java.util.LinkedHashMap;
@@ -55,8 +53,11 @@ public final class MachineDefinitionReloadListener extends ContextAwareReloadLis
   @Override
   public CompletableFuture<Void> reload(PreparationBarrier barrier, ResourceManager resources, ProfilerFiller prepareProfiler, ProfilerFiller applyProfiler, Executor backgroundExecutor, Executor gameExecutor) {
     var scripts = MachineDefinitionScripts.snapshot();
-    return CompletableFuture
-        .supplyAsync(() -> MachineDefinitionScripts.apply(readResources(resources), scripts), backgroundExecutor)
+    return CompletableFuture.supplyAsync(() -> {
+      var roots = readResources(resources);
+      MachineDefinitionScripts.applyInPlace(roots, scripts);
+      return roots;
+    }, backgroundExecutor)
         .thenApplyAsync(
             roots -> new Input(
                 roots,
@@ -97,7 +98,7 @@ public final class MachineDefinitionReloadListener extends ContextAwareReloadLis
     return compileCandidate(data, snapshot, MachineDefinitionDefaults.capture());
   }
 
-  private static Map<ResourceLocation, MachineDefinition> compileCandidate(Map<ResourceLocation, JsonElement> data, StateOrientationAdapters.RegistrySnapshot snapshot, MachineDefinitionDefaults defaults) {
+  public static Map<ResourceLocation, MachineDefinition> compileCandidate(Map<ResourceLocation, JsonElement> data, StateOrientationAdapters.RegistrySnapshot snapshot, MachineDefinitionDefaults defaults) {
     Map<ResourceLocation, MachineDefinition> candidate = new LinkedHashMap<>();
     data.entrySet().stream().sorted(Map.Entry.comparingByKey()).forEach(entry -> {
       if (!entry.getValue().isJsonObject()) {
@@ -133,26 +134,8 @@ public final class MachineDefinitionReloadListener extends ContextAwareReloadLis
     readGameTestFixtures(resources, converter, result);
     Path root = MachineDefinitionConfig.ensureDirectory();
     try {
-      var files = MachineDefinitionFiles.jsonFiles(root);
-      var machineFiles = files.stream().filter(path -> !MachineDefinitionFiles.variable(path)).toList();
-      if (machineFiles.size() > 1024) {
-        throw new JsonParseException("At most 1024 machine definitions per reload");
-      }
-      var variables = MachineDefinitionFiles.readVariables(root, files);
-      long totalBytes = 0;
-      for (Path file : machineFiles) {
-        long size = Files.size(file);
-        if (size > 67_108_864L || (totalBytes = Math.addExact(totalBytes, size)) > 1_073_741_824L) {
-          throw new JsonParseException(file + ": Machine definition size limit exceeded");
-        }
-        ResourceLocation id = MachineDefinitionConfig.id(root.relativize(file));
-        try (var reader = Files.newBufferedReader(file, StandardCharsets.UTF_8)) {
-          var rootJson = JsonParser.parseReader(reader).getAsJsonObject();
-          put(result, id, variables.expand(rootJson, file.toString()), file.toString());
-        } catch (IOException | IllegalArgumentException | JsonParseException exception) {
-          throw new JsonParseException(id + ": $: Failed reading " + file, exception);
-        }
-      }
+      var config = MachineDefinitionFiles.readDefinitions(root, null);
+      config.roots().forEach((id, definition) -> put(result, id, definition, root.toString()));
     } catch (IOException exception) {
       throw new JsonParseException("Failed scanning machine definition directory " + root, exception);
     }

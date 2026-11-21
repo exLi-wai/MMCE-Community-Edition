@@ -97,7 +97,6 @@ public final class StructureChangeRouter {
 
   public static void resourceChanged(ServerLevel level, BlockPos pos) {
     ServerThreadGuard.require(level, "Structure state accessed");
-    RangedSelectionTask.resourceChanged(level, pos);
     StructureLevelState state = StructureService.levelState(level);
     if (state == null) {
       return;

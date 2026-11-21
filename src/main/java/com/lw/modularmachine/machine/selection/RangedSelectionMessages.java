@@ -36,12 +36,7 @@ final class RangedSelectionMessages {
   }
 
   static Component saved(MachineDefinitionFileStore.SaveResult saved, DynamicDefinitionEditor.Result result) {
-    var message = text(
-        "saved_detail",
-        saved.file().toString(),
-        result.mainParts(),
-        result.dynamicParts(),
-        result.deduplicated());
+    var message = text("saved_detail", saved.file().toString(), result.mainParts(), result.dynamicParts());
     message.append("\n").append(text("excluded_controller", result.excludedController()));
     message.append("\n").append(text("source_hash", saved.sourceHash()));
     message.append("\n").append(text("target_hash", saved.targetHash()));

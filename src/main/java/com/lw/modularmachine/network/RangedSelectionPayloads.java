@@ -72,7 +72,7 @@ public final class RangedSelectionPayloads {
   }
 
   public static void register(RegisterPayloadHandlersEvent event) {
-    var registrar = event.registrar("3");
+    var registrar = event.registrar("4");
     registrar.playToServer(
         ACTION,
         StreamCodec.of(
@@ -141,7 +141,6 @@ public final class RangedSelectionPayloads {
     buffer.writeInt(request.index());
     buffer.writeUtf(request.value(), 256);
     writeSettings(buffer, request.settings());
-    buffer.writeBoolean(request.deduplicate());
     buffer.writeBoolean(request.includeAir());
     buffer.writeBoolean(request.partEdit() != null);
     if (request.partEdit() != null) {
@@ -158,7 +157,6 @@ public final class RangedSelectionPayloads {
         buffer.readInt(),
         buffer.readUtf(256),
         readSettings(buffer),
-        buffer.readBoolean(),
         buffer.readBoolean(),
         buffer.readBoolean() ? readPartEdit(buffer) : null);
   }
@@ -225,7 +223,6 @@ public final class RangedSelectionPayloads {
     buffer.writeUtf(snapshot.fileToken(), 256);
     buffer.writeUtf(snapshot.fileLabel(), 1024);
     buffer.writeUtf(snapshot.fileName(), 256);
-    buffer.writeBoolean(snapshot.deduplicate());
     buffer.writeBoolean(snapshot.includeAir());
     writeBox(buffer, snapshot.main());
     buffer.writeVarInt(snapshot.segments().size());
@@ -270,7 +267,7 @@ public final class RangedSelectionPayloads {
     var dimension = buffer.readResourceLocation();
     boolean open = buffer.readBoolean(), close = buffer.readBoolean(), append = buffer.readBoolean();
     String token = buffer.readUtf(256), label = buffer.readUtf(1024), name = buffer.readUtf(256);
-    boolean deduplicate = buffer.readBoolean(), air = buffer.readBoolean();
+    boolean air = buffer.readBoolean();
     var main = readBox(buffer);
     int count = count(buffer, RangedSelectionData.MAX_SEGMENTS);
     var segments = new ArrayList<Segment>(count);
@@ -302,7 +299,6 @@ public final class RangedSelectionPayloads {
         token,
         label,
         name,
-        deduplicate,
         air,
         main,
         segments,

@@ -113,13 +113,25 @@ public record DynamicPatternDefinition(
         Math.toIntExact((long) local.getZ() + start.getZ() + (long) step.getZ() * repetition));
   }
 
-  static List<DynamicPatternDefinition> parse(ResourceLocation machine, JsonObject root, OrientationPolicy policy, StateOrientationAdapters.RegistrySnapshot snapshot) {
-    var result = new ArrayList<DynamicPatternDefinition>();
+  /** Detached declaration geometry shared by the parser and selection export. */
+  public record Declaration(
+      String id,
+      int minimum,
+      int maximum,
+      BlockPos offset,
+      BlockPos step,
+      JsonArray start,
+      JsonArray body,
+      JsonArray end) {
+  }
+
+  public static List<Declaration> declarations(JsonObject root, String rootPath) {
+    var result = new ArrayList<Declaration>();
     var ids = new HashSet<String>();
-    var sources = sources(root, machine + ": $");
+    var sources = sources(root, rootPath);
     for (int index = 0; index < sources.size(); index++) {
       var source = sources.get(index);
-      String path = machine + ": $.dynamic_patterns[" + index + "]";
+      String path = rootPath + ".dynamic_patterns[" + index + "]";
       var identifier = alias(source, "id", "name", path);
       if (identifier == null || !identifier.isJsonPrimitive() || !identifier.getAsJsonPrimitive().isString()) {
         throw error(path + ".id", "Expected pattern ID");
@@ -138,28 +150,35 @@ public record DynamicPatternDefinition(
       if (source.has("faces")) {
         validateFaces(source.get("faces"), path + ".faces");
       }
-      var start = MachinePartParser.parse(
-          machine,
-          partArray(alias(source, "parts_start", "parts-start", path), false, path + ".parts_start"),
-          path + ".parts_start",
-          snapshot,
-          true);
-      var body = MachinePartParser
-          .parse(machine, partArray(source.get("parts"), true, path + ".parts"), path + ".parts", snapshot, true);
-      var end = MachinePartParser.parse(
-          machine,
-          partArray(alias(source, "parts_end", "parts-end", path), false, path + ".parts_end"),
-          path + ".parts_end",
-          snapshot,
-          true);
+      result.add(
+          new Declaration(
+              id,
+              minimum,
+              maximum,
+              offset,
+              step,
+              partArray(alias(source, "parts_start", "parts-start", path), false, path + ".parts_start"),
+              partArray(source.get("parts"), true, path + ".parts"),
+              partArray(alias(source, "parts_end", "parts-end", path), false, path + ".parts_end")));
+    }
+    return List.copyOf(result);
+  }
+
+  static List<DynamicPatternDefinition> parse(ResourceLocation machine, JsonObject root, OrientationPolicy policy, StateOrientationAdapters.RegistrySnapshot snapshot) {
+    var result = new ArrayList<DynamicPatternDefinition>();
+    for (var source : declarations(root, machine + ": $")) {
+      String path = machine + ": $.dynamic_patterns[" + result.size() + "]";
+      var start = MachinePartParser.parse(machine, source.start(), path + ".parts_start", snapshot, true);
+      var body = MachinePartParser.parse(machine, source.body(), path + ".parts", snapshot, true);
+      var end = MachinePartParser.parse(machine, source.end(), path + ".parts_end", snapshot, true);
       try {
         result.add(
             new DynamicPatternDefinition(
-                id,
-                minimum,
-                maximum,
-                offset,
-                step,
+                source.id(),
+                source.minimum(),
+                source.maximum(),
+                source.offset(),
+                source.step(),
                 start,
                 body,
                 end,

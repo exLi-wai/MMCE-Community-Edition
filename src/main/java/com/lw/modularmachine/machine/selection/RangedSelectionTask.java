@@ -1,7 +1,6 @@
 package com.lw.modularmachine.machine.selection;
 
 import com.lw.modularmachine.api.orientation.MachineOrientation;
-import com.lw.modularmachine.blockentity.MachinePortBlockEntity;
 import com.lw.modularmachine.item.RangedConstructToolItem;
 import com.lw.modularmachine.machine.orientation.StateOrientationAdapters;
 import com.lw.modularmachine.machine.selection.RangedSelectionData.Box;
@@ -202,8 +201,7 @@ public final class RangedSelectionTask {
               new DynamicDefinitionEditor.Captured(
                   pos,
                   state,
-                  RangedSelectionService.exportPart(state, orientation, local),
-                  fields(pos)));
+                  RangedSelectionService.exportPart(state, orientation, local)));
         }
       }
       if (boxIndex < boxes.size() || sourceTask == null || !sourceTask.isDone()) {
@@ -220,7 +218,6 @@ public final class RangedSelectionTask {
             origin,
             draft.append() ? null : draft.main(),
             draft.segments(),
-            draft.deduplicate(),
             draft.includeAir(),
             List.copyOf(captured.values()),
             edits);
@@ -279,23 +276,6 @@ public final class RangedSelectionTask {
       finish(RangedSelectionMessages.text("failed", RangedSelectionMessages.detail(failure)));
     }
     return done;
-  }
-
-  private Map<String, Long> fields(BlockPos pos) {
-    if (!(level.getBlockEntity(pos) instanceof MachinePortBlockEntity port) || !port.schemaSupported()) {
-      return Map.of();
-    }
-    long items = 0;
-    for (int index = 0; index < port.inventory().getSlots(); index++) {
-      items = Math.addExact(items, port.inventory().getStackInSlot(index).getCount());
-    }
-    return Map.of(
-        "energy_stored",
-        port.energy().stored(),
-        "fluid_amount",
-        (long) port.fluidTank().getFluidAmount(),
-        "item_count",
-        items);
   }
 
   private boolean valid() {
@@ -361,17 +341,6 @@ public final class RangedSelectionTask {
   public static void blockChanged(ServerLevel level, BlockPos pos) {
     for (var task : ACTIVE) {
       if (task.level == level && (task.origin.equals(pos) || task.boxes.stream().anyMatch(box -> box.contains(pos)))) {
-        task.active.set(false);
-      }
-    }
-  }
-
-  public static void resourceChanged(ServerLevel level, BlockPos pos) {
-    for (var task : ACTIVE) {
-      if (task.level == level
-          && task.draft.append()
-          && task.captured.containsKey(pos)
-          && !task.captured.get(pos).fields().isEmpty()) {
         task.active.set(false);
       }
     }

@@ -88,6 +88,57 @@ class RangedSelectionExportSnapshotTest {
     assertEquals("machine.mmcece.second", second.get("translation_key").getAsString());
   }
 
+  @Test
+  void appendPreservesFixedRulesAndUsesTheEditedDynamicDeclarationsAndExistingIds() {
+    var target = json("""
+        {"translation_key":"machine.test.original","color":"AABBCC","parts":[
+          {"offset":[2,0,0],"block":"MY_VARIABLE"},
+          {"offset":[10,0,0],"block":["minecraft:sand","minecraft:stone"],"part_id":"repeater","selector":"ore"},
+          {"offset":[16,0,0],"block":"minecraft:glass"}],
+         "dynamic-patterns":[{"name":"segment_1","maxSize":1,"structure-size-offset-start":[4,0,0],
+          "structure-size-offset":[1,0,0],"parts":[{"offset":[0,0,0],"block":"minecraft:stone"}]}]}
+        """);
+    var original = target.deepCopy();
+    var selected = new RangedSelectionExportSnapshot.Pattern(
+        "selection_1",
+        "",
+        new BlockPos(20, 0, 0),
+        new BlockPos(2, 0, 0),
+        List.of(),
+        List.of(json("{\"offset\":[0,0,0],\"block\":\"minecraft:sand\"}")),
+        List.of(json("{\"offset\":[0,0,0],\"block\":\"minecraft:glass\"}")));
+    var snapshot = new RangedSelectionExportSnapshot(List.of(), List.of(selected));
+
+    var merged = snapshot.appendTo(target, Design.defaults());
+
+    assertEquals(original, target);
+    assertEquals(target.get("translation_key"), merged.get("translation_key"));
+    assertEquals(target.get("color"), merged.get("color"));
+    assertEquals(target.get("parts"), merged.get("parts"));
+    var segments = merged.getAsJsonArray("dynamic-patterns");
+    assertFalse(merged.has("dynamic_patterns"));
+    assertEquals(target.getAsJsonArray("dynamic-patterns").get(0), segments.get(0));
+    var added = segments.get(1).getAsJsonObject();
+    assertEquals("segment_2", added.get("id").getAsString());
+    var body = added.getAsJsonArray("parts").get(0).getAsJsonObject();
+    assertEquals(json("{\"offset\":[0,0,0],\"block\":\"minecraft:sand\"}"), body);
+    assertEquals(json("{\"offset\":[0,0,0],\"block\":\"minecraft:glass\"}"), added.getAsJsonArray("parts_end").get(0));
+    merged.getAsJsonArray("parts").remove(1);
+    assertEquals(original, target);
+  }
+
+  @Test
+  void appendRejectsExplicitDuplicateId() {
+    var target = json("""
+        {"parts":[{"offset":[2,0,0],"block":"minecraft:stone"}],
+         "dynamic_patterns":[{"id":"taken","maximum":1,"step":[1,0,0],"start_offset":[5,0,0],
+         "parts":[{"offset":[0,0,0],"block":"minecraft:sand"}]}]}
+        """);
+    var snapshot = new RangedSelectionExportSnapshot(List.of(), List.of(pattern("selection_1", "taken")));
+
+    assertThrows(IllegalArgumentException.class, () -> snapshot.appendTo(target, Design.defaults()));
+  }
+
   private static RangedSelectionExportSnapshot.Pattern pattern(String key, String id) {
     return new RangedSelectionExportSnapshot.Pattern(
         key,

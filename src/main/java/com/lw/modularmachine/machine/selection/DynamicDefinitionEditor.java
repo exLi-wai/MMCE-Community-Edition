@@ -5,13 +5,13 @@ import com.google.gson.JsonArray;
 import com.google.gson.JsonElement;
 import com.google.gson.JsonObject;
 import com.lw.modularmachine.api.orientation.MachineOrientation;
-import com.lw.modularmachine.machine.PortKind;
 import com.lw.modularmachine.machine.orientation.StateOrientationAdapters;
 import com.lw.modularmachine.machine.selection.RangedSelectionData.Box;
 import com.lw.modularmachine.machine.selection.RangedSelectionData.Segment;
 import com.lw.modularmachine.machine.selection.RangedSelectionData.Settings;
 import com.lw.modularmachine.machine.selection.RangedSelectionData.PartEdit;
 import com.lw.modularmachine.machine.structure.DynamicLayoutValidator;
+import com.lw.modularmachine.machine.structure.DynamicPatternDefinition;
 import com.lw.modularmachine.machine.structure.MachineDefinition;
 import com.lw.modularmachine.machine.structure.MachineDefinitionFiles;
 import java.util.ArrayList;
@@ -38,16 +38,11 @@ import static com.lw.modularmachine.machine.selection.SelectionGeometry.step;
  */
 @ApiStatus.Internal
 public final class DynamicDefinitionEditor {
-  public record Captured(BlockPos world, BlockState state, JsonObject part, Map<String, Long> fields) {
-    public Captured(BlockPos world, BlockState state, JsonObject part) {
-      this(world, state, part, Map.of());
-    }
-
+  public record Captured(BlockPos world, BlockState state, JsonObject part) {
     public Captured {
       world = Objects.requireNonNull(world).immutable();
       Objects.requireNonNull(state);
       part = Objects.requireNonNull(part).deepCopy();
-      fields = Map.copyOf(fields);
     }
   }
 
@@ -59,14 +54,9 @@ public final class DynamicDefinitionEditor {
       BlockPos controller,
       Box main,
       List<Segment> segments,
-      boolean deduplicate,
       boolean includeAir,
       List<Captured> captured,
       Map<BlockPos, PartEdit> edits) {
-    public Input(ResourceLocation machine, JsonObject original, MachineDefinitionFiles.Variables variables, MachineOrientation orientation, BlockPos controller, Box main, List<Segment> segments, boolean deduplicate, boolean includeAir, List<Captured> captured) {
-      this(machine, original, variables, orientation, controller, main, segments, deduplicate, includeAir, captured,
-          Map.of());
-    }
     public Input {
       Objects.requireNonNull(machine);
       original = original == null ? null : original.deepCopy();
@@ -91,15 +81,11 @@ public final class DynamicDefinitionEditor {
       MachineDefinition definition,
       int mainParts,
       int dynamicParts,
-      int deduplicated,
       int excludedController,
       List<String> segmentIds) {
     public Result {
       segmentIds = List.copyOf(segmentIds);
     }
-  }
-
-  private record Existing(JsonObject raw, MachineDefinition.Part part, MachineDefinition.Rule rule) {
   }
 
   private static final Comparator<Captured> ORDER = Comparator
@@ -109,14 +95,9 @@ public final class DynamicDefinitionEditor {
 
   private final Input input;
   private final Map<BlockPos, Captured> captured = new HashMap<>();
-  private final Map<BlockPos, Existing> fixed = new LinkedHashMap<>();
   private final Set<BlockPos> assigned = new HashSet<>();
-  private final Set<BlockPos> moved = new HashSet<>();
   private final Set<BlockPos> appliedEdits = new HashSet<>();
-  private final Set<String> protectedParts = new HashSet<>();
-  private MachineDefinition original;
   private int dynamicParts;
-  private int deduplicated;
   private int work;
 
   private DynamicDefinitionEditor(Input input) {
@@ -140,28 +121,6 @@ public final class DynamicDefinitionEditor {
       references.addAll(
           MachineDefinitionParser.blockReferences(
               Map.of(input.machine(), input.variables().expand(input.original(), input.machine().toString()))));
-      // An edited existing declaration may keep a variable/multi-block candidate
-      // list.
-      // Capture the new literals for every retained candidate, not just the observed
-      // block.
-      var localEdits = new HashMap<BlockPos, PartEdit>();
-      input.edits()
-          .forEach((position, edit) -> localEdits.put(local(position, input.controller(), input.orientation()), edit));
-      var edited = new JsonArray();
-      for (var element : input.original().getAsJsonArray("parts")) {
-        var part = element.getAsJsonObject();
-        var override = localEdits.get(vector(part.get("offset")));
-        if (override != null) {
-          edited.add(PartOverrides.apply(part, override));
-        }
-      }
-      if (!edited.isEmpty()) {
-        var root = new JsonObject();
-        root.add("parts", edited);
-        references.addAll(
-            MachineDefinitionParser
-                .blockReferences(Map.of(input.machine(), input.variables().expand(root, input.machine().toString()))));
-      }
     }
     if (!input.captured().isEmpty()) {
       var root = new JsonObject();
@@ -182,24 +141,47 @@ public final class DynamicDefinitionEditor {
           MachineDefinitionParser
               .blockReferences(Map.of(input.machine(), input.variables().expand(root, input.machine().toString()))));
     }
-    var grouped = new LinkedHashMap<ResourceLocation, Map<String, StateOrientationAdapters.PropertyReference>>();
-    var paths = new HashMap<ResourceLocation, String>();
-    for (var reference : references) {
-      var properties = grouped.computeIfAbsent(reference.id(), ignored -> new LinkedHashMap<>());
-      paths.putIfAbsent(reference.id(), reference.path());
-      for (var property : reference.properties()) {
-        properties.putIfAbsent(property.name() + "\u0000" + property.literal(), property);
-      }
-    }
-    var result = new ArrayList<StateOrientationAdapters.BlockReference>();
-    grouped.forEach(
-        (id, properties) -> result
-            .add(new StateOrientationAdapters.BlockReference(id, paths.get(id), List.copyOf(properties.values()))));
-    return List.copyOf(result);
+    return StateOrientationAdapters.distinctReferences(references);
   }
 
   public static Result edit(Input input, StateOrientationAdapters.RegistrySnapshot registry) {
     return new DynamicDefinitionEditor(input).edit(registry);
+  }
+
+  /**
+   * Appends detached segment declarations to a copy of the target and checks
+   * every permitted length.
+   */
+  public static JsonObject appendSegments(JsonObject target, JsonArray additions) {
+    if (additions.isEmpty()) {
+      throw new IllegalArgumentException("Select a dynamic repeating body before appending to a machine");
+    }
+    String key = target.has("dynamic-patterns") ? "dynamic-patterns" : "dynamic_patterns";
+    var merged = target.deepCopy();
+    var patterns = merged.has(key) ? merged.getAsJsonArray(key) : new JsonArray();
+    patterns.addAll(additions);
+    merged.add(key, patterns);
+    DynamicLayoutValidator.validate(merged);
+    return merged;
+  }
+
+  /**
+   * Every selected template part must survive the loader's optional-block
+   * filtering.
+   */
+  public static void requireLoadedSegments(MachineDefinition definition, List<DynamicPatternDefinition.Declaration> selected) {
+    var loaded = new HashMap<String, DynamicPatternDefinition>();
+    definition.dynamicPatterns().forEach(pattern -> loaded.put(pattern.id(), pattern));
+    for (var declaration : selected) {
+      var pattern = loaded.get(declaration.id());
+      if (pattern == null
+          || pattern.start().size() != declaration.start().size()
+          || pattern.body().size() != declaration.body().size()
+          || pattern.end().size() != declaration.end().size()) {
+        throw new IllegalArgumentException(
+            "Dynamic segment " + declaration.id() + " contains unavailable block constraints");
+      }
+    }
   }
 
   private Result edit(StateOrientationAdapters.RegistrySnapshot registry) {
@@ -217,7 +199,6 @@ public final class DynamicDefinitionEditor {
       root.add("orientation", orientation);
     } else {
       root = input.original().deepCopy();
-      readOriginal(registry);
     }
     String dynamicKey = root.has("dynamic-patterns") ? "dynamic-patterns" : "dynamic_patterns";
     var patterns = root.has(dynamicKey) ? root.getAsJsonArray(dynamicKey) : new JsonArray();
@@ -273,36 +254,28 @@ public final class DynamicDefinitionEditor {
     if (!patterns.isEmpty()) {
       root.add(dynamicKey, patterns);
     }
-    var parts = new JsonArray();
+    JsonArray parts;
     int excludedController = 0;
     if (input.original() == null) {
+      parts = new JsonArray();
       for (var value : selection(input.main(), false)) {
         if (value.world().equals(input.controller())) {
           excludedController++;
           continue;
         }
         if (assigned.contains(value.world())) {
-          if (!input.deduplicate()) {
-            throw new IllegalArgumentException(
-                "Main body overlaps a dynamic selection at " + value.world().toShortString());
-          }
-          deduplicated++;
-          continue;
+          throw new IllegalArgumentException(
+              "Main body overlaps a dynamic selection at " + value.world().toShortString());
         }
         parts.add(edited(value.part(), value.world()));
       }
+      root.add("parts", parts);
     } else {
-      for (var element : input.original().getAsJsonArray("parts")) {
-        if (!moved.contains(vector(element.getAsJsonObject().get("offset")))) {
-          parts.add(element.deepCopy());
-        }
-      }
+      parts = root.getAsJsonArray("parts");
     }
     if (parts.isEmpty()) {
-      throw new IllegalArgumentException(
-          "At least one fixed part besides the controller must remain after deduplication");
+      throw new IllegalArgumentException("At least one fixed part besides the controller is required");
     }
-    root.add("parts", parts);
     if (!appliedEdits.containsAll(input.edits().keySet())) {
       throw RangedSelectionMessages.invalid("unused_part_edits");
     }
@@ -315,48 +288,9 @@ public final class DynamicDefinitionEditor {
     if (definition.parts().size() != parts.size()) {
       throw new IllegalArgumentException("The fixed definition contains unavailable block constraints");
     }
-    for (int index = 0; index < definition.dynamicPatterns().size(); index++) {
-      var pattern = definition.dynamicPatterns().get(index);
-      var declaration = patterns.get(index).getAsJsonObject();
-      if (pattern.body().size() != declaration.getAsJsonArray("parts").size()
-          || pattern.start().size() != arraySize(declaration, "parts_start", "parts-start")
-          || pattern.end().size() != arraySize(declaration, "parts_end", "parts-end")) {
-        throw new IllegalArgumentException(
-            "Dynamic segment " + pattern.id() + " contains unavailable block constraints");
-      }
-    }
+    requireLoadedSegments(definition, DynamicPatternDefinition.declarations(root, input.machine() + ": $"));
     DynamicLayoutValidator.validate(definition);
-    return new Result(root, definition, parts.size(), dynamicParts, deduplicated, excludedController, segmentIds);
-  }
-
-  private void readOriginal(StateOrientationAdapters.RegistrySnapshot registry) {
-    original = MachineDefinitionParser
-        .parse(input.machine(), input.variables().expand(input.original(), input.machine().toString()), registry);
-    if (!original.allows(input.orientation())) {
-      throw new IllegalArgumentException("The selected controller orientation is not allowed by the original file");
-    }
-    var rules = original.rulesFor(input.orientation());
-    var parsed = new HashMap<BlockPos, Integer>();
-    for (int index = 0; index < original.parts().size(); index++) {
-      parsed.put(original.parts().get(index).offset(), index);
-    }
-    for (var modifier : original.structureModifiers()) {
-      for (int index : modifier.partIndices()) {
-        protectedParts.add(original.parts().get(index).id());
-      }
-    }
-    for (var element : input.original().getAsJsonArray("parts")) {
-      var raw = element.getAsJsonObject();
-      var position = vector(raw.get("offset"));
-      Integer index = parsed.get(position);
-      if (index == null) {
-        throw new IllegalArgumentException(
-            "The original file has an unavailable or ambiguous fixed part at " + position.toShortString());
-      }
-      if (fixed.putIfAbsent(position, new Existing(raw, original.parts().get(index), rules.get(index))) != null) {
-        throw new IllegalArgumentException("The original file has duplicate fixed coordinates");
-      }
-    }
+    return new Result(root, definition, parts.size(), dynamicParts, excludedController, segmentIds);
   }
 
   private JsonObject pattern(Segment segment, String id) {
@@ -390,27 +324,15 @@ public final class DynamicDefinitionEditor {
         throw new IllegalArgumentException("Dynamic selections overlap at " + value.world().toShortString());
       }
       var absolute = vector(value.part().get("offset"));
-      var previous = fixed.get(absolute);
-      JsonObject part;
-      if (previous == null) {
-        part = value.part().deepCopy();
+      var part = value.part();
+      if (!settings.selector().isEmpty() || !settings.interfaceType().isEmpty()) {
+        part = part.deepCopy();
         if (!settings.selector().isEmpty()) {
           part.addProperty("selector", settings.selector());
         }
         if (!settings.interfaceType().isEmpty()) {
           part.addProperty("interface", settings.interfaceType());
         }
-      } else {
-        if (!input.deduplicate()) {
-          throw new IllegalArgumentException("Dynamic selection overlaps fixed part " + previous.part().id());
-        }
-        validateMove(previous, value, settings);
-        part = previous.raw().deepCopy();
-        if (!part.has("part_id")) {
-          part.addProperty("part_id", previous.part().id());
-        }
-        moved.add(absolute);
-        deduplicated++;
       }
       part = edited(part, value.world());
       part.add("offset", coordinates(relative(absolute, base, step, repetition)));
@@ -418,36 +340,6 @@ public final class DynamicDefinitionEditor {
       dynamicParts++;
     }
     return result;
-  }
-
-  private void validateMove(Existing previous, Captured value, Settings settings) {
-    var part = previous.part();
-    if (protectedParts.contains(part.id())) {
-      throw new IllegalArgumentException("Fixed part " + part.id() + " is referenced by a structure modifier");
-    }
-    if (original.energyPerTick() > 0
-        && (part.rule().port() == PortKind.ENERGY_INPUT || part.rule().port() == PortKind.ENERGY_OUTPUT)) {
-      throw new IllegalArgumentException("The fixed energy transfer port cannot move into a dynamic segment");
-    }
-    if (!previous.rule().matches(value.state())) {
-      throw new IllegalArgumentException("World block does not satisfy the original rule for " + part.id());
-    }
-    if (part.field() != null) {
-      var field = part.field();
-      Long measured = value.fields().get(field.name());
-      if (measured == null || measured < field.min() || measured > field.max()) {
-        throw new IllegalArgumentException("World field does not satisfy the original rule for " + part.id());
-      }
-    }
-    var edit = input.edits().get(value.world());
-    if ((edit == null || !edit.changeSelector())
-        && !settings.selector().isEmpty()
-        && !settings.selector().equals(part.selector())
-        || (edit == null || !edit.changeInterface())
-            && !settings.interfaceType().isEmpty()
-            && !settings.interfaceType().equals(part.interfaceType())) {
-      throw new IllegalArgumentException("Explicit selector/interface conflicts with fixed part " + part.id());
-    }
   }
 
   private JsonObject edited(JsonObject original, BlockPos position) {
@@ -497,13 +389,6 @@ public final class DynamicDefinitionEditor {
     result.add(position.getY());
     result.add(position.getZ());
     return result;
-  }
-
-  private static int arraySize(JsonObject object, String primary, String legacy) {
-    if (object.has(primary)) {
-      return object.getAsJsonArray(primary).size();
-    }
-    return object.has(legacy) ? object.getAsJsonArray(legacy).size() : 0;
   }
 
   private static JsonObject canonicalPattern(JsonObject source) {

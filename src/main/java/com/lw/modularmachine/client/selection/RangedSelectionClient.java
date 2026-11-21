@@ -13,7 +13,9 @@ import com.lw.modularmachine.machine.selection.RangedSelectionData.PartEditor;
 import com.lw.modularmachine.machine.selection.RangedSelectionData.Segment;
 import com.lw.modularmachine.machine.selection.RangedSelectionData.Settings;
 import java.util.ArrayList;
+import java.util.HashMap;
 import java.util.List;
+import java.util.Map;
 import java.util.Set;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.function.UnaryOperator;
@@ -65,6 +67,7 @@ public final class RangedSelectionClient {
   private static final class Session {
     final ClientLevel level;
     final RangedSelectionCapture capture = new RangedSelectionCapture();
+    final ExportOrigins exportOrigins = new ExportOrigins();
     final Set<Long> dirtySections = ConcurrentHashMap.newKeySet();
     final Set<Long> dirtyChunks = ConcurrentHashMap.newKeySet();
     volatile List<Box> watched = List.of();
@@ -80,6 +83,39 @@ public final class RangedSelectionClient {
     Session(ClientLevel level) {
       this.level = level;
       capture.select(level, 0, design);
+    }
+  }
+
+  /** World origins of this session's exports made with the retained main box. */
+  static final class ExportOrigins {
+    private final Map<String, BlockPos> origins = new HashMap<>();
+    private Box main;
+
+    void selectMain(@Nullable Box selected) {
+      if (main != selected) {
+        main = selected;
+        origins.clear();
+      }
+    }
+
+    void remember(String name, Design exported) {
+      if (!exported.append() && exported.controller() == null && main != null && exported.main() == main) {
+        origins.put(name, exported.previewOrigin());
+      }
+    }
+
+    BlockPos previewOrigin(Design design) {
+      if (design.append() && design.controller() == null && design.main() == main && !origins.isEmpty()) {
+        try {
+          var origin = origins.get(RangedSelectionExportFile.targetName(design.targetFile()));
+          if (origin != null) {
+            return origin;
+          }
+        } catch (IllegalArgumentException incompleteTarget) {
+          // The settings page may preview a draft before a target filename is valid.
+        }
+      }
+      return design.previewOrigin();
     }
   }
 
@@ -171,8 +207,9 @@ public final class RangedSelectionClient {
     try {
       var current = session;
       var next = change.apply(current.design);
-      if (capture) {
-        current.capture.select(current.level, current.revision + 1, next);
+      current.exportOrigins.selectMain(next.main());
+      if (capture || next.append() && !next.targetFile().equals(current.design.targetFile())) {
+        current.capture.select(current.level, current.revision + 1, next, current.exportOrigins.previewOrigin(next));
       }
       current.design = next;
       current.revision++;
@@ -191,6 +228,19 @@ public final class RangedSelectionClient {
     } catch (IllegalArgumentException | ArithmeticException invalid) {
       error(invalid.getMessage());
       return false;
+    }
+  }
+
+  static void exported(RangedSelectionCapture capture, Design exported, String name) {
+    var current = session;
+    if (current == null || capture != current.capture) {
+      return;
+    }
+    var previous = current.exportOrigins.previewOrigin(current.design);
+    current.exportOrigins.remember(name, exported);
+    var origin = current.exportOrigins.previewOrigin(current.design);
+    if (!origin.equals(previous)) {
+      current.capture.select(current.level, ++current.revision, current.design, origin);
     }
   }
 
@@ -434,8 +484,9 @@ public final class RangedSelectionClient {
 
   private static List<Box> boxes(Design design) {
     var boxes = new ArrayList<Box>();
-    if (design.main() != null) {
-      boxes.add(design.main());
+    var main = design.captureMain();
+    if (main != null) {
+      boxes.add(main);
     }
     for (var segment : design.segments()) {
       if (segment.body() != null) {

@@ -73,7 +73,6 @@ public final class RangedSelectionService {
     PartEditor partEditor;
     BlockState partState;
     boolean append;
-    boolean deduplicate = true;
     boolean includeAir;
     String fileToken = "";
     String fileLabel = "";
@@ -111,7 +110,6 @@ public final class RangedSelectionService {
           fileToken,
           fileLabel,
           fileName,
-          deduplicate,
           includeAir,
           main,
           segments,
@@ -466,14 +464,12 @@ public final class RangedSelectionService {
     }
     var before = session.segments.get(session.selected);
     if (!before.settings().equals(request.settings())
-        || session.deduplicate != request.deduplicate()
         || session.includeAir != request.includeAir()
         || !session.fileName.equals(request.value())) {
       session.changed();
     }
     session.segments
         .set(session.selected, new Segment(request.settings(), before.body(), before.start(), before.end()));
-    session.deduplicate = request.deduplicate();
     session.includeAir = request.includeAir();
     session.fileName = request.value();
     session.revision++;

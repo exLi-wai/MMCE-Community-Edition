@@ -2,10 +2,13 @@ package com.lw.modularmachine.client.selection;
 
 import com.google.gson.JsonArray;
 import com.google.gson.JsonObject;
+import com.lw.modularmachine.machine.selection.DynamicDefinitionEditor;
 import com.lw.modularmachine.machine.selection.RangedSelectionData.Design;
+import com.lw.modularmachine.machine.structure.DynamicPatternDefinition;
 import java.util.HashMap;
 import java.util.HashSet;
 import java.util.List;
+import java.util.Set;
 import net.minecraft.core.BlockPos;
 import org.jetbrains.annotations.ApiStatus;
 
@@ -44,16 +47,6 @@ public final class RangedSelectionExportSnapshot {
    * Geometry, IDs and part settings remain those of this completed snapshot.
    */
   public JsonObject root(Design current, String exportName) {
-    var maximums = new HashMap<String, Integer>();
-    for (int index = 0; index < current.keys().size(); index++) {
-      maximums.put(current.keys().get(index), current.segments().get(index).settings().maximum());
-    }
-    var usedIds = new HashSet<String>();
-    for (var pattern : patterns) {
-      if (!pattern.id.isEmpty() && !usedIds.add(pattern.id)) {
-        throw new IllegalArgumentException("Duplicate dynamic segment ID: " + pattern.id);
-      }
-    }
     var root = new JsonObject();
     root.addProperty("translation_key", "machine.mmcece." + exportName.replace('/', '.'));
     root.addProperty("requires_blueprint", current.requiresBlueprint());
@@ -66,6 +59,31 @@ public final class RangedSelectionExportSnapshot {
     orientation.addProperty("policy", "all_24");
     root.add("orientation", orientation);
     root.add("parts", parts(fixed));
+    var dynamic = dynamicDeclarations(current, Set.of());
+    if (!dynamic.isEmpty()) {
+      root.add("dynamic_patterns", dynamic);
+    }
+
+    return root;
+  }
+
+  public JsonObject appendTo(JsonObject target, Design current) {
+    var existingIds = new HashSet<String>();
+    DynamicPatternDefinition.declarations(target, "$").forEach(segment -> existingIds.add(segment.id()));
+    return DynamicDefinitionEditor.appendSegments(target, dynamicDeclarations(current, existingIds));
+  }
+
+  private JsonArray dynamicDeclarations(Design current, Set<String> existingIds) {
+    var maximums = new HashMap<String, Integer>();
+    for (int index = 0; index < current.keys().size(); index++) {
+      maximums.put(current.keys().get(index), current.segments().get(index).settings().maximum());
+    }
+    var usedIds = new HashSet<>(existingIds);
+    for (var pattern : patterns) {
+      if (!pattern.id.isEmpty() && !usedIds.add(pattern.id)) {
+        throw new IllegalArgumentException("Duplicate dynamic segment ID: " + pattern.id);
+      }
+    }
     var dynamic = new JsonArray();
     int suffix = 1;
     for (var pattern : patterns) {
@@ -96,11 +114,7 @@ public final class RangedSelectionExportSnapshot {
       }
       dynamic.add(declaration);
     }
-    if (!dynamic.isEmpty()) {
-      root.add("dynamic_patterns", dynamic);
-    }
-
-    return root;
+    return dynamic;
   }
 
   private static JsonArray parts(List<JsonObject> source) {

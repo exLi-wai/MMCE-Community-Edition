@@ -92,6 +92,26 @@ public final class StateOrientationAdapters {
     }
   }
 
+  /**
+   * Keeps the first diagnostic path for each block and requested property
+   * literal.
+   */
+  public static List<BlockReference> distinctReferences(List<BlockReference> references) {
+    var grouped = new LinkedHashMap<ResourceLocation, Map<String, PropertyReference>>();
+    var paths = new HashMap<ResourceLocation, String>();
+    for (var reference : references) {
+      var properties = grouped.computeIfAbsent(reference.id(), ignored -> new LinkedHashMap<>());
+      paths.putIfAbsent(reference.id(), reference.path());
+      for (var property : reference.properties()) {
+        properties.putIfAbsent(property.name() + "\u0000" + property.literal(), property);
+      }
+    }
+    var result = new ArrayList<BlockReference>(grouped.size());
+    grouped.forEach(
+        (id, properties) -> result.add(new BlockReference(id, paths.get(id), List.copyOf(properties.values()))));
+    return List.copyOf(result);
+  }
+
   public static RegistrySnapshot capture(List<BlockReference> references) {
     var server = ServerLifecycleHooks.getCurrentServer();
     if (server != null && !server.isSameThread()) {

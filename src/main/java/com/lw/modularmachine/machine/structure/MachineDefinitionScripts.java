@@ -1,8 +1,8 @@
 package com.lw.modularmachine.machine.structure;
 
 import com.google.gson.JsonElement;
+import com.google.gson.JsonObject;
 import com.lw.modularmachine.machine.controller.DedicatedControllerCatalog;
-import java.util.LinkedHashMap;
 import java.util.Map;
 import net.minecraft.resources.ResourceLocation;
 import org.jetbrains.annotations.ApiStatus;
@@ -45,29 +45,29 @@ public final class MachineDefinitionScripts {
     return current == snapshot;
   }
 
-  public static Map<ResourceLocation, JsonElement> apply(Map<ResourceLocation, JsonElement> sources, Snapshot snapshot) {
-    var result = new LinkedHashMap<ResourceLocation, JsonElement>(sources);
+  /** Applies the generation's scripts to exclusively owned compilation inputs. */
+  public static void applyInPlace(Map<ResourceLocation, JsonElement> sources, Snapshot snapshot) {
     for (var entry : snapshot.declarations().entrySet()) {
       requireRegistered(entry.getKey());
-      var source = result.get(entry.getKey());
+      var source = sources.get(entry.getKey());
       if (source == null || !source.isJsonObject()) {
         throw new IllegalArgumentException("Script machine requires a configuration definition: " + entry.getKey());
       }
-      var root = source.getAsJsonObject().deepCopy();
-      var patch = JsonParser.parseString(entry.getValue()).getAsJsonObject();
-      patch.getAsJsonArray("remove").forEach(field -> root.remove(field.getAsString()));
-      patch.getAsJsonObject("set").entrySet().forEach(field -> root.add(field.getKey(), field.getValue().deepCopy()));
-      result.put(entry.getKey(), root);
+      applyPatch(source.getAsJsonObject(), entry.getValue());
     }
+  }
 
-    return Map.copyOf(result);
+  private static void applyPatch(JsonObject root, String declaration) {
+    var patch = JsonParser.parseString(declaration).getAsJsonObject();
+    patch.getAsJsonArray("remove").forEach(field -> root.remove(field.getAsString()));
+    patch.getAsJsonObject("set").entrySet().forEach(field -> root.add(field.getKey(), field.getValue()));
   }
 
   public static synchronized void clear() {
     current = new Snapshot(Math.incrementExact(current.generation()), Map.of(), Map.of(), Map.of());
   }
 
-  static <T> T compile(Snapshot snapshot, Supplier<T> operation) {
+  public static <T> T compile(Snapshot snapshot, Supplier<T> operation) {
     var previous = COMPILING.get();
     COMPILING.set(snapshot);
     try {

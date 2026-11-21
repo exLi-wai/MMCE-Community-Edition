@@ -199,6 +199,10 @@ public final class RangedSelectionCapture {
 
   /** A parameter-only update retains section snapshots and the complete scene. */
   public void select(ClientLevel nextLevel, long nextRevision, Design nextDesign) {
+    select(nextLevel, nextRevision, nextDesign, nextDesign.previewOrigin());
+  }
+
+  void select(ClientLevel nextLevel, long nextRevision, Design nextDesign, BlockPos nextOrigin) {
     requireClientThread();
     Objects.requireNonNull(nextLevel);
     Objects.requireNonNull(nextDesign);
@@ -221,7 +225,7 @@ public final class RangedSelectionCapture {
       }
       revision = nextRevision;
       design = nextDesign;
-      origin = nextDesign.controller() == null ? origin(geometry) : nextDesign.controller();
+      origin = nextOrigin;
       compiler = null;
       recompile = true;
       invalid = false;
@@ -235,7 +239,7 @@ public final class RangedSelectionCapture {
 
   private static List<Bounds> geometry(Design design) {
     var bounds = new LinkedHashSet<Bounds>();
-    add(bounds, design.main());
+    add(bounds, design.captureMain());
     for (var segment : design.segments()) {
       add(bounds, segment.body());
       add(bounds, segment.start());
@@ -263,20 +267,6 @@ public final class RangedSelectionCapture {
         || !level.getWorldBorder().isWithinBounds(last)) {
       throw new IllegalArgumentException("Selection is outside the world's build bounds");
     }
-  }
-
-  private static BlockPos origin(List<Bounds> bounds) {
-    if (bounds.isEmpty()) {
-      return BlockPos.ZERO;
-    }
-    int x = Integer.MAX_VALUE, y = Integer.MAX_VALUE, z = Integer.MAX_VALUE;
-    for (var range : bounds) {
-      x = Math.min(x, range.minX);
-      y = Math.min(y, range.minY);
-      z = Math.min(z, range.minZ);
-    }
-
-    return new BlockPos(x, y, z);
   }
 
   /** A dirty signal does no world scan and coalesces repeated notifications. */

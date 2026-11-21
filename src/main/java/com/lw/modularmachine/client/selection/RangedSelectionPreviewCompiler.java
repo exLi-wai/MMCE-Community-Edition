@@ -146,7 +146,7 @@ final class RangedSelectionPreviewCompiler {
     }
     if (!mainDone) {
       if (main == null) {
-        main = positions(design.main());
+        main = positions(design.captureMain());
       }
       if (!main.hasNext()) {
         mainDone = true;
@@ -161,10 +161,7 @@ final class RangedSelectionPreviewCompiler {
         return;
       }
       if (assigned.contains(position.asLong())) {
-        if (!design.deduplicate()) {
-          throw new Failure("preview_main_overlap", position.toShortString());
-        }
-        return;
+        throw new Failure("preview_main_overlap", position.toShortString());
       }
       part(fixed, fixedDeclarations, null, position, SelectionGeometry.local(position, origin, orientation), state);
       return;

@@ -1,6 +1,11 @@
 package com.lw.modularmachine.machine.structure;
 
+import com.google.gson.JsonArray;
+import com.google.gson.JsonObject;
+import java.util.ArrayList;
 import java.util.HashMap;
+import java.util.HashSet;
+import java.util.List;
 import java.util.Map;
 import java.util.concurrent.CancellationException;
 import net.minecraft.core.BlockPos;
@@ -19,16 +24,29 @@ public final class DynamicLayoutValidator {
   }
 
   private enum Kind {
-    FIXED,
-    START,
-    BODY,
-    END
+    FIXED(""),
+    START("start"),
+    BODY("body"),
+    END("end");
+
+    final String group;
+
+    Kind(String group) {
+      this.group = group;
+    }
   }
 
   private record Claim(String segment, Kind kind, int index, String part, Claim next) {
   }
 
+  private record Part(String id, BlockPos offset) {
+    Part(MachineDefinition.Part source) {
+      this(source.id(), source.offset());
+    }
+  }
+
   private final Map<Position, Claim> occupied = new HashMap<>();
+  private final HashSet<String> fixedIds = new HashSet<>();
   private long work;
 
   private DynamicLayoutValidator() {
@@ -39,38 +57,97 @@ public final class DynamicLayoutValidator {
     var source = definition.sourceDefinition();
     validator.add(BlockPos.ZERO, "", Kind.FIXED, 0, "controller");
     for (var part : source.parts()) {
-      validator.add(part.offset(), "", Kind.FIXED, 0, part.id());
+      validator.fixed(part.offset(), part.id());
     }
     for (var segment : source.dynamicPatterns()) {
-      for (var part : segment.start()) {
-        validator.add(
-            DynamicPatternDefinition.translated(part.offset(), segment.startOffset(), segment.step(), 0),
-            segment.id(),
-            Kind.START,
-            0,
-            part.id());
+      validator.segment(
+          segment.id(),
+          segment.minimum(),
+          segment.maximum(),
+          segment.startOffset(),
+          segment.step(),
+          segment.start().stream().map(Part::new).toList(),
+          segment.body().stream().map(Part::new).toList(),
+          segment.end().stream().map(Part::new).toList());
+    }
+  }
+
+  /**
+   * Proves the complete client-edited layout without looking up any world or
+   * registry objects.
+   */
+  public static void validate(JsonObject root) {
+    var validator = new DynamicLayoutValidator();
+    validator.add(BlockPos.ZERO, "", Kind.FIXED, 0, "controller");
+    for (var part : parts(root.getAsJsonArray("parts"))) {
+      validator.fixed(part.offset(), part.id());
+    }
+    for (var segment : DynamicPatternDefinition.declarations(root, "$")) {
+      validator.segment(
+          segment.id(),
+          segment.minimum(),
+          segment.maximum(),
+          segment.offset(),
+          segment.step(),
+          parts(segment.start()),
+          parts(segment.body()),
+          parts(segment.end()));
+    }
+  }
+
+  private static List<Part> parts(JsonArray declarations) {
+    var result = new ArrayList<Part>(declarations.size());
+    var ids = new HashSet<String>();
+    for (var declaration : declarations) {
+      var part = declaration.getAsJsonObject();
+      var offset = MachinePartParser.offset(part, "part");
+      String id = MachinePartParser.partId(part, offset, "part");
+      if (!ids.add(id)) {
+        throw new IllegalArgumentException("Duplicate part ID: " + id);
       }
-      for (int index = 0; index < segment.maximum(); index++) {
-        for (var part : segment.body()) {
-          validator.add(
-              DynamicPatternDefinition.translated(part.offset(), segment.startOffset(), segment.step(), index),
-              segment.id(),
-              Kind.BODY,
-              index,
-              part.id());
+      result.add(new Part(id, offset));
+    }
+    return result;
+  }
+
+  private void segment(String id, int minimum, int maximum, BlockPos start, BlockPos step, List<Part> head, List<Part> body, List<Part> tail) {
+    if (minimum < 0
+        || minimum > maximum
+        || step.equals(BlockPos.ZERO)
+        || body.isEmpty()
+        || (long) head.size() + (long) maximum * body.size() + tail
+            .size() > DynamicPatternDefinition.MAX_EXPANDED_PARTS) {
+      throw new IllegalArgumentException("Invalid dynamic segment geometry: " + id);
+    }
+    for (var part : body) {
+      DynamicPatternDefinition.translated(part.offset(), start, step, maximum);
+    }
+    group(id, Kind.START, start, step, head, 0, 0);
+    group(id, Kind.BODY, start, step, body, 0, maximum - 1);
+    // Ends at different lengths never coexist; an end at n coexists only with body
+    // indices < n.
+    group(id, Kind.END, start, step, tail, minimum, maximum);
+  }
+
+  private void fixed(BlockPos offset, String id) {
+    fixedIds.add(id);
+    add(offset, "", Kind.FIXED, 0, id);
+  }
+
+  private void group(String segment, Kind kind, BlockPos start, BlockPos step, List<Part> parts, int first, int last) {
+    if (parts.isEmpty()) {
+      return;
+    }
+    // Other segments, groups and repetitions have distinct generated prefixes.
+    var ids = new HashSet<String>();
+    for (int index = first; index <= last; index++) {
+      ids.clear();
+      for (var part : parts) {
+        String id = MachineDefinition.expandedPartId(segment, kind.group, index, part.id());
+        if (fixedIds.contains(id) || !ids.add(id)) {
+          throw new IllegalArgumentException("Duplicate expanded part ID: " + id);
         }
-      }
-      // Ends at different lengths never coexist; an end at n coexists only with body
-      // indices < n.
-      for (int index = segment.minimum(); index <= segment.maximum(); index++) {
-        for (var part : segment.end()) {
-          validator.add(
-              DynamicPatternDefinition.translated(part.offset(), segment.startOffset(), segment.step(), index),
-              segment.id(),
-              Kind.END,
-              index,
-              part.id());
-        }
+        add(DynamicPatternDefinition.translated(part.offset(), start, step, index), segment, kind, index, part.id());
       }
     }
   }

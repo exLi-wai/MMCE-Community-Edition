@@ -107,6 +107,39 @@ public final class MachineDefinitionFileStore {
   private MachineDefinitionFileStore() {
   }
 
+  /** Reads an existing export without creating directories or following links. */
+  public static byte[] readExistingExport(Path directory, Path file) throws IOException {
+    verifyPath(directory, file, true);
+    if (!directory.equals(file.getParent()) || !Files.isRegularFile(file, LinkOption.NOFOLLOW_LINKS)) {
+      throw new IOException("Select a regular JSON file in the export directory");
+    }
+    return MachineDefinitionFiles.read(file, LinkOption.NOFOLLOW_LINKS);
+  }
+
+  /**
+   * Serializes client export replacement with the integrated server's definition
+   * editor.
+   */
+  public static void replaceExistingExport(Path directory, Path file, String expectedHash, byte[] bytes, PublicationCheck check)
+      throws IOException {
+    if (bytes.length > MachineDefinitionFiles.MAX_FILE_BYTES) {
+      throw new IOException("The exported machine exceeds the file size budget");
+    }
+    synchronized (WRITES) {
+      verifyExportVersion(directory, file, expectedHash);
+      publish(file, bytes, true, () -> {
+        check.verify();
+        verifyExportVersion(directory, file, expectedHash);
+      });
+    }
+  }
+
+  private static void verifyExportVersion(Path directory, Path file, String expectedHash) throws IOException {
+    if (!MachineDefinitionFiles.hash(readExistingExport(directory, file)).equals(expectedHash)) {
+      throw new IOException("The selected export changed; reopen it before merging");
+    }
+  }
+
   /** Each scan owns its tokens; tokens never encode or accept client paths. */
   public static Catalog scan() throws IOException {
     Path root = MachineDefinitionConfig.ensureDirectory();
@@ -244,36 +277,46 @@ public final class MachineDefinitionFileStore {
         throw new IOException("The source machine changed before backup");
       }
       Path backup = original == null ? null : backup(source, original);
-      Path temporary = Files.createTempFile(source.file().getParent(), ".mmcece-selection-", ".tmp");
-      boolean published = false;
-      try {
-        writeFlushed(temporary, output, false);
+      publish(source.file(), output, source.existing(), () -> {
         checkActive(active);
         verifySource(source);
         checkActive(active);
-        if (source.existing()) {
-          Files.move(temporary, source.file(), StandardCopyOption.ATOMIC_MOVE, StandardCopyOption.REPLACE_EXISTING);
-        } else {
-          Files.createLink(source.file(), temporary);
-        }
-        published = true;
+      });
+      return new SaveResult(
+          source.file(),
+          source.machine(),
+          source.hash(),
+          MachineDefinitionFiles.hash(output),
+          backup);
+    }
+  }
 
-        return new SaveResult(
-            source.file(),
-            source.machine(),
-            source.hash(),
-            MachineDefinitionFiles.hash(output),
-            backup);
-      } finally {
-        try {
-          Files.deleteIfExists(temporary);
-        } catch (IOException cleanupFailure) {
-          if (!published) {
-            throw cleanupFailure;
-          }
-          // A completed publication must not be reported as failed because its private
-          // tmp remains.
+  @FunctionalInterface
+  public interface PublicationCheck {
+    void verify() throws IOException;
+  }
+
+  private static void publish(Path file, byte[] output, boolean replace, PublicationCheck beforeMove)
+      throws IOException {
+    Path temporary = Files.createTempFile(file.getParent(), ".mmcece-selection-", ".tmp");
+    boolean published = false;
+    try {
+      writeFlushed(temporary, output, false);
+      beforeMove.verify();
+      if (replace) {
+        Files.move(temporary, file, StandardCopyOption.ATOMIC_MOVE, StandardCopyOption.REPLACE_EXISTING);
+      } else {
+        Files.createLink(file, temporary);
+      }
+      published = true;
+    } finally {
+      try {
+        Files.deleteIfExists(temporary);
+      } catch (IOException cleanupFailure) {
+        if (!published) {
+          throw cleanupFailure;
         }
+        // Cleanup after publication cannot undo the visible export.
       }
     }
   }

@@ -50,25 +50,11 @@ final class MachinePartParser {
       String partPath = path + "[" + index + "]";
       JsonObject part = object(elements.get(index), partPath);
       partFields(part, partPath);
-      JsonArray xyz = array(part.get("offset"), partPath + ".offset");
-      if (xyz.size() != 3) {
-        throw error(partPath + ".offset", "Expected three integer coordinates");
-      }
-      int[] values = new int[3];
-      for (int axis = 0; axis < 3; axis++) {
-        long value = integer(xyz.get(axis), partPath + ".offset[" + axis + "]");
-        if (value < Integer.MIN_VALUE || value > Integer.MAX_VALUE) {
-          throw error(partPath + ".offset[" + axis + "]", "Offset outside the 32-bit coordinate range");
-        }
-        values[axis] = (int) value;
-      }
-      BlockPos offset = new BlockPos(values[0], values[1], values[2]);
+      BlockPos offset = offset(part, partPath);
       if (!allowAnchor && offset.equals(BlockPos.ZERO) || !offsets.add(offset)) {
         throw error(partPath + ".offset", "Duplicate/controller-anchor part");
       }
-      String partId = part.has("part_id") ? string(
-          part.get("part_id"),
-          partPath + ".part_id") : "offset:" + values[0] + "," + values[1] + "," + values[2];
+      String partId = partId(part, offset, partPath);
       if (partId.isBlank() || partId.length() > 128 || !partIds.add(partId)) {
         throw error(partPath + ".part_id", "Expected unique nonblank part ID of at most 128 characters");
       }
@@ -151,6 +137,28 @@ final class MachinePartParser {
           skippedParts);
     }
     return List.copyOf(parts);
+  }
+
+  static BlockPos offset(JsonObject part, String path) {
+    JsonArray xyz = array(part.get("offset"), path + ".offset");
+    if (xyz.size() != 3) {
+      throw error(path + ".offset", "Expected three integer coordinates");
+    }
+    int[] values = new int[3];
+    for (int axis = 0; axis < 3; axis++) {
+      long value = integer(xyz.get(axis), path + ".offset[" + axis + "]");
+      if (value < Integer.MIN_VALUE || value > Integer.MAX_VALUE) {
+        throw error(path + ".offset[" + axis + "]", "Offset outside the 32-bit coordinate range");
+      }
+      values[axis] = (int) value;
+    }
+    return new BlockPos(values[0], values[1], values[2]);
+  }
+
+  static String partId(JsonObject part, BlockPos offset, String path) {
+    return part.has("part_id") ? string(
+        part.get("part_id"),
+        path + ".part_id") : "offset:" + offset.getX() + "," + offset.getY() + "," + offset.getZ();
   }
 
   static void partFields(JsonObject part, String path) {
