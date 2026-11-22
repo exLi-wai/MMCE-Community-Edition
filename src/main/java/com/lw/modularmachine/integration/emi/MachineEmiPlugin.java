@@ -1,6 +1,7 @@
 package com.lw.modularmachine.integration.emi;
 
 import com.lw.modularmachine.ModularMachine;
+import com.lw.modularmachine.client.FactoryControllerScreen;
 import com.lw.modularmachine.client.NetworkPortScreen;
 import com.lw.modularmachine.util.Mods;
 import com.lw.modularmachine.client.recipe.MachineRecipeLayout;
@@ -13,6 +14,7 @@ import dev.emi.emi.api.EmiEntrypoint;
 import dev.emi.emi.api.EmiPlugin;
 import dev.emi.emi.api.EmiRegistry;
 import dev.emi.emi.api.stack.EmiStack;
+import dev.emi.emi.api.widget.Bounds;
 import java.util.ArrayList;
 import java.util.Comparator;
 import java.util.LinkedHashMap;
@@ -31,6 +33,12 @@ public final class MachineEmiPlugin implements EmiPlugin {
   @Override
   public void register(EmiRegistry registry) {
     EmiPreviewInput.register();
+    registry.addExclusionArea(FactoryControllerScreen.class, (screen, add) -> {
+      var editor = screen.threadEditorBounds();
+      if (editor != null) {
+        add.accept(new Bounds(editor.left(), editor.top(), editor.width(), editor.height()));
+      }
+    });
     if (Mods.AE2.isLoaded()) {
       registry.addDragDropHandler(NetworkPortScreen.class, NetworkPortEmiDragDropHandler.INSTANCE);
       registry.addRecipeHandler(MachineRegistries.NETWORK_PORT_MENU.get(), new NetworkPortEmiRecipeHandler());

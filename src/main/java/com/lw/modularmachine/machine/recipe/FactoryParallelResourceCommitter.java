@@ -49,7 +49,7 @@ public final class FactoryParallelResourceCommitter {
       return FactoryRunResourceResult.STALE;
     }
     if (!factory.canCommitStructure()
-        || activeRuns.stream().anyMatch(run -> !run.matchesBindings(factory.registration().pattern.definition))) {
+        || activeRuns.stream().anyMatch(run -> !run.matchesBindings(factory.registration().pattern))) {
       return FactoryRunResourceResult.STALE;
     }
     if (activeRuns.stream().anyMatch(run -> !PatternRunSources.available(factory, run))) {

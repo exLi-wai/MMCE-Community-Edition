@@ -407,7 +407,7 @@ public final class RecipeRunEngine {
     if (binding != current || !run.runId().equals(bindingRun)) {
       binding = current;
       bindingRun = run.runId();
-      compatible = run.matchesBindings(current.pattern.definition);
+      compatible = run.matchesBindings(current.pattern);
     }
     return compatible;
   }

@@ -5,6 +5,7 @@ import com.lw.modularmachine.machine.network.NetworkPortResource;
 import com.lw.modularmachine.menu.NetworkPortMenu;
 import com.lw.modularmachine.network.NetworkPortPayloads;
 import java.util.ArrayList;
+import java.util.List;
 import java.util.Locale;
 import java.util.UUID;
 import net.minecraft.client.Minecraft;
@@ -19,6 +20,7 @@ import net.minecraft.resources.ResourceLocation;
 import net.minecraft.world.entity.player.Inventory;
 import net.minecraft.world.inventory.InventoryMenu;
 import net.neoforged.neoforge.client.extensions.common.IClientFluidTypeExtensions;
+import org.lwjgl.glfw.GLFW;
 
 /**
  * Shared resource-specific interface configuration and legacy output-buffer
@@ -29,9 +31,12 @@ public final class NetworkPortScreen extends AbstractContainerScreen<NetworkPort
       .fromNamespaceAndPath("mmcece", "textures/gui/interface.png");
   private static final ResourceLocation OUTPUT_TEXTURE = ResourceLocation
       .fromNamespaceAndPath("mmcece", "textures/gui/me_output.png");
+  private static final int INPUT_CONFIG_SLOT_Y = 53;
+  private static final int INPUT_BUFFER_SLOT_Y = INPUT_CONFIG_SLOT_Y + 18;
   private final boolean input;
   private final Button[] amountButtons = new Button[9];
   private NetworkPortAmountScreen amountScreen;
+  private NetworkPortGhostPicker ghostPicker;
   private int selected;
 
   public NetworkPortScreen(NetworkPortMenu menu, Inventory inventory, Component title) {
@@ -51,6 +56,7 @@ public final class NetworkPortScreen extends AbstractContainerScreen<NetworkPort
 
   @Override
   protected void init() {
+    closeGhostPicker();
     super.init();
     if (input) {
       for (int index = 0; index < amountButtons.length; index++) {
@@ -74,6 +80,9 @@ public final class NetworkPortScreen extends AbstractContainerScreen<NetworkPort
     syncStatus();
     if (amountScreen != null) {
       amountScreen.tick();
+    }
+    if (ghostPicker != null && !ghostPicker.current()) {
+      closeGhostPicker();
     }
   }
 
@@ -109,11 +118,14 @@ public final class NetworkPortScreen extends AbstractContainerScreen<NetworkPort
    * ghosts.
    */
   public boolean canAcceptGhosts() {
+    return !hasGhostPicker() && Minecraft.getInstance().screen == this && ghostRowEditable();
+  }
+
+  private boolean ghostRowEditable() {
     var client = Minecraft.getInstance();
     var status = menu.status();
     return input
         && amountScreen == null
-        && client.screen == this
         && client.player != null
         && client.player.containerMenu == menu
         && status != null
@@ -124,11 +136,11 @@ public final class NetworkPortScreen extends AbstractContainerScreen<NetworkPort
     if (slot < 0 || slot >= 9) {
       throw new IndexOutOfBoundsException(slot);
     }
-    return new Rect2i(leftPos + 8 + slot * 18, topPos + 54, 16, 16);
+    return new Rect2i(leftPos + 8 + slot * 18, topPos + INPUT_CONFIG_SLOT_Y, 16, 16);
   }
 
   public int ghostSlotAt(int mouseX, int mouseY) {
-    return input ? slotAt(mouseX - leftPos, mouseY - topPos, 54, 1) : -1;
+    return input ? slotAt(mouseX - leftPos, mouseY - topPos, INPUT_CONFIG_SLOT_Y, 1) : -1;
   }
 
   public void acceptGhost(int slot, NetworkPortResource resource, UUID session, long revision) {
@@ -137,9 +149,54 @@ public final class NetworkPortScreen extends AbstractContainerScreen<NetworkPort
     }
   }
 
+  boolean isGhostEditCurrent(UUID session, long revision) {
+    var status = menu.status();
+    return ghostRowEditable() && session.equals(status.session()) && revision == status.snapshot().configRevision();
+  }
+
+  public void chooseGhost(int slot, List<NetworkPortResource> candidates, UUID session, long revision) {
+    if (hasGhostPicker()
+        || minecraft.screen != this
+        || !isGhostEditCurrent(session, revision)
+        || candidates.isEmpty()) {
+      return;
+    }
+    if (candidates.size() == 1) {
+      acceptGhost(slot, candidates.getFirst(), session, revision);
+    } else {
+      ghostPicker = new NetworkPortGhostPicker(this, slot, candidates, session, revision);
+    }
+  }
+
+  public boolean hasGhostPicker() {
+    return ghostPicker != null;
+  }
+
+  public boolean isOverGhostPicker(int x, int y) {
+    return ghostPicker != null && ghostPicker.contains(x, y);
+  }
+
+  public void renderGhostPicker(GuiGraphics graphics, int mouseX, int mouseY) {
+    if (ghostPicker != null) {
+      ghostPicker.render(graphics, mouseX, mouseY);
+    }
+  }
+
+  void closeGhostPicker() {
+    ghostPicker = null;
+  }
+
+  @Override
+  public void removed() {
+    closeGhostPicker();
+    super.removed();
+  }
+
   @Override
   public void onClose() {
-    if (amountScreen != null) {
+    if (hasGhostPicker()) {
+      closeGhostPicker();
+    } else if (amountScreen != null) {
       amountScreen.onClose();
     } else {
       super.onClose();
@@ -148,6 +205,12 @@ public final class NetworkPortScreen extends AbstractContainerScreen<NetworkPort
 
   @Override
   public boolean keyPressed(int key, int scanCode, int modifiers) {
+    if (hasGhostPicker()) {
+      if (key == GLFW.GLFW_KEY_ESCAPE) {
+        closeGhostPicker();
+      }
+      return true;
+    }
     if (amountScreen != null) {
       return amountScreen.keyPressed(key, scanCode, modifiers);
     }
@@ -157,6 +220,9 @@ public final class NetworkPortScreen extends AbstractContainerScreen<NetworkPort
 
   @Override
   public boolean mouseClicked(double mouseX, double mouseY, int button) {
+    if (ghostPicker != null) {
+      return ghostPicker.mouseClicked(mouseX, mouseY, button);
+    }
     if (amountScreen != null) {
       return amountScreen.mouseClicked(mouseX, mouseY, button);
     }
@@ -178,28 +244,43 @@ public final class NetworkPortScreen extends AbstractContainerScreen<NetworkPort
 
   @Override
   public boolean charTyped(char value, int modifiers) {
+    if (hasGhostPicker()) {
+      return true;
+    }
     return amountScreen == null ? super.charTyped(value, modifiers) : amountScreen.charTyped(value, modifiers);
   }
 
   @Override
   public boolean keyReleased(int key, int scanCode, int modifiers) {
+    if (hasGhostPicker()) {
+      return true;
+    }
     return amountScreen == null ? super.keyReleased(key, scanCode, modifiers) : amountScreen
         .keyReleased(key, scanCode, modifiers);
   }
 
   @Override
   public boolean mouseReleased(double x, double y, int button) {
+    if (ghostPicker != null) {
+      return ghostPicker.mouseReleased(x, y, button);
+    }
     return amountScreen == null ? super.mouseReleased(x, y, button) : amountScreen.mouseReleased(x, y, button);
   }
 
   @Override
   public boolean mouseDragged(double x, double y, int button, double dx, double dy) {
+    if (ghostPicker != null) {
+      return ghostPicker.mouseDragged(x, y, button, dx, dy);
+    }
     return amountScreen == null ? super.mouseDragged(x, y, button, dx, dy) : amountScreen
         .mouseDragged(x, y, button, dx, dy);
   }
 
   @Override
   public boolean mouseScrolled(double x, double y, double scrollX, double scrollY) {
+    if (ghostPicker != null) {
+      return ghostPicker.mouseScrolled(x, y, scrollX, scrollY);
+    }
     return amountScreen == null ? super.mouseScrolled(x, y, scrollX, scrollY) : amountScreen
         .mouseScrolled(x, y, scrollX, scrollY);
   }
@@ -216,8 +297,8 @@ public final class NetworkPortScreen extends AbstractContainerScreen<NetworkPort
       var row = rows.get(index);
       int x = leftPos + 8 + index % 9 * 18;
       if (input) {
-        drawResource(graphics, row.configured(), row.target(), x, topPos + 54);
-        drawResource(graphics, row.buffered(), row.stored(), x, topPos + 72);
+        drawResource(graphics, row.configured(), row.target(), x, topPos + INPUT_CONFIG_SLOT_Y);
+        drawResource(graphics, row.buffered(), row.stored(), x, topPos + INPUT_BUFFER_SLOT_Y);
       } else {
         drawResource(graphics, row.buffered(), row.stored(), x, topPos + 24 + index / 9 * 18);
       }
@@ -293,7 +374,7 @@ public final class NetworkPortScreen extends AbstractContainerScreen<NetworkPort
         graphics.drawString(font, Component.translatable("menu.mmcece.network." + key), 8, 97, 0x404040, false);
       }
     }
-    int firstY = input ? 54 : 24;
+    int firstY = input ? INPUT_CONFIG_SLOT_Y : 24;
     int slot = slotAt(mouseX - leftPos, mouseY - topPos, firstY, input ? 2 : 4);
     if (slot >= 0) {
       renderSlotHighlight(graphics, 8 + slot % 9 * 18, firstY + slot / 9 * 18, 0);
@@ -326,6 +407,11 @@ public final class NetworkPortScreen extends AbstractContainerScreen<NetworkPort
       amountScreen.render(graphics, mouseX, mouseY, partialTick);
       return;
     }
+    if (ghostPicker != null) {
+      // Draw the container without hover effects underneath the picker.
+      super.render(graphics, -1, -1, partialTick);
+      return;
+    }
     super.render(graphics, mouseX, mouseY, partialTick);
     renderTooltip(graphics, mouseX, mouseY);
     var status = menu.status();
@@ -337,7 +423,7 @@ public final class NetworkPortScreen extends AbstractContainerScreen<NetworkPort
     int slot = ghostSlotAt(mouseX, mouseY);
     boolean configured = slot >= 0;
     if (!configured) {
-      slot = slotAt(x, y, input ? 72 : 24, input ? 1 : 4);
+      slot = slotAt(x, y, input ? INPUT_BUFFER_SLOT_Y : 24, input ? 1 : 4);
     }
     if (slot >= 0) {
       var row = status.snapshot().rows().get(slot);

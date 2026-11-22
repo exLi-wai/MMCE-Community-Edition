@@ -2,6 +2,7 @@ package com.lw.modularmachine.network;
 
 import com.lw.modularmachine.ModularMachine;
 import com.lw.modularmachine.machine.network.NetworkPortResource;
+import com.lw.modularmachine.machine.network.pattern.PatternProviderState;
 import com.lw.modularmachine.menu.PatternProviderMenu;
 import java.util.ArrayList;
 import java.util.List;
@@ -21,7 +22,10 @@ import net.neoforged.neoforge.network.event.RegisterPayloadHandlersEvent;
  * identities.
  */
 public final class PatternProviderPayloads {
-  public static final int PAGE_SIZE = 21;
+  public static final int ALL_SLOTS = -1;
+  public static final int COLUMNS = 3;
+  public static final int VISIBLE_ROWS = 7;
+  public static final int PAGE_SIZE = COLUMNS * VISIBLE_ROWS;
   private static final CustomPacketPayload.Type<Status> STATUS = new CustomPacketPayload.Type<>(
       ResourceLocation.fromNamespaceAndPath(ModularMachine.MODID, "pattern_provider_status"));
   private static final CustomPacketPayload.Type<Action> ACTION = new CustomPacketPayload.Type<>(
@@ -36,10 +40,10 @@ public final class PatternProviderPayloads {
     FLUID_CONTAINER
   }
 
-  public record Entry(NetworkPortResource resource, long amount, long generation, boolean retired) {
+  public record Entry(NetworkPortResource resource, long amount, int slot, long generation, boolean retired) {
     public Entry {
       Objects.requireNonNull(resource);
-      if (amount <= 0 || generation <= 0) {
+      if (amount <= 0 || slot < 0 || slot >= PatternProviderState.SLOT_COUNT || generation <= 0) {
         throw new IllegalArgumentException("Invalid provider cache entry");
       }
     }
@@ -59,13 +63,13 @@ public final class PatternProviderPayloads {
       generations = List.copyOf(generations);
       entries = List.copyOf(entries);
       if (revision < 0
-          || generations.size() != 36
+          || generations.size() != PatternProviderState.SLOT_COUNT
           || generations.stream().anyMatch(value -> value < 0)
-          || selectedSlot < 0
-          || selectedSlot >= 36
+          || selectedSlot < ALL_SLOTS
+          || selectedSlot >= PatternProviderState.SLOT_COUNT
           || firstRow < 0
           || totalRows < 0
-          || firstRow > Math.max(0, totalRows - 7)
+          || firstRow > Math.max(0, totalRows - VISIBLE_ROWS)
           || entries.size() > PAGE_SIZE
           || fluidAmount < 0
           || fluidCapacity < fluidAmount
@@ -111,7 +115,13 @@ public final class PatternProviderPayloads {
       position = position.immutable();
       Objects.requireNonNull(session);
       Objects.requireNonNull(operation);
-      if (containerId < 0 || revision < 0 || slot < 0 || slot >= 36 || generation < 0 || firstRow < 0) {
+      if (containerId < 0
+          || revision < 0
+          || slot < ALL_SLOTS
+          || slot >= PatternProviderState.SLOT_COUNT
+          || generation < 0
+          || slot == ALL_SLOTS && generation != 0
+          || firstRow < 0) {
         throw new IllegalArgumentException("Invalid provider action");
       }
     }
@@ -127,7 +137,7 @@ public final class PatternProviderPayloads {
   }
 
   public static void register(RegisterPayloadHandlersEvent event) {
-    event.registrar("1")
+    event.registrar("2")
         .playToClient(
             STATUS,
             StreamCodec.of(PatternProviderPayloads::writeStatus, PatternProviderPayloads::readStatus),
@@ -159,6 +169,7 @@ public final class PatternProviderPayloads {
     for (var entry : snapshot.entries()) {
       NetworkPortResource.STREAM_CODEC.encode(buffer, entry.resource());
       buffer.writeVarLong(entry.amount());
+      buffer.writeVarInt(entry.slot());
       buffer.writeVarLong(entry.generation());
       buffer.writeBoolean(entry.retired());
     }
@@ -177,8 +188,8 @@ public final class PatternProviderPayloads {
     long sequence = buffer.readVarLong();
     boolean editable = buffer.readBoolean();
     long revision = buffer.readVarLong();
-    var generations = new ArrayList<Long>(36);
-    for (int slot = 0; slot < 36; slot++) {
+    var generations = new ArrayList<Long>(PatternProviderState.SLOT_COUNT);
+    for (int slot = 0; slot < PatternProviderState.SLOT_COUNT; slot++) {
       generations.add(buffer.readVarLong());
     }
     int selected = buffer.readVarInt();
@@ -194,6 +205,7 @@ public final class PatternProviderPayloads {
           new Entry(
               NetworkPortResource.STREAM_CODEC.decode(buffer),
               buffer.readVarLong(),
+              buffer.readVarInt(),
               buffer.readVarLong(),
               buffer.readBoolean()));
     }

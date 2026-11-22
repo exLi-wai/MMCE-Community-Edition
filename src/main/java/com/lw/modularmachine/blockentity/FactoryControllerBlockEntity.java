@@ -229,7 +229,7 @@ public final class FactoryControllerBlockEntity extends BlockEntity implements M
     @Override
     public boolean bindingsCurrent(FrozenRecipeRun run) {
       return canCommitStructure()
-          && run.matchesBindings(registration.pattern.definition)
+          && run.matchesBindings(registration.pattern)
           && PatternRunSources.available(FactoryControllerBlockEntity.this, run);
     }
     @Override

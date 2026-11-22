@@ -7,6 +7,7 @@ import com.lw.modularmachine.machine.PortKind;
 import com.lw.modularmachine.machine.structure.MachineDefinition;
 import java.util.EnumSet;
 import java.util.LinkedHashMap;
+import java.util.List;
 import java.util.Map;
 import java.util.Objects;
 import java.util.Set;
@@ -15,6 +16,7 @@ import net.minecraft.nbt.ListTag;
 import net.minecraft.nbt.Tag;
 import java.util.Locale;
 import org.jetbrains.annotations.ApiStatus;
+import org.jetbrains.annotations.Nullable;
 
 /**
  * Frozen logical routing; never resolves a live inventory or changes a paid
@@ -207,19 +209,25 @@ final class FrozenRecipeBindings {
     }
   }
 
-  boolean matchesDefinition(MachineDefinition definition) {
-    var roles = new LinkedHashMap<String, PortKind>();
-    var labels = new LinkedHashMap<String, String>();
-    for (var part : definition.parts()) {
-      if (part.rule().port() != null) {
-        roles.put(part.id(), part.rule().port());
-        labels.put(part.id(), part.selector());
-      }
+  boolean matchesDefinition(MachineDefinition definition, @Nullable List<Integer> recipePartIndices) {
+    if (!dynamicLengths.equals(definition.dynamicLengths())) {
+      return false;
     }
-
-    return dynamicLengths.equals(definition.dynamicLengths())
-        && logicalPorts.equals(roles)
-        && logicalSelectors.equals(labels);
+    var parts = definition.parts();
+    int size = recipePartIndices == null ? parts.size() : recipePartIndices.size();
+    int ports = 0;
+    for (int i = 0; i < size; i++) {
+      var part = parts.get(recipePartIndices == null ? i : recipePartIndices.get(i));
+      var kind = part.rule().port();
+      if (kind == null) {
+        continue;
+      }
+      if (logicalPorts.get(part.id()) != kind || !part.selector().equals(logicalSelectors.get(part.id()))) {
+        return false;
+      }
+      ports++;
+    }
+    return ports == logicalPorts.size();
   }
 
   boolean matchesPatternSource(PatternRunSources.Binding binding) {

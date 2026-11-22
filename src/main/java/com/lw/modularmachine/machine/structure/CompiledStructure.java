@@ -46,6 +46,7 @@ public final class CompiledStructure {
   public final Direction facing;
 
   private final List<BlockPos> positions;
+  private final List<Integer> recipePartIndices;
   private final Map<Block, List<Integer>> componentIndices;
   private final Map<Long, Integer> sectionGroups;
   private final Map<BlockPos, Integer> contentGroups;
@@ -73,6 +74,7 @@ public final class CompiledStructure {
     orientation = data.orientation;
     facing = orientation.front();
     positions = data.positions;
+    recipePartIndices = data.recipePartIndices;
     componentIndices = data.componentIndices;
     sectionGroups = data.sections;
     contentGroups = data.contents;
@@ -173,6 +175,7 @@ public final class CompiledStructure {
             target.immutable(),
             orientation,
             List.copyOf(shifted),
+            recipePartIndices,
             componentIndices,
             Map.copyOf(sections),
             Map.copyOf(contents),
@@ -207,6 +210,7 @@ public final class CompiledStructure {
       BlockPos origin,
       MachineOrientation orientation,
       List<BlockPos> positions,
+      List<Integer> recipePartIndices,
       Map<Block, List<Integer>> componentIndices,
       Map<Long, Integer> sections,
       Map<BlockPos, Integer> contents,
@@ -236,6 +240,7 @@ public final class CompiledStructure {
     private final OrientationCompilation.RulePreparation rules;
     private final StructureModifierTracker.Builder modifiers;
     private final List<BlockPos> positions = new ArrayList<>();
+    private final List<Integer> recipePartIndices = new ArrayList<>();
     private final Map<Block, List<Integer>> componentIndices = new LinkedHashMap<>();
     private final Map<Long, Integer> sections = new LinkedHashMap<>();
     private final Map<BlockPos, Integer> contents = new LinkedHashMap<>();
@@ -290,6 +295,9 @@ public final class CompiledStructure {
       used += modifiers.advance(budget - used);
       while (used < budget && cursor < definition.parts().size()) {
         var part = definition.parts().get(cursor);
+        if (part.rule().port() != null || !part.interfaceType().isEmpty()) {
+          recipePartIndices.add(cursor);
+        }
         if (watchesWorkingState(rules.result().get(cursor), part.scriptCondition())
             || modifiers.result().workingSensitiveParts.contains(cursor)) {
           workingSensitiveParts.set(cursor);
@@ -346,6 +354,7 @@ public final class CompiledStructure {
             origin,
             orientation,
             List.copyOf(positions),
+            List.copyOf(recipePartIndices),
             Map.copyOf(componentIndices),
             Map.copyOf(sections),
             Map.copyOf(contents),
@@ -585,6 +594,12 @@ public final class CompiledStructure {
 
   public BlockPos position(int index) {
     return positions.get(index);
+  }
+
+  /** Typed resource ports and smart interfaces in definition order. */
+  @ApiStatus.Internal
+  public List<Integer> recipePartIndices() {
+    return recipePartIndices;
   }
 
   @ApiStatus.Internal

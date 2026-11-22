@@ -11,6 +11,7 @@
     "LevelBlockEntityChangeMixin"
   ],
   "client": [
+    "EmiGhostPickerInputMixin",
     "PreviewLevelRendererMixin"
   ],
   "injectors": {"defaultRequire": 1}

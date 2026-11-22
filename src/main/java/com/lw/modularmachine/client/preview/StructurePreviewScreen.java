@@ -121,6 +121,10 @@ public abstract class StructurePreviewScreen extends Screen {
     return ItemStack.EMPTY;
   }
 
+  protected boolean hasHeaderModifier() {
+    return false;
+  }
+
   protected boolean canEditDynamicLengths() {
     return true;
   }
@@ -284,7 +288,7 @@ public abstract class StructurePreviewScreen extends Screen {
     int top = panel.top();
     int panelWidth = panel.width();
     panel.drawBackground(graphics);
-    panel.drawHeader(graphics, font, headerTitle(), headerIcon());
+    panel.drawHeader(graphics, font, headerTitle(), headerIcon(), hasHeaderModifier());
     if (preview.selection == null) {
       if (preview.pendingSelection != null) {
         graphics.drawString(
@@ -301,7 +305,7 @@ public abstract class StructurePreviewScreen extends Screen {
     if (preview.scene != null) {
       drawScene(graphics, panel);
     }
-    drawSettingsButton(graphics, left, top, panelWidth, mouseX, mouseY);
+    drawSettingsButton(graphics, panel, mouseX, mouseY);
     positionFields(materialPanel());
     if (settingsOpen) {
       drawRequiredBlocks(graphics, mouseX, mouseY, partialTick);
@@ -441,14 +445,14 @@ public abstract class StructurePreviewScreen extends Screen {
     }
   }
 
-  private void drawSettingsButton(GuiGraphics graphics, int left, int top, int panelWidth, int mouseX, int mouseY) {
-    int x = left + panelWidth - 30;
-    int y = top + 10;
-    boolean hovered = mouseX >= x && mouseX < x + 20 && mouseY >= y && mouseY < y + 22;
-    graphics.blit(SETTINGS_BACKGROUND, x, y, 0, 0, 20, 22, 20, 22);
+  private void drawSettingsButton(GuiGraphics graphics, StructurePreviewPanel panel, int mouseX, int mouseY) {
+    var button = panel.settingsButton();
+    int x = button.left();
+    int y = button.top();
+    graphics.blit(SETTINGS_BACKGROUND, x, y, 0, 0, button.width(), button.height(), 20, 22);
     graphics.blit(SETTINGS_ICON, x + 2, y + 3, 0, 0, 16, 16, 16, 16);
-    if (hovered) {
-      graphics.renderOutline(x, y, 20, 22, 0xFF205A70);
+    if (button.containsPoint(mouseX, mouseY)) {
+      graphics.renderOutline(x, y, button.width(), button.height(), 0xFF205A70);
       graphics.renderTooltip(font, Component.translatable("jei.mmcece.required_blocks"), mouseX, mouseY);
     }
   }
@@ -711,12 +715,8 @@ public abstract class StructurePreviewScreen extends Screen {
     if (preview.selection == null) {
       return super.mouseClicked(x, y, button);
     }
-    int panelLeft = Math.max(12, (width - Math.min(760, width - 24)) / 2);
-    int panelTop = Math.max(12, (height - Math.min(900, height - 24)) / 2);
-    int panelWidth = Math.min(760, width - panelLeft * 2);
-    int settingsX = panelLeft + panelWidth - 30;
-    int settingsY = panelTop + 10;
-    if (button == 0 && x >= settingsX && x < settingsX + 20 && y >= settingsY && y < settingsY + 22) {
+    var settings = StructurePreviewPanel.forScreen(width, height).settingsButton();
+    if (button == 0 && settings.containsPoint((int) Math.floor(x), (int) Math.floor(y))) {
       settingsOpen = !settingsOpen;
       positionFields(materialPanel());
       return true;

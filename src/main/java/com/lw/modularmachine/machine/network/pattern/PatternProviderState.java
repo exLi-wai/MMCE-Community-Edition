@@ -12,6 +12,7 @@ import java.util.Objects;
 import java.util.Optional;
 import java.util.Set;
 import java.util.UUID;
+import java.util.stream.Stream;
 import net.minecraft.core.HolderLookup;
 import net.minecraft.nbt.CompoundTag;
 import net.minecraft.nbt.ListTag;
@@ -32,6 +33,7 @@ public final class PatternProviderState {
   private final Runnable beforeWrite;
   private UUID providerId = UUID.randomUUID();
   private long revision;
+  private long physicalLayoutRevision;
   private long[] generations = new long[SLOT_COUNT];
   private Map<PatternContainerRef, Container> containers = new LinkedHashMap<>();
   private Tag unsupported;
@@ -50,6 +52,9 @@ public final class PatternProviderState {
       PatternDefinition pattern,
       long resourceRevision,
       boolean retired) {
+  }
+
+  public record CachedContents(PatternContainerRef address, boolean retired, Map<PatternResourceKey, Long> physical) {
   }
 
   /**
@@ -142,6 +147,39 @@ public final class PatternProviderState {
     }
 
     return containers.entrySet().stream().map(e -> view(e.getKey(), e.getValue())).toList();
+  }
+
+  /**
+   * Leases replace edited containers, so these read-only physical maps remain
+   * stable across commits.
+   */
+  public Stream<CachedContents> cachedContents() {
+    readAllowed();
+    if (unsupported != null) {
+      return Stream.empty();
+    }
+
+    return containers.entrySet().stream()
+        .map(
+            entry -> new CachedContents(
+                entry.getKey(),
+                entry.getValue().retired,
+                entry.getValue().resources.physicalView()))
+        .filter(contents -> !contents.physical().isEmpty());
+  }
+
+  /**
+   * Changes when physical keys enter, leave or change order within a generation.
+   */
+  public long physicalLayoutRevision() {
+    readAllowed();
+    return physicalLayoutRevision;
+  }
+
+  public long physicalAmount(PatternContainerRef address, PatternResourceKey key) {
+    readAllowed();
+    var container = containers.get(address);
+    return container == null ? 0 : container.resources.physicalAmount(key);
   }
 
   public Optional<ContainerView> container(PatternContainerRef address) {
@@ -284,6 +322,7 @@ public final class PatternProviderState {
     private final Map<PatternContainerRef, Container> next = new LinkedHashMap<>(containers);
     private final Set<PatternContainerRef> changed = new LinkedHashSet<>();
     private boolean modified;
+    private boolean physicalLayoutChanged;
     private boolean resolved;
 
     private Lease() {
@@ -316,6 +355,11 @@ public final class PatternProviderState {
       }
       container.revision++;
       modified = true;
+    }
+
+    private void changedPhysical(Container container, int previousSize) {
+      physicalLayoutChanged |= previousSize != container.resources.physicalSize();
+      changed(container);
     }
 
     /** Null clears the slot; surviving old contents are retired and returnable. */
@@ -355,20 +399,22 @@ public final class PatternProviderState {
 
     public boolean receive(PatternContainerRef ref, UUID job, Map<PatternResourceKey, Long> batch) {
       var container = editable(ref);
+      int previousSize = container.resources.physicalSize();
       if (container.retired || !container.resources.receive(job, batch)) {
         return false;
       }
-      changed(container);
+      changedPhysical(container, previousSize);
 
       return true;
     }
 
     public boolean consume(PatternContainerRef ref, UUID job, Map<PatternResourceKey, Long> batch) {
       var container = editable(ref);
+      int previousSize = container.resources.physicalSize();
       if (container.retired || !container.resources.consume(job, batch)) {
         return false;
       }
-      changed(container);
+      changedPhysical(container, previousSize);
 
       return true;
     }
@@ -395,10 +441,11 @@ public final class PatternProviderState {
 
     public boolean consumeForRun(PatternContainerRef ref, UUID job, UUID run, Map<PatternResourceKey, Long> batch) {
       var container = editable(ref);
+      int previousSize = container.resources.physicalSize();
       if (!container.resources.consumeForRun(job, run, batch)) {
         return false;
       }
-      changed(container);
+      changedPhysical(container, previousSize);
 
       return true;
     }
@@ -450,11 +497,12 @@ public final class PatternProviderState {
 
     public boolean settleReturn(PatternContainerRef ref, UUID job, PatternResourceKey key, long accepted) {
       var container = editable(ref);
+      int previousSize = container.resources.physicalSize();
       if (!container.resources.settleReturn(job, key, accepted)) {
         return false;
       }
       if (accepted > 0) {
-        changed(container);
+        changedPhysical(container, previousSize);
         prune(ref, container);
       }
 
@@ -479,6 +527,9 @@ public final class PatternProviderState {
         generations = nextGenerations;
         containers = next;
         revision++;
+        if (physicalLayoutChanged) {
+          physicalLayoutRevision = revision;
+        }
       }
       resolved = true;
       active = null;

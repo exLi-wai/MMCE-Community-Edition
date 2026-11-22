@@ -123,6 +123,18 @@ public final class PatternResourceLedger<K> {
     return amounts(physical);
   }
 
+  Map<K, Long> physicalView() {
+    return Collections.unmodifiableMap(physical);
+  }
+
+  int physicalSize() {
+    return physical.size();
+  }
+
+  long physicalAmount(K key) {
+    return physical.getOrDefault(key, 0L);
+  }
+
   public boolean hasRun(UUID run) {
     return unownedRuns.contains(run) || receipts.values().stream().anyMatch(r -> r.runs().contains(run));
   }

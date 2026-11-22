@@ -2,6 +2,7 @@ package com.lw.modularmachine.integration.jei;
 
 import com.lw.modularmachine.client.preview.ClientMachineCatalog;
 import com.lw.modularmachine.ModularMachine;
+import com.lw.modularmachine.client.FactoryControllerScreen;
 import com.lw.modularmachine.client.NetworkPortScreen;
 import com.lw.modularmachine.machine.recipe.MachineRecipe;
 import com.lw.modularmachine.machine.recipe.MachineRecipeRegistries;
@@ -18,6 +19,7 @@ import java.util.TreeSet;
 import mezz.jei.api.IModPlugin;
 import mezz.jei.api.JeiPlugin;
 import mezz.jei.api.constants.VanillaTypes;
+import mezz.jei.api.gui.handlers.IGuiContainerHandler;
 import mezz.jei.api.registration.IGuiHandlerRegistration;
 import mezz.jei.api.registration.IRecipeCatalystRegistration;
 import mezz.jei.api.registration.IRecipeCategoryRegistration;
@@ -25,6 +27,7 @@ import mezz.jei.api.registration.IRecipeRegistration;
 import mezz.jei.api.registration.IRecipeTransferRegistration;
 import mezz.jei.api.runtime.IJeiRuntime;
 import net.minecraft.client.Minecraft;
+import net.minecraft.client.renderer.Rect2i;
 import net.minecraft.resources.ResourceLocation;
 import net.minecraft.world.item.ItemStack;
 import net.minecraft.world.item.crafting.RecipeHolder;
@@ -44,6 +47,15 @@ public final class MachineJeiPlugin implements IModPlugin {
   @Override
   public void registerGuiHandlers(IGuiHandlerRegistration registration) {
     registration.addGhostIngredientHandler(NetworkPortScreen.class, new NetworkPortGhostIngredientHandler());
+    registration
+        .addGuiContainerHandler(FactoryControllerScreen.class, new IGuiContainerHandler<FactoryControllerScreen>() {
+          @Override
+          public List<Rect2i> getGuiExtraAreas(FactoryControllerScreen screen) {
+            var editor = screen.threadEditorBounds();
+            return editor == null ? List.of() : List
+                .of(new Rect2i(editor.left(), editor.top(), editor.width(), editor.height()));
+          }
+        });
   }
 
   @Override

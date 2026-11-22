@@ -296,7 +296,7 @@ public final class FactoryOutputEngine {
     if (registration == null || !factory.canCommitStructure()) {
       return false;
     }
-    return set.runs().stream().allMatch(run -> run.matchesBindings(registration.pattern.definition));
+    return set.runs().stream().allMatch(run -> run.matchesBindings(registration.pattern));
   }
 
   private static void publishItem(MachinePortBlockEntity.ItemStartLease lease) {

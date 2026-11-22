@@ -11,6 +11,7 @@ import com.lw.modularmachine.api.recipe.ChemicalRecipeData;
 import com.lw.modularmachine.api.recipe.ChemicalRequirement;
 import com.lw.modularmachine.api.recipe.RecipeExecutionOptions;
 import com.lw.modularmachine.machine.PortKind;
+import com.lw.modularmachine.machine.structure.CompiledStructure;
 import com.lw.modularmachine.machine.structure.MachineDefinition;
 import com.mojang.serialization.JsonOps;
 import java.util.ArrayList;
@@ -283,7 +284,12 @@ public final class FrozenRecipeRun {
   }
 
   public boolean matchesBindings(MachineDefinition definition) {
-    return machineId.equals(definition.id()) && bindings.matchesDefinition(definition);
+    return machineId.equals(definition.id()) && bindings.matchesDefinition(definition, null);
+  }
+
+  public boolean matchesBindings(CompiledStructure pattern) {
+    return machineId.equals(pattern.definition.id())
+        && bindings.matchesDefinition(pattern.definition, pattern.recipePartIndices());
   }
 
   boolean matchesPatternSource(PatternRunSources.Binding binding) {

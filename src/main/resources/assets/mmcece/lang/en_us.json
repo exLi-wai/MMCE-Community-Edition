@@ -240,6 +240,7 @@
   "emi.category.mmcece.recipe": "Machine Recipe: %s",
   "emi.category.mmcece.structure": "Machine Structure",
 
+  "gui.mmcece.drag_handle": "Hold the wrench and drag to move the panel",
   "gui.mmcece.factory_thread.applied": "Settings applied",
   "gui.mmcece.factory_thread.apply": "Apply",
   "gui.mmcece.factory_thread.busy": "This thread has work in progress; recipe lock and parallel limit are unavailable.",
@@ -472,6 +473,7 @@
   "jade.mmcece.network.mirror_invalid": "Mirror: offline (provider binding invalid)",
   "jade.mmcece.network.mirror_unavailable": "Mirror: unavailable (invalid binding data)",
   "jade.mmcece.network.target": "Target provider: %s",
+  "jade.mmcece.pattern_cache.more": "%s more entries in the provider GUI",
 
   "jei.mmcece.candidates": "Allowed Blocks",
   "jei.mmcece.details.dimensions": "Size %s×%s×%s · %s blocks total",
@@ -604,6 +606,7 @@
   "menu.mmcece.group.tooltip": "Independent checks per group",
   "menu.mmcece.group.value": "Current ID:",
   "menu.mmcece.network.amount": "Amount",
+  "menu.mmcece.network.choose_resource": "Choose a resource",
   "menu.mmcece.network.clear": "Right-click to clear configuration",
   "menu.mmcece.network.configure.chemical": "Left-click with a chemical container or drag a chemical or its container from JEI or EMI",
   "menu.mmcece.network.configure.fluid": "Left-click with a fluid container or drag a fluid or its container from JEI or EMI",
@@ -1044,7 +1047,8 @@
   "menu.mmcece.pattern.retired": "Previous pattern cache, awaiting return",
   "menu.mmcece.pattern.fluid": "%s / %s mB",
   "menu.mmcece.pattern.fluid.description": "Click while carrying one fluid container to fill or empty it.",
-  "menu.mmcece.pattern.select": "Left-click to view the cache; right-click or shift-click to remove the pattern.",
+  "menu.mmcece.pattern.select": "Left-click to view this slot's cache. Right-click or shift-click to remove the pattern.",
+  "menu.mmcece.pattern.select_all": "Left-click to view all cached resources. Right-click or shift-click to remove the pattern.",
   "tooltip.mmcece.configuration_card.type.pattern_provider": "Pattern provider reference",
   "tooltip.mmcece.configuration_card.pattern_target": "%s @ %s",
   "message.mmcece.configuration_card.cross_dimension": "Mirrors can only bind to a provider in the same dimension."

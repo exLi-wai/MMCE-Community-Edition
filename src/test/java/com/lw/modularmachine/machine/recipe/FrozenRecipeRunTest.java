@@ -1,12 +1,19 @@
 package com.lw.modularmachine.machine.recipe;
 
+import com.google.gson.JsonParser;
+import com.lw.modularmachine.api.orientation.MachineOrientation;
 import com.lw.modularmachine.api.recipe.RecipeFailureAction;
 import com.lw.modularmachine.machine.PortKind;
+import com.lw.modularmachine.machine.orientation.StateOrientationAdapters;
+import com.lw.modularmachine.machine.structure.CompiledStructure;
+import com.lw.modularmachine.machine.structure.MachineDefinitionParser;
 import java.util.Map;
 import java.util.UUID;
+import net.minecraft.core.BlockPos;
 import net.minecraft.nbt.CompoundTag;
 import net.minecraft.nbt.ListTag;
 import net.minecraft.nbt.Tag;
+import net.minecraft.resources.ResourceLocation;
 import org.junit.jupiter.api.Test;
 import static org.junit.jupiter.api.Assertions.*;
 import java.util.Locale;
@@ -74,6 +81,25 @@ class FrozenRecipeRunTest {
     assertEquals("mmcece:test", run.machineId().toString());
     assertEquals(20, run.duration());
     assertEquals(0, run.progress());
+  }
+
+  @Test
+  void compiledBindingsMatchByIdAndRejectReboundOrMissingPorts() {
+    var definition = MachineDefinitionParser.parse(ResourceLocation.parse("mmcece:test"), JsonParser.parseString("""
+        {"parts":[
+          {"part_id":"out","offset":[1,0,0],"block":"item_output"},
+          {"part_id":"in","offset":[2,0,0],"block":"item_input"}]}
+        """).getAsJsonObject(), new StateOrientationAdapters.RegistrySnapshot(Map.of()));
+    var pattern = new CompiledStructure(definition, BlockPos.ZERO, MachineOrientation.IDENTITY);
+    assertTrue(FrozenRecipeRun.read(valid()).matchesBindings(pattern));
+
+    var rebound = valid();
+    rebound.getList("ports", Tag.TAG_COMPOUND).getCompound(0).putString("selector", "other");
+    assertFalse(FrozenRecipeRun.read(rebound).matchesBindings(pattern));
+
+    var extra = valid();
+    addPort(extra, PortKind.FLUID_OUTPUT);
+    assertFalse(FrozenRecipeRun.read(extra).matchesBindings(pattern));
   }
 
   @Test

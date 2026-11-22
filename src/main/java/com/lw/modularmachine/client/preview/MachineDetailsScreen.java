@@ -54,6 +54,11 @@ public final class MachineDetailsScreen extends StructurePreviewScreen {
   }
 
   @Override
+  protected boolean hasHeaderModifier() {
+    return machine != null && !machine.modifiers().isEmpty();
+  }
+
+  @Override
   public void tick() {
     if (minecraft.level == null) {
       onClose();
@@ -74,7 +79,7 @@ public final class MachineDetailsScreen extends StructurePreviewScreen {
   @Override
   public void render(GuiGraphics graphics, int mouseX, int mouseY, float partialTick) {
     super.render(graphics, mouseX, mouseY, partialTick);
-    if (machine == null || machine.modifiers().isEmpty()) {
+    if (!hasHeaderModifier()) {
       return;
     }
     var panel = StructurePreviewPanel.forScreen(width, height);
@@ -84,10 +89,9 @@ public final class MachineDetailsScreen extends StructurePreviewScreen {
     if (stack.isEmpty()) {
       stack = new ItemStack(Items.BOOK);
     }
-    int x = panel.left() + panel.width() - 34;
-    int y = panel.top() + 12;
-    graphics.renderItem(stack, x, y);
-    if (modifierContains(mouseX, mouseY)) {
+    var icon = panel.modifierIcon();
+    graphics.renderItem(stack, icon.left(), icon.top());
+    if (icon.containsPoint(mouseX, mouseY)) {
       var text = new ArrayList<Component>();
       text.add(Component.translatable(modifier.display().name().isEmpty() ? modifier.id() : modifier.display().name()));
       if (!modifier.display().description().isEmpty()) {
@@ -100,19 +104,12 @@ public final class MachineDetailsScreen extends StructurePreviewScreen {
     }
   }
 
-  private boolean modifierContains(double mouseX, double mouseY) {
-    var panel = StructurePreviewPanel.forScreen(width, height);
-    int x = panel.left() + panel.width() - 34;
-    int y = panel.top() + 12;
-    return mouseX >= x && mouseX < x + 18 && mouseY >= y && mouseY < y + 18;
-  }
-
   @Override
   public boolean mouseClicked(double mouseX, double mouseY, int button) {
-    if (machine != null
-        && !machine.modifiers().isEmpty()
-        && modifierContains(mouseX, mouseY)
-        && (button == 0 || button == 1)) {
+    if (hasHeaderModifier()
+        && (button == 0 || button == 1)
+        && StructurePreviewPanel.forScreen(width, height).modifierIcon()
+            .containsPoint((int) Math.floor(mouseX), (int) Math.floor(mouseY))) {
       modifierIndex = Math.floorMod(modifierIndex + (button == 0 ? 1 : -1), machine.modifiers().size());
       return true;
     }

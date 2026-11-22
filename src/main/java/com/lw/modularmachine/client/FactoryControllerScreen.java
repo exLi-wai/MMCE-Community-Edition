@@ -1,5 +1,6 @@
 package com.lw.modularmachine.client;
 
+import com.lw.modularmachine.api.client.gui.DraggablePanel;
 import com.lw.modularmachine.api.component.ChemicalStackData;
 import com.lw.modularmachine.api.recipe.ChemicalRequirement;
 import com.lw.modularmachine.menu.FactoryControllerMenu;
@@ -8,6 +9,7 @@ import com.lw.modularmachine.presentation.ControllerStatusFormat;
 import com.lw.modularmachine.machine.recipe.MachineRecipe;
 import com.lw.modularmachine.machine.recipe.MachineRecipeRegistries;
 import com.lw.modularmachine.util.client.gui.GuiTextures;
+import com.lw.modularmachine.util.client.gui.PanelDragHandle;
 import com.lw.modularmachine.util.client.search.NameSearch;
 import java.util.Comparator;
 import java.util.List;
@@ -20,6 +22,7 @@ import java.util.stream.Stream;
 import net.minecraft.Util;
 import net.minecraft.client.gui.GuiGraphics;
 import net.minecraft.client.gui.components.EditBox;
+import net.minecraft.client.gui.navigation.ScreenRectangle;
 import net.minecraft.client.gui.screens.inventory.AbstractContainerScreen;
 import net.minecraft.network.chat.Component;
 import net.minecraft.network.chat.ComponentUtils;
@@ -27,6 +30,7 @@ import net.minecraft.resources.ResourceLocation;
 import net.minecraft.world.entity.player.Inventory;
 import net.minecraft.world.item.ItemStack;
 import net.minecraft.world.item.crafting.RecipeHolder;
+import org.jetbrains.annotations.Nullable;
 import org.lwjgl.glfw.GLFW;
 import com.lw.modularmachine.client.controller.ControllerClientPublisher;
 
@@ -48,15 +52,16 @@ public final class FactoryControllerScreen extends AbstractContainerScreen<Facto
   private static final int SCROLLBAR_Y = 8;
   private static final int SCROLLBAR_HEIGHT = 197;
   private static final int EDITOR_WIDTH = 268, EDITOR_HEIGHT = 201, RECIPES_PER_PAGE = 3;
+  private static final int CLOSE_X = 240, CLOSE_Y = 4, UNLOCK_Y = 24;
   private static final GuiTextures.NineSlice EDITOR_BACKGROUND = new GuiTextures.NineSlice(
-      ELEMENT_TEXTURE,
+      ResourceLocation.fromNamespaceAndPath("mmcece", "textures/gui/button_2.png"),
       0,
       0,
-      86,
-      32,
-      256,
-      256,
-      1);
+      20,
+      22,
+      20,
+      22,
+      4);
   private static final GuiTextures.NineSlice EDITOR_BUTTON = new GuiTextures.NineSlice(
       ResourceLocation.fromNamespaceAndPath("mmcece", "textures/gui/button.png"),
       0,
@@ -68,8 +73,8 @@ public final class FactoryControllerScreen extends AbstractContainerScreen<Facto
       2);
   private final LegacyGuiScrollbar scrollbar = new LegacyGuiScrollbar();
   private final NameSearch nameSearch = new NameSearch();
-  private String editingThread, query = "", parallelText = "";
-  private ResourceLocation editingMachine;
+  private ThreadEditorPanel editor;
+  private String query = "", parallelText = "";
   private EditBox search, parallel;
   private List<RecipeHolder<MachineRecipe>> recipes = List.of(), filteredRecipes = List.of();
   private Map<ResourceLocation, Component> recipeLabels = Map.of();
@@ -77,6 +82,31 @@ public final class FactoryControllerScreen extends AbstractContainerScreen<Facto
   private int recipePage;
   private PendingAction pending;
   private Component editorMessage = Component.empty();
+
+  private final class ThreadEditorPanel implements DraggablePanel {
+    private final String threadId;
+    private final ResourceLocation machine;
+    private final PanelDragHandle handle = PanelDragHandle.topRight(this, EDITOR_WIDTH - CLOSE_X + 4, CLOSE_Y);
+    private int left, top;
+
+    private ThreadEditorPanel(MachinePayloads.FactoryStatusThread thread) {
+      threadId = thread.threadId();
+      machine = thread.machineId();
+    }
+
+    @Override
+    public ScreenRectangle bounds() {
+      return new ScreenRectangle(left, top, EDITOR_WIDTH, EDITOR_HEIGHT);
+    }
+
+    @Override
+    public void setPosition(int left, int top) {
+      this.left = left;
+      this.top = top;
+      search.setPosition(left + 8, top + 70);
+      parallel.setPosition(left + 152, top + 42);
+    }
+  }
 
   private record PendingAction(
       MachinePayloads.FactoryAction action,
@@ -105,11 +135,12 @@ public final class FactoryControllerScreen extends AbstractContainerScreen<Facto
     rememberFields();
     super.init();
     MachineControllerStatusClient.attach(this);
-    if (editingThread != null) {
-      if (editedThread() == null) {
+    if (editor != null) {
+      var thread = editedThread();
+      if (thread == null || !thread.machineId().equals(editor.machine)) {
         closeEditor();
       } else {
-        installFields();
+        installEditor(thread, editor.left, editor.top);
       }
     }
   }
@@ -117,7 +148,7 @@ public final class FactoryControllerScreen extends AbstractContainerScreen<Facto
   @Override
   public void render(GuiGraphics graphics, int mouseX, int mouseY, float partialTick) {
     super.render(graphics, mouseX, mouseY, partialTick);
-    if (editingThread != null) {
+    if (editor != null) {
       renderEditor(graphics, mouseX, mouseY, partialTick);
     } else {
       renderTooltip(graphics, mouseX, mouseY);
@@ -131,16 +162,12 @@ public final class FactoryControllerScreen extends AbstractContainerScreen<Facto
     return Component.translatable("gui.mmcece.factory_thread." + key, args);
   }
 
-  private int editorLeft() {
-    return leftPos + 6;
-  }
-
-  private int editorTop() {
-    return topPos + 6;
+  public @Nullable ScreenRectangle threadEditorBounds() {
+    return editor == null ? null : editor.bounds();
   }
 
   private MachinePayloads.FactoryStatusThread editedThread() {
-    return editingThread == null ? null : threads().stream().filter(thread -> thread.threadId().equals(editingThread))
+    return editor == null ? null : threads().stream().filter(thread -> thread.threadId().equals(editor.threadId))
         .findFirst().orElse(null);
   }
 
@@ -159,14 +186,12 @@ public final class FactoryControllerScreen extends AbstractContainerScreen<Facto
   }
 
   private void openEditor(MachinePayloads.FactoryStatusThread thread) {
-    editingThread = thread.threadId();
-    editingMachine = thread.machineId();
     query = "";
     parallelText = Integer.toString(thread.parallelLimit());
     recipePage = 0;
     pending = null;
     editorMessage = Component.empty();
-    installFields();
+    installEditor(thread, leftPos + 6, topPos + 6);
     refreshRecipes();
   }
 
@@ -179,14 +204,14 @@ public final class FactoryControllerScreen extends AbstractContainerScreen<Facto
     }
   }
 
-  private void installFields() {
+  private void installEditor(MachinePayloads.FactoryStatusThread thread, int left, int top) {
     if (search != null) {
       removeWidget(search);
     }
     if (parallel != null) {
       removeWidget(parallel);
     }
-    search = new EditBox(font, editorLeft() + 8, editorTop() + 70, 186, 18, tr("search"));
+    search = new EditBox(font, 0, 0, 186, 18, tr("search"));
     search.setMaxLength(256);
     search.setValue(query);
     search.setResponder(value -> {
@@ -195,7 +220,7 @@ public final class FactoryControllerScreen extends AbstractContainerScreen<Facto
       filterRecipes();
     });
     addWidget(search);
-    parallel = new EditBox(font, editorLeft() + 152, editorTop() + 42, 58, 18, tr("parallel"));
+    parallel = new EditBox(font, 0, 0, 58, 18, tr("parallel"));
     parallel.setMaxLength(10);
     parallel.setFilter(value -> value.matches("[0-9]*"));
     parallel.setValue(parallelText);
@@ -204,7 +229,12 @@ public final class FactoryControllerScreen extends AbstractContainerScreen<Facto
       parallel.setTextColor(parallelValue() > 0 ? 0xFFE0E0E0 : 0xFFFF7777);
     });
     addWidget(parallel);
+    editor = new ThreadEditorPanel(thread);
+    editor.setPosition(
+        Math.clamp(left, 0, Math.max(0, width - EDITOR_WIDTH)),
+        Math.clamp(top, 0, Math.max(0, height - EDITOR_HEIGHT)));
     setFocused(null);
+    setDragging(false);
   }
 
   private void closeEditor() {
@@ -218,8 +248,7 @@ public final class FactoryControllerScreen extends AbstractContainerScreen<Facto
     setDragging(false);
     search = null;
     parallel = null;
-    editingThread = null;
-    editingMachine = null;
+    editor = null;
     recipes = List.of();
     filteredRecipes = List.of();
     recipeLabels = Map.of();
@@ -231,7 +260,7 @@ public final class FactoryControllerScreen extends AbstractContainerScreen<Facto
     var connection = minecraft.getConnection();
     recipes = connection == null ? List.of() : connection.getRecipeManager()
         .getAllRecipesFor(MachineRecipeRegistries.ITEM_TYPE.get()).stream()
-        .filter(holder -> holder.value().machineId().equals(editingMachine))
+        .filter(holder -> holder.value().machineId().equals(editor.machine))
         .sorted(Comparator.comparing(holder -> holder.id().toString())).toList();
     recipeLabels = recipes.stream()
         .collect(Collectors.toUnmodifiableMap(RecipeHolder::id, holder -> recipeLabel(holder.value())));
@@ -350,11 +379,11 @@ public final class FactoryControllerScreen extends AbstractContainerScreen<Facto
   @Override
   protected void containerTick() {
     super.containerTick();
-    if (editingThread == null) {
+    if (editor == null) {
       return;
     }
     var thread = editedThread();
-    if (thread == null || !thread.machineId().equals(editingMachine)) {
+    if (thread == null || !thread.machineId().equals(editor.machine)) {
       closeEditor();
       return;
     }
@@ -371,23 +400,23 @@ public final class FactoryControllerScreen extends AbstractContainerScreen<Facto
   }
 
   private boolean editorHit(double mouseX, double mouseY, int x, int y, int width, int height) {
-    return mouseX >= editorLeft() + x
-        && mouseX < editorLeft() + x + width
-        && mouseY >= editorTop() + y
-        && mouseY < editorTop() + y + height;
+    return mouseX >= editor.left + x
+        && mouseX < editor.left + x + width
+        && mouseY >= editor.top + y
+        && mouseY < editor.top + y + height;
   }
 
   private void drawEditorButton(GuiGraphics graphics, int x, int y, int width, int height, Component label, boolean active, int mouseX, int mouseY) {
-    GuiTextures.blitNineSlice(graphics, EDITOR_BUTTON, editorLeft() + x, editorTop() + y, width, height);
+    GuiTextures.blitNineSlice(graphics, EDITOR_BUTTON, editor.left + x, editor.top + y, width, height);
     if (active && editorHit(mouseX, mouseY, x, y, width, height)) {
-      graphics.renderOutline(editorLeft() + x, editorTop() + y, width, height, 0xFF205A70);
+      graphics.renderOutline(editor.left + x, editor.top + y, width, height, 0xFF205A70);
     }
     String text = font.plainSubstrByWidth(label.getString(), Math.max(0, width - 4));
     graphics.drawString(
         font,
         text,
-        editorLeft() + x + (width - font.width(text)) / 2,
-        editorTop() + y + (height - font.lineHeight) / 2,
+        editor.left + x + (width - font.width(text)) / 2,
+        editor.top + y + (height - font.lineHeight) / 2,
         active ? 0xFF202020 : 0xFF888888,
         false);
   }
@@ -404,15 +433,17 @@ public final class FactoryControllerScreen extends AbstractContainerScreen<Facto
     graphics.pose().pushPose();
     graphics.pose().translate(0, 0, 400);
     try {
-      GuiTextures.blitNineSlice(graphics, EDITOR_BACKGROUND, editorLeft(), editorTop(), EDITOR_WIDTH, EDITOR_HEIGHT);
+      GuiTextures.blitNineSlice(graphics, EDITOR_BACKGROUND, editor.left, editor.top, EDITOR_WIDTH, EDITOR_HEIGHT);
       graphics.drawString(
           font,
-          font.plainSubstrByWidth(tr("title", thread.threadId()).getString(), 222),
-          editorLeft() + 8,
-          editorTop() + 7,
+          font.plainSubstrByWidth(
+              tr("title", thread.threadId()).getString(),
+              EDITOR_WIDTH - editor.handle.reservedWidth() - 8),
+          editor.left + 8,
+          editor.top + 7,
           FONT_COLOR,
           false);
-      drawEditorButton(graphics, 240, 4, 20, 16, Component.literal("X"), true, mouseX, mouseY);
+      drawEditorButton(graphics, CLOSE_X, CLOSE_Y, 20, 16, Component.literal("X"), true, mouseX, mouseY);
       var lockedName = tr("unlocked");
       if (thread.lockedRecipe() != null) {
         lockedName = recipeLabels.getOrDefault(
@@ -423,13 +454,22 @@ public final class FactoryControllerScreen extends AbstractContainerScreen<Facto
       graphics.drawString(
           font,
           font.plainSubstrByWidth(locked.getString(), 174),
-          editorLeft() + 8,
-          editorTop() + 24,
+          editor.left + 8,
+          editor.top + UNLOCK_Y + 3,
           FONT_COLOR,
           false);
-      drawEditorButton(graphics, 190, 20, 70, 16, tr("unlock"), idle && thread.lockedRecipe() != null, mouseX, mouseY);
+      drawEditorButton(
+          graphics,
+          190,
+          UNLOCK_Y,
+          70,
+          16,
+          tr("unlock"),
+          idle && thread.lockedRecipe() != null,
+          mouseX,
+          mouseY);
       drawEditorButton(graphics, 8, 42, 80, 18, tr(thread.enabled() ? "disable" : "enable"), editable, mouseX, mouseY);
-      graphics.drawString(font, tr("parallel"), editorLeft() + 94, editorTop() + 47, FONT_COLOR, false);
+      graphics.drawString(font, tr("parallel"), editor.left + 94, editor.top + 47, FONT_COLOR, false);
       parallel.render(graphics, mouseX, mouseY, partialTick);
       drawEditorButton(
           graphics,
@@ -450,21 +490,21 @@ public final class FactoryControllerScreen extends AbstractContainerScreen<Facto
         int y = 94 + row * 25;
         boolean selected = recipe.id().equals(thread.lockedRecipe());
         graphics.fill(
-            editorLeft() + 8,
-            editorTop() + y,
-            editorLeft() + 260,
-            editorTop() + y + 23,
+            editor.left + 8,
+            editor.top + y,
+            editor.left + 260,
+            editor.top + y + 23,
             selected ? 0xFFD4E8D0 : 0xFFD5D5D5);
         var icon = recipe.value().outputs().isEmpty() ? ItemStack.EMPTY : recipe.value()
             .getResultItem(minecraft.level.registryAccess());
         if (!icon.isEmpty()) {
-          graphics.renderItem(icon, editorLeft() + 11, editorTop() + y + 3);
+          graphics.renderItem(icon, editor.left + 11, editor.top + y + 3);
         }
         graphics.drawString(
             font,
             font.plainSubstrByWidth(label.getString(), 169),
-            editorLeft() + 32,
-            editorTop() + y + 7,
+            editor.left + 32,
+            editor.top + y + 7,
             FONT_COLOR,
             false);
         drawEditorButton(
@@ -482,11 +522,11 @@ public final class FactoryControllerScreen extends AbstractContainerScreen<Facto
         }
       }
       if (filteredRecipes.isEmpty()) {
-        graphics.drawString(font, tr("no_recipes"), editorLeft() + 12, editorTop() + 106, FONT_COLOR, false);
+        graphics.drawString(font, tr("no_recipes"), editor.left + 12, editor.top + 106, FONT_COLOR, false);
       }
       drawEditorButton(graphics, 8, 173, 24, 16, Component.literal("<"), recipePage > 0, mouseX, mouseY);
       var page = Component.literal((recipePage + 1) + " / " + recipePages());
-      graphics.drawString(font, page, editorLeft() + 36, editorTop() + 177, FONT_COLOR, false);
+      graphics.drawString(font, page, editor.left + 36, editor.top + 177, FONT_COLOR, false);
       drawEditorButton(
           graphics,
           94,
@@ -504,17 +544,18 @@ public final class FactoryControllerScreen extends AbstractContainerScreen<Facto
       graphics.drawString(
           font,
           font.plainSubstrByWidth(message.getString(), 250),
-          editorLeft() + 8,
-          editorTop() + 191,
+          editor.left + 8,
+          editor.top + 191,
           busy(thread) ? 0xFF8A2B20 : FONT_COLOR,
           false);
-      if (editorHit(mouseX, mouseY, 8, 20, 174, 17)) {
+      if (editorHit(mouseX, mouseY, 8, UNLOCK_Y, 174, 16)) {
         tooltip = List.of(locked);
       } else if (editorHit(mouseX, mouseY, 94, 42, 166, 18)) {
         tooltip = List.of(tr("parallel_current", thread.parallelLimit()), tr("parallel_help"));
       } else if (editorHit(mouseX, mouseY, 8, 190, 250, 11)) {
         tooltip = List.of(message);
       }
+      editor.handle.render(graphics, mouseX, mouseY, partialTick);
     } finally {
       graphics.pose().popPose();
     }
@@ -678,8 +719,8 @@ public final class FactoryControllerScreen extends AbstractContainerScreen<Facto
 
   @Override
   public boolean mouseScrolled(double mouseX, double mouseY, double scrollX, double scrollY) {
-    if (editingThread != null) {
-      if (editorHit(mouseX, mouseY, 8, 94, 252, 73) && scrollY != 0) {
+    if (editor != null) {
+      if (!editor.handle.isHeld() && editorHit(mouseX, mouseY, 8, 94, 252, 73) && scrollY != 0) {
         recipePage = Math.clamp(recipePage + (scrollY > 0 ? -1 : 1), 0, recipePages() - 1);
       }
       return true;
@@ -694,7 +735,7 @@ public final class FactoryControllerScreen extends AbstractContainerScreen<Facto
 
   @Override
   public boolean mouseClicked(double mouseX, double mouseY, int button) {
-    if (editingThread != null) {
+    if (editor != null) {
       if (!editorHit(mouseX, mouseY, 0, 0, EDITOR_WIDTH, EDITOR_HEIGHT)) {
         if (button == 0) {
           closeEditor();
@@ -704,19 +745,21 @@ public final class FactoryControllerScreen extends AbstractContainerScreen<Facto
       if (button != 0) {
         return true;
       }
-      if (editorHit(mouseX, mouseY, 240, 4, 20, 16)) {
+      if (editor.handle.mouseClicked(mouseX, mouseY, button)) {
+        setFocused(null);
+      } else if (editorHit(mouseX, mouseY, CLOSE_X, CLOSE_Y, 20, 16)) {
         closeEditor();
-      } else if (editorHit(mouseX, mouseY, 8, 70, 186, 18)) {
+      } else if (search.isMouseOver(mouseX, mouseY)) {
         search.mouseClicked(mouseX, mouseY, button);
         setFocused(search);
         setDragging(true);
-      } else if (parallel.active && editorHit(mouseX, mouseY, 152, 42, 58, 18)) {
+      } else if (parallel.isMouseOver(mouseX, mouseY)) {
         parallel.mouseClicked(mouseX, mouseY, button);
         setFocused(parallel);
         setDragging(true);
       } else {
         setFocused(null);
-        if (editorHit(mouseX, mouseY, 190, 20, 70, 16)) {
+        if (editorHit(mouseX, mouseY, 190, UNLOCK_Y, 70, 16)) {
           sendAction(MachinePayloads.FactoryAction.SET_LOCKED_RECIPE, null);
         } else if (editorHit(mouseX, mouseY, 8, 42, 80, 18)) {
           sendAction(MachinePayloads.FactoryAction.SET_ENABLED, null);
@@ -730,7 +773,7 @@ public final class FactoryControllerScreen extends AbstractContainerScreen<Facto
         } else if (editorHit(mouseX, mouseY, 94, 173, 24, 16)) {
           recipePage = Math.min(recipePages() - 1, recipePage + 1);
         } else if (editorHit(mouseX, mouseY, 8, 94, 252, 73)) {
-          int localY = (int) (mouseY - editorTop() - 94);
+          int localY = (int) (mouseY - editor.top - 94);
           int row = localY / 25;
           int index = recipePage * RECIPES_PER_PAGE + row;
           if (localY % 25 < 23 && row < RECIPES_PER_PAGE && index < filteredRecipes.size()) {
@@ -751,8 +794,8 @@ public final class FactoryControllerScreen extends AbstractContainerScreen<Facto
 
   @Override
   public boolean mouseDragged(double mouseX, double mouseY, int button, double dragX, double dragY) {
-    if (editingThread != null) {
-      if (getFocused() instanceof EditBox edit) {
+    if (editor != null) {
+      if (!editor.handle.mouseDragged(mouseX, mouseY, button, dragX, dragY) && getFocused() instanceof EditBox edit) {
         edit.mouseDragged(mouseX, mouseY, button, dragX, dragY);
       }
       return true;
@@ -766,9 +809,9 @@ public final class FactoryControllerScreen extends AbstractContainerScreen<Facto
 
   @Override
   public boolean mouseReleased(double mouseX, double mouseY, int button) {
-    if (editingThread != null) {
+    if (editor != null) {
       setDragging(false);
-      if (getFocused() instanceof EditBox edit) {
+      if (!editor.handle.mouseReleased(mouseX, mouseY, button) && getFocused() instanceof EditBox edit) {
         edit.mouseReleased(mouseX, mouseY, button);
       }
       return true;
@@ -778,7 +821,7 @@ public final class FactoryControllerScreen extends AbstractContainerScreen<Facto
 
   @Override
   public boolean keyPressed(int keyCode, int scanCode, int modifiers) {
-    if (editingThread == null) {
+    if (editor == null) {
       return super.keyPressed(keyCode, scanCode, modifiers);
     }
     if (keyCode == GLFW.GLFW_KEY_ESCAPE) {
@@ -807,7 +850,7 @@ public final class FactoryControllerScreen extends AbstractContainerScreen<Facto
 
   @Override
   public boolean charTyped(char codePoint, int modifiers) {
-    if (editingThread != null) {
+    if (editor != null) {
       return getFocused() instanceof EditBox edit && edit.charTyped(codePoint, modifiers);
     }
     return super.charTyped(codePoint, modifiers);

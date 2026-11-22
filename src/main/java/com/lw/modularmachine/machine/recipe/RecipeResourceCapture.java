@@ -63,7 +63,8 @@ final class RecipeResourceCapture {
     var interfaces = new ArrayList<SmartSnapshot>();
     var positions = new HashSet<BlockPos>();
     var definition = registration.pattern.definition;
-    for (int index = 0; index < definition.parts().size(); index++) {
+    List<Integer> indices = mode == CaptureMode.COMPONENTS ? List.of() : registration.pattern.recipePartIndices();
+    for (int index : indices) {
       var part = definition.parts().get(index);
       if (mode == CaptureMode.ALL && !part.interfaceType().isEmpty()) {
         var position = registration.pattern.position(index);
@@ -77,7 +78,7 @@ final class RecipeResourceCapture {
         }
         interfaces.add(new SmartSnapshot(position, smart, binding));
       }
-      if (mode == CaptureMode.COMPONENTS || part.rule().port() == null) {
+      if (part.rule().port() == null) {
         continue;
       }
       if (mode == CaptureMode.OUTPUTS

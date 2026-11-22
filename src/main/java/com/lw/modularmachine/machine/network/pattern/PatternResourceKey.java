@@ -1,5 +1,6 @@
 package com.lw.modularmachine.machine.network.pattern;
 
+import com.lw.modularmachine.api.component.ResourceType;
 import com.lw.modularmachine.machine.network.NetworkPortResource;
 import com.lw.modularmachine.machine.network.codec.NetworkResourceCodecs;
 import java.util.Objects;
@@ -41,6 +42,10 @@ public final class PatternResourceKey {
 
   public NetworkPortResource resource(HolderLookup.Provider registries) {
     return NetworkPortResource.load(registries, encoded.copy());
+  }
+
+  public ResourceType kind() {
+    return identity.kind();
   }
 
   public CompoundTag save() {

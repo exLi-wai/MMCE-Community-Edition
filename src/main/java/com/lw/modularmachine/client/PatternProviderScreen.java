@@ -10,12 +10,13 @@ import net.minecraft.client.Minecraft;
 import net.minecraft.client.gui.GuiGraphics;
 import net.minecraft.client.gui.screens.inventory.AbstractContainerScreen;
 import net.minecraft.network.chat.Component;
+import net.minecraft.network.chat.MutableComponent;
 import net.minecraft.resources.ResourceLocation;
 import net.minecraft.world.entity.player.Inventory;
 
 /**
- * Legacy provider layout with a separate, paged view of each physical pattern
- * cache.
+ * Legacy provider layout with a paged cache view and an optional pattern slot
+ * filter.
  */
 public final class PatternProviderScreen extends AbstractContainerScreen<PatternProviderMenu> {
   private static final ResourceLocation TEXTURE = ResourceLocation
@@ -42,9 +43,7 @@ public final class PatternProviderScreen extends AbstractContainerScreen<Pattern
     graphics.blit(TEXTURE, leftPos, topPos, 0, 0, imageWidth, imageHeight, 256, 256);
     for (int index = 0; index < 36; index++) {
       var slot = menu.getSlot(index);
-      if (!slot.hasItem()) {
-        NetworkPortAmountWidgets.patternSlotBackground(graphics, leftPos + slot.x, topPos + slot.y);
-      }
+      NetworkPortAmountWidgets.patternSlotBackground(graphics, leftPos + slot.x, topPos + slot.y);
     }
     graphics.blit(
         TEXTURE,
@@ -93,6 +92,10 @@ public final class PatternProviderScreen extends AbstractContainerScreen<Pattern
     graphics.drawString(font, Component.translatable("menu.mmcece.pattern.cached"), 180, 11, 0x404040, false);
     graphics.drawString(font, playerInventoryTitle, 7, 101, 0x404040, false);
     graphics.drawString(font, Component.translatable("menu.mmcece.pattern.independent"), 180, 158, 0x404040, false);
+    if (menu.status() != null && menu.status().snapshot().selectedSlot() != PatternProviderPayloads.ALL_SLOTS) {
+      var selected = menu.getSlot(menu.status().snapshot().selectedSlot());
+      graphics.renderOutline(selected.x - 1, selected.y - 1, 18, 18, 0xFF205A70);
+    }
     int entry = cacheAt(mouseX, mouseY);
     if (menu.status() != null && entry >= 0 && entry < menu.status().snapshot().entries().size()) {
       renderSlotHighlight(graphics, 181 + entry % 3 * 18, 28 + entry / 3 * 18, 0);
@@ -113,11 +116,12 @@ public final class PatternProviderScreen extends AbstractContainerScreen<Pattern
     } else if (menu.status() != null) {
       var snapshot = menu.status().snapshot();
       int entry = cacheAt(mouseX, mouseY);
+      int pattern = patternAt(mouseX, mouseY);
       if (entry >= 0 && entry < snapshot.entries().size()) {
         var value = snapshot.entries().get(entry);
         tooltip.add(NetworkPortScreen.resourceName(value.resource()));
         tooltip.add(Component.translatable("menu.mmcece.pattern.amount", value.amount()));
-        tooltip.add(Component.translatable("menu.mmcece.pattern.slot", snapshot.selectedSlot() + 1));
+        tooltip.add(Component.translatable("menu.mmcece.pattern.slot", value.slot() + 1));
         if (value.retired()) {
           tooltip.add(Component.translatable("menu.mmcece.pattern.retired"));
         }
@@ -128,10 +132,8 @@ public final class PatternProviderScreen extends AbstractContainerScreen<Pattern
         tooltip
             .add(Component.translatable("menu.mmcece.pattern.fluid", snapshot.fluidAmount(), snapshot.fluidCapacity()));
         tooltip.add(Component.translatable("menu.mmcece.pattern.fluid.description"));
-      } else if (patternAt(mouseX, mouseY) >= 0
-          && menu.getCarried().isEmpty()
-          && !menu.getSlot(patternAt(mouseX, mouseY)).hasItem()) {
-        tooltip.add(Component.translatable("menu.mmcece.pattern.select"));
+      } else if (pattern >= 0 && menu.getCarried().isEmpty() && !menu.getSlot(pattern).hasItem()) {
+        tooltip.add(patternFilterHint(pattern));
       }
     }
     if (!tooltip.isEmpty()) {
@@ -146,9 +148,14 @@ public final class PatternProviderScreen extends AbstractContainerScreen<Pattern
     var tooltip = new ArrayList<>(super.getTooltipFromContainerItem(stack));
     if (hoveredSlot != null && hoveredSlot.index < 36) {
       tooltip.add(Component.empty());
-      tooltip.add(Component.translatable("menu.mmcece.pattern.select").withStyle(ChatFormatting.GRAY));
+      tooltip.add(patternFilterHint(hoveredSlot.index).withStyle(ChatFormatting.GRAY));
     }
     return tooltip;
+  }
+
+  private MutableComponent patternFilterHint(int slot) {
+    boolean selected = menu.status() != null && menu.status().snapshot().selectedSlot() == slot;
+    return Component.translatable(selected ? "menu.mmcece.pattern.select_all" : "menu.mmcece.pattern.select");
   }
 
   @Override
@@ -171,7 +178,8 @@ public final class PatternProviderScreen extends AbstractContainerScreen<Pattern
       }
       int selected = patternAt(mouseX, mouseY);
       if (button == 0 && selected >= 0 && menu.getCarried().isEmpty() && !hasShiftDown()) {
-        menu.request(PatternProviderPayloads.Operation.SELECT_SLOT, selected, 0);
+        int filter = selected == slot ? PatternProviderPayloads.ALL_SLOTS : selected;
+        menu.request(PatternProviderPayloads.Operation.SELECT_SLOT, filter, 0);
         return true;
       }
     }

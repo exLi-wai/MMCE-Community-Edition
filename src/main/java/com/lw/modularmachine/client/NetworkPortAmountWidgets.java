@@ -14,6 +14,10 @@ import net.minecraft.resources.ResourceLocation;
 final class NetworkPortAmountWidgets {
   private static final ResourceLocation ICONS = ResourceLocation
       .fromNamespaceAndPath("ae2", "textures/guis/states.png");
+  private static final ResourceLocation PATTERN_SLOT = ResourceLocation
+      .fromNamespaceAndPath("mmcece", "textures/gui/pattern_slot_outline.png");
+  /** Plate colour the outline texture was extracted from (154,159,180). */
+  private static final int PATTERN_SLOT_PLATE = 0xFF9A9FB4;
   private static final ResourceLocation NORMAL = ResourceLocation.fromNamespaceAndPath("ae2", "button");
   private static final ResourceLocation HIGHLIGHTED = ResourceLocation
       .fromNamespaceAndPath("ae2", "button_highlighted");
@@ -22,9 +26,17 @@ final class NetworkPortAmountWidgets {
   private NetworkPortAmountWidgets() {
   }
 
-  /** AE 19.2's encoded-pattern slot background, before the actual slot item. */
+  /** AE2's standard 18x18 slot frame. */
+  static void slotBackground(GuiGraphics graphics, int x, int y) {
+    graphics.blit(ICONS, x, y, 192, 192, 18, 18, 256, 256);
+  }
+
+  /**
+   * Blank-pattern outline drawn as the background of every provider pattern slot.
+   */
   static void patternSlotBackground(GuiGraphics graphics, int x, int y) {
-    graphics.blit(ICONS, x, y, 240, 112, 16, 16, 256, 256);
+    graphics.fill(x, y, x + 16, y + 16, PATTERN_SLOT_PLATE);
+    graphics.blit(PATTERN_SLOT, x, y, 0, 0, 16, 16, 16, 16);
   }
 
   static Button gear(int x, int y, Runnable action) {

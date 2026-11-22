@@ -240,6 +240,7 @@
   "emi.category.mmcece.recipe": "机器配方：%s",
   "emi.category.mmcece.structure": "机器结构预览",
 
+  "gui.mmcece.drag_handle": "按住扳手后拖动面板",
   "gui.mmcece.factory_thread.applied": "配置已应用",
   "gui.mmcece.factory_thread.apply": "应用",
   "gui.mmcece.factory_thread.busy": "线程已有任务，暂不能修改锁定与并行设置",
@@ -472,6 +473,7 @@
   "jade.mmcece.network.mirror_invalid": "镜像：离线（供应器绑定已失效）",
   "jade.mmcece.network.mirror_unavailable": "镜像：不可用（绑定数据异常）",
   "jade.mmcece.network.target": "目标供应器：%s",
+  "jade.mmcece.pattern_cache.more": "另有 %s 条，可在供应器界面查看",
 
   "jei.mmcece.candidates": "可选方块",
   "jei.mmcece.details.dimensions": "尺寸 %s×%s×%s · 总计 %s 个方块",
@@ -604,6 +606,7 @@
   "menu.mmcece.group.tooltip": "不同的组中，配方检查独立进行",
   "menu.mmcece.group.value": "当前ID：",
   "menu.mmcece.network.amount": "拉取数量",
+  "menu.mmcece.network.choose_resource": "选择补货资源",
   "menu.mmcece.network.clear": "右键清空配置",
   "menu.mmcece.network.configure.chemical": "拿起化学品容器后左键设置，或从 JEI/EMI 拖入化学品或容器",
   "menu.mmcece.network.configure.fluid": "拿起流体容器后左键设置，或从 JEI/EMI 拖入流体或容器",
@@ -1044,7 +1047,8 @@
   "menu.mmcece.pattern.retired": "旧样板缓存，等待返还",
   "menu.mmcece.pattern.fluid": "%s / %s mB",
   "menu.mmcece.pattern.fluid.description": "持单个流体容器点击以存入或取出。",
-  "menu.mmcece.pattern.select": "左键查看缓存；右键或Shift＋左键取出样板。",
+  "menu.mmcece.pattern.select": "左键查看此槽缓存。右键或 Shift＋左键取出样板。",
+  "menu.mmcece.pattern.select_all": "左键查看全部缓存。右键或 Shift＋左键取出样板。",
   "tooltip.mmcece.configuration_card.type.pattern_provider": "样板供应器引用",
   "tooltip.mmcece.configuration_card.pattern_target": "%s @ %s",
   "message.mmcece.configuration_card.cross_dimension": "镜像只能绑定同维度供应器。"

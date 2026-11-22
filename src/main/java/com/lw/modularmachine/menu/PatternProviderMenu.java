@@ -2,6 +2,7 @@ package com.lw.modularmachine.menu;
 
 import com.lw.modularmachine.blockentity.PatternProviderBlockEntity;
 import com.lw.modularmachine.machine.network.NetworkPortResource;
+import com.lw.modularmachine.machine.network.pattern.PatternProviderState;
 import com.lw.modularmachine.network.PatternProviderPayloads;
 import com.lw.modularmachine.registry.MachineRegistries;
 import java.util.ArrayList;
@@ -25,7 +26,7 @@ public final class PatternProviderMenu extends AbstractContainerMenu {
   private final Player viewer;
   private final UUID session = UUID.randomUUID();
   private long sequence;
-  private int selectedSlot;
+  private int selectedSlot = PatternProviderPayloads.ALL_SLOTS;
   private int firstRow;
   private PatternProviderPayloads.Status status;
   private PatternProviderPayloads.Status lastSent;
@@ -97,8 +98,8 @@ public final class PatternProviderMenu extends AbstractContainerMenu {
 
   public void request(PatternProviderPayloads.Operation operation, int slot, int row) {
     if (status != null
-        && slot >= 0
-        && slot < 36
+        && slot >= PatternProviderPayloads.ALL_SLOTS
+        && slot < PatternProviderState.SLOT_COUNT
         && row >= 0
         && (status.editable()
             || operation == PatternProviderPayloads.Operation.SELECT_SLOT
@@ -110,7 +111,7 @@ public final class PatternProviderMenu extends AbstractContainerMenu {
               status.session(),
               status.snapshot().revision(),
               slot,
-              status.snapshot().generations().get(slot),
+              slot == PatternProviderPayloads.ALL_SLOTS ? 0 : status.snapshot().generations().get(slot),
               operation,
               row));
     }
@@ -122,9 +123,7 @@ public final class PatternProviderMenu extends AbstractContainerMenu {
         && action.position().equals(provider.getBlockPos())
         && action.session().equals(session)
         && stillValid(player)
-        && !provider.state().inTransaction()
-        && action.revision() == provider.resourceRevision()
-        && action.generation() == provider.state().generation(action.slot())) {
+        && !provider.state().inTransaction()) {
       switch (action.operation()) {
         case SELECT_SLOT -> {
           selectedSlot = action.slot();
@@ -136,12 +135,12 @@ public final class PatternProviderMenu extends AbstractContainerMenu {
           }
         }
         case RETURN_ALL -> {
-          if (canEdit(player)) {
+          if (canApplyEdit(player, action)) {
             provider.requestReturnAll();
           }
         }
         case FLUID_CONTAINER -> {
-          if (canEdit(player)) {
+          if (canApplyEdit(player, action)) {
             provider.interactIndependentFluid(player);
           }
         }
@@ -149,6 +148,13 @@ public final class PatternProviderMenu extends AbstractContainerMenu {
     }
     lastSent = null;
     broadcastChanges();
+  }
+
+  private boolean canApplyEdit(ServerPlayer player, PatternProviderPayloads.Action action) {
+    return canEdit(player)
+        && action.revision() == provider.resourceRevision()
+        && (action.slot() == PatternProviderPayloads.ALL_SLOTS
+            || action.generation() == provider.state().generation(action.slot()));
   }
 
   private boolean canEdit(Player player) {
@@ -206,19 +212,25 @@ public final class PatternProviderMenu extends AbstractContainerMenu {
   }
 
   private PatternProviderPayloads.Snapshot capture() {
-    var generations = new ArrayList<Long>(36);
-    for (int slot = 0; slot < 36; slot++) {
+    var generations = new ArrayList<Long>(PatternProviderState.SLOT_COUNT);
+    for (int slot = 0; slot < PatternProviderState.SLOT_COUNT; slot++) {
       generations.add(provider.state().generation(slot));
     }
-    var containers = provider.state().containers().stream().filter(value -> value.address().slot() == selectedSlot)
+    var containers = provider.state().cachedContents()
+        .filter(value -> selectedSlot == PatternProviderPayloads.ALL_SLOTS || value.address().slot() == selectedSlot)
         .toList();
-    long count = containers.stream().mapToLong(value -> value.resources().physical().size()).sum();
-    int totalRows = (int) Math.min(Integer.MAX_VALUE, (count + 2) / 3);
-    firstRow = Math.min(firstRow, Math.max(0, totalRows - 7));
-    long skip = (long) firstRow * 3;
+    long count = containers.stream().mapToLong(value -> value.physical().size()).sum();
+    int columns = PatternProviderPayloads.COLUMNS;
+    int totalRows = (int) Math.min(Integer.MAX_VALUE, Math.ceilDiv(count, columns));
+    firstRow = Math.min(firstRow, Math.max(0, totalRows - PatternProviderPayloads.VISIBLE_ROWS));
+    long skip = (long) firstRow * columns;
     var entries = new ArrayList<PatternProviderPayloads.Entry>(PatternProviderPayloads.PAGE_SIZE);
     outer : for (var container : containers) {
-      for (var entry : container.resources().physical().entrySet()) {
+      if (skip >= container.physical().size()) {
+        skip -= container.physical().size();
+        continue;
+      }
+      for (var entry : container.physical().entrySet()) {
         if (skip > 0) {
           skip--;
           continue;
@@ -227,6 +239,7 @@ public final class PatternProviderMenu extends AbstractContainerMenu {
             new PatternProviderPayloads.Entry(
                 entry.getKey().resource(viewer.level().registryAccess()),
                 entry.getValue(),
+                container.address().slot(),
                 container.address().generation(),
                 container.retired()));
         if (entries.size() == PatternProviderPayloads.PAGE_SIZE) {

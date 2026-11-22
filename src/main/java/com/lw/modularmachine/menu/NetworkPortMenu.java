@@ -47,7 +47,7 @@ public final class NetworkPortMenu extends AbstractContainerMenu {
     super(MachineRegistries.NETWORK_PORT_MENU.get(), id);
     this.port = port;
     viewer = inventory.player;
-    int inventoryY = port.kind().isInput() ? 124 : 113;
+    int inventoryY = port.kind().isInput() ? 123 : 113;
     PlayerInventorySlots.add(inventory, this::addSlot, 8, inventoryY, inventoryY + 58);
   }
 

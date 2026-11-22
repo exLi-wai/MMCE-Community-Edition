@@ -86,7 +86,12 @@ final class NetworkDeviceTooltipProvider implements IBlockComponentProvider, ISe
       if (provider.state().inTransaction()) {
         return;
       }
-      status = provider.schemaSupported() ? networkStatus(provider, false) : Status.UNAVAILABLE;
+      if (provider.schemaSupported()) {
+        status = networkStatus(provider, false);
+        PatternCacheTooltip.capture(data, accessor, provider);
+      } else {
+        status = Status.UNAVAILABLE;
+      }
     } else if (entity instanceof PatternMirrorBlockEntity mirror) {
       status = mirrorStatus(data, mirror, level);
     } else {
@@ -152,5 +157,6 @@ final class NetworkDeviceTooltipProvider implements IBlockComponentProvider, ISe
           Component.translatable("jade.mmcece.network.target", BlockPos.of(data.getLong(TARGET)).toShortString())
               .withStyle(ChatFormatting.GRAY));
     }
+    PatternCacheDisplay.append(tooltip, accessor);
   }
 }

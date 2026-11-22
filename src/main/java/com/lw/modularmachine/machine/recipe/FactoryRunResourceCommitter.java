@@ -33,7 +33,7 @@ public final class FactoryRunResourceCommitter {
         || UpgradeLifecyclePublisher.isDispatching(factory)) {
       return FactoryRunResourceResult.STALE;
     }
-    if (!factory.canCommitStructure() || !run.matchesBindings(factory.registration().pattern.definition)) {
+    if (!factory.canCommitStructure() || !run.matchesBindings(factory.registration().pattern)) {
       return FactoryRunResourceResult.STALE;
     }
     if (run.lastProgressTick() == level.getGameTime()) {

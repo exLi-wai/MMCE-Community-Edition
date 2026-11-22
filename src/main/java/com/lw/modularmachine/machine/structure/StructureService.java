@@ -42,6 +42,7 @@ import net.neoforged.neoforge.event.level.ChunkEvent;
 import net.neoforged.neoforge.event.level.LevelEvent;
 import net.neoforged.neoforge.event.server.ServerStoppedEvent;
 import net.neoforged.neoforge.event.tick.LevelTickEvent;
+import net.neoforged.neoforge.gametest.GameTestHooks;
 import net.neoforged.neoforge.server.ServerLifecycleHooks;
 import org.slf4j.Logger;
 import org.jetbrains.annotations.ApiStatus;
@@ -396,7 +397,7 @@ public final class StructureService {
   }
 
   static boolean gameTestMode() {
-    return !System.getProperty("neoforge.enabledGameTestNamespaces", "").isBlank();
+    return GameTestHooks.isGametestServer();
   }
 
   private static int advanceDynamic(StructureLevelState state, ServerLevel level, StructureAnchor anchor, int budget) {

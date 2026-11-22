@@ -7,6 +7,7 @@ import com.lw.modularmachine.util.minecraft.energy.EnergyDisplay;
 import java.util.List;
 import net.minecraft.client.Minecraft;
 import net.minecraft.client.gui.GuiGraphics;
+import net.minecraft.client.gui.navigation.ScreenRectangle;
 import net.minecraft.client.gui.screens.inventory.AbstractContainerScreen;
 import net.minecraft.network.chat.Component;
 import net.minecraft.resources.ResourceLocation;
@@ -17,6 +18,8 @@ import net.neoforged.neoforge.client.extensions.common.IClientFluidTypeExtension
 import net.neoforged.neoforge.network.PacketDistributor;
 
 public final class MachineResourceScreen extends AbstractContainerScreen<MachineResourceMenu> {
+  private static final ScreenRectangle GAUGE = new ScreenRectangle(15, 10, 20, 61);
+
   public MachineResourceScreen(MachineResourceMenu menu, Inventory inventory, Component title) {
     super(menu, inventory, title);
     MachineControllerStatusClient.attach(this);
@@ -51,7 +54,7 @@ public final class MachineResourceScreen extends AbstractContainerScreen<Machine
         var sprite = Minecraft.getInstance().getTextureAtlas(InventoryMenu.BLOCK_ATLAS).apply(appearance.texture());
         int tint = appearance.tint();
         graphics.setColor((tint >> 16 & 255) / 255.0F, (tint >> 8 & 255) / 255.0F, (tint & 255) / 255.0F, 1.0F);
-        graphics.blit(x + 15, y + 10 + 61 - filled, 0, 20, filled, sprite);
+        graphics.blit(x + GAUGE.left(), y + GAUGE.bottom() - filled, 0, GAUGE.width(), filled, sprite);
         graphics.setColor(1, 1, 1, 1);
       }
     } else if (status != null) {
@@ -63,22 +66,22 @@ public final class MachineResourceScreen extends AbstractContainerScreen<Machine
             .apply(extension.getStillTexture(fluid));
         int tint = extension.getTintColor(fluid);
         graphics.setColor((tint >> 16 & 255) / 255.0F, (tint >> 8 & 255) / 255.0F, (tint & 255) / 255.0F, 1.0F);
-        graphics.blit(x + 15, y + 10 + 61 - filled, 0, 20, filled, sprite);
+        graphics.blit(x + GAUGE.left(), y + GAUGE.bottom() - filled, 0, GAUGE.width(), filled, sprite);
         graphics.setColor(1, 1, 1, 1);
       }
     }
-    graphics.blit(texture, x + 15, y + 10, 176, 0, 20, 61, 256, 256);
+    graphics.blit(texture, x + GAUGE.left(), y + GAUGE.top(), 176, 0, GAUGE.width(), GAUGE.height(), 256, 256);
   }
 
   private static void drawEnergyFill(GuiGraphics graphics, int x, int y, int filled) {
     if (filled > 0) {
       graphics.blit(
           ResourceLocation.fromNamespaceAndPath("mmcece", "textures/gui/guibar.png"),
-          x + 15,
-          y + 10 + 61 - filled,
+          x + GAUGE.left(),
+          y + GAUGE.bottom() - filled,
           196,
-          61 - filled,
-          20,
+          GAUGE.height() - filled,
+          GAUGE.width(),
           filled,
           256,
           256);
@@ -86,7 +89,8 @@ public final class MachineResourceScreen extends AbstractContainerScreen<Machine
   }
 
   private static int fillPixels(long amount, long capacity) {
-    return amount <= 0 || capacity <= 0 ? 0 : (int) Math.min(61, Math.max(0, Math.ceil(amount * 61.0 / capacity)));
+    return amount <= 0
+        || capacity <= 0 ? 0 : (int) Math.min(GAUGE.height(), Math.ceil((double) amount * GAUGE.height() / capacity));
   }
 
   @Override
@@ -95,15 +99,10 @@ public final class MachineResourceScreen extends AbstractContainerScreen<Machine
 
   @Override
   public boolean mouseClicked(double mouseX, double mouseY, int button) {
-    int localX = (int) mouseX - leftPos;
-    int localY = (int) mouseY - topPos;
     if (button == 0
         && (menu.port().kind().resource() == ResourceType.FLUID
             || menu.port().kind().resource() == ResourceType.CHEMICAL)
-        && localX >= 15
-        && localX <= 35
-        && localY >= 10
-        && localY <= 71) {
+        && GAUGE.containsPoint((int) Math.floor(mouseX - leftPos), (int) Math.floor(mouseY - topPos))) {
       var player = Minecraft.getInstance().player;
       if (player != null) {
         InteractionHand hand = !player.getMainHandItem()
@@ -125,9 +124,7 @@ public final class MachineResourceScreen extends AbstractContainerScreen<Machine
   public void render(GuiGraphics graphics, int mouseX, int mouseY, float partialTick) {
     super.render(graphics, mouseX, mouseY, partialTick);
     renderTooltip(graphics, mouseX, mouseY);
-    int localX = mouseX - leftPos;
-    int localY = mouseY - topPos;
-    if (localX < 15 || localX > 35 || localY < 10 || localY > 71) {
+    if (!GAUGE.containsPoint(mouseX - leftPos, mouseY - topPos)) {
       return;
     }
     var status = menu.status();
