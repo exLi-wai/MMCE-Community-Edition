@@ -7,6 +7,7 @@ import com.lw.modularmachine.api.recipe.RecipeModifier;
 import com.lw.modularmachine.machine.recipe.MachineRecipe;
 import java.util.LinkedHashMap;
 import java.util.List;
+import java.util.Locale;
 import java.util.Objects;
 
 /**
@@ -18,7 +19,12 @@ public final class NetworkPortRecipePlan {
     NO_INPUT,
     UNSUPPORTED,
     TOO_MANY,
-    AMOUNT_OVERFLOW
+    AMOUNT_OVERFLOW,
+    UNAVAILABLE;
+
+    public String tooltipKey() {
+      return "gui.mmcece.network_port.transfer." + (this == NONE ? "configure" : name().toLowerCase(Locale.ROOT));
+    }
   }
 
   public record Target(NetworkPortResource resource, int amount) {
@@ -44,6 +50,10 @@ public final class NetworkPortRecipePlan {
 
   public List<Target> targets() {
     return targets;
+  }
+
+  public static NetworkPortRecipePlan unavailable() {
+    return new NetworkPortRecipePlan(Error.UNAVAILABLE, List.of());
   }
 
   public static NetworkPortRecipePlan forRecipe(MachineRecipe recipe, ResourceType kind) {

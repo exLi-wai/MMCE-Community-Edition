@@ -11,7 +11,7 @@ import org.jetbrains.annotations.ApiStatus;
 
 /**
  * Internal quantity-free container samples shared by server configuration and
- * JEI drops.
+ * recipe viewer drops.
  */
 @ApiStatus.Internal
 public final class NetworkResourceSamples {

@@ -4,6 +4,7 @@ import com.lw.modularmachine.blockentity.NetworkPortBlockEntity;
 import com.lw.modularmachine.machine.network.NetworkPortRecipePlan;
 import com.lw.modularmachine.machine.network.NetworkPortResource;
 import com.lw.modularmachine.machine.recipe.MachineRecipeService;
+import com.lw.modularmachine.machine.recipe.MachineRecipe;
 import com.lw.modularmachine.network.NetworkPortPayloads;
 import com.lw.modularmachine.registry.MachineRegistries;
 import java.util.List;
@@ -131,6 +132,13 @@ public final class NetworkPortMenu extends AbstractContainerMenu {
     }
     lastSent = null;
     broadcastChanges();
+  }
+
+  public NetworkPortRecipePlan previewRecipe(MachineRecipe recipe) {
+    if (viewer.containerMenu != this || status == null || !status.editable() || !status.snapshot().input()) {
+      return NetworkPortRecipePlan.unavailable();
+    }
+    return NetworkPortRecipePlan.forRecipe(recipe, status.snapshot().resource());
   }
 
   public boolean requestRecipe(ResourceLocation recipeId, int transferId, List<NetworkPortRecipePlan.Target> previewTargets) {

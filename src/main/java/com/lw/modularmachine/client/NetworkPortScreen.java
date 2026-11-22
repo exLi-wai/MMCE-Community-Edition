@@ -127,6 +127,10 @@ public final class NetworkPortScreen extends AbstractContainerScreen<NetworkPort
     return new Rect2i(leftPos + 8 + slot * 18, topPos + 54, 16, 16);
   }
 
+  public int ghostSlotAt(int mouseX, int mouseY) {
+    return input ? slotAt(mouseX - leftPos, mouseY - topPos, 54, 1) : -1;
+  }
+
   public void acceptGhost(int slot, NetworkPortResource resource, UUID session, long revision) {
     if (canAcceptGhosts() && resource.kind() == menu.port().kind().resource()) {
       menu.requestGhost(slot, resource, session, revision);
@@ -156,10 +160,8 @@ public final class NetworkPortScreen extends AbstractContainerScreen<NetworkPort
     if (amountScreen != null) {
       return amountScreen.mouseClicked(mouseX, mouseY, button);
     }
-    int x = (int) mouseX - leftPos;
-    int y = (int) mouseY - topPos;
-    int slot = slotAt(x, y, 54, 1);
-    if (input && slot >= 0 && (button == 0 || button == 1)) {
+    int slot = ghostSlotAt((int) mouseX, (int) mouseY);
+    if (slot >= 0 && (button == 0 || button == 1)) {
       selected = slot;
       if (button == 1) {
         request(NetworkPortPayloads.Operation.CLEAR, 0);
@@ -332,7 +334,7 @@ public final class NetworkPortScreen extends AbstractContainerScreen<NetworkPort
     }
     int x = mouseX - leftPos;
     int y = mouseY - topPos;
-    int slot = input ? slotAt(x, y, 54, 1) : -1;
+    int slot = ghostSlotAt(mouseX, mouseY);
     boolean configured = slot >= 0;
     if (!configured) {
       slot = slotAt(x, y, input ? 72 : 24, input ? 1 : 4);

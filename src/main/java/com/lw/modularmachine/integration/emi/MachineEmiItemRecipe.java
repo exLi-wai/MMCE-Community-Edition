@@ -48,6 +48,10 @@ final class MachineEmiItemRecipe extends BasicEmiRecipe {
     return super.supportsRecipeTree() && hasExactChemicalCosts;
   }
 
+  MachineRecipe definition() {
+    return recipe;
+  }
+
   @Override
   public void addWidgets(WidgetHolder widgets) {
     widgets.addDrawable(

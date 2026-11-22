@@ -6,7 +6,6 @@ import com.lw.modularmachine.network.NetworkPortPayloads;
 import com.lw.modularmachine.registry.MachineRegistries;
 import java.util.HashMap;
 import java.util.List;
-import java.util.Locale;
 import java.util.Map;
 import java.util.Optional;
 import java.util.UUID;
@@ -28,7 +27,6 @@ record NetworkPortRecipeTransfer(
     RecipeType<MachineRecipeJeiPage> type,
     IRecipeTransferHandlerHelper helper,
     Pending pending) implements IRecipeTransferHandler<NetworkPortMenu, MachineRecipeJeiPage> {
-  private static final String PREFIX = "gui.mmcece.network_port.transfer.";
   private static final IRecipeTransferError CONFIGURE = new IRecipeTransferError() {
     @Override
     public Type getType() {
@@ -42,7 +40,7 @@ record NetworkPortRecipeTransfer(
 
     @Override
     public void getTooltip(ITooltipBuilder tooltip) {
-      tooltip.add(Component.translatable(PREFIX + "configure"));
+      tooltip.add(Component.translatable(NetworkPortRecipePlan.Error.NONE.tooltipKey()));
     }
   };
 
@@ -85,21 +83,18 @@ record NetworkPortRecipeTransfer(
     if (MachineJeiPlugin.runtime == null || player.containerMenu != menu || !menu.port().kind().isInput()) {
       return helper.createInternalError();
     }
-    var status = menu.status();
-    if (status == null || !status.editable()) {
-      return helper.createUserErrorWithTooltip(Component.translatable(PREFIX + "unavailable"));
-    }
     var recipe = page.recipes().getFirst();
-    var plan = NetworkPortRecipePlan.forRecipe(recipe.value(), status.snapshot().resource());
+    var plan = menu.previewRecipe(recipe.value());
     var error = plan.error();
     if (error != NetworkPortRecipePlan.Error.NONE) {
-      return helper.createUserErrorWithTooltip(Component.translatable(PREFIX + error.name().toLowerCase(Locale.ROOT)));
+      return helper.createUserErrorWithTooltip(Component.translatable(error.tooltipKey()));
     }
     if (!doTransfer) {
       return CONFIGURE;
     }
     if (!menu.requestRecipe(recipe.id(), transferId, plan.targets())) {
-      return helper.createUserErrorWithTooltip(Component.translatable(PREFIX + "unavailable"));
+      return helper
+          .createUserErrorWithTooltip(Component.translatable(NetworkPortRecipePlan.Error.UNAVAILABLE.tooltipKey()));
     }
     return null;
   }

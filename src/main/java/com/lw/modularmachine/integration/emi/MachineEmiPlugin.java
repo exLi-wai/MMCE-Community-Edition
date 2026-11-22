@@ -1,6 +1,8 @@
 package com.lw.modularmachine.integration.emi;
 
 import com.lw.modularmachine.ModularMachine;
+import com.lw.modularmachine.client.NetworkPortScreen;
+import com.lw.modularmachine.util.Mods;
 import com.lw.modularmachine.client.recipe.MachineRecipeLayout;
 import com.lw.modularmachine.client.preview.ClientMachineCatalog;
 import com.lw.modularmachine.util.minecraft.registry.RegisteredMachineItems;
@@ -29,6 +31,10 @@ public final class MachineEmiPlugin implements EmiPlugin {
   @Override
   public void register(EmiRegistry registry) {
     EmiPreviewInput.register();
+    if (Mods.AE2.isLoaded()) {
+      registry.addDragDropHandler(NetworkPortScreen.class, NetworkPortEmiDragDropHandler.INSTANCE);
+      registry.addRecipeHandler(MachineRegistries.NETWORK_PORT_MENU.get(), new NetworkPortEmiRecipeHandler());
+    }
     Map<ResourceLocation, MachineEmiCategory> recipeCategories = new LinkedHashMap<>();
     Map<ResourceLocation, ArrayList<RecipeHolder<MachineRecipe>>> recipes = new LinkedHashMap<>();
     registry.getRecipeManager().getAllRecipesFor(MachineRecipeRegistries.ITEM_TYPE.get()).stream()
