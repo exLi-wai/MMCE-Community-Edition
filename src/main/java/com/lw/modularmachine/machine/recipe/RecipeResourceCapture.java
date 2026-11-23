@@ -7,6 +7,7 @@ import com.lw.modularmachine.blockentity.MachineControllerBlockEntity;
 import com.lw.modularmachine.blockentity.FactoryControllerBlockEntity;
 import com.lw.modularmachine.blockentity.MachinePortBlockEntity;
 import com.lw.modularmachine.api.component.ChemicalStackData;
+import com.lw.modularmachine.api.component.ResourceType;
 import com.lw.modularmachine.blockentity.SmartInterfaceBlockEntity;
 import com.lw.modularmachine.machine.PortKind;
 import com.lw.modularmachine.machine.structure.StructureService;
@@ -80,9 +81,8 @@ final class RecipeResourceCapture {
         || owner instanceof MachineControllerBlockEntity ordinary && !ordinary.canCommitProduction()) {
       return Optional.empty();
     }
-    var cache = mode != CaptureMode.ALL && owner instanceof FactoryControllerBlockEntity factory ? factory
-        .tickResourceTickets() : null;
-    if (cache != null) {
+    var cache = owner instanceof FactoryControllerBlockEntity factory ? factory.tickResourceTickets() : null;
+    if (cache != null && mode != CaptureMode.ALL) {
       cache.beginTick(level.getGameTime());
       var reused = cache.current(mode);
       if (reused != null) {
@@ -137,8 +137,9 @@ final class RecipeResourceCapture {
         continue;
       }
       int tankCount = PortResourceAccess.require(port.kind().resource()).tanks().applyAsInt(port);
+      var images = cache != null && kind.resource() == ResourceType.ITEM ? cache.itemImages(registration, port) : null;
       for (int tank = 0; tank < tankCount; tank++) {
-        ports.add(new RecipePortSnapshot(part.id(), position, port, level, part.selector(), tank, tankCount));
+        ports.add(new RecipePortSnapshot(part.id(), position, port, level, part.selector(), tank, tankCount, images));
       }
     }
     ports.sort(Comparator.comparing(RecipePortSnapshot::logicalPartId).thenComparingInt(RecipePortSnapshot::tankIndex));
@@ -146,7 +147,7 @@ final class RecipeResourceCapture {
     if (!ticket.matchesLive()) {
       return Optional.empty();
     }
-    if (cache != null) {
+    if (cache != null && mode != CaptureMode.ALL) {
       cache.remember(mode, ticket);
     }
     return Optional.of(ticket);

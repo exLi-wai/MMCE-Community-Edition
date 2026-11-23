@@ -3,10 +3,12 @@ package com.lw.modularmachine.machine.recipe.search;
 import com.lw.modularmachine.api.recipe.resource.RecipeResourcePlanning.Progress;
 import com.lw.modularmachine.api.recipe.resource.RecipeResourcePlanning.Status;
 import java.util.ArrayList;
+import java.util.BitSet;
 import java.util.Collections;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.Set;
 import org.junit.jupiter.api.Test;
 import static org.junit.jupiter.api.Assertions.*;
 
@@ -60,6 +62,34 @@ class RecipeSearchSessionTest {
         priority,
         List.of(new RecipeCandidate.Input<>("dirt", 1)),
         List.of(new RecipeCandidate.Output<>(output, count)));
+  }
+
+  @Test
+  void lockAndGroupLimitsAlsoApplyToDynamicallyPreparedRecipes() {
+    var recipes = new CompiledRecipeSet<>(
+        List.of(recipe("b", 2, "b", 1), recipe("a", 2, "a", 1), recipe("d", 1, "d", 1), recipe("c", 1, "c", 1)));
+    var dynamic = new BitSet();
+    dynamic.set(recipes.rankOf("a"));
+    dynamic.set(recipes.rankOf("d"));
+    var locked = new RecipeCatalog.CandidateFilter(recipes, dynamic, Set.of("b", "missing"));
+    var results = new BitSet();
+    locked.includeDynamic(results, recipes.size(), null);
+    assertTrue(results.isEmpty());
+    assertEquals(recipes.rankOf("b"), locked.firstRank);
+
+    var multi = new RecipeCatalog.CandidateFilter(recipes, dynamic, Set.of("a", "b", "d"));
+    var rejectedInFirstGroup = new BitSet();
+    rejectedInFirstGroup.set(recipes.rankOf("a"));
+    results.set(recipes.rankOf("b"));
+    multi.includeDynamic(results, recipes.rankOf("c"), rejectedInFirstGroup);
+    assertEquals(List.of("b"), recipes.candidatesAt(results).stream().map(RecipeCandidate::id).toList());
+    results.clear();
+    multi.includeDynamic(results, recipes.rankOf("b"), null);
+    assertEquals(List.of("a"), recipes.candidatesAt(results).stream().map(RecipeCandidate::id).toList());
+    results.clear();
+    var single = new RecipeCatalog.CandidateFilter(recipes, dynamic, Set.of("d"));
+    single.includeDynamic(results, recipes.size(), null);
+    assertEquals(List.of("d"), recipes.candidatesAt(results).stream().map(RecipeCandidate::id).toList());
   }
 
   @Test

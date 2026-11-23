@@ -108,30 +108,9 @@ public final class CompiledRecipeSet<K> {
     return candidatesAt(selected);
   }
 
-  /** Only strict predecessors can improve an already complete group result. */
-  Set<String> candidateIdsBefore(String recipeId, Set<String> allowedIds) {
-    var limit = byId.get(recipeId);
-    if (limit == null) {
-      throw new IllegalArgumentException("Unknown recipe ID: " + recipeId);
-    }
-    if (limit.rank == 0 || allowedIds != null && allowedIds.isEmpty()) {
-      return Set.of();
-    }
-    var selected = new HashSet<String>();
-    if (allowedIds == null) {
-      for (int rank = 0; rank < limit.rank; rank++) {
-        selected.add(entries.get(rank).recipe.id());
-      }
-    } else {
-      for (var id : allowedIds) {
-        var entry = byId.get(id);
-        if (entry != null && entry.rank < limit.rank) {
-          selected.add(id);
-        }
-      }
-    }
-
-    return Set.copyOf(selected);
+  int rankOf(String recipeId) {
+    var entry = byId.get(recipeId);
+    return entry == null ? -1 : entry.rank;
   }
 
   public Optional<RecipeCandidate<K>> candidate(String id) {
@@ -169,17 +148,6 @@ public final class CompiledRecipeSet<K> {
     }
 
     return List.copyOf(result);
-  }
-
-  BitSet ranksOf(List<RecipeCandidate<K>> selected) {
-    var ranks = new BitSet(entries.size());
-    for (var candidate : selected) {
-      var entry = byId.get(candidate.id());
-      if (entry != null) {
-        ranks.set(entry.rank);
-      }
-    }
-    return ranks;
   }
 
   static final class Entry<K> {

@@ -158,18 +158,53 @@ public final class RecipeCatalog {
     return !dynamicInputRanks.isEmpty();
   }
 
-  List<RecipeCandidate<ItemResourceKey>> candidatesForPreparation(Map<ItemResourceKey, Long> items, List<RecipeSearchResource.Captured> resources, Set<String> allowedIds) {
-    var indexed = candidatesForInputs(items, resources, allowedIds);
-    if (dynamicInputRanks.isEmpty()) {
-      return indexed;
-    }
-    var selected = recipes.ranksOf(indexed);
-    for (int rank = dynamicInputRanks.nextSetBit(0); rank >= 0; rank = dynamicInputRanks.nextSetBit(rank + 1)) {
-      if (allowedIds == null || allowedIds.contains(recipes.candidates().get(rank).id())) {
-        selected.set(rank);
+  boolean supportsLockedRestart() {
+    return !resourceSearches.externalStrategies();
+  }
+
+  /**
+   * Shared by every group in one search. Dynamic inputs can match even when their
+   * original anchors are absent.
+   */
+  static final class CandidateFilter {
+    final Set<String> allowedIds;
+    final int firstRank;
+    private final BitSet dynamicRanks;
+
+    CandidateFilter(CompiledRecipeSet<?> recipes, BitSet dynamic, Set<String> allowed) {
+      allowedIds = allowed == null ? null : Set.copyOf(allowed);
+      if (allowedIds == null) {
+        firstRank = 0;
+        dynamicRanks = dynamic;
+      } else {
+        int first = recipes.size();
+        dynamicRanks = new BitSet();
+        for (var id : allowedIds) {
+          int rank = recipes.rankOf(id);
+          if (rank >= 0) {
+            first = Math.min(first, rank);
+            if (dynamic.get(rank)) {
+              dynamicRanks.set(rank);
+            }
+          }
+        }
+        firstRank = first;
       }
     }
-    return recipes.candidatesAt(selected);
+
+    void includeDynamic(BitSet selected, int rankLimit, BitSet rejected) {
+      selected.or(dynamicRanks);
+      if (rankLimit < selected.length()) {
+        selected.clear(rankLimit, selected.length());
+      }
+      if (rejected != null) {
+        selected.andNot(rejected);
+      }
+    }
+  }
+
+  CandidateFilter candidateFilter(Set<String> allowed) {
+    return new CandidateFilter(recipes, dynamicInputRanks, allowed);
   }
 
   Set<ItemResourceKey> itemInputAliases() {
@@ -183,13 +218,20 @@ public final class RecipeCatalog {
   final class CapturedResources {
     private final List<RecipeSearchResource.Captured> all = new ArrayList<>();
     private final Map<List<Integer>, List<RecipeSearchResource.Captured>> subsets = new HashMap<>();
+    private final List<Integer> selectedStrategies;
+
+    CapturedResources(String lockedRecipe) {
+      selectedStrategies = lockedRecipe == null ? null : resourceSearches.byRecipe().get(lockedRecipe);
+    }
 
     boolean complete() {
-      return all.size() == resourceSearches.strategies().size();
+      return all
+          .size() == (selectedStrategies == null ? resourceSearches.strategies().size() : selectedStrategies.size());
     }
 
     void captureNext(RecipeExecutionTicket ticket, RecipeSearchResources resources) {
-      all.add(resourceSearches.strategies().get(all.size()).capture(ticket, resources));
+      int index = selectedStrategies == null ? all.size() : selectedStrategies.get(all.size());
+      all.add(resourceSearches.strategies().get(index).capture(ticket, resources));
     }
 
     List<RecipeSearchResource.Captured> all() {
@@ -197,6 +239,9 @@ public final class RecipeCatalog {
     }
 
     List<RecipeSearchResource.Captured> forRecipe(String id) {
+      if (selectedStrategies != null) {
+        return all;
+      }
       var indices = resourceSearches.byRecipe().getOrDefault(id, List.of());
       return indices.size() == all.size() ? all : subsets
           .computeIfAbsent(indices, selected -> selected.stream().map(all::get).toList());
@@ -214,14 +259,16 @@ public final class RecipeCatalog {
         .forRecipePorts(RecipeResourceRequirements.forCandidate(this, candidate, definition));
   }
 
-  List<RecipeCandidate<ItemResourceKey>> candidatesForInputs(Map<ItemResourceKey, Long> items, List<RecipeSearchResource.Captured> resources, Set<String> allowedIds) {
+  List<RecipeCandidate<ItemResourceKey>> candidatesForPreparation(Map<ItemResourceKey, Long> items, List<RecipeSearchResource.Captured> resources, CandidateFilter filter, int rankLimit, BitSet rejected) {
     var queries = new ArrayList<ResourceInputQuery>(resources.size() + 1);
-    queries.add(new RequiredInputQuery<>(itemIndex.inputs(), items.keySet()));
+    queries.add(new RequiredInputQuery<>(itemIndex.inputs(), items));
     for (var resource : resources) {
       queries.add(resource.inputs());
     }
 
-    return recipes.candidatesAt(ResourceCandidateSelection.select(queries, allowedIds));
+    var selected = ResourceCandidateSelection.select(queries, filter.allowedIds, rankLimit);
+    filter.includeDynamic(selected, rankLimit, rejected);
+    return recipes.candidatesAt(selected);
   }
 
   public RecipeSelectors selectors(String recipeId) {

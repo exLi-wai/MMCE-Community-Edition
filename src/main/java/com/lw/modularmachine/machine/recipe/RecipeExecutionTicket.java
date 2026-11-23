@@ -3,6 +3,7 @@ package com.lw.modularmachine.machine.recipe;
 import com.lw.modularmachine.machine.recipe.RecipeResourceCapture.CaptureMode;
 import com.lw.modularmachine.machine.recipe.RecipeTicketProof.SmartSnapshot;
 import com.lw.modularmachine.blockentity.MachineControllerBlockEntity;
+import com.lw.modularmachine.blockentity.MachinePortBlockEntity;
 import com.lw.modularmachine.machine.PortKind;
 import com.lw.modularmachine.machine.recipe.search.RecipeResourceRequirements.RequiredPort;
 import com.lw.modularmachine.api.upgrade.UpgradeSnapshot;
@@ -25,6 +26,7 @@ import java.util.TreeSet;
 import net.minecraft.core.BlockPos;
 import net.minecraft.server.level.ServerLevel;
 import net.minecraft.world.level.block.Block;
+import net.minecraft.world.item.ItemStack;
 import org.jetbrains.annotations.ApiStatus;
 
 /**
@@ -39,6 +41,10 @@ public final class RecipeExecutionTicket {
    */
   public static final class TickCache {
     private final EnumMap<CaptureMode, RecipeExecutionTicket> tickets = new EnumMap<>(CaptureMode.class);
+    private record SlotImages(MachinePortBlockEntity port, ItemStack[] images) {
+    }
+    private final Map<BlockPos, SlotImages> itemPorts = new HashMap<>();
+    private StructureService.Registration itemRegistration;
     private long tick = Long.MIN_VALUE;
 
     public void beginTick(long now) {
@@ -57,8 +63,25 @@ public final class RecipeExecutionTicket {
       tickets.put(mode, ticket);
     }
 
+    ItemStack[] itemImages(StructureService.Registration registration, MachinePortBlockEntity port) {
+      if (itemRegistration != registration) {
+        itemPorts.clear();
+        itemRegistration = registration;
+      }
+      int size = port.inventory().getSlots();
+      var pos = port.getBlockPos();
+      var previous = itemPorts.get(pos);
+      if (previous == null || previous.port() != port || previous.images().length != size) {
+        previous = new SlotImages(port, new ItemStack[size]);
+        itemPorts.put(pos, previous);
+      }
+      return previous.images();
+    }
+
     public void clear() {
       tickets.clear();
+      itemPorts.clear();
+      itemRegistration = null;
     }
   }
 

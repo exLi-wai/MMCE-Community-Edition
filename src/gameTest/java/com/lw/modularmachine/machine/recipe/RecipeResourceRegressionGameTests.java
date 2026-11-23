@@ -12,7 +12,9 @@ import com.lw.modularmachine.blockentity.MachinePortBlockEntity;
 import com.lw.modularmachine.machine.recipe.resource.RecipeResourceDefinitions;
 import com.lw.modularmachine.machine.recipe.search.CompiledRecipeSet;
 import com.lw.modularmachine.machine.recipe.search.RecipeCatalog;
+import com.lw.modularmachine.machine.recipe.search.RecipePlanner;
 import com.lw.modularmachine.machine.recipe.search.RecipeResourceRequirements;
+import com.lw.modularmachine.machine.recipe.search.RecipeSearch;
 import com.lw.modularmachine.machine.structure.StructureService;
 import com.lw.modularmachine.registry.MachineRegistries;
 import com.mojang.serialization.JsonOps;
@@ -30,6 +32,8 @@ import net.minecraft.resources.ResourceLocation;
 import net.minecraft.world.item.ItemStack;
 import net.minecraft.world.item.Items;
 import net.minecraft.world.item.crafting.Recipe;
+import net.minecraft.world.level.material.Fluids;
+import net.neoforged.neoforge.fluids.FluidStack;
 import net.neoforged.neoforge.gametest.GameTestHolder;
 import net.neoforged.neoforge.gametest.PrefixGameTestTemplate;
 
@@ -46,6 +50,56 @@ public final class RecipeResourceRegressionGameTests {
       "fluid_output_hatch_normal", "energy_input_hatch_normal", "energy_output_hatch_normal"};
 
   private RecipeResourceRegressionGameTests() {
+  }
+
+  @GameTest(template = "empty16", timeoutTicks = 80)
+  public static void later_group_can_win_and_rejections_are_local_to_each_group(GameTestHelper helper) {
+    var ticket = build(helper, false);
+    var items = input(helper, ticket);
+    helper.assertTrue(items.configureInputGroup(1, items.groupRevision()), "Could not isolate the dirt input");
+    var fluid = (MachinePortBlockEntity) helper.getLevel()
+        .getBlockEntity(ticket.owner().structurePosition().offset(0, 1, 1));
+    helper.assertTrue(fluid.inputGroup() == InputGroup.SHARED, "Fixture needs a shared water input");
+    fluid.fluidTank().setFluid(new FluidStack(Fluids.WATER, 100));
+
+    var itemId = ResourceLocation.parse("mmcece:a_group_dirt");
+    var fluidId = ResourceLocation.parse("mmcece:z_shared_water");
+    var itemRecipe = decode(helper, root());
+    var fluidSource = root();
+    fluidSource.add("inputs", JsonParser.parseString("[]"));
+    fluidSource.add("fluid_inputs", JsonParser.parseString("[{\"id\":\"minecraft:water\",\"amount\":100}]"));
+    var fluidRecipe = decode(helper, fluidSource);
+    var registries = helper.getLevel().registryAccess();
+    var catalog = RecipeCatalog.fromDefinitions(
+        MACHINE,
+        List.of(fluidRecipe.compile(fluidId, registries), itemRecipe.compile(itemId, registries)),
+        Map.of(fluidId.toString(), fluidRecipe, itemId.toString(), itemRecipe),
+        () -> true,
+        null,
+        List.of());
+
+    var search = RecipeSearch.begin((MachineControllerBlockEntity) ticket.owner(), catalog).orElseThrow();
+    var first = search.advance(4096).plan().orElseThrow();
+    helper.assertTrue(
+        first.recipe().id().equals(itemId.toString()) && first.source().inputGroup() == 1,
+        "Earlier recipe ID in group 1 lost to the shared group's first match");
+    helper.assertTrue(search.rejectSelected(first), "Could not reject the group 1 dirt plan");
+
+    var second = search.advance(4096).plan().orElseThrow();
+    helper.assertTrue(
+        second.recipe().id().equals(fluidId.toString()) && second.source().inputGroup() == InputGroup.SHARED,
+        "Shared water was not restored after rejecting the better group");
+    helper.assertTrue(search.rejectSelected(second), "Could not reject the shared water plan");
+
+    var third = search.advance(4096).plan().orElseThrow();
+    helper.assertTrue(
+        third.recipe().id().equals(fluidId.toString()) && third.source().inputGroup() == 1,
+        "Rejecting shared water also removed the same recipe from group 1");
+    helper.assertTrue(search.rejectSelected(third), "Could not reject the group 1 water plan");
+    helper.assertTrue(
+        search.advance(4096).status() == RecipePlanner.Status.NO_MATCH,
+        "An already rejected plan returned");
+    helper.succeed();
   }
 
   @GameTest(template = "empty16", timeoutTicks = 80)

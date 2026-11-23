@@ -6,6 +6,7 @@ import org.jetbrains.annotations.ApiStatus;
 import com.lw.modularmachine.machine.recipe.ItemResourceKey;
 import com.lw.modularmachine.machine.recipe.ItemSlotRef;
 import com.lw.modularmachine.machine.recipe.RecipeExecutionTicket;
+import com.lw.modularmachine.machine.recipe.search.index.RequiredInputQuery;
 import com.lw.modularmachine.machine.recipe.search.index.fluid.FluidRecipeIndex;
 import com.lw.modularmachine.machine.PortKind;
 import java.util.ArrayList;
@@ -25,16 +26,22 @@ import net.neoforged.neoforge.fluids.FluidStack;
 @ApiStatus.Internal
 public final class RecipeSearchResources {
   private final RecipeCatalog catalog;
-  private final Map<RecipePortSnapshot, PortInputs> items = new IdentityHashMap<>();
-  private final Map<RecipePortSnapshot, StoredFluid> fluids = new IdentityHashMap<>();
-  private final Map<RecipePortSnapshot, ChemicalResourceKey> chemicals = new IdentityHashMap<>();
+  final RecipeSearch.LockedRestart restart;
+  private Map<RecipePortSnapshot, PortInputs> items;
+  private Map<RecipePortSnapshot, StoredFluid> fluids;
+  private Map<RecipePortSnapshot, ChemicalResourceKey> chemicals;
   private final Map<ItemSlotDomain, ResourceSnapshot.SlotLimit<ItemResourceKey>> limits = new HashMap<>();
   private final List<ItemSlotRef> outputRefs = new ArrayList<>();
   private final List<ResourceSnapshot.OutputSlot<ItemResourceKey>> buildingOutputs = new ArrayList<>();
   private List<ResourceSnapshot.OutputSlot<ItemResourceKey>> outputSpaces;
 
   RecipeSearchResources(RecipeCatalog catalog) {
+    this(catalog, null);
+  }
+
+  RecipeSearchResources(RecipeCatalog catalog, RecipeSearch.LockedRestart restart) {
     this.catalog = Objects.requireNonNull(catalog, "catalog");
+    this.restart = restart;
   }
 
   /**
@@ -44,6 +51,7 @@ public final class RecipeSearchResources {
   final class GroupItems {
     private final RecipeExecutionTicket ticket;
     private final List<List<ItemSlot>> inputs = new ArrayList<>();
+    private final List<ItemSlot> lockedSlots;
     private final Map<ItemResourceKey, Long> counts = new HashMap<>();
     private int portIndex;
     private int slotIndex;
@@ -51,6 +59,10 @@ public final class RecipeSearchResources {
 
     GroupItems(RecipeExecutionTicket ticket) {
       this.ticket = ticket;
+      lockedSlots = restart == null ? null : new ArrayList<>();
+      if (lockedSlots != null) {
+        inputs.add(lockedSlots);
+      }
     }
 
     int advance(int budget) {
@@ -58,20 +70,28 @@ public final class RecipeSearchResources {
       while (portIndex < ticket.ports().size() && used < budget) {
         var port = ticket.ports().get(portIndex);
         used++;
-        if (port.kind() == PortKind.ITEM_INPUT) {
+        if (port.kind() == PortKind.ITEM_INPUT && restart != null) {
+          if ((restart.itemKeys() == null || !restart.itemKeys().isEmpty())
+              && (restart.singleInput == null || restart.singleInput.selector().equals(port.selector()))
+              && slotIndex < port.itemSlotCount()) {
+            captureLockedSlot(port, slotIndex++);
+            continue;
+          }
+        } else if (port.kind() == PortKind.ITEM_INPUT) {
+          if (items == null) {
+            items = new IdentityHashMap<>();
+          }
           var input = items.computeIfAbsent(port, ignored -> new PortInputs());
           if (input.next < port.itemSlotCount()) {
             int slot = input.next++;
             var key = port.itemKey(slot);
             if (key != null) {
               long count = port.itemAmount(slot);
+              var alias = inputAlias(key);
               input.slots.add(new ItemSlot(new ItemSlotRef(port.partId(), slot), key, count));
               input.counts.merge(key, count, Math::addExact);
-              if (!catalog.itemInputAliases().isEmpty() || catalog.hasDynamicInputRecipes()) {
-                var alias = key.ignoringComponents();
-                if (catalog.itemInputAliases().contains(alias) || catalog.hasDynamicInputRecipes()) {
-                  input.counts.merge(alias, count, Math::addExact);
-                }
+              if (alias != null) {
+                input.counts.merge(alias, count, Math::addExact);
               }
             }
             continue;
@@ -112,6 +132,45 @@ public final class RecipeSearchResources {
       return portIndex == ticket.ports().size();
     }
 
+    private void captureLockedSlot(RecipePortSnapshot port, int slot) {
+      if (restart.singleInput != null) {
+        var key = port.matchingItemKey(slot, restart.singleInput);
+        if (key != null) {
+          long amount = port.itemAmount(slot);
+          lockedSlots.add(new ItemSlot(new ItemSlotRef(port.partId(), slot), key, amount));
+          counts.merge(restart.singleInput, amount, Math::addExact);
+        }
+        return;
+      }
+      var key = port.itemKey(slot);
+      if (key == null) {
+        return;
+      }
+      var declared = restart.itemKeys();
+      // Static item-only matching is a single input row, handled above.
+      // Ingredient groups and input modifiers need every physical key.
+      if (declared != null && !declared.contains(key)) {
+        return;
+      }
+      long amount = port.itemAmount(slot);
+      lockedSlots.add(new ItemSlot(new ItemSlotRef(port.partId(), slot), key, amount));
+      counts.merge(key, amount, Math::addExact);
+      if (declared == null) {
+        var alias = inputAlias(key);
+        if (alias != null) {
+          counts.merge(alias, amount, Math::addExact);
+        }
+      }
+    }
+
+    private ItemResourceKey inputAlias(ItemResourceKey key) {
+      if (catalog.itemInputAliases().isEmpty() && !catalog.hasDynamicInputRecipes()) {
+        return null;
+      }
+      var alias = key.ignoringComponents();
+      return catalog.hasDynamicInputRecipes() || catalog.itemInputAliases().contains(alias) ? alias : null;
+    }
+
     List<List<ItemSlot>> inputs() {
       return inputs;
     }
@@ -133,6 +192,9 @@ public final class RecipeSearchResources {
 
   Fluids fluids(RecipeExecutionTicket ticket) {
     ticket.requireServerThread();
+    if (fluids == null) {
+      fluids = new IdentityHashMap<>();
+    }
     var inputs = new HashMap<FluidRecipeIndex.Key, List<StoredFluid>>();
     var outputs = new HashMap<String, List<StoredFluid>>();
     for (var port : ticket.ports()) {
@@ -157,6 +219,9 @@ public final class RecipeSearchResources {
 
   Set<ChemicalResourceKey> chemicalInputKeys(RecipeExecutionTicket ticket) {
     ticket.requireServerThread();
+    if (chemicals == null) {
+      chemicals = new IdentityHashMap<>();
+    }
     var keys = new HashSet<ChemicalResourceKey>();
     for (var port : ticket.ports()) {
       if (port.kind() == PortKind.CHEMICAL_INPUT && !port.chemical().isEmpty()) {
@@ -196,8 +261,8 @@ public final class RecipeSearchResources {
       this.outputs = freeze(outputs);
     }
 
-    Set<FluidRecipeIndex.Key> inputKeys() {
-      return inputs.keySet();
+    RequiredInputQuery<FluidRecipeIndex.Key> inputQuery(FluidRecipeIndex index) {
+      return new RequiredInputQuery<>(index.inputs(), inputs);
     }
 
     boolean inputsAvailable(List<FluidStack> required, String selector) {

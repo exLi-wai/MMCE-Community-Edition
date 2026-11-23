@@ -14,6 +14,10 @@ public final class ResourceCandidateSelection {
   }
 
   public static BitSet select(List<? extends ResourceInputQuery> queries, Set<String> allowedIds) {
+    return select(queries, allowedIds, Integer.MAX_VALUE);
+  }
+
+  public static BitSet select(List<? extends ResourceInputQuery> queries, Set<String> allowedIds, int rankLimit) {
     if (queries.isEmpty()) {
       throw new IllegalArgumentException("A catalog query is required");
     }
@@ -32,6 +36,9 @@ public final class ResourceCandidateSelection {
       }
     }
     var selected = source.select(allowedIds);
+    if (rankLimit < selected.length()) {
+      selected.clear(rankLimit, selected.length());
+    }
     for (var query : queries) {
       if (query != source && !selected.isEmpty()) {
         query.retainMatches(selected);

@@ -335,8 +335,9 @@ public final class FactoryControllerBlockEntity extends BlockEntity implements M
       return threadStartAllowed(threadId);
     }
     @Override
-    public RecipeSearch beginSearch(String threadId, RecipeCatalog catalog, Set<String> allowed) {
-      return RecipeSearch.beginFactory(FactoryControllerBlockEntity.this, threadId, catalog, allowed).orElse(null);
+    public RecipeSearch beginSearch(String threadId, RecipeCatalog catalog, Set<String> allowed, RecipeSearch.LockedRestart restart) {
+      return RecipeSearch.beginFactory(FactoryControllerBlockEntity.this, threadId, catalog, allowed, restart)
+          .orElse(null);
     }
     @Override
     public int parallelLimit(String threadId) {
@@ -847,6 +848,7 @@ public final class FactoryControllerBlockEntity extends BlockEntity implements M
 
   @Override
   public void attach(StructureService.Registration registration) {
+    tickResourceTickets.clear();
     PatternProductionService.invalidate(this);
     runtimeUpgrades.clear();
     upgrades.clearDiscovery();
@@ -859,6 +861,7 @@ public final class FactoryControllerBlockEntity extends BlockEntity implements M
 
   @Override
   public void failPreparation(VerificationFailure failure) {
+    tickResourceTickets.clear();
     upgrades.clearDiscovery();
     runCoordinator.invalidateOutput();
     registration = null;

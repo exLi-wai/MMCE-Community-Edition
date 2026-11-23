@@ -68,7 +68,7 @@ public final class RecipePreparationHandlers {
   }
 
   public static boolean has(ResourceLocation machine, ResourceLocation recipe, Type type) {
-    return installed.containsKey(new Key(machine, recipe, type));
+    return !installed.isEmpty() && installed.containsKey(new Key(machine, recipe, type));
   }
 
   public static int parallelLimit(RecipeExecutionTicket ticket, String threadId) {
@@ -80,13 +80,21 @@ public final class RecipePreparationHandlers {
     var level = (ServerLevel) owner.structureLevel();
     ServerThreadGuard.require(level, "Recipe preparation");
     boolean factory = owner instanceof FactoryControllerBlockEntity;
+    var thread = factory ? Optional.of(threadId) : Optional.<String>empty();
+    var registered = installed.isEmpty() ? List.<Handler>of() : installed
+        .getOrDefault(new Key(owner.structureMachineId(), recipe, type), List.of());
+    var handlers = factory || registered.isEmpty() ? registered : registered.stream()
+        .filter(handler -> !handler.factoryOnly()).toList();
+    if (handlers.isEmpty()) {
+      return new Session(null, type, parallelism, handlers);
+    }
     var context = new RecipePreparationEvents.Context(
         level.dimension().location(),
         owner.structurePosition(),
         owner.structureMachineId(),
         recipe,
         factory,
-        factory ? Optional.of(threadId) : Optional.empty(),
+        thread,
         level.getGameTime(),
         Optional.ofNullable(run).map(
             value -> new RunSnapshot(
@@ -99,8 +107,6 @@ public final class RecipePreparationHandlers {
                 value.lastProgressTick())),
         ControllerOwnershipApi.inspect(level, owner.structurePosition()).orElseThrow(),
         ControllerScriptDataApi.inspect(level, owner.structurePosition()));
-    var handlers = installed.getOrDefault(new Key(owner.structureMachineId(), recipe, type), List.of()).stream()
-        .filter(handler -> !handler.factoryOnly() || factory).toList();
     return new Session(context, type, parallelism, handlers);
   }
 

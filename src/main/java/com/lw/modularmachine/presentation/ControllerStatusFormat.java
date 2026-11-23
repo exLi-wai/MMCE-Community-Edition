@@ -20,7 +20,7 @@ public final class ControllerStatusFormat {
   }
 
   public static String searchMilliseconds(int averageSearchMicros) {
-    return String.format(Locale.ROOT, "%.2f", averageSearchMicros / 1000.0);
+    return String.format(Locale.ROOT, "%.3f", averageSearchMicros / 1000.0);
   }
 
   public static MutableComponent menuRecipeStatus(String status, boolean hasRecipe) {

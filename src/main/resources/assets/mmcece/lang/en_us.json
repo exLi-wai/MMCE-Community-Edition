@@ -422,7 +422,7 @@
   "jade.mmcece.failure.verification_timeout": "Structure verification timed out",
   "jade.mmcece.input.recipe": "Inputs for: %s",
   "jade.mmcece.input.shortage": "Missing %s: %s",
-  "jade.mmcece.performance": "Avg: %sµs/t (Search: %sms)",
+  "jade.mmcece.performance": "Avg: %sµs/t (Search: %sms/t)",
   "jade.mmcece.production.paused": "Production: paused",
   "jade.mmcece.production.ready": "Production: ready",
   "jade.mmcece.progress": "Progress: %s",
@@ -526,7 +526,7 @@
 
   "menu.mmcece.controller.blueprint": "Blueprint found: %s",
   "menu.mmcece.controller.none": "None",
-  "menu.mmcece.controller.performance": "Avg: %sµs/t (Search: %sms)",
+  "menu.mmcece.controller.performance": "Avg: %sµs/t (Search: %sms/t)",
   "menu.mmcece.controller.progress": "Progress: %s",
   "menu.mmcece.controller.state.binding_changed": "Port bindings changed",
   "menu.mmcece.controller.state.crafting": "Working...",

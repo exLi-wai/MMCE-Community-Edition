@@ -4,7 +4,6 @@ import com.lw.modularmachine.api.recipe.resource.RecipeResourcePlanning;
 import com.lw.modularmachine.api.recipe.RecipeSelectors;
 import com.lw.modularmachine.machine.recipe.MachineRecipe;
 import com.lw.modularmachine.machine.recipe.RecipeExecutionTicket;
-import com.lw.modularmachine.machine.recipe.search.index.RequiredInputQuery;
 import com.lw.modularmachine.machine.recipe.search.index.ResourceInputQuery;
 import com.lw.modularmachine.machine.recipe.search.index.fluid.FluidRecipeIndex;
 import java.util.HashMap;
@@ -42,7 +41,7 @@ final class FluidRecipeSearchResource implements RecipeSearchResource {
   @Override
   public Captured capture(RecipeExecutionTicket ticket, RecipeSearchResources resources) {
     var fluids = resources.fluids(ticket);
-    var query = new RequiredInputQuery<>(index.inputs(), fluids.inputKeys());
+    var query = fluids.inputQuery(index);
 
     return new Captured() {
       private FluidOutputLayout layout;

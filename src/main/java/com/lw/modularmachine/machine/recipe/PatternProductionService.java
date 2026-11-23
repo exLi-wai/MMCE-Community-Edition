@@ -317,23 +317,22 @@ public final class PatternProductionService {
             if (cache.size() >= 1024 && !cache.containsKey(key)) {
               cache.clear();
             }
-            boolean matches = cache
-                .computeIfAbsent(key, ignored -> catalog.recipes().candidates().stream().anyMatch(candidate -> {
-                  if (!key.lockedRecipe().isEmpty() && !candidate.id().equals(key.lockedRecipe())) {
-                    return false;
-                  }
-                  if (owner instanceof FactoryControllerBlockEntity factory
-                      && !FactoryThreadPreset.accepts(
-                          factory.structureMachineId(),
-                          key.thread(),
-                          ResourceLocation.parse(candidate.id()))) {
-                    return false;
-                  }
-                  var recipe = catalog.definition(candidate.id());
-                  return recipe != null
-                      && recipe.executionOptions().accepts(key.thread())
-                      && matches(pattern, gateway.selector(), recipe, upgrades, level);
-                }));
+            boolean matches = cache.computeIfAbsent(key, ignored -> {
+              var recipes = catalog.recipes();
+              var candidates = key.lockedRecipe().isEmpty() ? recipes.candidates().stream() : recipes
+                  .candidate(key.lockedRecipe()).stream();
+              return candidates.anyMatch(candidate -> {
+                if (owner instanceof FactoryControllerBlockEntity factory
+                    && !FactoryThreadPreset
+                        .accepts(factory.structureMachineId(), key.thread(), ResourceLocation.parse(candidate.id()))) {
+                  return false;
+                }
+                var recipe = catalog.definition(candidate.id());
+                return recipe != null
+                    && recipe.executionOptions().accepts(key.thread())
+                    && matches(pattern, gateway.selector(), recipe, upgrades, level);
+              });
+            });
             if (matches) {
               return true;
             }

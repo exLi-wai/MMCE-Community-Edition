@@ -54,7 +54,7 @@ public final class RecipePortSnapshot {
   private final String selector;
   private final int inputGroup;
 
-  RecipePortSnapshot(String logicalPartId, BlockPos position, MachinePortBlockEntity port, ServerLevel level, String selector, int tankIndex, int tankCount) {
+  RecipePortSnapshot(String logicalPartId, BlockPos position, MachinePortBlockEntity port, ServerLevel level, String selector, int tankIndex, int tankCount, ItemStack[] images) {
     this.logicalPartId = logicalPartId;
     pattern = null;
     patternKeys = List.of();
@@ -77,7 +77,22 @@ public final class RecipePortSnapshot {
     var slotLimits = new ArrayList<Integer>();
     if (kind.resource() == ResourceType.ITEM) {
       for (int slot = 0; slot < port.inventory().getSlots(); slot++) {
-        stacks.add(ItemStackSnapshots.detached(port.inventory().getStackInSlot(slot), level.registryAccess()));
+        var live = port.inventory().getStackInSlot(slot);
+        var before = images == null ? null : images[slot];
+        ItemStack captured;
+        if (live.isEmpty()) {
+          captured = ItemStack.EMPTY;
+        } else if (before != null && ItemStack.isSameItemSameComponents(before, live)) {
+          // Previous tickets keep their own count. Only the private, detached components
+          // are shared.
+          captured = before.getCount() == live.getCount() ? before : before.copyWithCount(live.getCount());
+        } else {
+          captured = ItemStackSnapshots.detached(live, level.registryAccess());
+        }
+        if (images != null) {
+          images[slot] = captured;
+        }
+        stacks.add(captured);
         slotLimits.add(port.inventory().getSlotLimit(slot));
       }
     }
@@ -228,6 +243,14 @@ public final class RecipePortSnapshot {
       itemKeys[slot] = ItemResourceKey.fromSnapshot(stack, selector);
     }
     return itemKeys[slot];
+  }
+
+  /** Retain the physical component key for item-only deductions. */
+  public ItemResourceKey matchingItemKey(int slot, ItemResourceKey required) {
+    if (!selector.equals(required.selector()) || !matchesItem(slot, required)) {
+      return null;
+    }
+    return required.ignoresComponents() ? itemKey(slot) : required;
   }
 
   boolean matchesItem(int slot, ItemResourceKey key) {

@@ -1,0 +1,9 @@
+{
+  "type": "mmcece:machine",
+  "machine": "mmcece:test_recipe_lifecycle",
+  "thread_name": "output_thread",
+  "priority": -100000,
+  "duration": 2,
+  "inputs": [{"stack": {"id": "minecraft:dirt"}, "amount": 1, "match": "item"}],
+  "outputs": [{"stack": {"id": "minecraft:paper"}, "amount": 1}]
+}

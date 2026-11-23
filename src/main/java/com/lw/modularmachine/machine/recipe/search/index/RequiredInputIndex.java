@@ -74,12 +74,7 @@ public final class RequiredInputIndex<K> {
   }
 
   public int candidateCount(Set<K> available) {
-    int count = ranksWithoutAnchor.size();
-    for (var key : available) {
-      count += ranksByAnchor.getOrDefault(key, List.of()).size();
-    }
-
-    return count;
+    return countMatches(available, Integer.MAX_VALUE);
   }
 
   /**
@@ -97,20 +92,27 @@ public final class RequiredInputIndex<K> {
       }
       return selected;
     }
-    for (int rank : ranksWithoutAnchor) {
+    include(selected, ranksWithoutAnchor, allowedIds);
+    if (available.size() > ranksByAnchor.size()) {
+      for (var posting : ranksByAnchor.entrySet()) {
+        if (available.contains(posting.getKey())) {
+          include(selected, posting.getValue(), allowedIds);
+        }
+      }
+    } else {
+      for (var key : available) {
+        include(selected, ranksByAnchor.getOrDefault(key, List.of()), allowedIds);
+      }
+    }
+    return selected;
+  }
+
+  private void include(BitSet selected, List<Integer> ranks, Set<String> allowedIds) {
+    for (int rank : ranks) {
       if (allowedIds == null || allowedIds.contains(anchors.get(rank).recipeId())) {
         selected.set(rank);
       }
     }
-    for (var key : available) {
-      for (int rank : ranksByAnchor.getOrDefault(key, List.of())) {
-        if (allowedIds == null || allowedIds.contains(anchors.get(rank).recipeId())) {
-          selected.set(rank);
-        }
-      }
-    }
-
-    return selected;
   }
 
   /**
@@ -135,18 +137,33 @@ public final class RequiredInputIndex<K> {
   }
 
   private boolean preferIdLookup(Set<K> available, int allowedCount) {
-    if (allowedCount <= 1 || allowedCount <= ranksWithoutAnchor.size()) {
+    if (allowedCount <= 1
+        || allowedCount <= ranksWithoutAnchor.size() + Math.min(available.size(), ranksByAnchor.size())) {
       return true;
     }
-    long indexedCount = ranksWithoutAnchor.size();
-    for (var key : available) {
-      indexedCount += ranksByAnchor.getOrDefault(key, List.of()).size();
-      if (indexedCount >= allowedCount) {
-        return true;
+    return countMatches(available, allowedCount) >= allowedCount;
+  }
+
+  private int countMatches(Set<K> available, int stopAt) {
+    int count = ranksWithoutAnchor.size();
+    if (available.size() > ranksByAnchor.size()) {
+      for (var posting : ranksByAnchor.entrySet()) {
+        if (available.contains(posting.getKey())) {
+          count += posting.getValue().size();
+          if (count >= stopAt) {
+            return count;
+          }
+        }
+      }
+    } else {
+      for (var key : available) {
+        count += ranksByAnchor.getOrDefault(key, List.of()).size();
+        if (count >= stopAt) {
+          return count;
+        }
       }
     }
-
-    return false;
+    return count;
   }
 
   /** Distinct required keys retain declaration order for equal-frequency ties. */

@@ -5,13 +5,22 @@ import com.lw.modularmachine.machine.factory.FactoryThreadConfiguration.Change;
 import com.lw.modularmachine.blockentity.MachinePortBlockEntity;
 import com.lw.modularmachine.config.MachineConfig;
 import com.lw.modularmachine.machine.recipe.RecipeExecutionTicket;
+import com.lw.modularmachine.machine.recipe.FactoryRecipeStarter;
+import com.lw.modularmachine.api.recipe.RecipePreparationEvents;
+import com.lw.modularmachine.machine.recipe.RecipePreparationHandlers;
+import com.lw.modularmachine.machine.recipe.MachineRecipeService;
+import com.lw.modularmachine.machine.recipe.search.RecipePlanner;
+import com.lw.modularmachine.machine.recipe.search.RecipeSearch;
 import com.lw.modularmachine.machine.factory.FactoryThreadState;
 import com.lw.modularmachine.api.upgrade.UpgradeSnapshot;
 import com.lw.modularmachine.machine.structure.StructureService;
 import com.lw.modularmachine.registry.MachineRegistries;
 import java.util.List;
+import java.util.Set;
 import java.util.function.BooleanSupplier;
 import net.minecraft.core.BlockPos;
+import net.minecraft.core.component.DataComponents;
+import net.minecraft.network.chat.Component;
 import net.minecraft.gametest.framework.AfterBatch;
 import net.minecraft.gametest.framework.GameTest;
 import net.minecraft.gametest.framework.GameTestHelper;
@@ -40,6 +49,143 @@ public final class FactoryOutputPlanningGameTests {
     MachinePortBlockEntity fluid;
   }
 
+  @GameTest(template = "empty16", batch = "factory_locked_restart", timeoutTicks = 400)
+  public static void locked_item_only_restart_debits_current_components_in_mixed_catalog(GameTestHelper helper) {
+    var machine = id("test_recipe_lifecycle");
+    var recipe = id("mmcece/test_lifecycle_locked_item_only");
+    var fixture = build(helper, machine, recipe);
+    after(helper, () -> {
+      confirm(helper, fixture.factory);
+      fixture.factory.serverTick();
+      var catalog = MachineRecipeService.catalogFor(fixture.factory).orElseThrow();
+      var exact = catalog.recipes().candidate(id("mmcece/test_lifecycle_simple").toString()).orElseThrow();
+      var alias = catalog.recipes().candidate(recipe.toString()).orElseThrow();
+      helper.assertTrue(
+          !exact.inputs().getFirst().key().ignoresComponents() && alias.inputs().getFirst().key().ignoresComponents(),
+          "Expected exact and item-only recipes for dirt in the same catalog");
+      var firstStack = new ItemStack(Items.DIRT);
+      firstStack.set(DataComponents.CUSTOM_NAME, Component.literal("first physical components"));
+      fixture.input.inventory().setStackInSlot(0, firstStack);
+      var allowed = Set.of(recipe.toString());
+      var first = RecipeSearch.beginFactory(fixture.factory, THREAD, catalog, allowed).orElseThrow();
+      var initial = first.advance(65_536).plan().orElseThrow();
+      helper.assertTrue(
+          FactoryRecipeStarter.start(fixture.factory, THREAD, initial, 65_536) == FactoryRecipeStarter.Result.STARTED,
+          "Cold item-only search failed to debit the named physical input");
+      var hint = first.lockedRestart(recipe.toString(), fixture.factory.threadConfiguration().revision());
+      helper.assertTrue(hint != null, "Locked item-only recipe did not yield a single-route hint");
+      until(helper, 100, () -> fixture.factory.run(THREAD).isEmpty(), () -> {
+        var nextStack = new ItemStack(Items.DIRT);
+        nextStack.set(DataComponents.CUSTOM_NAME, Component.literal("second physical components"));
+        fixture.input.inventory().setStackInSlot(2, nextStack);
+        fixture.input.inventory().setStackInSlot(3, new ItemStack(Items.DIRT));
+        var cold = RecipeSearch.beginFactory(fixture.factory, THREAD, catalog, allowed).orElseThrow();
+        var hot = RecipeSearch.beginFactory(fixture.factory, THREAD, catalog, allowed, hint).orElseThrow();
+        var coldPlan = cold.advance(65_536).plan().orElseThrow();
+        var hotPlan = hot.advance(65_536).plan().orElseThrow();
+        var debit = hotPlan.deductions().getFirst();
+        helper.assertTrue(
+            hot.totalWork() < cold.totalWork()
+                && hotPlan.deductions().equals(coldPlan.deductions())
+                && debit.slot().slot() == 2
+                && !debit.key().ignoresComponents()
+                && debit.key().matches(nextStack)
+                && !debit.key().matches(firstStack),
+            "Hot item-only search lost the physical components or selected another slot");
+        helper.assertTrue(
+            FactoryRecipeStarter.start(fixture.factory, THREAD, hotPlan, 65_536) == FactoryRecipeStarter.Result.STARTED
+                && fixture.input.inventory().getStackInSlot(2).isEmpty()
+                && fixture.input.inventory().getStackInSlot(3).getCount() == 1,
+            "Hot item-only start did not debit the chosen named item exactly once");
+        helper.succeed();
+      });
+    });
+  }
+
+  @GameTest(template = "empty16", batch = "factory_locked_restart", timeoutTicks = 400)
+  public static void locked_restart_replans_changed_slots_and_falls_back_for_grouped_routes(GameTestHelper helper) {
+    var fixture = build(helper);
+    after(helper, () -> {
+      confirm(helper, fixture.factory);
+      fixture.factory.serverTick();
+      for (var phase : List.of(RecipePreparationEvents.Type.POST_CHECK, RecipePreparationEvents.Type.PRE_TICK)) {
+        var empty = RecipePreparationHandlers
+            .begin(fixture.factory, id("unregistered_prepare_check"), THREAD, phase, 3, null);
+        helper.assertTrue(
+            empty.current()
+                && empty.complete()
+                && !empty.rejected()
+                && empty.parallelism() == 3
+                && empty.advance(0) == 0,
+            "An unsubscribed preparation phase changed its admission or budget");
+      }
+      var recipe = fixture.factory.scheduler().requireChannel(THREAD).lockedRecipe().toString();
+      var catalog = MachineRecipeService.catalogFor(fixture.factory).orElseThrow();
+      var allowed = Set.of(recipe);
+      fixture.input.inventory().setStackInSlot(0, new ItemStack(Items.DIRT));
+      fixture.input.inventory().setStackInSlot(1, new ItemStack(Items.GOLD_INGOT));
+      fixture.input.inventory().setStackInSlot(2, new ItemStack(Items.FLINT));
+      var first = RecipeSearch.beginFactory(fixture.factory, THREAD, catalog, allowed).orElseThrow();
+      var original = first.advance(65_536).plan().orElseThrow();
+      helper.assertTrue(
+          FactoryRecipeStarter.start(fixture.factory, THREAD, original, 65_536) == FactoryRecipeStarter.Result.STARTED,
+          "Initial locked recipe failed to debit the first slot");
+      var hint = first.lockedRestart(recipe, fixture.factory.threadConfiguration().revision());
+      helper.assertTrue(hint != null, "Locked single-route start produced no restart metadata");
+      until(helper, 100, () -> fixture.factory.run(THREAD).isEmpty(), () -> {
+        var empty = RecipeSearch.beginFactory(fixture.factory, THREAD, catalog, allowed, hint).orElseThrow();
+        helper.assertTrue(
+            empty.advance(65_536).status() == RecipePlanner.Status.NO_MATCH,
+            "Locked restart reused a paid input after it was consumed");
+        var namedDirt = new ItemStack(Items.DIRT);
+        namedDirt.set(DataComponents.CUSTOM_NAME, Component.literal("different input components"));
+        fixture.input.inventory().setStackInSlot(3, namedDirt);
+        var different = RecipeSearch.beginFactory(fixture.factory, THREAD, catalog, allowed, hint).orElseThrow();
+        helper.assertTrue(
+            different.advance(65_536).status() == RecipePlanner.Status.NO_MATCH,
+            "Single-input restart accepted a different component stack");
+        fixture.input.inventory().setStackInSlot(3, new ItemStack(Items.DIRT));
+        var storedWater = fixture.fluid.fluidTank().getFluid().copy();
+        fixture.fluid.fluidTank().setFluid(new FluidStack(Fluids.LAVA, 100));
+        var blocked = RecipeSearch.beginFactory(fixture.factory, THREAD, catalog, allowed, hint).orElseThrow();
+        helper.assertTrue(
+            blocked.advance(65_536).status() == RecipePlanner.Status.NO_MATCH,
+            "Locked restart skipped a resource strategy's current output check");
+        fixture.fluid.fluidTank().setFluid(storedWater);
+        var cold = RecipeSearch.beginFactory(fixture.factory, THREAD, catalog, allowed).orElseThrow();
+        var hot = RecipeSearch.beginFactory(fixture.factory, THREAD, catalog, allowed, hint).orElseThrow();
+        var coldPlan = cold.advance(65_536).plan().orElseThrow();
+        var hotPlan = hot.advance(65_536).plan().orElseThrow();
+        helper.assertTrue(
+            hot.totalWork() + 4 <= cold.totalWork()
+                && hotPlan != original
+                && hotPlan.deductions().equals(coldPlan.deductions())
+                && hotPlan.deductions().getFirst().slot().slot() == 3,
+            "Locked restart did not narrow search work and rebuild the debit from slot 3: " + hot
+                .totalWork() + " / " + cold.totalWork());
+        helper.assertTrue(
+            fixture.input.configureInputGroup(1, fixture.input.groupRevision()),
+            "Could not create a second route");
+        var grouped = RecipeSearch.beginFactory(fixture.factory, THREAD, catalog, allowed, hint).orElseThrow();
+        var groupedCold = RecipeSearch.beginFactory(fixture.factory, THREAD, catalog, allowed).orElseThrow();
+        var groupedPlan = grouped.advance(65_536).plan().orElseThrow();
+        var groupedColdPlan = groupedCold.advance(65_536).plan().orElseThrow();
+        helper.assertTrue(
+            grouped.totalWork() == groupedCold.totalWork()
+                && grouped.lockedRestart(recipe, fixture.factory.threadConfiguration().revision()) == null
+                && groupedPlan.deductions().equals(groupedColdPlan.deductions()),
+            "A multi-route search accepted stale single-route metadata");
+        helper.assertTrue(
+            FactoryRecipeStarter
+                .start(fixture.factory, THREAD, groupedPlan, 65_536) == FactoryRecipeStarter.Result.STARTED
+                && fixture.input.inventory().getStackInSlot(3).isEmpty()
+                && countIron(fixture) == 1,
+            "Replanned factory start did not commit exactly one debit");
+        helper.succeed();
+      });
+    });
+  }
+
   @GameTest(template = "empty16", batch = "factory_output_planning")
   public static void same_tick_factory_capture_reuses_only_current_port_contents(GameTestHelper helper) {
     var fixture = build(helper);
@@ -52,6 +198,28 @@ public final class FactoryOutputPlanningGameTests {
     helper.assertTrue(
         after != before && !before.dependenciesCurrent(),
         "Same-tick inventory mutation kept the old item ticket current");
+    var live = fixture.input.inventory().getStackInSlot(0);
+    var name = net.minecraft.network.chat.Component.literal("before");
+    live.set(net.minecraft.core.component.DataComponents.CUSTOM_NAME, name);
+    var firstFull = RecipeExecutionTicket.capture(fixture.factory).orElseThrow();
+    var firstPort = firstFull.ports().stream().filter(port -> port.position().equals(fixture.input.getBlockPos()))
+        .findFirst().orElseThrow();
+    live.grow(1);
+    var nextFull = RecipeExecutionTicket.capture(fixture.factory).orElseThrow();
+    var nextPort = nextFull.ports().stream().filter(port -> port.position().equals(fixture.input.getBlockPos()))
+        .findFirst().orElseThrow();
+    helper.assertTrue(
+        firstPort.itemAmount(0) == 2 && nextPort.itemAmount(0) == 3 && !firstFull.dependenciesCurrent(),
+        "Reusing detached components changed an earlier ticket's count");
+    name.append(" edited");
+    var changed = RecipeExecutionTicket.capture(fixture.factory).orElseThrow();
+    var changedPort = changed.ports().stream().filter(port -> port.position().equals(fixture.input.getBlockPos()))
+        .findFirst().orElseThrow();
+    helper.assertTrue(
+        !nextFull.dependenciesCurrent()
+            && !nextPort.itemKey(0).equals(changedPort.itemKey(0))
+            && changedPort.itemKey(0).matches(live),
+        "A nested component edit was missed by a fresh factory ticket");
     helper.succeed();
   }
 
@@ -230,6 +398,10 @@ public final class FactoryOutputPlanningGameTests {
   }
 
   private static Fixture build(GameTestHelper helper) {
+    return build(helper, MACHINE, id("mmcece/test_factory_output_planning"));
+  }
+
+  private static Fixture build(GameTestHelper helper, ResourceLocation machine, ResourceLocation recipe) {
     var level = helper.getLevel();
     var position = helper.absolutePos(new BlockPos(7, 5, 7));
     level.setBlockAndUpdate(position, MachineRegistries.FACTORY_CONTROLLER.get().defaultBlockState());
@@ -244,13 +416,13 @@ public final class FactoryOutputPlanningGameTests {
         MachineRegistries.PORTS.get("fluid_output_hatch_normal").get().defaultBlockState());
     var fixture = new Fixture();
     fixture.factory = (FactoryControllerBlockEntity) level.getBlockEntity(position);
-    fixture.factory.bindMachine(MACHINE);
+    fixture.factory.bindMachine(machine);
     fixture.factory.threadConfiguration().replaceThreads(
         List.of(
             new FactoryThreadState(
                 THREAD,
-                MACHINE,
-                id("mmcece/test_factory_output_planning"),
+                machine,
+                recipe,
                 true,
                 0,
                 2,

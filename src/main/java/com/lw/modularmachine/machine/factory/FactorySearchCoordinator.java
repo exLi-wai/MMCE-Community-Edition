@@ -28,6 +28,7 @@ public final class FactorySearchCoordinator {
   private final FactoryThreadConfiguration threadConfiguration;
   private final Host host;
   private final Map<String, RecipeSearch> searches = new HashMap<>();
+  private final Map<String, RecipeSearch.LockedRestart> lockedRestarts = new HashMap<>();
   private final Retries retries = new Retries();
   private long checkEpoch = Long.MIN_VALUE;
   private final Map<String, String> interfaceFailures = new HashMap<>();
@@ -37,7 +38,7 @@ public final class FactorySearchCoordinator {
     long gameTime();
     boolean hasRuns(String threadId);
     boolean startAllowed(String threadId);
-    RecipeSearch beginSearch(String threadId, RecipeCatalog catalog, Set<String> allowed);
+    RecipeSearch beginSearch(String threadId, RecipeCatalog catalog, Set<String> allowed, RecipeSearch.LockedRestart restart);
     int parallelLimit(String threadId);
     int maximumUpgradeRuns();
     MachineRecipe definitionForStart(RecipeStartPlan plan);
@@ -102,7 +103,7 @@ public final class FactorySearchCoordinator {
       interfaceFailures.remove(thread.threadId());
       var allowed = thread.lockedRecipe() == null ? null : Set.of(thread.lockedRecipe().toString());
       try {
-        search = host.beginSearch(thread.threadId(), catalog, allowed);
+        search = host.beginSearch(thread.threadId(), catalog, allowed, lockedRestarts.remove(thread.threadId()));
       } catch (RuntimeException failure) {
         metrics.recordSearch(System.nanoTime() - started, serverTick);
         if (!(failure instanceof UpgradeRecipeCheckHandlers.FailedException)) {
@@ -219,6 +220,13 @@ public final class FactorySearchCoordinator {
       startResult = host.startSingle(thread.threadId(), plan, plan.parallelBudgetRemaining());
     }
     if (startResult == FactoryRecipeStarter.Result.STARTED) {
+      // A committed plan, including its random draws and admissions, is single-use.
+      if (searches.remove(thread.threadId(), activeSearch) && thread.lockedRecipe() != null) {
+        var restart = activeSearch.lockedRestart(thread.lockedRecipe().toString(), threadConfiguration.revision());
+        if (restart != null) {
+          lockedRestarts.put(thread.threadId(), restart);
+        }
+      }
       threadConfiguration
           .updateThreadState(thread.threadId(), FactoryThreadState.State.RUNNING, FactoryThreadState.Reason.NONE);
       retries.reset(thread.threadId());
@@ -248,12 +256,14 @@ public final class FactorySearchCoordinator {
 
   public void invalidate() {
     searches.clear();
+    lockedRestarts.clear();
     interfaceFailures.clear();
     wakeRetries();
   }
 
   public void invalidateThread(String threadId, long now) {
     clearThread(threadId);
+    lockedRestarts.remove(threadId);
     retries.reset(threadId);
   }
 

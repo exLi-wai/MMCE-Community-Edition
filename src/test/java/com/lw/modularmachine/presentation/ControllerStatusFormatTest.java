@@ -23,9 +23,9 @@ class ControllerStatusFormatTest {
   }
 
   @Test
-  void searchTimeDisplaysMillisecondsWithTwoDecimalPlaces() {
-    assertEquals("1.23", ControllerStatusFormat.searchMilliseconds(1234));
-    assertEquals("1.00", ControllerStatusFormat.searchMilliseconds(1000));
+  void searchTimeDisplaysMillisecondsWithMicrosecondPrecision() {
+    assertEquals("1.234", ControllerStatusFormat.searchMilliseconds(1234));
+    assertEquals("0.003", ControllerStatusFormat.searchMilliseconds(3));
   }
 
   @Test

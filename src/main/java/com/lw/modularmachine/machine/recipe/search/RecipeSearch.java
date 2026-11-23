@@ -21,6 +21,7 @@ import com.lw.modularmachine.machine.PortKind;
 import com.lw.modularmachine.machine.upgrade.UpgradeBusOwner;
 import com.lw.modularmachine.machine.structure.StructureService;
 import java.util.ArrayList;
+import java.util.BitSet;
 import java.util.HashMap;
 import java.util.HashSet;
 import java.util.List;
@@ -89,12 +90,14 @@ public final class RecipeSearch {
   private RecipeSearchResource.ReplenishmentProof pendingProof;
   private long checkWork;
   private List<RecipeExecutionTicket> groups;
-  private Set<String> allowedIds;
+  private final RecipeCatalog.CandidateFilter filter;
+  private int rankLimit = Integer.MAX_VALUE;
+  private BitSet rejectedRanks;
   private int groupCursor;
   private RecipeSearch groupSearch;
   private RecipeStartPlan groupBest;
   private int groupBestIndex = -1;
-  private final Map<Integer, Set<String>> rejectedGroupRecipes = new HashMap<>();
+  private final Map<Integer, BitSet> rejectedGroupRecipes = new HashMap<>();
   private long completedGroupWork;
   private final java.util.LinkedHashSet<RecipeResourceRequirements> roles = new java.util.LinkedHashSet<>();
   private List<RecipeCandidate<ItemResourceKey>> diagnosticCandidates;
@@ -103,6 +106,70 @@ public final class RecipeSearch {
   private PortKind missingResource;
   private boolean resourcesDiagnosed;
   private String interfaceFailure = "";
+
+  /** Static recipe metadata retained after a successful locked factory start. */
+  public static final class LockedRestart {
+    private final RecipeCatalog catalog;
+    private final RecipeCatalog.CandidateFilter filter;
+    private final String threadId;
+    final String recipeId;
+    private final long generation;
+    private final long definitionEpoch;
+    private final long structureRevision;
+    private final long configurationRevision;
+    private final RecipeCatalog.SearchEntry entry;
+    private final List<RecipeCandidate<ItemResourceKey>> candidates;
+    private final List<CompiledRecipeSet.Entry<ItemResourceKey>> plannerEntries;
+    private final ItemResourceKey itemAnchor;
+    final ItemResourceKey singleInput;
+    private final Set<ItemResourceKey> itemKeys;
+
+    private LockedRestart(RecipeSearch search, String recipeId, long configurationRevision) {
+      this.catalog = search.catalog;
+      filter = search.filter;
+      threadId = search.factoryThread;
+      this.recipeId = recipeId;
+      this.configurationRevision = configurationRevision;
+      generation = search.ticket.generation();
+      definitionEpoch = search.ticket.definitionEpoch();
+      structureRevision = search.ticket.structureRevision();
+      entry = catalog.searchEntry(recipeId);
+      candidates = List.of(catalog.recipes().candidates().get(filter.firstRank));
+      plannerEntries = List.of(entry.inputs());
+      itemAnchor = catalog.recipes().inputIndex().anchorKey(filter.firstRank);
+      itemKeys = entry.transformsInputs() ? null : entry.inputs().input.keySet();
+      singleInput = itemKeys != null && itemKeys.size() == 1 ? itemKeys.iterator().next() : null;
+    }
+
+    Set<ItemResourceKey> itemKeys() {
+      return itemKeys;
+    }
+
+    private List<RecipeCandidate<ItemResourceKey>> candidates(ResourceSnapshot<ItemResourceKey> snapshot, List<RecipeSearchResource.Captured> currentResources) {
+      if (!entry.transformsInputs()) {
+        if (itemAnchor != null && !snapshot.inputs().containsKey(itemAnchor)) {
+          return List.of();
+        }
+        for (var resource : currentResources) {
+          if (!resource.inputs().matchesRank(filter.firstRank)) {
+            return List.of();
+          }
+        }
+      }
+      return candidates;
+    }
+
+    private boolean matches(RecipeCatalog currentCatalog, RecipeExecutionTicket ticket, Set<String> allowedIds, FactoryControllerBlockEntity controller) {
+      return catalog == currentCatalog
+          && allowedIds != null
+          && allowedIds.size() == 1
+          && allowedIds.contains(recipeId)
+          && generation == ticket.generation()
+          && definitionEpoch == ticket.definitionEpoch()
+          && structureRevision == ticket.structureRevision()
+          && configurationRevision == controller.threadConfiguration().revision();
+    }
+  }
 
   private record PendingInputs(
       RecipeCandidate<ItemResourceKey> candidate,
@@ -135,11 +202,11 @@ public final class RecipeSearch {
       List<RecipeResourceExecution.Output> liveOutputs) {
   }
 
-  private RecipeSearch(RecipeExecutionTicket ticket, RecipeCatalog catalog, Set<String> allowedIds, String factoryThread, List<RecipeExecutionTicket> groups) {
+  private RecipeSearch(RecipeExecutionTicket ticket, RecipeCatalog catalog, RecipeCatalog.CandidateFilter filter, String factoryThread, List<RecipeExecutionTicket> groups) {
     this.ticket = ticket;
     this.catalog = catalog;
     resources = new RecipeSearchResources(catalog);
-    this.allowedIds = allowedIds == null ? null : Set.copyOf(allowedIds);
+    this.filter = filter;
     this.factoryThread = startThread(ticket, factoryThread);
     this.groups = groups;
     pendingInputs = new PendingInputsQueue();
@@ -150,17 +217,17 @@ public final class RecipeSearch {
     resourceSearches = null;
   }
 
-  private RecipeSearch(RecipeExecutionTicket ticket, RecipeCatalog catalog, Set<String> allowedIds, String factoryThread, RecipeSearchResources resources, PendingInputsQueue pendingInputs) {
+  private RecipeSearch(RecipeExecutionTicket ticket, RecipeCatalog catalog, RecipeCatalog.CandidateFilter filter, String factoryThread, RecipeSearchResources resources, PendingInputsQueue pendingInputs) {
     this.ticket = ticket;
     this.catalog = catalog;
     this.resources = resources;
     this.pendingInputs = pendingInputs;
-    this.allowedIds = allowedIds == null ? null : Set.copyOf(allowedIds);
+    this.filter = filter;
     this.factoryThread = startThread(ticket, factoryThread);
     factory = this.factoryThread != null && ticket.owner() instanceof UpgradeBusOwner owner ? owner : null;
     factoryScope = factory == null ? null : UpgradeRecipeCheckHandlers.capture(factory, this.factoryThread);
     groupItems = resources.new GroupItems(ticket);
-    resourceSearches = catalog.new CapturedResources();
+    resourceSearches = catalog.new CapturedResources(resources.restart == null ? null : resources.restart.recipeId);
   }
 
   private int advanceBootstrap(int budget) {
@@ -175,8 +242,13 @@ public final class RecipeSearch {
       used++;
     }
     if (preparationSnapshot != null && resourceSearches.complete() && used < budget) {
-      screeningCandidates = catalog
-          .candidatesForPreparation(preparationSnapshot.inputs(), resourceSearches.all(), allowedIds);
+      screeningCandidates = resources.restart != null ? resources.restart
+          .candidates(preparationSnapshot, resourceSearches.all()) : catalog.candidatesForPreparation(
+              preparationSnapshot.inputs(),
+              resourceSearches.all(),
+              filter,
+              rankLimit,
+              rejectedRanks);
       bootstrapComplete = true;
       used++;
     }
@@ -227,6 +299,9 @@ public final class RecipeSearch {
     if (screeningCursor == screeningCandidates.size()) {
       screeningOrder = screeningCandidates;
       screeningCandidates = null;
+      if (resources.restart != null && session == null && inputPreparationCandidates.isEmpty()) {
+        session = RecipePlanner.prepareEntries(preparationSnapshot, List.of());
+      }
     }
     return used;
   }
@@ -235,6 +310,8 @@ public final class RecipeSearch {
     if (screeningNeedsPreparation) {
       inputPreparationCandidates.add(candidate);
       inputPreparationEpoch = itemCallbackEpoch;
+    } else if (resources.restart != null) {
+      session = RecipePlanner.prepareEntries(preparationSnapshot, resources.restart.plannerEntries);
     } else {
       preparedCandidates.put(candidate.id(), catalog.searchEntry(candidate.id()).inputs());
     }
@@ -409,10 +486,10 @@ public final class RecipeSearch {
   }
 
   public static Optional<RecipeSearch> begin(StructureService.StructureSubject owner, RecipeCatalog catalog, Set<String> allowedIds) {
-    return begin(owner, catalog, allowedIds, null);
+    return begin(owner, catalog, allowedIds, null, null);
   }
 
-  private static Optional<RecipeSearch> begin(StructureService.StructureSubject owner, RecipeCatalog catalog, Set<String> allowedIds, String factoryThread) {
+  private static Optional<RecipeSearch> begin(StructureService.StructureSubject owner, RecipeCatalog catalog, Set<String> allowedIds, String factoryThread, LockedRestart restart) {
     Objects.requireNonNull(catalog, "catalog");
     if (catalog.recipes().size() == 0) {
       return Optional.empty();
@@ -427,13 +504,20 @@ public final class RecipeSearch {
     var ticket = captured.orElseThrow();
     PatternProductionService.observe(owner, catalog, factoryThread);
     var groups = ticket.searchContexts();
+    if (restart != null
+        && (groups.size() != 1
+            || !(owner instanceof FactoryControllerBlockEntity controller)
+            || !restart.matches(catalog, ticket, allowedIds, controller))) {
+      restart = null;
+    }
+    var filter = restart == null ? catalog.candidateFilter(allowedIds) : restart.filter;
     var search = groups.size() == 1 ? new RecipeSearch(
         ticket,
         catalog,
-        allowedIds,
+        filter,
         factoryThread,
-        new RecipeSearchResources(catalog),
-        new PendingInputsQueue()) : new RecipeSearch(ticket, catalog, allowedIds, factoryThread, groups);
+        new RecipeSearchResources(catalog, restart),
+        new PendingInputsQueue()) : new RecipeSearch(ticket, catalog, filter, factoryThread, groups);
     return catalog.isCurrent() ? Optional.of(search) : Optional.empty();
   }
 
@@ -450,6 +534,10 @@ public final class RecipeSearch {
   }
 
   public static Optional<RecipeSearch> beginFactory(FactoryControllerBlockEntity factory, String threadId, RecipeCatalog catalog, Set<String> allowedIds) {
+    return beginFactory(factory, threadId, catalog, allowedIds, null);
+  }
+
+  public static Optional<RecipeSearch> beginFactory(FactoryControllerBlockEntity factory, String threadId, RecipeCatalog catalog, Set<String> allowedIds, LockedRestart restart) {
     Objects.requireNonNull(threadId, "threadId");
     var thread = factory.scheduler().channel(threadId);
     if (thread == null)
@@ -465,8 +553,25 @@ public final class RecipeSearch {
       }
     }
     var finalAllowed = allowedIds;
+    var locked = restart != null
+        && threadId.equals(restart.threadId)
+        && thread.lockedRecipe() != null
+        && thread.lockedRecipe().toString().equals(restart.recipeId) ? restart : null;
     return MachineRecipeService.catalogForFactory(factory, threadId, catalog)
-        .flatMap(effective -> begin(factory, effective, finalAllowed, threadId));
+        .flatMap(effective -> begin(factory, effective, finalAllowed, threadId, locked));
+  }
+
+  public LockedRestart lockedRestart(String recipeId, long configurationRevision) {
+    if (!catalog.supportsLockedRestart()
+        || groups != null
+        || selected == null
+        || !selected.recipe().id().equals(recipeId)
+        || filter.allowedIds == null
+        || filter.allowedIds.size() != 1
+        || !filter.allowedIds.contains(recipeId)) {
+      return null;
+    }
+    return resources.restart == null ? new LockedRestart(this, recipeId, configurationRevision) : resources.restart;
   }
 
   public static Optional<RecipeSearch> beginFactory(FactoryControllerBlockEntity factory, String threadId) {
@@ -857,7 +962,8 @@ public final class RecipeSearch {
 
   private void rejectGroupBest() {
     // Revisit groups pruned by this plan, keeping the shared physical scans.
-    rejectedGroupRecipes.computeIfAbsent(groupBestIndex, ignored -> new HashSet<>()).add(groupBest.recipe().id());
+    rejectedGroupRecipes.computeIfAbsent(groupBestIndex, ignored -> new BitSet()).set(rankLimit);
+    rankLimit = Integer.MAX_VALUE;
     groupCursor = 0;
     groupSearch = null;
     groupBest = null;
@@ -877,24 +983,10 @@ public final class RecipeSearch {
         return new Result(RecipePlanner.Status.BUDGET_EXHAUSTED, Optional.empty(), used);
       }
       if (groupSearch == null) {
-        Set<String> competitive = allowedIds;
-        if (groupBest != null) {
-          competitive = catalog.recipes().candidateIdsBefore(groupBest.recipe().id(), allowedIds);
-          if (competitive.isEmpty()) {
-            // Later groups cannot beat a complete, higher-priority match.
-            groupCursor = groups.size();
-            break;
-          }
-        }
-        var rejected = rejectedGroupRecipes.get(groupCursor);
-        if (rejected != null) {
-          var remaining = new HashSet<String>();
-          for (var candidate : catalog.recipes().candidatesFor(competitive)) {
-            if (!rejected.contains(candidate.id())) {
-              remaining.add(candidate.id());
-            }
-          }
-          competitive = remaining;
+        if (rankLimit <= filter.firstRank) {
+          // No allowed recipe in a later group can outrank the current best.
+          groupCursor = groups.size();
+          break;
         }
         // Charge even an empty group, so a long list cannot bypass the tick budget.
         used++;
@@ -902,10 +994,12 @@ public final class RecipeSearch {
         groupSearch = new RecipeSearch(
             groups.get(groupCursor),
             catalog,
-            competitive,
+            filter,
             factoryThread,
             resources,
             pendingInputs);
+        groupSearch.rankLimit = rankLimit;
+        groupSearch.rejectedRanks = rejectedGroupRecipes.get(groupCursor);
       }
       var result = groupSearch.advanceSearch(budget - used);
       used += result.workUsed();
@@ -914,9 +1008,11 @@ public final class RecipeSearch {
       }
       if (result.plan().isPresent()) {
         var candidate = result.plan().orElseThrow();
-        if (groupBest == null || precedes(candidate.recipe(), groupBest.recipe())) {
+        int rank = catalog.recipes().rankOf(candidate.recipe().id());
+        if (rank < rankLimit) {
           groupBest = candidate;
           groupBestIndex = groupCursor;
+          rankLimit = rank;
         }
       }
       if (interfaceFailure.isEmpty()) {
@@ -936,11 +1032,6 @@ public final class RecipeSearch {
         selected == null ? RecipePlanner.Status.NO_MATCH : RecipePlanner.Status.SELECTED,
         Optional.ofNullable(selected),
         used);
-  }
-
-  private static boolean precedes(RecipeCandidate<ItemResourceKey> left, RecipeCandidate<ItemResourceKey> right) {
-    return left.priority() > right.priority()
-        || left.priority() == right.priority() && left.id().compareTo(right.id()) < 0;
   }
 
   public boolean dependenciesCurrent() {
@@ -963,7 +1054,7 @@ public final class RecipeSearch {
 
   private Result advanceDiagnostics(int used, int budget, long deadline) {
     if (diagnosticCandidates == null) {
-      diagnosticCandidates = catalog.recipes().candidatesFor(allowedIds);
+      diagnosticCandidates = catalog.recipes().candidatesFor(filter.allowedIds);
       if (groups == null) {
         roles.add(screeningRequirements);
       }

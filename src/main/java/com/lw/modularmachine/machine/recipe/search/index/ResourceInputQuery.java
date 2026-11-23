@@ -16,4 +16,11 @@ public interface ResourceInputQuery {
   BitSet select(Set<String> allowedIds);
 
   void retainMatches(BitSet selected);
+
+  default boolean matchesRank(int rank) {
+    var single = new BitSet();
+    single.set(rank);
+    retainMatches(single);
+    return single.get(rank);
+  }
 }

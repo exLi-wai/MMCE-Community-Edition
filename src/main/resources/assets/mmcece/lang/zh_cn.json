@@ -422,7 +422,7 @@
   "jade.mmcece.failure.verification_timeout": "结构检测超时",
   "jade.mmcece.input.recipe": "配方输入：%s",
   "jade.mmcece.input.shortage": "缺少 %s：%s",
-  "jade.mmcece.performance": "Avg: %sµs/t (Search: %sms)",
+  "jade.mmcece.performance": "Avg: %sµs/t (Search: %sms/t)",
   "jade.mmcece.production.paused": "生产：暂停",
   "jade.mmcece.production.ready": "生产：就绪",
   "jade.mmcece.progress": "进度：%s",
@@ -526,7 +526,7 @@
 
   "menu.mmcece.controller.blueprint": "找到蓝图：%s",
   "menu.mmcece.controller.none": "无",
-  "menu.mmcece.controller.performance": "Avg: %sµs/t (Search: %sms)",
+  "menu.mmcece.controller.performance": "Avg: %sµs/t (Search: %sms/t)",
   "menu.mmcece.controller.progress": "进度：%s",
   "menu.mmcece.controller.state.binding_changed": "机器仓口绑定已变化",
   "menu.mmcece.controller.state.crafting": "工作中...",
