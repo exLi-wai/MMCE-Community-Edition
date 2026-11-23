@@ -24,4 +24,13 @@ public record ItemSlotDomain(int capacity, String selector, boolean bulk) {
 
     return Map.copyOf(result);
   }
+
+  ResourceSnapshot.SlotLimit<ItemResourceKey> outputLimits(Set<ItemResourceKey> keys) {
+    return (key, slotCapacity) -> {
+      if (keys.isEmpty()) {
+        return slotCapacity;
+      }
+      return selector.equals(key.selector()) && keys.contains(key) ? capacityFor(key) : 0;
+    };
+  }
 }

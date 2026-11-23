@@ -6,7 +6,8 @@ import com.lw.modularmachine.api.recipe.resource.RecipeResourcePlanning;
 import com.lw.modularmachine.api.recipe.resource.RecipeResourceType;
 import com.lw.modularmachine.api.recipe.resource.RecipeResources;
 import com.lw.modularmachine.machine.recipe.FrozenRecipeRun;
-import com.lw.modularmachine.machine.recipe.RecipeTriggeredResources;
+import com.lw.modularmachine.api.recipe.TriggeredResourceData;
+import java.util.BitSet;
 import com.lw.modularmachine.machine.recipe.TriggeredItemExecution;
 import com.lw.modularmachine.machine.recipe.PatternInputTransaction;
 import com.lw.modularmachine.machine.recipe.RecipeCommitGuard;
@@ -51,7 +52,7 @@ import org.jetbrains.annotations.ApiStatus;
 public final class RecipeResourceExecutionRegistry {
   private static final Map<RecipeResourceType<?>, Boolean> ENGINE_OWNED = new IdentityHashMap<>();
   private static final List<Binding<?>> BINDINGS = new ArrayList<>();
-  private static List<Binding<?>> installed;
+  private static volatile List<Binding<?>> installed;
 
   static {
     ENGINE_OWNED.put(RecipeResourceDefinitions.ITEM, Boolean.TRUE);
@@ -125,13 +126,47 @@ public final class RecipeResourceExecutionRegistry {
     BINDINGS.add(new Binding<>(type, admission, plannedStart, start, tick, finish, freeze, validation));
   }
 
-  private static synchronized List<Binding<?>> snapshot() {
+  private static List<Binding<?>> snapshot() {
+    var published = installed;
+    return published == null ? install() : published;
+  }
+
+  private static synchronized List<Binding<?>> install() {
     if (installed == null) {
       BINDINGS.forEach(binding -> RecipeResourceDefinitions.requireRegistered(binding.type()));
       installed = List.copyOf(BINDINGS);
     }
 
     return installed;
+  }
+
+  /**
+   * Indices preserve installed strategy order, including optional resource
+   * plugins.
+   */
+  public static final class TickStrategies {
+    private final BitSet indices = new BitSet();
+    private final boolean triggered;
+
+    private TickStrategies(RecipeResources resources, TriggeredResourceData triggers) {
+      var bindings = snapshot();
+      requireSupported(resources, bindings);
+      triggered = !triggers.isEmpty();
+      for (int i = 0; i < bindings.size(); i++) {
+        var binding = bindings.get(i);
+        if (tickRequired(binding, resources)
+            || binding.type() == RecipeResourceDefinitions.FLUID
+                && triggers.rows().stream().anyMatch(row -> row.resource().equals("fluid"))
+            || binding.type() == RecipeResourceDefinitions.CHEMICAL
+                && triggers.rows().stream().anyMatch(row -> row.resource().equals("chemical"))) {
+          indices.set(i);
+        }
+      }
+    }
+  }
+
+  public static TickStrategies tickStrategies(RecipeResources resources, TriggeredResourceData triggers) {
+    return new TickStrategies(resources, triggers);
   }
 
   private static void requireSupported(RecipeResources resources, List<Binding<?>> bindings) {
@@ -476,10 +511,13 @@ public final class RecipeResourceExecutionRegistry {
       throw new IllegalStateException("Resource tick preparation outside server thread");
     }
     var bindings = snapshot();
-    var resources = runs.stream()
-        .map(run -> RecipeTriggeredResources.effective(run, run.resourceData(owner.structureLevel().registryAccess())))
-        .toList();
-    resources.forEach(value -> requireSupported(value, bindings));
+    var registries = level.registryAccess();
+    var resources = new ArrayList<RecipeResources>(runs.size());
+    var eligible = new BitSet();
+    for (var run : runs) {
+      eligible.or(run.tickStrategies(registries).indices);
+      resources.add(run.effectiveTickResources(registries));
+    }
     var prepared = new ArrayList<PreparedRecipeResource>();
     if (runs.stream().anyMatch(run -> !run.triggeredResources().isEmpty())) {
       var triggeredItems = TriggeredItemExecution.prepare(owner, runs);
@@ -489,7 +527,8 @@ public final class RecipeResourceExecutionRegistry {
       // Scheduled IO also needs transactional progress before its due position.
       prepared.add(triggeredItems.prepared());
     }
-    for (var binding : bindings) {
+    for (int index = eligible.nextSetBit(0); index >= 0; index = eligible.nextSetBit(index + 1)) {
+      var binding = bindings.get(index);
       var result = prepareTick(binding, owner, runs, resources);
       if (result == null) {
         continue;
@@ -507,12 +546,8 @@ public final class RecipeResourceExecutionRegistry {
   }
 
   public static boolean hasTickResources(FrozenRecipeRun run, HolderLookup.Provider registries) {
-    var bindings = snapshot();
-    var resources = run.resourceData(registries);
-    requireSupported(resources, bindings);
-
-    return !run.triggeredResources().isEmpty()
-        || bindings.stream().anyMatch(binding -> tickRequired(binding, resources));
+    var strategies = run.tickStrategies(registries);
+    return strategies.triggered || !strategies.indices.isEmpty();
   }
 
   private static <D> boolean tickRequired(Binding<D> binding, RecipeResources resources) {
@@ -528,8 +563,7 @@ public final class RecipeResourceExecutionRegistry {
     if (resource == RecipeResourceDefinitions.ITEM) {
       return TriggeredItemExecution.prepare(owner, runs).status() == RecipeResourceExecution.TickStatus.INSUFFICIENT;
     }
-    var resources = runs.stream()
-        .map(run -> RecipeTriggeredResources.effective(run, run.resourceData(owner.structureLevel().registryAccess())))
+    var resources = runs.stream().map(run -> run.effectiveTickResources(owner.structureLevel().registryAccess()))
         .toList();
     for (var binding : snapshot()) {
       if (binding.type() == resource) {

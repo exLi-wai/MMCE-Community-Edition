@@ -103,6 +103,15 @@ public final class UpgradeCatalogService {
       return byItem;
     }
 
+    public boolean matchesByItemOnly(ItemStack stack) {
+      if (stack.isEmpty()) {
+        return true;
+      }
+      var item = stack.getItem().builtInRegistryHolder().key().location();
+      var index = indexes.get(item);
+      return !supportedItems.contains(item) && (index == null || index.exact().isEmpty());
+    }
+
     public Optional<UpgradeDefinition> match(ItemStack stack) {
       if (stack == null || stack.isEmpty()) {
         return Optional.empty();

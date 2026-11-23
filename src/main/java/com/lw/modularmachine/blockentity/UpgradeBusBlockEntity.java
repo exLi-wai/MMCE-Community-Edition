@@ -49,6 +49,7 @@ import net.minecraft.world.entity.player.Inventory;
 import net.minecraft.world.entity.player.Player;
 import net.minecraft.world.inventory.AbstractContainerMenu;
 import net.minecraft.world.item.ItemStack;
+import net.minecraft.world.item.Item;
 import net.minecraft.world.level.block.entity.BlockEntity;
 import net.minecraft.world.level.block.state.BlockState;
 import net.neoforged.neoforge.items.ItemStackHandler;
@@ -67,6 +68,8 @@ public final class UpgradeBusBlockEntity extends BlockEntity implements MenuProv
   private final TransactionalItemStackHandler inventory;
   private final Map<BlockPos, UpgradeBusBinding> bindings = new LinkedHashMap<>();
   private final Map<ResourceLocation, UpgradeBusContext> contexts = new HashMap<>();
+  private UpgradeBusContext auditedRuntimeContext;
+  private Item[] auditedRuntimeItems;
   private final Map<BlockPos, UpgradeBusOwner> published = new HashMap<>();
   private long upgradeRevision, bindingRevision;
   private long definitionsEpoch = -1, lastBindingCheck = Long.MIN_VALUE;
@@ -367,16 +370,38 @@ public final class UpgradeBusBlockEntity extends BlockEntity implements MenuProv
     }
     var definitions = UpgradeCatalogService.snapshot();
     long revision = upgradeRevision;
+    var runtimeContext = context(factory);
+    if (auditedRuntimeContext == runtimeContext && auditedRuntimeItems != null) {
+      boolean unchanged = true;
+      for (int slot = 0; slot < slots; slot++) {
+        if (auditedRuntimeItems[slot] != inventory.getStackInSlot(slot).getItem()) {
+          unchanged = false;
+          break;
+        }
+      }
+      if (unchanged) {
+        return true;
+      }
+    }
     var expected = context(factory).tickCosts();
     var expectedData = context(factory).tickData();
     var expectedFinishData = context(factory).finishData();
     var actual = new ArrayList<StartCostSlot>();
     var actualData = new UpgradeRuntimeDataHandlers.Subscriptions();
     var actualFinishData = new UpgradeRuntimeDataHandlers.Subscriptions(UpgradeRuntimeData.Phase.FINISHED);
+    var itemProof = new Item[slots];
     rebuildingCatalog = true;
     try {
       for (int slot = 0; slot < slots; slot++) {
-        var definition = definitions.match(inventory.getStackInSlot(slot)).orElse(null);
+        var stack = inventory.getStackInSlot(slot);
+        if (itemProof != null) {
+          if (definitions.matchesByItemOnly(stack)) {
+            itemProof[slot] = stack.getItem();
+          } else {
+            itemProof = null;
+          }
+        }
+        var definition = definitions.match(stack).orElse(null);
         if (definition != null && definition.compatibility().allows(factory.machineId())) {
           if (definition.tickCost().present()) {
             actual.add(new StartCostSlot(slot, definition.tickCost()));
@@ -395,6 +420,9 @@ public final class UpgradeBusBlockEntity extends BlockEntity implements MenuProv
         || !actualData.build().equals(expectedData)
         || !actualFinishData.build().equals(expectedFinishData)) {
       onInventoryChanged();
+    } else {
+      auditedRuntimeContext = runtimeContext;
+      auditedRuntimeItems = itemProof;
     }
 
     return tickCostsReady(factory);
@@ -749,11 +777,18 @@ public final class UpgradeBusBlockEntity extends BlockEntity implements MenuProv
     if (!bindingMutationAllowed() || !schemaSupported()) {
       return;
     }
-    ensureDefinitionsCurrent();
-    rebuildContexts();
+    if (definitionsEpoch != UpgradeCatalogService.snapshot().epoch()) {
+      // A new catalog withdraws existing sources. Republish valid bindings in the
+      // same visit.
+      refreshBinding();
+    } else {
+      rebuildContexts();
+    }
   }
 
   private void onInventoryChanged() {
+    auditedRuntimeContext = null;
+    auditedRuntimeItems = null;
     if (!loading && (level == null || !level.isClientSide)) {
       upgradeRevision = Math.incrementExact(upgradeRevision);
       contexts.clear();

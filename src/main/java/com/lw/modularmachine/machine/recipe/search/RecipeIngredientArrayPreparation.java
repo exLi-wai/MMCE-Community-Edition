@@ -56,6 +56,7 @@ final class RecipeIngredientArrayPreparation {
   private final long epoch = RecipeItemCallbackService.epoch();
   private Stage stage = Stage.BRANCH;
   private MachineRecipe definition;
+  private RecipeExecutionTicket branchTicket;
   private RecipeItemCallbackService.InputPreparation modifiers;
   private RecipePlanner.Session<ItemResourceKey> planner;
   private RecipeResourcePlanning resourceAdmission;
@@ -103,7 +104,7 @@ final class RecipeIngredientArrayPreparation {
     if (budget < 0) {
       throw new IllegalArgumentException("Negative ingredient array preparation budget");
     }
-    if (!RecipeItemCallbackService.isCurrent(epoch) || !ticket.dependenciesCurrent() || !catalog.isCurrent()) {
+    if (!RecipeItemCallbackService.isCurrent(epoch) || !ticket.searchContextCurrent() || !catalog.isCurrent()) {
       throw new UpgradeRecipeCheckHandlers.StaleException();
     }
     if (!expansion.complete()) {
@@ -127,10 +128,15 @@ final class RecipeIngredientArrayPreparation {
    * remaining work before returning to the caller's branch budget gate.
    */
   private boolean advanceCurrentBranch(int budget, HolderLookup.Provider registries, DynamicOps<JsonElement> ops) {
+    if (branchTicket != null && !branchTicket.dependenciesCurrent()) {
+      workUsed++;
+      advanceBranch();
+      return true;
+    }
     do {
       boolean canContinue = switch (stage) {
         case BRANCH -> beginBranch(registries, ops);
-        case INPUT_MODIFIERS -> advanceInputModifiers(budget, registries, ops);
+        case INPUT_MODIFIERS -> advanceInputModifiers(budget, registries);
         case ITEM_INPUTS -> advanceItemInputs(budget);
         case RESOURCE_INPUTS -> advanceResourceInputs(budget);
         case RESOURCE_ADMISSION -> advanceResourceAdmission(budget);
@@ -161,13 +167,13 @@ final class RecipeIngredientArrayPreparation {
     return true;
   }
 
-  private boolean advanceInputModifiers(int budget, HolderLookup.Provider registries, DynamicOps<JsonElement> ops) {
+  private boolean advanceInputModifiers(int budget, HolderLookup.Provider registries) {
     modifiers.advance(budget - workUsed);
     workUsed += modifiers.workUsed();
     if (!modifiers.rejected() && modifiers.prepared().isEmpty()) {
       return false;
     }
-    if (modifiers.rejected() || !prepareItemInputs(registries, ops)) {
+    if (modifiers.rejected() || !prepareItemInputs(registries)) {
       advanceBranch();
     } else {
       stage = Stage.ITEM_INPUTS;
@@ -205,7 +211,7 @@ final class RecipeIngredientArrayPreparation {
       waitingForInputs = true;
       stage = Stage.RESOURCE_OUTPUTS;
     } else {
-      resourceAdmission = RecipeResourceExecutionRegistry.prepareAdmission(ticket, definition.resourceData(), 1);
+      resourceAdmission = RecipeResourceExecutionRegistry.prepareAdmission(branchTicket, definition.resourceData(), 1);
       stage = Stage.RESOURCE_ADMISSION;
     }
     return true;
@@ -326,12 +332,11 @@ final class RecipeIngredientArrayPreparation {
     }
     var declaration = RecipeIngredientArrayResolution.resolve(contextual, selectedChoices, registries);
     var selected = MachineRecipe.CODEC.codec().parse(ops, declaration).getOrThrow();
-    modifiers = RecipeItemCallbackService
-        .beginInputs(declaration, selected.scriptOptions(), callbackContext(1), registries);
+    modifiers = RecipeItemCallbackService.beginInputs(selected, () -> declaration, callbackContext(1), registries);
   }
 
-  private boolean prepareItemInputs(HolderLookup.Provider registries, DynamicOps<JsonElement> ops) {
-    definition = MachineRecipe.CODEC.codec().parse(ops, modifiers.prepared().orElseThrow().declaration()).getOrThrow();
+  private boolean prepareItemInputs(HolderLookup.Provider registries) {
+    definition = modifiers.prepared().orElseThrow().definition();
     modifiers = null;
     if (!PatternProductionService.matches(ticket, definition, thread)
         || RecipeResourceRequirements.missing(ticket, definition).isPresent()
@@ -341,7 +346,11 @@ final class RecipeIngredientArrayPreparation {
     var candidate = RecipeItemPreparation.inputCandidate(
         RecipeItemCallbackService.compilePrepared(definition, ResourceLocation.parse(original.id()), registries),
         definition);
-    planner = RecipePlanner.prepare(snapshot, new CompiledRecipeSet<>(List.of(candidate)));
+    branchTicket = catalog.ticketForRecipe(ticket, candidate, definition);
+    if (!branchTicket.dependenciesCurrent()) {
+      return false;
+    }
+    planner = RecipePlanner.prepareEntries(snapshot, List.of(CompiledRecipeSet.compileCandidate(candidate)));
 
     return true;
   }
@@ -363,7 +372,7 @@ final class RecipeIngredientArrayPreparation {
     var exact = RecipeItemCallbackService
         .compilePrepared(definition, ResourceLocation.parse(original.id()), registries);
     parallel = RecipeStartPlan
-        .prepared(ticket, catalog, exact, List.of(), List.of(), RecipeStartPlan.newInputChanceSeed(), null)
+        .prepared(branchTicket, catalog, exact, List.of(), List.of(), RecipeStartPlan.newInputChanceSeed(), null)
         .withOutputPreparationContext(thread).withPreparedInputs(definition, original, epoch);
   }
 
@@ -378,6 +387,7 @@ final class RecipeIngredientArrayPreparation {
   private void advanceBranch() {
     stage = Stage.BRANCH;
     definition = null;
+    branchTicket = null;
     modifiers = null;
     planner = null;
     resourceAdmission = null;

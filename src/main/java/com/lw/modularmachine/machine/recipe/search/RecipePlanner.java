@@ -57,15 +57,19 @@ public final class RecipePlanner {
   }
 
   public static <K> Session<K> prepare(ResourceSnapshot<K> snapshot, CompiledRecipeSet<K> recipes) {
-    return new Session<>(snapshot, recipes, false, null);
+    return prepare(snapshot, recipes, null);
   }
 
   static <K> Session<K> prepare(ResourceSnapshot<K> snapshot, CompiledRecipeSet<K> recipes, Set<String> allowedIds) {
-    return new Session<>(snapshot, recipes, false, allowedIds);
+    return prepareEntries(snapshot, recipes.entriesFor(snapshot, false, allowedIds));
+  }
+
+  static <K> Session<K> prepareEntries(ResourceSnapshot<K> snapshot, List<CompiledRecipeSet.Entry<K>> candidates) {
+    return new Session<>(snapshot, List.copyOf(candidates), false);
   }
 
   public static <K> Session<K> prepareOutputs(ResourceSnapshot<K> snapshot, RecipeCandidate<K> paidOutput) {
-    return new Session<>(snapshot, new CompiledRecipeSet<>(List.of(paidOutput)), true, null);
+    return new Session<>(snapshot, List.of(CompiledRecipeSet.compileCandidate(paidOutput)), true);
   }
 
   /**
@@ -102,11 +106,10 @@ public final class RecipePlanner {
     private int overflowRow, overflowSlot;
     private long overflowRemaining;
 
-    private Session(ResourceSnapshot<K> snapshot, CompiledRecipeSet<K> recipes, boolean outputOnly, Set<String> allowedIds) {
+    private Session(ResourceSnapshot<K> snapshot, List<CompiledRecipeSet.Entry<K>> candidates, boolean outputOnly) {
       this.snapshot = Objects.requireNonNull(snapshot, "snapshot");
-      Objects.requireNonNull(recipes, "recipes");
       this.outputOnly = outputOnly;
-      candidates = recipes.entriesFor(snapshot, outputOnly, allowedIds);
+      this.candidates = candidates;
       if (snapshot.outputs().size() > MAX_OUTPUT_SLOTS || snapshot.inputs().size() > MAX_SNAPSHOT_INPUT_KEYS) {
         throw new IllegalArgumentException("Snapshot exceeds planner support limits");
       }

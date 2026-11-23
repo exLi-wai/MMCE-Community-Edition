@@ -11,6 +11,7 @@ import com.lw.modularmachine.machine.chemical.ChemicalPlatform;
 import com.lw.modularmachine.machine.recipe.PatternInputTransaction;
 import com.lw.modularmachine.machine.recipe.RecipeCommitGuard;
 import com.lw.modularmachine.machine.recipe.RecipeExecutionTicket;
+import com.lw.modularmachine.machine.recipe.TickOutputWork;
 import com.lw.modularmachine.machine.recipe.resource.PreparedRecipeResource;
 import com.lw.modularmachine.machine.recipe.resource.RecipeResourceExecution;
 import com.lw.modularmachine.machine.recipe.search.ChemicalOutputLayout;
@@ -21,9 +22,7 @@ import com.lw.modularmachine.machine.recipe.search.ResourcePlanningAdapter;
 import com.lw.modularmachine.machine.structure.StructureService;
 import java.util.ArrayList;
 import java.util.List;
-import java.util.Map;
 import java.util.UUID;
-import java.util.WeakHashMap;
 import org.jetbrains.annotations.ApiStatus;
 import com.lw.modularmachine.machine.PortKind;
 import com.lw.modularmachine.machine.recipe.resource.RecipeResourceTransaction;
@@ -33,9 +32,6 @@ import net.minecraft.core.BlockPos;
 /** Physical Chemical rules adapted into the shared execution stages. */
 @ApiStatus.Internal
 public final class ChemicalResourceExecution {
-  private static final int TICK_OUTPUT_WORK = 64;
-  private static final Map<StructureService.StructureSubject, TickOutputs> TICK_OUTPUTS = new WeakHashMap<>();
-
   private record TickRun(UUID id, int progress) {
   }
 
@@ -55,15 +51,19 @@ public final class ChemicalResourceExecution {
       List<TickTank> tanks,
       List<TickRun> runs,
       List<RecipeCandidate.Output<ChemicalResourceKey>> claims,
-      ChemicalOutputLayout.Planning plan,
-      long lastWorkTick) {
+      ChemicalOutputLayout.Planning plan) implements TickOutputWork.Plan {
+    @Override
+    public int advance(int budget) {
+      return plan.advance(budget).workUsed();
+    }
+
+    @Override
+    public boolean pending() {
+      return plan.status() == RecipePlanner.Status.BUDGET_EXHAUSTED;
+    }
   }
 
   private ChemicalResourceExecution() {
-  }
-
-  public static void clear() {
-    TICK_OUTPUTS.clear();
   }
 
   public static RecipeResourceExecution.Validation<ChemicalRecipeData> validation() {
@@ -186,8 +186,8 @@ public final class ChemicalResourceExecution {
                 value -> (value.run().canEmitTickOutputs() || !value.run().triggeredResources().isEmpty())
                     && !value.data().perTickOutputs().isEmpty())
             .toList();
+        var outputs = outputRuns.isEmpty() ? null : RecipeExecutionTicket.captureChemicalOutputs(owner).orElse(null);
         if (!outputRuns.isEmpty()) {
-          var outputs = RecipeExecutionTicket.captureOutputs(owner).orElse(null);
           if (outputs == null) {
             return RecipeResourceExecution.TickResult.failed(RecipeResourceExecution.TickStatus.STALE);
           }
@@ -221,47 +221,29 @@ public final class ChemicalResourceExecution {
                       port.chemical().amount(),
                       port.capacity()))
               .toList();
-          var cached = TICK_OUTPUTS.get(owner);
-          long now = outputs.level().getGameTime();
-          if (cached == null
-              || cached.structureRevision() != outputs.structureRevision()
-              || cached.definitionEpoch() != outputs.definitionEpoch()
-              || !cached.tanks().equals(tanks)
-              || !cached.runs().equals(ids)
-              || !cached.claims().equals(claims)
-              || cached.plan().status() == RecipePlanner.Status.NO_MATCH && cached.lastWorkTick() != now) {
-            cached = new TickOutputs(
-                outputs.structureRevision(),
-                outputs.definitionEpoch(),
-                tanks,
-                ids,
-                claims,
-                new ChemicalOutputLayout(outputs).planClaims(claims),
-                cached == null ? Long.MIN_VALUE : cached.lastWorkTick());
-            TICK_OUTPUTS.put(owner, cached);
-          }
-          if (cached.plan().status() == RecipePlanner.Status.BUDGET_EXHAUSTED && cached.lastWorkTick() != now) {
-            cached.plan().advance(TICK_OUTPUT_WORK);
-            cached = new TickOutputs(
-                cached.structureRevision(),
-                cached.definitionEpoch(),
-                cached.tanks(),
-                cached.runs(),
-                cached.claims(),
-                cached.plan(),
-                now);
-            TICK_OUTPUTS.put(owner, cached);
-          }
+          var cached = TickOutputWork.forOwner(owner).visit(
+              outputs.level().getGameTime(),
+              TickOutputs.class,
+              ids.getFirst().id(),
+              previous -> previous.structureRevision() == outputs.structureRevision()
+                  && previous.definitionEpoch() == outputs.definitionEpoch()
+                  && previous.tanks().equals(tanks)
+                  && previous.runs().equals(ids)
+                  && previous.claims().equals(claims),
+              () -> new TickOutputs(
+                  outputs.structureRevision(),
+                  outputs.definitionEpoch(),
+                  tanks,
+                  ids,
+                  claims,
+                  new ChemicalOutputLayout(outputs).planClaims(claims)));
           if (cached.plan().status() == RecipePlanner.Status.BUDGET_EXHAUSTED) {
             return RecipeResourceExecution.TickResult.failed(RecipeResourceExecution.TickStatus.STALE);
           }
           if (cached.plan().status() != RecipePlanner.Status.SELECTED) {
             return RecipeResourceExecution.TickResult.failed(RecipeResourceExecution.TickStatus.OUTPUT_BLOCKED);
           }
-          proofs.add(outputs);
           batches.add(ChemicalTransactions.outputs(outputs, cached.plan().additions()));
-        } else {
-          TICK_OUTPUTS.remove(owner);
         }
         var transaction = new RecipeResourceTransaction();
         batches.forEach(batch -> transaction.phase().enlist(batch));
@@ -269,7 +251,8 @@ public final class ChemicalResourceExecution {
         return RecipeResourceExecution.TickResult.ready(new PreparedRecipeResource() {
           @Override
           public boolean current() {
-            return proofs.stream().allMatch(RecipeCommitGuard::validate);
+            return (captured == null || RecipeCommitGuard.validateViews(captured, proofs))
+                && (outputs == null || RecipeCommitGuard.validate(outputs));
           }
 
           @Override

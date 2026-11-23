@@ -8,7 +8,6 @@ import com.lw.modularmachine.machine.recipe.resource.RecipeResourceExecutionRegi
 import com.lw.modularmachine.machine.recipe.search.RecipeResourceRequirements;
 import com.lw.modularmachine.machine.upgrade.UpgradeLifecyclePublisher;
 import com.lw.modularmachine.api.recipe.RecipeLifecycleEvents;
-import com.lw.modularmachine.ModularMachine;
 import com.lw.modularmachine.blockentity.FactoryControllerBlockEntity;
 import com.lw.modularmachine.blockentity.MachinePortBlockEntity;
 import com.lw.modularmachine.blockentity.UpgradeBusBlockEntity.StartCostLease;
@@ -91,8 +90,7 @@ public final class FactoryParallelResourceCommitter {
     } catch (ArithmeticException overflow) {
       return FactoryRunResourceResult.STALE;
     }
-    var energyTicket = energyRequirements.isEmpty() ? null : RecipeExecutionTicket.captureEnergyInputs(factory)
-        .orElse(null);
+    var energyTicket = energyRequirements.isEmpty() ? null : energyOutputs.inputs(factory).orElse(null);
     if (!energyRequirements.isEmpty() && energyTicket == null) {
       return FactoryRunResourceResult.WAITING_ENERGY;
     }
@@ -144,9 +142,8 @@ public final class FactoryParallelResourceCommitter {
     }
     var additionalResources = resourceTick.prepared();
     if (!tickCosts.current()
-        || !energyOutputs.current()
         || energyTicket == null && !factory.revalidateStructure(factory.registration())
-        || energyTicket != null && !RecipeCommitGuard.validate(energyTicket)
+        || !energyOutputs.current(energyTicket)
         || !additionalResources.current()
         || !tickCosts.versionsCurrent()) {
       return FactoryRunResourceResult.STALE;
@@ -201,7 +198,7 @@ public final class FactoryParallelResourceCommitter {
       }
       committed = true;
     } catch (RuntimeException failure) {
-      ModularMachine.LOGGER.warn("Parallel factory fee commit failed at {}", factory.getBlockPos(), failure);
+      factory.runCoordinator().warnFailure(threadId, "parallel fee commit", factory.getBlockPos(), failure);
       return FactoryRunResourceResult.STALE;
     } finally {
       resourceTransaction.resolve(committed);

@@ -1,6 +1,5 @@
 package com.lw.modularmachine.machine.recipe;
 
-import java.util.Objects;
 import net.minecraft.core.HolderLookup;
 import net.minecraft.world.item.ItemStack;
 import net.neoforged.neoforge.server.ServerLifecycleHooks;
@@ -13,22 +12,24 @@ import org.jetbrains.annotations.ApiStatus;
 public final class ItemResourceKey {
   private final ItemStack prototype;
   private final int hash;
+  private final int componentsHash;
   private final int maxStackSize;
   private final String selector;
   private final boolean ignoresComponents;
 
-  private ItemResourceKey(ItemStack stack, HolderLookup.Provider registries) {
+  private ItemResourceKey(ItemStack stack, String selector) {
     if (stack.isEmpty()) {
       throw new IllegalArgumentException("Empty stacks do not have a resource key");
     }
-    prototype = ItemStackSnapshots.detached(stack.copyWithCount(1), registries);
+    prototype = stack;
     maxStackSize = prototype.getMaxStackSize();
     if (maxStackSize <= 0) {
       throw new IllegalArgumentException("Invalid component-aware stack limit");
     }
-    selector = "";
+    this.selector = ResourceSelector.require(selector);
     ignoresComponents = false;
-    hash = 31 * (31 * System.identityHashCode(prototype.getItem()) + prototype.getComponents().hashCode());
+    componentsHash = prototype.getComponents().hashCode();
+    hash = 31 * (31 * System.identityHashCode(prototype.getItem()) + componentsHash) + selector.hashCode();
   }
 
   private ItemResourceKey(ItemResourceKey source, String selector, boolean ignoresComponents) {
@@ -36,11 +37,9 @@ public final class ItemResourceKey {
     maxStackSize = source.maxStackSize;
     this.selector = ResourceSelector.require(selector);
     this.ignoresComponents = ignoresComponents;
-    int componentsHash = 0;
-    if (!ignoresComponents) {
-      componentsHash = prototype.getComponents().hashCode();
-    }
-    int keyHash = 31 * (31 * System.identityHashCode(prototype.getItem()) + componentsHash) + selector.hashCode();
+    componentsHash = source.componentsHash;
+    int keyHash = 31 * (31 * System
+        .identityHashCode(prototype.getItem()) + (ignoresComponents ? 0 : componentsHash)) + selector.hashCode();
     if (ignoresComponents) {
       keyHash++;
     }
@@ -77,9 +76,12 @@ public final class ItemResourceKey {
   }
 
   public static ItemResourceKey of(ItemStack stack, HolderLookup.Provider registries) {
-    return new ItemResourceKey(
-        Objects.requireNonNull(stack, "stack"),
-        Objects.requireNonNull(registries, "registries"));
+    return new ItemResourceKey(ItemStackSnapshots.detached(stack.copyWithCount(1), registries), "");
+  }
+
+  /** Only for private, detached snapshot stacks whose components never escape. */
+  static ItemResourceKey fromSnapshot(ItemStack stack, String selector) {
+    return new ItemResourceKey(stack.copyWithCount(1), selector);
   }
 
   public int maxStackSize() {

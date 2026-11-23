@@ -899,6 +899,9 @@ public final class StructureService {
 
     boolean structureRemoved();
 
+    default void wakeRecipeSearch() {
+    }
+
     MachineOrientation structureOrientation(ServerLevel level);
 
     boolean matchesStructureBlock(BlockState state);

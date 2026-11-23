@@ -108,6 +108,9 @@ public final class StructureChangeRouter {
       return;
     }
     for (Registration registration : watched) {
+      if (registration.valid && registration.pattern.hasRecipePartAt(pos)) {
+        registration.controller.wakeRecipeSearch();
+      }
       if (registration.valid && registration.pattern.watchesContentsAt(pos)) {
         markDirty(state, registration, registration.pattern.groupFor(pos), false, false, level.getGameTime());
       }

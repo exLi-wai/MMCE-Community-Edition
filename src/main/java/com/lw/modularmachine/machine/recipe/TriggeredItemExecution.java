@@ -20,7 +20,7 @@ import java.util.HashMap;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
-import java.util.WeakHashMap;
+import java.util.Objects;
 import net.minecraft.core.NonNullList;
 import net.minecraft.world.item.ItemStack;
 import org.jetbrains.annotations.ApiStatus;
@@ -34,9 +34,6 @@ import java.util.stream.Collectors;
  */
 @ApiStatus.Internal
 public final class TriggeredItemExecution {
-  private static final int OUTPUT_WORK = 64;
-  private static final Map<StructureService.StructureSubject, Pending> OUTPUTS = new WeakHashMap<>();
-
   private record Slot(Object inventory, int slot) {
   }
 
@@ -70,10 +67,46 @@ public final class TriggeredItemExecution {
       int tank,
       long revision,
       String selector,
-      List<ItemStack> stacks) {
+      ItemResourceKey[] keys,
+      long[] amounts,
+      List<Integer> limits) {
+    static Image capture(RecipePortSnapshot port) {
+      int slots = port.itemSlotCount();
+      var keys = new ItemResourceKey[slots];
+      var amounts = new long[slots];
+      for (int slot = 0; slot < slots; slot++) {
+        keys[slot] = port.itemKey(slot);
+        amounts[slot] = port.itemAmount(slot);
+      }
+      return new Image(
+          new WeakReference<>(port.identity()),
+          port.tankIndex(),
+          port.revision(),
+          port.selector(),
+          keys,
+          amounts,
+          port.slotLimits());
+    }
+
+    boolean matches(RecipePortSnapshot port) {
+      if (identity.get() != port.identity()
+          || tank != port.tankIndex()
+          || revision != port.revision()
+          || !selector.equals(port.selector())
+          || keys.length != port.itemSlotCount()
+          || !limits.equals(port.slotLimits())) {
+        return false;
+      }
+      for (int slot = 0; slot < keys.length; slot++) {
+        if (amounts[slot] != port.itemAmount(slot) || !Objects.equals(keys[slot], port.itemKey(slot))) {
+          return false;
+        }
+      }
+      return true;
+    }
   }
 
-  private static final class Pending {
+  private static final class Pending implements TickOutputWork.Plan {
     final long structureRevision, definitionEpoch;
     final List<FrozenRecipeRun> runs;
     final List<Image> images;
@@ -82,13 +115,12 @@ public final class TriggeredItemExecution {
     final RecipePlanner.Session<ItemResourceKey> session;
     RecipePlanner.Status status = RecipePlanner.Status.BUDGET_EXHAUSTED;
     RecipePlan<ItemResourceKey> selected;
-    long lastWorkTick = Long.MIN_VALUE;
 
-    Pending(RecipeExecutionTicket ticket, List<FrozenRecipeRun> runs, List<Image> images, List<RecipeCandidate.Output<ItemResourceKey>> claims) {
+    Pending(RecipeExecutionTicket ticket, List<FrozenRecipeRun> runs, List<RecipeCandidate.Output<ItemResourceKey>> claims) {
       structureRevision = ticket.structureRevision();
       definitionEpoch = ticket.definitionEpoch();
       this.runs = List.copyOf(runs);
-      this.images = List.copyOf(images);
+      images = ticket.ports().stream().filter(port -> port.kind() == PortKind.ITEM_OUTPUT).map(Image::capture).toList();
       this.claims = List.copyOf(claims);
       layout = new ItemOutputLayout(
           ticket,
@@ -96,37 +128,36 @@ public final class TriggeredItemExecution {
       session = RecipePlanner.prepareOutputs(layout.snapshot(), RecipeCandidate.outputOnly("triggered_items", claims));
     }
 
-    boolean matches(RecipeExecutionTicket ticket, List<FrozenRecipeRun> runs, List<Image> images, List<RecipeCandidate.Output<ItemResourceKey>> claims) {
+    boolean matches(RecipeExecutionTicket ticket, List<FrozenRecipeRun> runs, List<RecipeCandidate.Output<ItemResourceKey>> claims) {
       return structureRevision == ticket.structureRevision()
           && definitionEpoch == ticket.definitionEpoch()
           && this.runs.equals(runs)
-          && sameImages(this.images, images)
-          && this.claims.equals(claims);
+          && this.claims.equals(claims)
+          && sameImages(images, ticket);
     }
 
-    void advance(long tick) {
-      if (status == RecipePlanner.Status.BUDGET_EXHAUSTED && lastWorkTick != tick) {
-        var result = session.advance(OUTPUT_WORK);
-        status = result.status();
-        selected = result.plan().orElse(null);
-        lastWorkTick = tick;
-      }
+    @Override
+    public int advance(int budget) {
+      var result = session.advance(budget);
+      status = result.status();
+      selected = result.plan().orElse(null);
+      return result.workUsed();
+    }
+
+    @Override
+    public boolean pending() {
+      return status == RecipePlanner.Status.BUDGET_EXHAUSTED;
     }
   }
 
   private TriggeredItemExecution() {
   }
 
-  static void clear() {
-    OUTPUTS.clear();
-  }
-
   public static RecipeResourceExecution.TickResult prepare(StructureService.StructureSubject owner, List<FrozenRecipeRun> runs) {
     if (runs.stream().allMatch(run -> RecipeTriggeredResources.dueRows(run, "item").isEmpty())) {
-      OUTPUTS.remove(owner);
       return RecipeResourceExecution.TickResult.ready(empty());
     }
-    var ticket = RecipeExecutionTicket.capture(owner).orElse(null);
+    var ticket = RecipeExecutionTicket.captureTickItems(owner).orElse(null);
     if (ticket == null) {
       return failed(RecipeResourceExecution.TickStatus.STALE);
     }
@@ -188,16 +219,17 @@ public final class TriggeredItemExecution {
     if (debits == null) {
       return failed(RecipeResourceExecution.TickStatus.STALE);
     }
-    var changes = inputChanges(debits);
+    Pending pending = null;
     if (!demands.outputs().isEmpty()) {
-      var pending = planOutputs(owner, ticket, runs, demands.outputs());
+      pending = planOutputs(owner, ticket, runs, demands.outputs());
       if (pending.status != RecipePlanner.Status.SELECTED) {
         return failed(
             pending.status == RecipePlanner.Status.NO_MATCH ? RecipeResourceExecution.TickStatus.OUTPUT_BLOCKED : RecipeResourceExecution.TickStatus.STALE);
       }
+    }
+    var changes = inputChanges(debits);
+    if (pending != null) {
       addOutputChanges(ticket, pending, changes);
-    } else {
-      OUTPUTS.remove(owner);
     }
     return RecipeResourceExecution.TickResult
         .ready(new Batch(ticket, demands.proofs(), debits, List.copyOf(changes.values())));
@@ -222,7 +254,7 @@ public final class TriggeredItemExecution {
       }
       var change = changes.computeIfAbsent(
           debit.port().physicalIdentity(),
-          ignored -> new Change(debit.port(), copy(debit.port().items())));
+          ignored -> new Change(debit.port(), debit.port().copyItemContents()));
       var before = change.items().get(debit.slot());
       change.items().set(debit.slot(), before.copyWithCount(Math.toIntExact(before.getCount() - debit.amount())));
     }
@@ -231,53 +263,22 @@ public final class TriggeredItemExecution {
   }
 
   private static Pending planOutputs(StructureService.StructureSubject owner, RecipeExecutionTicket ticket, List<FrozenRecipeRun> runs, List<RecipeCandidate.Output<ItemResourceKey>> claims) {
-    var images = ticket.ports().stream().filter(port -> port.kind() == PortKind.ITEM_OUTPUT)
-        .map(
-            port -> new Image(
-                new WeakReference<>(port.identity()),
-                port.tankIndex(),
-                port.revision(),
-                port.selector(),
-                port.items()))
-        .toList();
-    var pending = OUTPUTS.get(owner);
-    long tick = ticket.level().getGameTime();
-    boolean same = pending != null && pending.matches(ticket, runs, images, claims);
-    if (!same || pending.status == RecipePlanner.Status.NO_MATCH && pending.lastWorkTick != tick) {
-      long lastWorkTick = pending == null ? Long.MIN_VALUE : pending.lastWorkTick;
-      pending = new Pending(ticket, runs, images, claims);
-      pending.lastWorkTick = lastWorkTick;
-      OUTPUTS.put(owner, pending);
-    }
-    pending.advance(tick);
-
-    return pending;
+    return TickOutputWork.forOwner(owner).visit(
+        ticket.level().getGameTime(),
+        Pending.class,
+        runs.getFirst().runId(),
+        plan -> plan.matches(ticket, runs, claims),
+        () -> new Pending(ticket, runs, claims));
   }
 
-  private static boolean sameImages(List<Image> first, List<Image> second) {
-    if (first.size() != second.size()) {
-      return false;
-    }
-    for (int i = 0; i < first.size(); i++) {
-      var a = first.get(i);
-      var b = second.get(i);
-      var previousPort = a.identity().get();
-      var currentPort = b.identity().get();
-      if (previousPort == null
-          || previousPort != currentPort
-          || a.tank() != b.tank()
-          || a.revision() != b.revision()
-          || !a.selector().equals(b.selector())
-          || a.stacks().size() != b.stacks().size()) {
+  private static boolean sameImages(List<Image> images, RecipeExecutionTicket ticket) {
+    int index = 0;
+    for (var port : ticket.ports()) {
+      if (port.kind() == PortKind.ITEM_OUTPUT && (index >= images.size() || !images.get(index++).matches(port))) {
         return false;
       }
-      for (int slot = 0; slot < a.stacks().size(); slot++) {
-        if (!ItemStack.matches(a.stacks().get(slot), b.stacks().get(slot))) {
-          return false;
-        }
-      }
     }
-    return true;
+    return index == images.size();
   }
 
   private static List<Debit> planInputs(List<Input> inputs) {
@@ -290,12 +291,10 @@ public final class TriggeredItemExecution {
         if (port.kind() != PortKind.ITEM_INPUT || !port.selector().equals(input.row().selector())) {
           continue;
         }
-        var stacks = port.items();
-        for (int slot = 0; slot < stacks.size() && remaining > 0; slot++) {
-          var stack = stacks.get(slot);
-          if (stack.isEmpty()
-              || (input.row().match().equals(
-                  "item") ? !stack.is(prototype.getItem()) : !ItemStack.isSameItemSameComponents(stack, prototype))) {
+        for (int slot = 0; slot < port.itemSlotCount() && remaining > 0; slot++) {
+          var key = port.itemKey(slot);
+          if (key == null
+              || !(input.row().match().equals("item") ? key.ignoringComponents() : key).matches(prototype)) {
             continue;
           }
           var address = new Slot(port.physicalIdentity(), slot);
@@ -318,14 +317,6 @@ public final class TriggeredItemExecution {
     return List.copyOf(result);
   }
 
-  private static NonNullList<ItemStack> copy(List<ItemStack> image) {
-    var result = NonNullList.withSize(image.size(), ItemStack.EMPTY);
-    for (int index = 0; index < image.size(); index++) {
-      result.set(index, image.get(index).copy());
-    }
-    return result;
-  }
-
   private record Change(RecipePortSnapshot port, NonNullList<ItemStack> items) {
   }
 
@@ -346,7 +337,7 @@ public final class TriggeredItemExecution {
 
     @Override
     public boolean current() {
-      return RecipeCommitGuard.validate(output) && proofs.stream().allMatch(RecipeCommitGuard::validate);
+      return RecipeCommitGuard.validateViews(output, proofs);
     }
 
     @Override

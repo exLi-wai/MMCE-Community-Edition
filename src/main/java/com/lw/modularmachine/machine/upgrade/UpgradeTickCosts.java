@@ -13,8 +13,6 @@ import com.lw.modularmachine.machine.recipe.ItemStackSnapshots;
 import com.lw.modularmachine.machine.structure.StructureService;
 import com.lw.modularmachine.util.thread.ServerThreadGuard;
 import java.util.ArrayList;
-import java.util.Collections;
-import java.util.IdentityHashMap;
 import java.util.List;
 import java.util.Objects;
 import net.minecraft.core.BlockPos;
@@ -228,7 +226,8 @@ public final class UpgradeTickCosts {
       var prepared = NonNullList.withSize(bus.tier().slots(), ItemStack.EMPTY);
       for (int slot = 0; slot < before.size(); slot++) {
         before.set(slot, ItemStackSnapshots.detached(bus.inventory().getStackInSlot(slot), level.registryAccess()));
-        prepared.set(slot, before.get(slot).copy());
+        // Costs return a replacement. Copy on write for mutable item data below.
+        prepared.set(slot, before.get(slot));
       }
       var beforeData = bus.busDataSnapshot();
       for (var cost : costs) {
@@ -415,6 +414,10 @@ public final class UpgradeTickCosts {
         stack = source.prepared.get(item.slot());
       }
       if (!stack.isEmpty() && item.data().isPresent()) {
+        if (stack == source.before.get(item.slot())) {
+          stack = stack.copy();
+          source.prepared.set(item.slot(), stack);
+        }
         source.changed |= UpgradeItemDataHandlers.apply(stack, item.data().orElseThrow());
       }
     }
@@ -452,13 +455,7 @@ public final class UpgradeTickCosts {
 
   public boolean runsCurrent() {
     ServerThreadGuard.require(level, "Runtime upgrade run identities");
-    if (legacy) {
-      return true;
-    }
-    var current = Collections.newSetFromMap(new IdentityHashMap<FrozenRecipeRun, Boolean>());
-    current.addAll(owner.upgradeRuns(threadId));
-
-    return runs.stream().allMatch(current::contains);
+    return legacy || owner.containsUpgradeRuns(threadId, runs);
   }
 
   private boolean stampsCurrent(boolean sameTick) {

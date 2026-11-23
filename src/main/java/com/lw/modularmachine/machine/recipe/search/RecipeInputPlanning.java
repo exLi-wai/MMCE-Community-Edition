@@ -6,6 +6,7 @@ import java.util.ArrayList;
 import java.util.List;
 import java.util.function.Supplier;
 import java.util.function.BooleanSupplier;
+import net.minecraft.resources.ResourceLocation;
 
 final class RecipeInputPlanning implements RecipeResourcePlanning {
   private final String recipeId;
@@ -82,6 +83,10 @@ final class RecipeInputPlanning implements RecipeResourcePlanning {
 
   boolean requested() {
     return requests.stream().anyMatch(RecipeSearchResource.Replenishment::requested);
+  }
+
+  ResourceLocation nextRequestKey() {
+    return requests.get(requestCursor).nextRequestKey();
   }
 
   Progress advanceRequests(int budget, BooleanSupplier current) {

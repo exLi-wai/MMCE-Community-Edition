@@ -6,6 +6,7 @@ import com.lw.modularmachine.config.MachineConfig;
 import com.lw.modularmachine.machine.recipe.FrozenRecipeRun;
 import com.lw.modularmachine.machine.recipe.RecipePreparationHandlers;
 import com.lw.modularmachine.machine.recipe.RecipeTickPreparation;
+import com.lw.modularmachine.machine.recipe.PatternRunSources;
 import com.lw.modularmachine.api.recipe.RecipePreparationEvents;
 import com.lw.modularmachine.util.thread.ServerThreadGuard;
 import java.util.ArrayDeque;
@@ -92,6 +93,13 @@ public final class UpgradeRuntimeWork {
         run -> RecipePreparationHandlers
             .has(owner.machineId(), run.recipeId(), RecipePreparationEvents.Type.PRE_TICK))) {
       return RecipeTickPreparation.Status.ALLOWED;
+    }
+    var registration = owner.structureRegistration();
+    if (registration == null
+        || !owner.canCommitStructure()
+        || runs.stream()
+            .anyMatch(run -> !run.matchesBindings(registration.pattern) || !PatternRunSources.available(owner, run))) {
+      return RecipeTickPreparation.Status.STALE;
     }
     beginBudget(level);
     var key = new RecipeKey(threadId);

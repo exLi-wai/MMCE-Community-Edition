@@ -38,8 +38,6 @@ import net.neoforged.neoforge.event.server.ServerStartedEvent;
 import net.neoforged.neoforge.event.server.ServerStoppedEvent;
 import net.neoforged.neoforge.server.ServerLifecycleHooks;
 import org.jetbrains.annotations.ApiStatus;
-import com.lw.modularmachine.machine.recipe.resource.chemical.ChemicalResourceExecution;
-import com.lw.modularmachine.machine.recipe.resource.fluid.FluidTickResourceExecution;
 
 /**
  * Validated candidates are staged by prospective RecipeManager; only current
@@ -561,8 +559,6 @@ public final class MachineRecipeService {
     RecipeScriptSources.clear();
     RecipeScriptCallbacks.reset();
     RecipeAdapterScriptSources.clear();
-    ChemicalResourceExecution.clear();
-    FluidTickResourceExecution.clear();
-    TriggeredItemExecution.clear();
+    TickOutputWork.clear();
   }
 }

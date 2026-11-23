@@ -10,17 +10,20 @@ import java.util.Objects;
 import java.util.Optional;
 import java.util.Set;
 import java.util.UUID;
+import net.minecraft.resources.ResourceLocation;
 
 /** Immutable collection of independent paid factory runs. */
 public final class FactoryRunSet {
+  private static final FactoryRunSet EMPTY = new FactoryRunSet(List.of());
   private final List<FrozenRecipeRun> runs;
+  private Set<ResourceLocation> recipeIds;
 
   private FactoryRunSet(List<FrozenRecipeRun> runs) {
     this.runs = List.copyOf(runs);
   }
 
   public static FactoryRunSet empty() {
-    return new FactoryRunSet(List.of());
+    return EMPTY;
   }
 
   public static FactoryRunSet ofRuns(List<FrozenRecipeRun> runs) {
@@ -36,6 +39,22 @@ public final class FactoryRunSet {
 
   public List<FrozenRecipeRun> runs() {
     return runs;
+  }
+
+  /**
+   * Thread admission consults the same immutable batch for many catalog
+   * candidates.
+   */
+  public boolean containsRecipe(ResourceLocation recipe) {
+    if (runs.size() <= 1) {
+      return !runs.isEmpty() && runs.getFirst().recipeId().equals(recipe);
+    }
+    if (recipeIds == null) {
+      var ids = new HashSet<ResourceLocation>();
+      runs.forEach(run -> ids.add(run.recipeId()));
+      recipeIds = Set.copyOf(ids);
+    }
+    return recipeIds.contains(recipe);
   }
 
   public Optional<FrozenRecipeRun> find(UUID runId) {
@@ -74,6 +93,7 @@ public final class FactoryRunSet {
     }
     var next = new ArrayList<>(runs);
     var replaced = new HashSet<UUID>();
+    var retainedIds = recipeIds;
     for (int i = 0; i < next.size(); i++) {
       var current = next.get(i);
       var replacement = replacements.get(current.runId());
@@ -82,13 +102,18 @@ public final class FactoryRunSet {
           throw new IllegalArgumentException("Replacement run UUID changed");
         }
         next.set(i, replacement);
+        if (!replacement.recipeId().equals(current.recipeId())) {
+          retainedIds = null;
+        }
         replaced.add(current.runId());
       }
     }
     if (replaced.size() != replacements.size()) {
       throw new IllegalArgumentException("Unknown factory run replacement");
     }
-    return new FactoryRunSet(next);
+    var updated = new FactoryRunSet(next);
+    updated.recipeIds = retainedIds;
+    return updated;
   }
 
   public FactoryRunSet replace(FrozenRecipeRun run) {

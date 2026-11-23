@@ -8,9 +8,10 @@ import com.lw.modularmachine.machine.PortKind;
 import com.lw.modularmachine.machine.recipe.RecipeItemCallbackService.InputCheck;
 import com.lw.modularmachine.machine.recipe.search.RecipeCandidate;
 import java.util.ArrayList;
+import java.util.BitSet;
 import java.util.HashMap;
-import java.util.Optional;
 import java.util.List;
+import java.util.Optional;
 import net.minecraft.resources.ResourceLocation;
 import org.jetbrains.annotations.ApiStatus;
 
@@ -65,14 +66,27 @@ public final class RecipeItemPreparation {
 
   static InputCheck checkInputs(MachineRecipe recipe, RecipeExecutionTicket ticket, Optional<String> thread, int instances, FrozenRecipeRun run) {
     var slices = new ArrayList<RecipeItemCallbackService.InputItem>();
+    if (!collectOrdinarySlices(recipe, ticket, instances, run.parallelInstances() > 1, slices)) {
+      return InputCheck.STALE;
+    }
+    return checkCollectedInputs(recipe, ticket, thread, instances, run, slices);
+  }
+
+  static boolean collectOrdinarySlices(MachineRecipe recipe, RecipeExecutionTicket ticket, int instances, boolean aggregate, List<RecipeItemCallbackService.InputItem> slices) {
     var reserved = new HashMap<PhysicalSlot, Long>();
+    var checkerRows = new BitSet();
+    for (var callback : recipe.scriptOptions().itemCallbacks()) {
+      if (callback.io() == RecipeModifier.Io.INPUT && callback.checker().isPresent()) {
+        checkerRows.set(callback.row());
+      }
+    }
     for (int row = 0; row < recipe.inputs().size(); row++) {
       var input = recipe.inputs().get(row);
       if (recipe.itemPayments().isTool(row)) {
         // The independent payment proof selects and checks durable tools below.
         continue;
       }
-      long remaining = input.parallelUnaffected() && run.parallelInstances() > 1 ? input.amount() : Math
+      long remaining = input.parallelUnaffected() && aggregate ? input.amount() : Math
           .multiplyExact(input.amount(), instances);
       var key = ItemResourceKey.of(input.prototype(ticket.level().registryAccess()), ticket.level().registryAccess())
           .withSelector(input.selector());
@@ -83,18 +97,19 @@ public final class RecipeItemPreparation {
         if (port.kind() != PortKind.ITEM_INPUT || !port.selector().equals(input.selector())) {
           continue;
         }
-        var stacks = port.items();
-        for (int slot = 0; slot < stacks.size() && remaining > 0; slot++) {
-          var actual = stacks.get(slot);
-          if (!key.matches(actual)) {
+        var identity = port.physicalIdentity();
+        for (int slot = 0; slot < port.itemSlotCount() && remaining > 0; slot++) {
+          if (!port.matchesItem(slot, key)) {
             continue;
           }
-          var physical = new PhysicalSlot(port.physicalIdentity(), slot);
+          var physical = new PhysicalSlot(identity, slot);
           long used = reserved.getOrDefault(physical, 0L);
           long amount = Math.min(remaining, Math.max(0, port.itemAmount(slot) - used));
           if (amount > 0) {
             reserved.put(physical, Math.addExact(used, amount));
-            slices.add(new RecipeItemCallbackService.InputItem(row, actual, amount));
+            if (checkerRows.get(row)) {
+              slices.add(new RecipeItemCallbackService.InputItem(row, port.copyItem(slot), amount));
+            }
             remaining -= amount;
           }
         }
@@ -103,9 +118,13 @@ public final class RecipeItemPreparation {
         }
       }
       if (remaining > 0) {
-        return InputCheck.STALE;
+        return false;
       }
     }
+    return true;
+  }
+
+  private static InputCheck checkCollectedInputs(MachineRecipe recipe, RecipeExecutionTicket ticket, Optional<String> thread, int instances, FrozenRecipeRun run, List<RecipeItemCallbackService.InputItem> slices) {
     if (!recipe.itemPayments().tools().isEmpty()) {
       var tools = RecipeItemPayments.toolSlices(ticket, recipe, instances, run.parallelInstances() > 1);
       if (tools.isEmpty()) {

@@ -4,6 +4,7 @@ import com.lw.modularmachine.api.recipe.RecipeRunState;
 import com.lw.modularmachine.api.recipe.RecipeModifier;
 import com.lw.modularmachine.api.recipe.resource.RecipeResources;
 import com.lw.modularmachine.machine.recipe.resource.RecipeResourceDefinitions;
+import com.lw.modularmachine.machine.recipe.resource.RecipeResourceExecutionRegistry;
 import com.lw.modularmachine.machine.recipe.search.RecipeCandidate;
 import com.lw.modularmachine.api.recipe.RecipeSelectors;
 import com.lw.modularmachine.api.recipe.RecipeFailureAction;
@@ -43,6 +44,9 @@ public final class FrozenRecipeRun {
 
   private static final class ResourceCache {
     RecipeResources value;
+    RecipeResources ordinaryTick;
+    RecipeResources replayedTick;
+    RecipeResourceExecutionRegistry.TickStrategies tickStrategies;
     TriggeredResourceData triggers;
   }
   private final UUID runId;
@@ -223,6 +227,37 @@ public final class FrozenRecipeRun {
     return resourceCache.triggers == null ? TriggeredResourceData.NONE : resourceCache.triggers;
   }
 
+  @ApiStatus.Internal
+  public RecipeResources effectiveTickResources(HolderLookup.Provider registries) {
+    var original = resourceData(registries);
+    if (triggeredResources().rows().stream().anyMatch(row -> RecipeTriggeredResources.due(this, row))) {
+      return RecipeTriggeredResources.effective(this, original);
+    }
+    synchronized (resourceCache) {
+      if (canEmitTickOutputs()) {
+        if (resourceCache.ordinaryTick == null) {
+          resourceCache.ordinaryTick = RecipeTriggeredResources.effective(this, original);
+        }
+        return resourceCache.ordinaryTick;
+      }
+      if (resourceCache.replayedTick == null) {
+        resourceCache.replayedTick = RecipeTriggeredResources.effective(this, original);
+      }
+      return resourceCache.replayedTick;
+    }
+  }
+
+  @ApiStatus.Internal
+  public RecipeResourceExecutionRegistry.TickStrategies tickStrategies(HolderLookup.Provider registries) {
+    synchronized (resourceCache) {
+      if (resourceCache.tickStrategies == null) {
+        var original = resourceData(registries);
+        resourceCache.tickStrategies = RecipeResourceExecutionRegistry.tickStrategies(original, triggeredResources());
+      }
+      return resourceCache.tickStrategies;
+    }
+  }
+
   public FluidStack fluidPerTick(HolderLookup.Provider registries) {
     if (fluidPerTickData.isEmpty()) {
       return resourceData(registries).get(RecipeResourceDefinitions.FLUID).perTick();
@@ -288,8 +323,7 @@ public final class FrozenRecipeRun {
   }
 
   public boolean matchesBindings(CompiledStructure pattern) {
-    return machineId.equals(pattern.definition.id())
-        && bindings.matchesDefinition(pattern.definition, pattern.recipePartIndices());
+    return machineId.equals(pattern.definition.id()) && bindings.matchesPattern(pattern);
   }
 
   boolean matchesPatternSource(PatternRunSources.Binding binding) {

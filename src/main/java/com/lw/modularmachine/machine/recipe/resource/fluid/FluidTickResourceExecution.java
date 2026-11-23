@@ -12,6 +12,7 @@ import com.lw.modularmachine.machine.recipe.RecipeCommitGuard;
 import com.lw.modularmachine.machine.recipe.RecipeExecutionTicket;
 import com.lw.modularmachine.machine.recipe.RecipeFluidLeases;
 import com.lw.modularmachine.machine.recipe.RecipePortSnapshot;
+import com.lw.modularmachine.machine.recipe.TickOutputWork;
 import com.lw.modularmachine.machine.recipe.resource.FluidRecipeData;
 import com.lw.modularmachine.machine.recipe.resource.PreparedRecipeResource;
 import com.lw.modularmachine.machine.recipe.resource.RecipeResourceExecution;
@@ -28,7 +29,6 @@ import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.Random;
-import java.util.WeakHashMap;
 import net.neoforged.neoforge.fluids.FluidStack;
 import org.jetbrains.annotations.ApiStatus;
 import static com.lw.modularmachine.machine.recipe.resource.RecipeResourceExecution.TickResult.failed;
@@ -37,13 +37,10 @@ import net.minecraft.core.BlockPos;
 /**
  * Main-thread tick preparation captures full input proof and sampled writes;
  * the returned participant joins the owner's resource/progress transaction.
- * Per-owner output snapshots expire on content/run/definition changes, rejected
- * plans retry within the next tick's work slice, and stop clears all snapshots.
+ * Output plans stay with their batch while its claims and tank images match.
  */
 @ApiStatus.Internal
 public final class FluidTickResourceExecution {
-  private static final Map<StructureService.StructureSubject, PendingOutput> OUTPUTS = new WeakHashMap<>();
-  private static final int OUTPUT_WORK = 64;
 
   private record Claim(RecipeExecutionTicket ticket, FluidRequirement requirement) {
   }
@@ -70,23 +67,21 @@ public final class FluidTickResourceExecution {
     }
   }
 
-  private static final class PendingOutput {
+  private static final class PendingOutput implements TickOutputWork.Plan {
     private final long structureRevision;
     private final long definitionEpoch;
     private final List<Tank> tanks;
     private final List<FrozenRecipeRun> runs;
     private final List<RecipeCandidate.Output<FluidResourceKey>> claims;
     private final FluidOutputLayout.Planning plan;
-    private long lastWorkTick;
 
-    private PendingOutput(RecipeExecutionTicket ticket, List<FrozenRecipeRun> runs, List<Tank> tanks, List<RecipeCandidate.Output<FluidResourceKey>> claims, long lastWorkTick) {
+    private PendingOutput(RecipeExecutionTicket ticket, List<FrozenRecipeRun> runs, List<Tank> tanks, List<RecipeCandidate.Output<FluidResourceKey>> claims) {
       structureRevision = ticket.structureRevision();
       definitionEpoch = ticket.definitionEpoch();
       this.tanks = List.copyOf(tanks);
       this.runs = List.copyOf(runs);
       this.claims = List.copyOf(claims);
       plan = new FluidOutputLayout(ticket, ticket.level().registryAccess()).planClaims(claims);
-      this.lastWorkTick = lastWorkTick;
     }
 
     private boolean matches(RecipeExecutionTicket ticket, List<FrozenRecipeRun> runs, List<Tank> tanks, List<RecipeCandidate.Output<FluidResourceKey>> claims) {
@@ -97,11 +92,14 @@ public final class FluidTickResourceExecution {
           && this.claims.equals(claims);
     }
 
-    private void advance(long tick) {
-      if (plan.status() == RecipePlanner.Status.BUDGET_EXHAUSTED && lastWorkTick != tick) {
-        plan.advance(OUTPUT_WORK);
-        lastWorkTick = tick;
-      }
+    @Override
+    public int advance(int budget) {
+      return plan.advance(budget).workUsed();
+    }
+
+    @Override
+    public boolean pending() {
+      return plan.status() == RecipePlanner.Status.BUDGET_EXHAUSTED;
     }
   }
 
@@ -116,10 +114,6 @@ public final class FluidTickResourceExecution {
   }
 
   private FluidTickResourceExecution() {
-  }
-
-  public static void clear() {
-    OUTPUTS.clear();
   }
 
   public static RecipeResourceExecution.Validation<FluidRecipeData> validation() {
@@ -177,7 +171,7 @@ public final class FluidTickResourceExecution {
 
       @Override
       public RecipeResourceExecution.TickResult prepare(StructureService.StructureSubject owner, List<RecipeResourceExecution.Run<FluidRecipeData>> runs) {
-        var ticket = RecipeExecutionTicket.capture(owner).orElse(null);
+        var ticket = RecipeExecutionTicket.captureTickFluids(owner).orElse(null);
         if (ticket == null) {
           return failed(RecipeResourceExecution.TickStatus.STALE);
         }
@@ -229,9 +223,7 @@ public final class FluidTickResourceExecution {
       return failed(RecipeResourceExecution.TickStatus.STALE);
     }
     var changes = new ArrayList<>(inputChanges);
-    if (demands.outputs().isEmpty()) {
-      OUTPUTS.remove(owner);
-    } else {
+    if (!demands.outputs().isEmpty()) {
       var output = planOutputs(
           owner,
           ticket,
@@ -291,7 +283,6 @@ public final class FluidTickResourceExecution {
   }
 
   private static PendingOutput planOutputs(StructureService.StructureSubject owner, RecipeExecutionTicket ticket, List<FrozenRecipeRun> runs, List<RecipeCandidate.Output<FluidResourceKey>> claims) {
-    var previous = OUTPUTS.get(owner);
     var tanks = ticket.ports().stream().filter(port -> port.kind() == PortKind.FLUID_OUTPUT)
         .map(
             port -> new Tank(
@@ -303,20 +294,12 @@ public final class FluidTickResourceExecution {
                 port.fluidAmount(),
                 port.capacity()))
         .toList();
-    boolean same = previous != null && previous.matches(ticket, runs, tanks, claims);
-    long tick = ticket.level().getGameTime();
-    if (!same || previous.plan.status() == RecipePlanner.Status.NO_MATCH && previous.lastWorkTick != tick) {
-      previous = new PendingOutput(
-          ticket,
-          runs,
-          tanks,
-          claims,
-          previous == null ? Long.MIN_VALUE : previous.lastWorkTick);
-    }
-    previous.advance(tick);
-    OUTPUTS.put(owner, previous);
-
-    return previous;
+    return TickOutputWork.forOwner(owner).visit(
+        ticket.level().getGameTime(),
+        PendingOutput.class,
+        runs.getFirst().runId(),
+        plan -> plan.matches(ticket, runs, tanks, claims),
+        () -> new PendingOutput(ticket, runs, tanks, claims));
   }
 
   private static List<Change> planInputs(List<Claim> claims) {
@@ -421,7 +404,7 @@ public final class FluidTickResourceExecution {
 
     @Override
     public boolean current() {
-      return RecipeCommitGuard.validate(outputProof) && proofs.stream().allMatch(RecipeCommitGuard::validate);
+      return RecipeCommitGuard.validateViews(outputProof, proofs);
     }
 
     @Override

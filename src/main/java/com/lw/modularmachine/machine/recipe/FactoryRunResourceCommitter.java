@@ -64,7 +64,7 @@ public final class FactoryRunResourceCommitter {
     RecipeExecutionTicket energyTicket = null;
     List<EnergyDebit> energyDebits = List.of();
     if (run.energyPerTick() > 0) {
-      energyTicket = RecipeExecutionTicket.captureEnergyInputs(factory).orElse(null);
+      energyTicket = energyOutputs.inputs(factory).orElse(null);
       if (energyTicket == null) {
         return FactoryRunResourceResult.WAITING_ENERGY;
       }
@@ -131,9 +131,8 @@ public final class FactoryRunResourceCommitter {
     boolean committed = false;
     try {
       if (!tickCosts.current()
-          || !energyOutputs.current()
           || energyTicket == null && !factory.revalidateStructure(factory.registration())
-          || energyTicket != null && !RecipeCommitGuard.validate(energyTicket)
+          || !energyOutputs.current(energyTicket)
           || !additionalResources.current()
           || !tickCosts.versionsCurrent()) {
         return FactoryRunResourceResult.STALE;
@@ -170,7 +169,7 @@ public final class FactoryRunResourceCommitter {
       run = advanced;
       return FactoryRunResourceResult.ADVANCED;
     } catch (RuntimeException failure) {
-      ModularMachine.LOGGER.warn("Factory run resource commit failed at {}", factory.getBlockPos(), failure);
+      factory.runCoordinator().warnFailure(threadId, "resource commit", factory.getBlockPos(), failure);
       return FactoryRunResourceResult.STALE;
     } finally {
       resourceTransaction.resolve(committed);

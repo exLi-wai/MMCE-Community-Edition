@@ -1,0 +1,11 @@
+{
+  "type": "mmcece:machine",
+  "machine": "mmcece:test_upgrade_recipe_checks",
+  "duration": 20,
+  "inputs": [],
+  "ingredient_arrays": [{"alternatives": [
+    {"resource": "item", "item": {"id": "minecraft:brick"}, "amount": 1},
+    {"resource": "item", "item": {"id": "minecraft:clay_ball"}, "amount": 1}
+  ]}],
+  "outputs": [{"stack": {"id": "minecraft:iron_ingot"}, "amount": 1}]
+}

@@ -1,5 +1,7 @@
 package com.lw.modularmachine.machine.recipe.resource.keyed;
 
+import com.google.common.collect.Iterators;
+import com.google.common.collect.PeekingIterator;
 import com.lw.modularmachine.api.recipe.KeyedAmountRecipeData;
 import com.lw.modularmachine.api.recipe.resource.RecipeResourcePlanning;
 import com.lw.modularmachine.api.recipe.resource.RecipeResourceType;
@@ -147,7 +149,7 @@ public final class KeyedRecipeExecution {
     private int portCursor;
     private Iterator<ResourceLocation> keys;
     private long remaining;
-    private Iterator<KeyedRequestAllocation.Request> publication;
+    private PeekingIterator<KeyedRequestAllocation.Request> publication;
     private boolean requested;
 
     Allocation(List<Map.Entry<ResourceLocation, Long>> claims, Iterator<? extends KeyedResourcePort> candidates, boolean output, boolean replenish, boolean overflow) {
@@ -261,6 +263,14 @@ public final class KeyedRecipeExecution {
     }
 
     @Override
+    public ResourceLocation nextRequestKey() {
+      if (publication == null) {
+        publication = Iterators.peekingIterator(replenishment.requests().values().iterator());
+      }
+      return publication.peek().key();
+    }
+
+    @Override
     public Progress advanceRequests(int budget, BooleanSupplier current) {
       if (!waiting()) {
         throw new IllegalStateException("Keyed inputs have no ready replenishment");
@@ -269,7 +279,7 @@ public final class KeyedRecipeExecution {
         throw new IllegalStateException("Keyed inputs require a live deficit check");
       }
       if (publication == null) {
-        publication = replenishment.requests().values().iterator();
+        nextRequestKey();
       }
       int used = 0;
       while (publication.hasNext() && used < budget) {
@@ -357,7 +367,7 @@ public final class KeyedRecipeExecution {
         boolean liveCheck = proof != null && !hatch.watchInputAmount(proof);
         if (hatch.resourceAddress() != port.address()) {
           if (liveCheck) {
-            proof.addLiveCheck(() -> hatch.resourceAddress() != port.address());
+            proof.observeDeficit(key, () -> hatch.resourceAddress() != port.address());
           }
           return 0;
         }
@@ -365,7 +375,8 @@ public final class KeyedRecipeExecution {
         long available = hatch.available(key);
         long total = hatch.totalAvailable();
         if (liveCheck) {
-          proof.addLiveCheck(
+          proof.observeDeficit(
+              key,
               () -> hatch.resourceAddress() == port.address()
                   && hatch.available(key) == available
                   && hatch.totalAvailable() == total);
@@ -373,6 +384,10 @@ public final class KeyedRecipeExecution {
         long free = remainingStock
             .computeIfAbsent(port, value -> Math.max(0, total - reservedStock.getOrDefault(value, 0L)));
         long extra = Math.min(missing, Math.min(free, Math.max(0, available + changes.getOrDefault(address, 0L))));
+        if (proof != null && extra > 0 && total != Long.MAX_VALUE) {
+          // An earlier key's extra stock now affects the credit available to later keys.
+          proof.shareDeficitCredit();
+        }
         remainingStock.put(port, free - extra);
         long outstanding = missing == extra ? 0 : Math.min(missing - extra, hatch.outstandingRequest(key, proof));
         return extra + outstanding;

@@ -1,5 +1,7 @@
 package com.lw.modularmachine.machine.recipe.search;
 
+import com.lw.modularmachine.api.recipe.resource.RecipeResourcePlanning.Progress;
+import com.lw.modularmachine.api.recipe.resource.RecipeResourcePlanning.Status;
 import java.util.ArrayList;
 import java.util.Collections;
 import java.util.HashMap;
@@ -9,6 +11,49 @@ import org.junit.jupiter.api.Test;
 import static org.junit.jupiter.api.Assertions.*;
 
 class RecipeSearchSessionTest {
+  private static final net.minecraft.resources.ResourceLocation REQUEST = net.minecraft.resources.ResourceLocation
+      .withDefaultNamespace("request");
+
+  @Test
+  void unwatchedReplenishmentReadsMustFitThePublishingVisit() {
+    var proof = new RecipeSearchResource.ReplenishmentProof();
+    var reads = new java.util.concurrent.atomic.AtomicInteger();
+    for (int i = 0; i < 3; i++) {
+      proof.addLiveCheck(() -> {
+        reads.incrementAndGet();
+        return true;
+      });
+    }
+    assertEquals(new Progress(Status.REJECTED, 0), proof.publishOne(REQUEST, 1, 1, () -> true, guard -> fail()));
+    assertEquals(new Progress(Status.PENDING, 0), proof.publishOne(REQUEST, 1, 3, () -> true, guard -> fail()));
+    assertEquals(0, reads.get());
+    assertEquals(
+        new Progress(Status.REJECTED, 1),
+        proof.publishOne(REQUEST, 3, 3, () -> reads.get() == 0, guard -> fail()));
+    assertEquals(new Progress(Status.READY, 3), proof.publishOne(REQUEST, 3, 3, () -> true, guard -> {
+      assertTrue(guard.getAsBoolean());
+      return new Progress(Status.READY, 1);
+    }));
+    assertEquals(4, reads.get());
+  }
+
+  @Test
+  void severalKeysAtOneHatchShareOneFinalConnectionRead() {
+    var proof = new RecipeSearchResource.ReplenishmentProof();
+    var reads = new java.util.concurrent.atomic.AtomicInteger();
+    var hatch = new Object();
+    for (int key = 0; key < 3; key++) {
+      proof.observeConnection(hatch, true, () -> reads.incrementAndGet() > 0);
+    }
+    assertEquals(new Progress(Status.READY, 1), proof.publishOne(REQUEST, 1, 1, () -> true, guard -> {
+      assertTrue(guard.getAsBoolean());
+      return new Progress(Status.READY, 1);
+    }));
+    assertEquals(1, reads.get());
+    proof.observeConnection(hatch, false, () -> false);
+    assertEquals(new Progress(Status.REJECTED, 0), proof.publishOne(REQUEST, 1, 1, () -> true, guard -> fail()));
+  }
+
   private static RecipeCandidate<String> recipe(String id, int priority, String output, long count) {
     return new RecipeCandidate<>(
         id,
@@ -125,6 +170,24 @@ class RecipeSearchSessionTest {
     assertEquals("a", RecipePlanner.prepare(snapshot, catalog).advance(1000).plan().orElseThrow().candidate().id());
     assertEquals("a", RecipePlanner.prepare(snapshot, catalog).advance(1000).plan().orElseThrow().candidate().id());
     assertThrows(UnsupportedOperationException.class, () -> catalog.outputKeys().clear());
+  }
+
+  @Test
+  void outputSlotsShareTheirCapacityPolicyWithoutQueryingEveryProductDuringCapture() {
+    var queries = new java.util.concurrent.atomic.AtomicInteger();
+    ResourceSnapshot.SlotLimit<String> policy = (key, capacity) -> {
+      queries.incrementAndGet();
+      return key.equals("product") ? 1 : 0;
+    };
+    var slots = new ArrayList<ResourceSnapshot.OutputSlot<String>>();
+    for (int index = 0; index < 100; index++) {
+      slots.add(new ResourceSnapshot.OutputSlot<>(null, 0, 64, policy));
+    }
+    var snapshot = new ResourceSnapshot<>(1, Map.of(), slots);
+    assertEquals(0, queries.get());
+    assertEquals(1, snapshot.outputs().getFirst().capacityFor("product"));
+    assertEquals(0, snapshot.outputs().getLast().capacityFor("other"));
+    assertEquals(2, queries.get());
   }
 
   @Test

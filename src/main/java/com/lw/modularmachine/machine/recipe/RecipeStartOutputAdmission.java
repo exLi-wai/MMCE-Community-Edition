@@ -94,7 +94,7 @@ final class RecipeStartOutputAdmission {
   }
 
   private boolean refreshTicket() {
-    var refreshed = ticket.refreshIfUnchanged().filter(RecipeCommitGuard::validate);
+    var refreshed = ticket.currentForCommit();
     if (refreshed.isEmpty() || !plan.catalog().isCurrent() || !plan.inputPreparationCurrent()) {
       return false;
     }

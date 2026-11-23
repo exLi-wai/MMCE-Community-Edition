@@ -7,12 +7,10 @@ import com.lw.modularmachine.blockentity.MachineControllerBlockEntity;
 import com.lw.modularmachine.api.recipe.IngredientArrayData;
 import com.lw.modularmachine.api.recipe.RecipeModifier;
 import com.lw.modularmachine.api.recipe.RecipeScriptOptions;
-import com.lw.modularmachine.machine.PortKind;
 import com.mojang.serialization.Codec;
 import com.mojang.serialization.DynamicOps;
 import com.mojang.serialization.JsonOps;
 import java.util.ArrayList;
-import java.util.HashMap;
 import java.util.List;
 import java.util.Optional;
 import java.util.Set;
@@ -189,9 +187,6 @@ public final class RecipeIngredientArrayResolution {
     return parent.getAsJsonArray(field);
   }
 
-  private record PhysicalSlot(Object storage, int slot) {
-  }
-
   /**
    * Captures the exact complete input slices, including zero-chance candidates.
    */
@@ -200,44 +195,11 @@ public final class RecipeIngredientArrayResolution {
       throw new IllegalArgumentException("Invalid ingredient checker instance count");
     }
     var result = new ArrayList<RecipeItemCallbackService.InputItem>();
-    var reserved = new HashMap<PhysicalSlot, Long>();
-    for (int row = 0; row < recipe.inputs().size(); row++) {
-      if (recipe.itemPayments().isTool(row)) {
-        continue;
-      }
-      var demand = recipe.inputs().get(row);
-      long remaining = demand.parallelUnaffected() ? demand.amount() : Math.multiplyExact(demand.amount(), instances);
-      var key = ItemResourceKey.of(demand.prototype(ticket.level().registryAccess()), ticket.level().registryAccess())
-          .withSelector(demand.selector());
-      if (demand.ignoresComponents()) {
-        key = key.ignoringComponents();
-      }
-      for (var port : ticket.ports()) {
-        if (port.kind() != PortKind.ITEM_INPUT || !port.selector().equals(demand.selector())) {
-          continue;
-        }
-        var stacks = port.items();
-        for (int slot = 0; slot < stacks.size() && remaining > 0; slot++) {
-          var actual = stacks.get(slot);
-          if (!key.matches(actual)) {
-            continue;
-          }
-          var physical = new PhysicalSlot(port.physicalIdentity(), slot);
-          long used = reserved.getOrDefault(physical, 0L);
-          long count = Math.min(remaining, Math.max(0, port.itemAmount(slot) - used));
-          if (count > 0) {
-            reserved.put(physical, Math.addExact(used, count));
-            result.add(new RecipeItemCallbackService.InputItem(row, actual, count));
-            remaining -= count;
-          }
-        }
-        if (remaining == 0) {
-          break;
-        }
-      }
-      if (remaining > 0) {
-        return List.of();
-      }
+    if (!RecipeItemPreparation.collectOrdinarySlices(recipe, ticket, instances, true, result)) {
+      return List.of();
+    }
+    if (recipe.itemPayments().isEmpty()) {
+      return List.copyOf(result);
     }
 
     var tools = RecipeItemPayments

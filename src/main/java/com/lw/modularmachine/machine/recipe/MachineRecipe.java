@@ -43,6 +43,7 @@ import net.neoforged.neoforge.fluids.FluidStack;
 import net.minecraft.nbt.CompoundTag;
 import com.lw.modularmachine.api.recipe.ItemPaymentData;
 import com.lw.modularmachine.api.recipe.RecipeModifier;
+import com.lw.modularmachine.machine.recipe.search.RecipeResourceRequirements;
 import java.util.stream.IntStream;
 import com.lw.modularmachine.api.recipe.ChemicalRequirement;
 import org.jetbrains.annotations.ApiStatus;
@@ -272,6 +273,7 @@ public final class MachineRecipe implements Recipe<RecipeInput> {
   private final long randomSeed;
   private final List<SmartNumberRequirement> interfaceInputs;
   private final RecipeSelectors selectors;
+  private final List<RecipeResourceRequirements.RequiredPort> requiredPorts;
 
   private MachineRecipe(ResourceLocation machineId, int priority, int duration, RecipeResources resourceData, String failureAction, boolean parallelized, long randomSeed, List<SmartNumberRequirement> interfaceInputs, RecipeSelectors selectors, Extras extras) {
     if (duration <= 0) {
@@ -318,6 +320,11 @@ public final class MachineRecipe implements Recipe<RecipeInput> {
         || outputs().stream().anyMatch(ItemAmount::ignoresComponents)) {
       throw new IllegalArgumentException("Item-only matching requires one item input and exact outputs");
     }
+    requiredPorts = RecipeResourceRequirements.declared(this);
+  }
+
+  public List<RecipeResourceRequirements.RequiredPort> requiredPorts() {
+    return requiredPorts;
   }
 
   public RecipeResources resourceData() {

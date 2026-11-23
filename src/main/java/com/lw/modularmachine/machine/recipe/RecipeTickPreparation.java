@@ -49,7 +49,7 @@ public final class RecipeTickPreparation {
         && level.hasChunkAt(owner.getBlockPos())
         && level.getBlockEntity(owner.getBlockPos()) == owner
         && owner.canCommitStructure()
-        && owner.upgradeRuns(threadId).containsAll(runs)
+        && owner.containsUpgradeRuns(threadId, runs)
         && scriptData.equals(ControllerScriptDataApi.inspect(level, owner.getBlockPos()));
   }
 

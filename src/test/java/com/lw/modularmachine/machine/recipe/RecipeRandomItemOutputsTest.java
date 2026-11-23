@@ -85,6 +85,22 @@ class RecipeRandomItemOutputsTest {
   }
 
   @Test
+  void guaranteedAndDisabledRowsSupportFullIntParallelismWithoutSampling() {
+    var rows = new ListTag();
+    var enabled = new CompoundTag();
+    enabled.putLong("amount", 3);
+    rows.add(enabled);
+    var disabled = enabled.copy();
+    disabled.putDouble("chance", 0);
+    rows.add(disabled);
+    var completed = FrozenRecipeSampling.sampledOutputs(rows, 37, Integer.MAX_VALUE);
+    assertEquals(1, completed.size());
+    assertEquals(3L * Integer.MAX_VALUE, completed.getCompound(0).getLong("amount"));
+    enabled.putLong("amount", Long.MAX_VALUE);
+    assertThrows(ArithmeticException.class, () -> FrozenRecipeSampling.sampledOutputs(rows, 37, 2));
+  }
+
+  @Test
   void admissionCombinesGroupsWithOrdinaryRowsButTakesOnlyTheLargestDuplicateCandidate() {
     long quarter = Long.MAX_VALUE / 4;
     var duplicate = new RecipeRandomItemOutputs.Group<>(

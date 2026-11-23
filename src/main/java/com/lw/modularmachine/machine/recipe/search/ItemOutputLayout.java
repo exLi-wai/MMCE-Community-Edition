@@ -3,6 +3,7 @@ package com.lw.modularmachine.machine.recipe.search;
 import com.lw.modularmachine.machine.PortKind;
 import com.lw.modularmachine.machine.recipe.ItemResourceKey;
 import com.lw.modularmachine.machine.recipe.RecipeExecutionTicket;
+import com.lw.modularmachine.machine.recipe.RecipePortSnapshot;
 import java.util.ArrayList;
 import java.util.HashMap;
 import java.util.HashSet;
@@ -20,40 +21,30 @@ import org.jetbrains.annotations.ApiStatus;
  */
 @ApiStatus.Internal
 public final class ItemOutputLayout {
-  private record Slot(String part, int index, ItemStack before, ItemSlotDomain domain) {
+  private record Slot(RecipePortSnapshot port, int index, ItemSlotDomain domain) {
   }
 
   private final List<Slot> slots;
-  private final Map<String, List<ItemStack>> images;
   private final ResourceSnapshot<ItemResourceKey> snapshot;
 
   public ItemOutputLayout(RecipeExecutionTicket ticket, Set<ItemResourceKey> keys) {
     var refs = new ArrayList<Slot>();
     var spaces = new ArrayList<ResourceSnapshot.OutputSlot<ItemResourceKey>>();
-    var copied = new HashMap<String, List<ItemStack>>();
-    var limitsBySize = new HashMap<ItemSlotDomain, Map<ItemResourceKey, Long>>();
+    var keysSnapshot = Set.copyOf(keys);
+    var limitsBySize = new HashMap<ItemSlotDomain, ResourceSnapshot.SlotLimit<ItemResourceKey>>();
     for (var port : ticket.ports()) {
       if (port.kind() != PortKind.ITEM_OUTPUT) {
         continue;
       }
-      var items = port.items();
-      copied.put(port.partId(), items);
-      for (int i = 0; i < items.size(); i++) {
-        var stack = items.get(i);
+      for (int i = 0; i < port.itemSlotCount(); i++) {
         int limit = port.slotLimits().get(i);
         var domain = new ItemSlotDomain(limit, port.selector(), port.bulkItems());
-        var limits = limitsBySize.computeIfAbsent(domain, current -> current.limits(keys));
-        refs.add(new Slot(port.partId(), i, stack, domain));
-        spaces.add(
-            new ResourceSnapshot.OutputSlot<>(
-                stack.isEmpty() ? null : ItemResourceKey.of(stack).withSelector(port.selector()),
-                stack.getCount(),
-                limit,
-                limits));
+        var limits = limitsBySize.computeIfAbsent(domain, current -> current.outputLimits(keysSnapshot));
+        refs.add(new Slot(port, i, domain));
+        spaces.add(new ResourceSnapshot.OutputSlot<>(port.itemKey(i), port.itemAmount(i), limit, limits));
       }
     }
     slots = List.copyOf(refs);
-    images = Map.copyOf(copied);
     snapshot = new ResourceSnapshot<>(ticket.structureRevision(), Map.of(), spaces);
   }
 
@@ -69,26 +60,20 @@ public final class ItemOutputLayout {
         throw new IllegalArgumentException("Output slot claimed twice");
       }
       var slot = slots.get(insertion.slot());
-      var contents = changed.computeIfAbsent(slot.part(), part -> {
-        var image = images.get(part);
-        var result = NonNullList.withSize(image.size(), ItemStack.EMPTY);
-        for (int i = 0; i < image.size(); i++) {
-          result.set(i, image.get(i));
-        }
-        return result;
-      });
+      var contents = changed.computeIfAbsent(slot.port().partId(), part -> slot.port().copyItemContents());
+      var before = contents.get(slot.index());
       int amount = Math.toIntExact(insertion.count());
-      int total = Math.addExact(slot.before().getCount(), amount);
+      int total = Math.addExact(before.getCount(), amount);
       if (amount <= 0 || total > slot.domain().capacityFor(insertion.key())) {
         throw new IllegalStateException("Output stack limit exceeded");
       }
-      if (slot.before().isEmpty()) {
+      if (before.isEmpty()) {
         contents.set(slot.index(), insertion.key().stack(1).copyWithCount(total));
       } else {
-        if (!insertion.key().matches(slot.before())) {
+        if (!insertion.key().matches(before)) {
           throw new IllegalStateException("Output component mismatch");
         }
-        contents.set(slot.index(), slot.before().copyWithCount(total));
+        contents.set(slot.index(), before.copyWithCount(total));
       }
     }
     return Map.copyOf(changed);

@@ -49,6 +49,25 @@ public final class RecipeResourceRegressionGameTests {
   }
 
   @GameTest(template = "empty16", timeoutTicks = 80)
+  public static void paid_fluid_and_item_tickets_check_only_required_contents_and_all_group_routes(GameTestHelper helper) {
+    var owner = build(helper, true).owner();
+    var items = input(helper, RecipeExecutionTicket.capture(owner).orElseThrow());
+    var fluid = RecipeExecutionTicket.captureTickFluids(owner).orElseThrow();
+    var item = RecipeExecutionTicket.captureTickItems(owner).orElseThrow();
+    helper.assertTrue(
+        fluid.ports().stream()
+            .allMatch(port -> port.kind().resource() == com.lw.modularmachine.api.component.ResourceType.FLUID),
+        "Fluid planning captured unrelated contents");
+    helper.assertTrue(item.currentForCommit().orElseThrow() == item, "Same-tick commit recaptured the inventory");
+    items.inventory().getStackInSlot(0).grow(1);
+    helper.assertTrue(item.currentForCommit().isEmpty(), "In-place stack edit escaped same-tick validation");
+    helper.assertTrue(RecipeCommitGuard.validate(fluid), "Unrelated item contents invalidated the fluid ticket");
+    helper.assertTrue(items.configureInputGroup(1, items.groupRevision()), "Group edit failed");
+    helper.assertTrue(!RecipeCommitGuard.validate(fluid), "Group change escaped the narrow fluid capture");
+    helper.succeed();
+  }
+
+  @GameTest(template = "empty16", timeoutTicks = 80)
   public static void independent_runs_reserve_and_pay_whole_fuels_separately(GameTestHelper helper) {
     var ticket = build(helper, true);
     var input = input(helper, ticket);

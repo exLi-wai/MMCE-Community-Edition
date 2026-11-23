@@ -200,18 +200,27 @@ public final class ComponentRecipePlanningGameTests {
   public static void sliced_native_search_keeps_progress_and_never_mutates_storage(GameTestHelper helper) {
     var controller = build(helper);
     var in = port(helper, controller, "item_in");
+    var energy = port(helper, controller, "energy_in").energy();
     in.inventory().setStackInSlot(0, new ItemStack(Items.DIRT, 1));
     var catalog = catalog(recipe("a", 10, key(Items.DIRT), 1, key(Items.IRON_INGOT), 1));
     var search = search(helper, controller, catalog);
     RecipeSearch.Result result;
     int calls = 0;
     do {
+      energy.receiveEnergy(1, false);
+      helper.assertTrue(search.dependenciesCurrent(), "Unrelated energy changes discarded the item scan");
       result = search.advance(1);
       helper.assertTrue(result.workUsed() <= 1 && ++calls < 1000, "Search restarted or exceeded its work slice");
     } while (result.status() == RecipePlanner.Status.BUDGET_EXHAUSTED);
+    var selected = result.plan().orElseThrow();
+    energy.receiveEnergy(1, false);
     helper.assertTrue(
-        result.plan().isPresent() && search.totalWork() == calls && in.inventory().getStackInSlot(0).getCount() == 1,
+        selected.validateForStart(catalog)
+            && search.totalWork() == calls
+            && in.inventory().getStackInSlot(0).getCount() == 1,
         "Sliced native search failed or consumed input");
+    in.inventory().setStackInSlot(0, ItemStack.EMPTY);
+    helper.assertTrue(!selected.validateForStart(catalog), "Changed item input retained start authority");
     helper.succeed();
   }
 
@@ -220,8 +229,10 @@ public final class ComponentRecipePlanningGameTests {
     var origin = helper.absolutePos(new BlockPos(7, 5, 3));
     var controller = RecipeResourceTicketGameTests.build(helper, origin, MachineOrientation.IDENTITY);
     var in = port(helper, controller, "item_in");
-    in.inventory().setStackInSlot(0, new ItemStack(Items.DIRT, 2));
-    var catalog = catalog(recipe("a", 1, key(Items.DIRT), 1, key(Items.IRON_INGOT), 1));
+    // The same machine's automatic fixture recipes consume two dirt during the
+    // wait.
+    in.inventory().setStackInSlot(0, new ItemStack(Items.FLINT, 2));
+    var catalog = catalog(recipe("a", 1, key(Items.FLINT), 1, key(Items.IRON_INGOT), 1));
     // First BE onLoad and other batches' definition reloads are real structure
     // invalidations.
     // Wait for initial notifications before capturing the stable continuation case.
@@ -233,11 +244,13 @@ public final class ComponentRecipePlanningGameTests {
       long revision = registration.verifier.revision();
       var plan = plan(helper, controller, catalog);
       helper.runAfterDelay(1, () -> {
+        var energy = port(helper, controller, "energy_in").energy();
+        helper.assertTrue(energy.receiveEnergy(1, false) == 1, "Fixture did not change the unrelated energy port");
         helper.assertTrue(
             plan.validateForStart(catalog) && in.inventory().getStackInSlot(0).getCount() == 2,
             "Unchanged snapshot could not refresh: same registration=" + (registration == controller
                 .registration()) + ", old revision=" + revision + ", " + controller.statusMessage().getString());
-        in.inventory().setStackInSlot(0, new ItemStack(Items.DIRT, 1));
+        in.inventory().setStackInSlot(0, new ItemStack(Items.FLINT, 1));
         helper.assertTrue(!plan.validateForStart(catalog), "Changed revision refreshed an old item plan");
         helper.succeed();
       });

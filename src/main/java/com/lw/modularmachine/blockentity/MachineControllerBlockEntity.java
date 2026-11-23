@@ -36,6 +36,7 @@ import com.lw.modularmachine.machine.recipe.ControllerMetrics;
 import com.lw.modularmachine.machine.recipe.search.RecipeSearch;
 import com.lw.modularmachine.machine.recipe.PatternRunSources;
 import com.lw.modularmachine.machine.recipe.PatternProductionService;
+import com.lw.modularmachine.machine.recipe.TickOutputWork;
 import com.lw.modularmachine.machine.recipe.RecipeRunEngine;
 import com.lw.modularmachine.machine.recipe.MachineRecipeService;
 import com.lw.modularmachine.machine.recipe.RecipeLifecyclePublisher;
@@ -231,6 +232,13 @@ public final class MachineControllerBlockEntity extends BlockEntity implements M
   }
 
   @Override
+  public void wakeRecipeSearch() {
+    if (level instanceof ServerLevel server) {
+      recipeSearch.wakeIdleRetry(server.getGameTime());
+    }
+  }
+
+  @Override
   @ApiStatus.Internal
   public ControllerCommandState commandState() {
     return commandState;
@@ -317,6 +325,7 @@ public final class MachineControllerBlockEntity extends BlockEntity implements M
   }
 
   private void detachRuntime() {
+    TickOutputWork.forget(this);
     ControllerVisualDataSync.remove(this);
     clientVisualData = null;
     PatternProductionService.invalidate(this);
@@ -773,6 +782,7 @@ public final class MachineControllerBlockEntity extends BlockEntity implements M
     if (!server.getServer().isSameThread()) {
       throw new IllegalStateException("Controller tick outside server thread");
     }
+    TickOutputWork.beginTick(this, server.getGameTime(), () -> runningRecipe().stream().map(FrozenRecipeRun::runId));
     RecipeCommandService.schedule(this);
     if (recipeStartInProgress() || RecipeLifecyclePublisher.isDispatching()) {
       return;

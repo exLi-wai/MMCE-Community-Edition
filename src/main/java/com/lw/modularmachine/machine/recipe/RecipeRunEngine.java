@@ -164,7 +164,7 @@ public final class RecipeRunEngine {
         RecipeExecutionTicket energyTicket = null;
         var debits = List.<EnergyDebit>of();
         if (run.energyPerTick() > 0) {
-          var captured = RecipeExecutionTicket.captureEnergyInputs(controller);
+          var captured = energyOutputs.inputs(controller);
           if (captured.isEmpty()) {
             return status = RecipeRunStatus.PAUSED;
           }
@@ -232,10 +232,9 @@ public final class RecipeRunEngine {
         try {
           var proof = controller.registration();
           if (!tickCosts.current()
-              || !energyOutputs.current()
               || !controller.revalidateProduction(proof)
               || !qualified(controller, run)
-              || energyTicket != null && !RecipeCommitGuard.validate(energyTicket)
+              || !energyOutputs.current(energyTicket)
               || !additionalResources.current()
               || !tickCosts.versionsCurrent()) {
             return status = RecipeRunStatus.PAUSED;
@@ -478,7 +477,7 @@ public final class RecipeRunEngine {
     if (!runtime.current()) {
       return RecipeRunStatus.STALE;
     }
-    var checked = active.ticket.refreshIfUnchanged().filter(RecipeCommitGuard::validate);
+    var checked = active.ticket.currentForCommit();
     if (checked.isEmpty() || !qualified(controller, run) || !runtime.versionsCurrent()) {
       work = null;
       return RecipeRunStatus.STALE;

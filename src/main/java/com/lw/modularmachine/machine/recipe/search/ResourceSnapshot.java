@@ -29,9 +29,29 @@ public record ResourceSnapshot<K>(long revision, Map<K, Long> inputs, List<Outpu
    * Nonempty limits restrict accepted keys; an empty map preserves the
    * unrestricted test model.
    */
-  public record OutputSlot<K>(K key, long count, long capacity, Map<K, Long> limits) {
+  public interface SlotLimit<K> {
+    long capacityFor(K key, long capacity);
+  }
+
+  private record KeyLimits<K>(Map<K, Long> values) implements SlotLimit<K> {
+    @Override
+    public long capacityFor(K key, long capacity) {
+      return values.isEmpty() ? capacity : values.getOrDefault(key, 0L);
+    }
+  }
+
+  public record OutputSlot<K>(K key, long count, long capacity, SlotLimit<K> limits) {
     public OutputSlot(K key, long count, long capacity) {
       this(key, count, capacity, Map.of());
+    }
+
+    public OutputSlot(K key, long count, long capacity, Map<K, Long> limits) {
+      this(key, count, capacity, new KeyLimits<>(Map.copyOf(limits)));
+      for (long limit : limits.values()) {
+        if (limit < 0 || limit > capacity) {
+          throw new IllegalArgumentException("Invalid key-specific capacity");
+        }
+      }
     }
 
     public OutputSlot {
@@ -44,17 +64,12 @@ public record ResourceSnapshot<K>(long revision, Map<K, Long> inputs, List<Outpu
       if (key == null && count != 0) {
         throw new IllegalArgumentException("Empty slot cannot contain items");
       }
-      limits = Map.copyOf(limits);
-      for (long limit : limits.values()) {
-        if (limit < 0 || limit > capacity) {
-          throw new IllegalArgumentException("Invalid key-specific capacity");
-        }
-      }
+      Objects.requireNonNull(limits, "limits");
     }
 
     public long capacityFor(K requested) {
       Objects.requireNonNull(requested, "requested");
-      return limits.isEmpty() ? capacity : limits.getOrDefault(requested, 0L);
+      return limits.capacityFor(requested, capacity);
     }
 
     public boolean canAccept(K requested) {

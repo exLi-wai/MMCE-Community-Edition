@@ -108,7 +108,7 @@ public final class FactoryOutputEngine {
     } catch (RuntimeException failure) {
       workByThread.remove(threadId);
       attempts.put(threadId, new Attempt(level.getGameTime(), Result.STALE));
-      ModularMachine.LOGGER.warn("Factory output planning failed at {}", factory.getBlockPos(), failure);
+      factory.runCoordinator().warnFailure(threadId, "output planning", factory.getBlockPos(), failure);
 
       return Result.STALE;
     } finally {
@@ -139,7 +139,7 @@ public final class FactoryOutputEngine {
         work = new Work(set, ticket, level);
         workByThread.put(threadId, work);
       } catch (RuntimeException failure) {
-        ModularMachine.LOGGER.warn("Factory output planning failed at {}", factory.getBlockPos(), failure);
+        factory.runCoordinator().warnFailure(threadId, "output planning", factory.getBlockPos(), failure);
         return Result.BLOCKED;
       }
     }
@@ -195,7 +195,7 @@ public final class FactoryOutputEngine {
     if (!runtime.current()) {
       return Result.STALE;
     }
-    var checked = work.ticket.refreshIfUnchanged().filter(RecipeCommitGuard::validate);
+    var checked = work.ticket.currentForCommit();
     if (checked.isEmpty()
         || factory.runSet(threadId) != set
         || !logicalPortsMatch(factory, set)
@@ -263,7 +263,7 @@ public final class FactoryOutputEngine {
       }
       committed = true;
     } catch (RuntimeException failure) {
-      ModularMachine.LOGGER.warn("Factory output commit failed at {}", factory.getBlockPos(), failure);
+      factory.runCoordinator().warnFailure(threadId, "output commit", factory.getBlockPos(), failure);
       workByThread.remove(threadId);
       return Result.STALE;
     } finally {

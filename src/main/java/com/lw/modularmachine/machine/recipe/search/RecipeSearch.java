@@ -1,11 +1,9 @@
 package com.lw.modularmachine.machine.recipe.search;
 
-import com.lw.modularmachine.api.component.ResourceType;
 import com.lw.modularmachine.api.recipe.resource.RecipeResourcePlanning;
 import com.lw.modularmachine.machine.recipe.PatternProductionService;
 import com.lw.modularmachine.machine.recipe.RecipeStartPlan;
 import com.lw.modularmachine.machine.recipe.ItemResourceKey;
-import com.lw.modularmachine.machine.recipe.ItemSlotRef;
 import com.lw.modularmachine.machine.recipe.MachineRecipeService;
 import com.lw.modularmachine.machine.recipe.RecipeExecutionTicket;
 import com.lw.modularmachine.machine.recipe.MachineRecipe;
@@ -15,9 +13,7 @@ import com.lw.modularmachine.machine.recipe.RecipeIngredientArrayResolution;
 import com.lw.modularmachine.machine.recipe.RecipePreparationHandlers;
 import com.lw.modularmachine.machine.recipe.resource.RecipeResourceExecution;
 import com.lw.modularmachine.api.recipe.RecipePreparationEvents;
-import com.lw.modularmachine.api.recipe.RecipeModifier;
 import com.mojang.serialization.JsonOps;
-import net.minecraft.resources.ResourceLocation;
 import com.lw.modularmachine.machine.upgrade.UpgradeRecipeCheckHandlers;
 import com.lw.modularmachine.blockentity.FactoryControllerBlockEntity;
 import com.lw.modularmachine.blockentity.MachineControllerBlockEntity;
@@ -27,7 +23,6 @@ import com.lw.modularmachine.machine.structure.StructureService;
 import java.util.ArrayList;
 import java.util.HashMap;
 import java.util.HashSet;
-import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.Objects;
@@ -48,15 +43,20 @@ public final class RecipeSearch {
   private final RecipeCatalog catalog;
   private final RecipeSearchResources resources;
   private final long itemCallbackEpoch = RecipeItemCallbackService.epoch();
-  private final List<InputSlot> inputs;
-  private final List<OutputSlot> outputs;
+  private final RecipeSearchResources.GroupItems groupItems;
   private RecipePlanner.Session<ItemResourceKey> session;
   private ResourceSnapshot<ItemResourceKey> preparationSnapshot;
   private List<RecipeCandidate<ItemResourceKey>> screeningCandidates;
   private RecipeResourceRequirements screeningRequirements;
   private int screeningCursor;
+  private List<RecipeSearchResource.Captured> screeningResources;
+  private int screeningResourceCursor;
+  private boolean screeningNeedsPreparation;
   private final List<RecipeCandidate<ItemResourceKey>> inputPreparationCandidates = new ArrayList<>();
-  private final List<RecipeCandidate<ItemResourceKey>> preparedCandidates = new ArrayList<>();
+  private final Map<String, CompiledRecipeSet.Entry<ItemResourceKey>> preparedCandidates = new HashMap<>();
+  private final List<CompiledRecipeSet.Entry<ItemResourceKey>> orderedEntries = new ArrayList<>();
+  private List<RecipeCandidate<ItemResourceKey>> screeningOrder;
+  private int entryCursor;
   private final Map<String, PreparedInputs> preparedDefinitions = new HashMap<>();
   private int inputPreparationCursor;
   private RecipeItemCallbackService.InputPreparation inputPreparation;
@@ -67,10 +67,15 @@ public final class RecipeSearch {
   private boolean preChecked;
   private final Map<String, Integer> preparationLimits = new HashMap<>();
 
-  private record PreparedInputs(MachineRecipe definition, RecipeCandidate<ItemResourceKey> original, long epoch) {
+  private record PreparedInputs(
+      MachineRecipe definition,
+      RecipeCandidate<ItemResourceKey> original,
+      RecipeCandidate<ItemResourceKey> effective,
+      long epoch) {
   }
   private RecipeStartPlan selected;
-  private final List<RecipeSearchResource.Captured> resourceSearches;
+  private final RecipeCatalog.CapturedResources resourceSearches;
+  private boolean bootstrapComplete;
   private ResourcePlanningSequence resourcePlans;
   private RecipeInputPlanning resourceInputs;
   private long resourceWork;
@@ -91,16 +96,13 @@ public final class RecipeSearch {
   private int groupBestIndex = -1;
   private final Map<Integer, Set<String>> rejectedGroupRecipes = new HashMap<>();
   private long completedGroupWork;
-  private final Map<String, MissingResource> missingResources = new HashMap<>();
-  private final Set<String> componentReady = new HashSet<>();
+  private final java.util.LinkedHashSet<RecipeResourceRequirements> roles = new java.util.LinkedHashSet<>();
+  private List<RecipeCandidate<ItemResourceKey>> diagnosticCandidates;
+  private int diagnosticCursor;
+  private java.util.Iterator<RecipeResourceRequirements> diagnosticRoles;
+  private PortKind missingResource;
   private boolean resourcesDiagnosed;
   private String interfaceFailure = "";
-
-  private record MissingResource(RecipeCandidate<ItemResourceKey> candidate, PortKind kind) {
-  }
-
-  private record OutputSlot(ItemSlotRef ref, ResourceSnapshot.OutputSlot<ItemResourceKey> snapshot) {
-  }
 
   private record PendingInputs(
       RecipeCandidate<ItemResourceKey> candidate,
@@ -139,14 +141,13 @@ public final class RecipeSearch {
     resources = new RecipeSearchResources(catalog);
     this.allowedIds = allowedIds == null ? null : Set.copyOf(allowedIds);
     this.factoryThread = startThread(ticket, factoryThread);
-    this.groups = List.copyOf(groups);
+    this.groups = groups;
     pendingInputs = new PendingInputsQueue();
     factory = this.factoryThread != null && ticket.owner() instanceof UpgradeBusOwner owner ? owner : null;
     factoryScope = factory == null ? null : UpgradeRecipeCheckHandlers.capture(factory, this.factoryThread);
-    inputs = List.of();
-    outputs = List.of();
+    groupItems = null;
     session = null;
-    resourceSearches = List.of();
+    resourceSearches = null;
   }
 
   private RecipeSearch(RecipeExecutionTicket ticket, RecipeCatalog catalog, Set<String> allowedIds, String factoryThread, RecipeSearchResources resources, PendingInputsQueue pendingInputs) {
@@ -158,92 +159,108 @@ public final class RecipeSearch {
     this.factoryThread = startThread(ticket, factoryThread);
     factory = this.factoryThread != null && ticket.owner() instanceof UpgradeBusOwner owner ? owner : null;
     factoryScope = factory == null ? null : UpgradeRecipeCheckHandlers.capture(factory, this.factoryThread);
-    var inputSlots = new ArrayList<InputSlot>();
-    var outputSlots = new ArrayList<OutputSlot>();
-    var counts = new LinkedHashMap<ItemResourceKey, Long>();
-    var spaces = new ArrayList<ResourceSnapshot.OutputSlot<ItemResourceKey>>();
-    for (var port : ticket.ports()) {
-      if (port.kind().resource() != ResourceType.ITEM) {
-        continue;
-      }
-      for (var slot : resources.items(port)) {
-        var key = slot.key();
-        if (port.kind() == PortKind.ITEM_INPUT) {
-          if (key != null) {
-            counts.merge(key, (long) slot.count(), Math::addExact);
-            inputSlots.add(new InputSlot(slot.ref(), key, slot.count()));
-            if (!catalog.itemInputAliases().isEmpty() || catalog.hasDynamicInputRecipes()) {
-              var alias = key.ignoringComponents();
-              if (catalog.itemInputAliases().contains(alias) || catalog.hasDynamicInputRecipes()) {
-                counts.merge(alias, (long) slot.count(), Math::addExact);
-              }
-            }
-          }
-        } else {
-          outputSlots.add(new OutputSlot(slot.ref(), slot.output()));
-          spaces.add(slot.output());
-        }
-      }
+    groupItems = resources.new GroupItems(ticket);
+    resourceSearches = catalog.new CapturedResources();
+  }
+
+  private int advanceBootstrap(int budget) {
+    int used = groupItems.advance(budget);
+    if (groupItems.complete() && preparationSnapshot == null && used < budget) {
+      preparationSnapshot = groupItems.snapshot();
+      screeningRequirements = RecipeResourceRequirements.capture(ticket);
+      used++;
     }
-    inputs = List.copyOf(inputSlots);
-    outputs = List.copyOf(outputSlots);
-    screeningRequirements = RecipeResourceRequirements.capture(ticket);
-    resourceSearches = catalog.captureResources(ticket, resources);
-    screeningCandidates = catalog.candidatesForPreparation(counts, resourceSearches, allowedIds);
-    // Logical aliases are counted once per physical slot and are needed only by
-    // single-row item-only candidates. The ticket retains exact physical stamps.
-    preparationSnapshot = new ResourceSnapshot<>(ticket.structureRevision(), counts, spaces);
+    while (preparationSnapshot != null && !resourceSearches.complete() && used < budget) {
+      resourceSearches.captureNext(ticket, resources);
+      used++;
+    }
+    if (preparationSnapshot != null && resourceSearches.complete() && used < budget) {
+      screeningCandidates = catalog
+          .candidatesForPreparation(preparationSnapshot.inputs(), resourceSearches.all(), allowedIds);
+      bootstrapComplete = true;
+      used++;
+    }
+    resourceWork += used;
+    return used;
   }
 
   private int advanceCandidateScreening(int budget) {
     int used = 0;
     while (screeningCursor < screeningCandidates.size() && used < budget) {
-      var candidate = screeningCandidates.get(screeningCursor++);
+      var candidate = screeningCandidates.get(screeningCursor);
       used++;
       resourceWork++;
       var definition = catalog.definition(candidate.id());
-      boolean transformsInput = definition != null
-          && (!definition.ingredientArrays().isEmpty()
-              || definition.scriptOptions().itemCallbacks().stream()
-                  .anyMatch(binding -> binding.io() == RecipeModifier.Io.INPUT && !binding.modifiers().isEmpty()));
-      boolean needsPreparation = transformsInput
-          || definition != null
-              && RecipePreparationHandlers.has(
-                  ticket.owner().structureMachineId(),
-                  ResourceLocation.parse(candidate.id()),
-                  RecipePreparationEvents.Type.PRE_CHECK);
-      var missing = definition == null ? Optional.<PortKind>empty() : screeningRequirements.missing(definition);
-      if (!transformsInput && missing.isPresent()
+      if (screeningResources != null) {
+        var resource = screeningResources.get(screeningResourceCursor++);
+        if (!resource.available(candidate.id(), definition)) {
+          screeningResources = null;
+          screeningCursor++;
+        } else if (screeningResourceCursor == screeningResources.size()) {
+          acceptScreened(candidate);
+        }
+        continue;
+      }
+      var entry = catalog.searchEntry(candidate.id());
+      boolean transformsInput = entry.transformsInputs();
+      screeningNeedsPreparation = needsInputPreparation(entry);
+      if (!transformsInput && definition != null && screeningRequirements.missing(definition).isPresent()
           || !transformsInput && !PatternProductionService.matches(ticket, definition, this.factoryThread)
-          || definition != null
-              && ticket.owner() instanceof FactoryControllerBlockEntity controller
-              && !controller.recipeThreadAllowed(
-                  this.factoryThread,
-                  ResourceLocation.parse(candidate.id()),
-                  definition.executionOptions())
-          || definition != null
-              && ticket.owner() instanceof MachineControllerBlockEntity
-              && !definition.executionOptions().threadName().isEmpty()) {
+          || !threadAllows(entry, definition, screeningNeedsPreparation)) {
+        screeningCursor++;
         continue;
       }
       boolean interfacesMatch = ticket.interfacesMatch(candidate.interfaceInputs());
       if (!interfacesMatch && interfaceFailure.isEmpty()) {
         interfaceFailure = ticket.interfaceFailureMessage(candidate.interfaceInputs());
       }
-      if (interfacesMatch && (transformsInput || resourcesFeasible(candidate.id(), definition, resourceSearches))) {
-        if (needsPreparation) {
-          inputPreparationCandidates.add(candidate);
-          inputPreparationEpoch = itemCallbackEpoch;
-        } else {
-          preparedCandidates.add(RecipeItemPreparation.inputCandidate(candidate, definition));
+      if (!interfacesMatch) {
+        screeningCursor++;
+      } else {
+        screeningResources = transformsInput ? List.of() : resourceSearches.forRecipe(candidate.id());
+        screeningResourceCursor = 0;
+        if (screeningResources.isEmpty()) {
+          acceptScreened(candidate);
         }
       }
     }
     if (screeningCursor == screeningCandidates.size()) {
+      screeningOrder = screeningCandidates;
       screeningCandidates = null;
-      screeningRequirements = null;
     }
     return used;
+  }
+
+  private void acceptScreened(RecipeCandidate<ItemResourceKey> candidate) {
+    if (screeningNeedsPreparation) {
+      inputPreparationCandidates.add(candidate);
+      inputPreparationEpoch = itemCallbackEpoch;
+    } else {
+      preparedCandidates.put(candidate.id(), catalog.searchEntry(candidate.id()).inputs());
+    }
+    screeningCursor++;
+    screeningResources = null;
+  }
+
+  private boolean needsInputPreparation(RecipeCatalog.SearchEntry entry) {
+    return entry.transformsInputs()
+        || entry.id() != null
+            && RecipePreparationHandlers
+                .has(ticket.owner().structureMachineId(), entry.id(), RecipePreparationEvents.Type.PRE_CHECK);
+  }
+
+  private boolean threadAllows(RecipeCatalog.SearchEntry entry, MachineRecipe definition, boolean needsPreparation) {
+    if (definition == null) {
+      return true;
+    }
+    if (ticket.owner() instanceof FactoryControllerBlockEntity controller) {
+      // Raw factory plans can defer admission to a starter, but input preparation
+      // already needs the real thread's parallel limit and callback context.
+      return factoryThread == null ? !needsPreparation : controller
+          .recipeThreadAllowed(factoryThread, entry.id(), definition.executionOptions());
+    }
+    return !(ticket.owner() instanceof MachineControllerBlockEntity)
+        || definition.executionOptions().threadName().isEmpty();
   }
 
   static boolean resourcesFeasible(String recipeId, MachineRecipe definition, List<RecipeSearchResource.Captured> resources) {
@@ -265,7 +282,7 @@ public final class RecipeSearch {
         if (preChecks == null) {
           preChecks = RecipePreparationHandlers.begin(
               ticket.owner(),
-              ResourceLocation.parse(original.id()),
+              catalog.searchEntry(original.id()).id(),
               factoryThread,
               RecipePreparationEvents.Type.PRE_CHECK,
               RecipePreparationHandlers.parallelLimit(ticket, factoryThread),
@@ -274,7 +291,7 @@ public final class RecipeSearch {
         int work = preChecks.advance(budget - used);
         used += work;
         inputPreparationWork += work;
-        if (!preChecks.current() || !ticket.dependenciesCurrent() || !catalog.isCurrent()) {
+        if (!preChecks.current() || !ticket.searchContextCurrent() || !catalog.isCurrent()) {
           throw new UpgradeRecipeCheckHandlers.StaleException();
         }
         if (!preChecks.complete()) {
@@ -296,7 +313,7 @@ public final class RecipeSearch {
               definition,
               original,
               preparationSnapshot,
-              resourceSearches,
+              resourceSearches.forRecipe(original.id()),
               factoryThread,
               catalog);
         }
@@ -309,10 +326,10 @@ public final class RecipeSearch {
         if (ingredientPreparation.prepared().isPresent()) {
           var nativeRecipe = ingredientPreparation.prepared().orElseThrow();
           var candidate = RecipeItemCallbackService
-              .compilePrepared(nativeRecipe, ResourceLocation.parse(original.id()), ticket.level().registryAccess());
-          preparedCandidates.add(RecipeItemPreparation.inputCandidate(candidate, nativeRecipe));
+              .compilePrepared(nativeRecipe, catalog.searchEntry(original.id()).id(), ticket.level().registryAccess());
+          recordPreparedCandidate(original, candidate, nativeRecipe);
           preparedDefinitions
-              .put(original.id(), new PreparedInputs(nativeRecipe, original, ingredientPreparation.epoch()));
+              .put(original.id(), new PreparedInputs(nativeRecipe, original, candidate, ingredientPreparation.epoch()));
         }
         ingredientPreparation = null;
         preChecked = false;
@@ -320,15 +337,16 @@ public final class RecipeSearch {
         continue;
       }
       if (inputPreparation == null) {
-        var ops = ticket.level().registryAccess().createSerializationContext(JsonOps.INSTANCE);
-        var json = MachineRecipe.CODEC.codec().encodeStart(ops, definition).getOrThrow().getAsJsonObject();
+        var registries = ticket.level().registryAccess();
         var thread = ticket.owner() instanceof FactoryControllerBlockEntity ? Optional.of(factoryThread) : Optional
             .<String>empty();
         inputPreparation = RecipeItemCallbackService.beginInputs(
-            json,
-            definition.scriptOptions(),
-            RecipeItemPreparation.context(ticket, ResourceLocation.parse(original.id()), thread, 1),
-            ticket.level().registryAccess());
+            definition,
+            () -> MachineRecipe.CODEC.codec()
+                .encodeStart(registries.createSerializationContext(JsonOps.INSTANCE), definition).getOrThrow()
+                .getAsJsonObject(),
+            RecipeItemPreparation.context(ticket, catalog.searchEntry(original.id()).id(), thread, 1),
+            registries);
       }
       inputPreparation.advance(budget - used);
       used += inputPreparation.workUsed();
@@ -339,25 +357,40 @@ public final class RecipeSearch {
       var prepared = inputPreparation.prepared();
       if (prepared.isPresent()) {
         var value = prepared.orElseThrow();
-        var ops = ticket.level().registryAccess().createSerializationContext(JsonOps.INSTANCE);
-        var nativeRecipe = MachineRecipe.CODEC.codec().parse(ops, value.declaration()).getOrThrow();
+        var nativeRecipe = value.definition();
         if (RecipeResourceRequirements.missing(ticket, nativeRecipe).isEmpty()
-            && resourcesFeasible(original.id(), nativeRecipe, resourceSearches)
+            && resourcesFeasible(original.id(), nativeRecipe, resourceSearches.forRecipe(original.id()))
             && PatternProductionService.matches(ticket, nativeRecipe, factoryThread)) {
           var candidate = RecipeItemCallbackService
-              .compilePrepared(nativeRecipe, ResourceLocation.parse(original.id()), ticket.level().registryAccess());
-          preparedCandidates.add(RecipeItemPreparation.inputCandidate(candidate, nativeRecipe));
-          preparedDefinitions.put(original.id(), new PreparedInputs(nativeRecipe, original, value.epoch()));
+              .compilePrepared(nativeRecipe, catalog.searchEntry(original.id()).id(), ticket.level().registryAccess());
+          recordPreparedCandidate(original, candidate, nativeRecipe);
+          preparedDefinitions.put(original.id(), new PreparedInputs(nativeRecipe, original, candidate, value.epoch()));
         }
       }
       inputPreparation = null;
       preChecked = false;
       inputPreparationCursor++;
     }
-    if (inputPreparationCursor == inputPreparationCandidates.size() && session == null) {
-      session = RecipePlanner.prepare(preparationSnapshot, new CompiledRecipeSet<>(preparedCandidates), null);
+    if (inputPreparationCursor == inputPreparationCandidates.size()) {
+      while (entryCursor < screeningOrder.size() && used < budget) {
+        var entry = preparedCandidates.get(screeningOrder.get(entryCursor++).id());
+        if (entry != null) {
+          orderedEntries.add(entry);
+        }
+        used++;
+        inputPreparationWork++;
+      }
+      if (entryCursor == screeningOrder.size()) {
+        session = RecipePlanner.prepareEntries(preparationSnapshot, orderedEntries);
+      }
     }
     return used;
+  }
+
+  private void recordPreparedCandidate(RecipeCandidate<ItemResourceKey> original, RecipeCandidate<ItemResourceKey> candidate, MachineRecipe definition) {
+    preparedCandidates.put(
+        original.id(),
+        CompiledRecipeSet.compileCandidate(RecipeItemPreparation.inputCandidate(candidate, definition)));
   }
 
   private static String startThread(RecipeExecutionTicket ticket, String threadId) {
@@ -451,14 +484,32 @@ public final class RecipeSearch {
   public record Result(RecipePlanner.Status status, Optional<RecipeStartPlan> plan, int workUsed) {
   }
 
+  public static long tickDeadline(long startedNanos) {
+    return startedNanos + 2_000_000L;
+  }
+
   public Result advance(int budget) {
-    var result = advanceSearch(budget);
-    if (result.status() != RecipePlanner.Status.NO_MATCH) {
-      return result;
+    return advance(budget, Long.MAX_VALUE);
+  }
+
+  public Result advance(int budget, long deadline) {
+    int used = 0;
+    while (true) {
+      int slice = deadline == Long.MAX_VALUE ? budget - used : Math.min(32, budget - used);
+      var result = advanceSearch(slice);
+      used += result.workUsed();
+      if (result.status() == RecipePlanner.Status.NO_MATCH) {
+        break;
+      }
+      if (result.status() == RecipePlanner.Status.SELECTED
+          || used >= budget
+          || result.workUsed() == 0
+          || deadlineReached(deadline)) {
+        return new Result(result.status(), result.plan(), used);
+      }
     }
-    int used = result.workUsed();
     while (pendingCheck != null || !pendingInputs.queue.isEmpty()) {
-      if (used >= budget) {
+      if (used >= budget || used > 0 && deadlineReached(deadline)) {
         return new Result(RecipePlanner.Status.BUDGET_EXHAUSTED, Optional.empty(), used);
       }
       if (pendingCheck == null) {
@@ -469,21 +520,21 @@ public final class RecipeSearch {
           continue;
         }
       }
-      var inputs = pendingCheck.inputs().advance(budget - used);
+      var inputs = pendingCheck.inputs().advance(pendingBudget(budget, used, deadline));
       used += inputs.workUsed();
       addResourceWork(inputs.workUsed());
       if (inputs.status() == RecipeResourcePlanning.Status.PENDING) {
         return new Result(RecipePlanner.Status.BUDGET_EXHAUSTED, Optional.empty(), used);
       }
       if (pendingCheck.inputs().waiting()) {
-        var outputs = pendingCheck.outputs().advance(budget - used);
+        var outputs = pendingCheck.outputs().advance(pendingBudget(budget, used, deadline));
         used += outputs.workUsed();
         addResourceWork(outputs.workUsed());
         if (outputs.status() == RecipeResourcePlanning.Status.PENDING) {
           return new Result(RecipePlanner.Status.BUDGET_EXHAUSTED, Optional.empty(), used);
         }
         if (outputs.status() == RecipeResourcePlanning.Status.READY) {
-          if (used == budget) {
+          if (pendingBudget(budget, used, deadline) == 0) {
             return new Result(RecipePlanner.Status.BUDGET_EXHAUSTED, Optional.empty(), used);
           }
           if (pendingVerification == null || !pendingProof.current()) {
@@ -498,7 +549,7 @@ public final class RecipeSearch {
             pendingProof = proof;
             pendingVerification = new ResourcePlanningSequence(steps);
           }
-          var verification = pendingVerification.advance(budget - used);
+          var verification = pendingVerification.advance(pendingBudget(budget, used, deadline));
           used += verification.workUsed();
           addResourceWork(verification.workUsed());
           if (verification.status() == RecipeResourcePlanning.Status.PENDING
@@ -513,26 +564,20 @@ public final class RecipeSearch {
               && checkPendingItems(current, pendingCheck.pending())
               && pendingCheck.inputs().current()
               && pendingCheck.liveOutputs().stream().allMatch(
-                  output -> output instanceof RecipeSearchResource.Recheckable || output.searchCurrent(current))
-              && pendingProof.current()) {
-            int liveWork = pendingProof.liveWork();
-            if (liveWork >= budget - used) {
-              if (used > 0) {
-                return new Result(RecipePlanner.Status.BUDGET_EXHAUSTED, Optional.empty(), used);
+                  output -> output instanceof RecipeSearchResource.Recheckable || output.searchCurrent(current))) {
+            var published = pendingProof.publishOne(
+                pendingCheck.inputs().nextRequestKey(),
+                budget - used,
+                budget,
+                () -> !deadlineReached(deadline),
+                stillCurrent -> pendingCheck.inputs().advanceRequests(1, stillCurrent));
+            used += published.workUsed();
+            addResourceWork(published.workUsed());
+            if (published.status() == RecipeResourcePlanning.Status.PENDING) {
+              if (published.workUsed() > 0 && used < budget && !deadlineReached(deadline)) {
+                continue;
               }
-              used++;
-              addResourceWork(1);
-            } else {
-              used += liveWork;
-              addResourceWork(liveWork);
-              if (pendingProof.liveCurrent()) {
-                var published = pendingCheck.inputs().advanceRequests(budget - used, pendingProof::current);
-                used += published.workUsed();
-                addResourceWork(published.workUsed());
-                if (published.status() == RecipeResourcePlanning.Status.PENDING) {
-                  return new Result(RecipePlanner.Status.BUDGET_EXHAUSTED, Optional.empty(), used);
-                }
-              }
+              return new Result(RecipePlanner.Status.BUDGET_EXHAUSTED, Optional.empty(), used);
             }
           } else if (used < budget) {
             used++;
@@ -547,7 +592,18 @@ public final class RecipeSearch {
       pendingVerification = null;
       pendingProof = null;
     }
-    return new Result(RecipePlanner.Status.NO_MATCH, Optional.empty(), used);
+    return advanceDiagnostics(used, budget, deadline);
+  }
+
+  private static int pendingBudget(int budget, int used, long deadline) {
+    if (deadline == Long.MAX_VALUE) {
+      return budget - used;
+    }
+    return used > 0 && deadlineReached(deadline) ? 0 : Math.min(32, budget - used);
+  }
+
+  private static boolean deadlineReached(long deadline) {
+    return deadline != Long.MAX_VALUE && System.nanoTime() - deadline >= 0;
   }
 
   private void addResourceWork(int work) {
@@ -559,7 +615,8 @@ public final class RecipeSearch {
   }
 
   private PendingCheck preparePendingInputs(PendingInputs pending) {
-    var current = pending.ticket().refreshIfUnchanged().orElse(null);
+    var current = catalog.ticketForRecipe(pending.ticket(), pending.candidate(), pending.definition())
+        .refreshIfUnchanged().orElse(null);
     var definition = pending.definition();
     var candidate = pending.candidate();
     if (current == null
@@ -568,7 +625,7 @@ public final class RecipeSearch {
         || RecipeResourceRequirements.missing(current, definition).isPresent()) {
       return null;
     }
-    var captured = catalog.captureResources(current, new RecipeSearchResources(catalog));
+    var captured = catalog.captureForRecipe(candidate.id(), current, new RecipeSearchResources(catalog));
     var liveOutputs = new ArrayList<RecipeResourceExecution.Output>();
     var steps = new ArrayList<Supplier<RecipeResourcePlanning>>(captured.size());
     for (var resource : captured) {
@@ -593,7 +650,10 @@ public final class RecipeSearch {
     if (definition.scriptOptions().itemCallbacks().stream().noneMatch(callback -> callback.checker().isPresent())) {
       return true;
     }
-    var recipeId = ResourceLocation.parse(pending.candidate().id());
+    if (current.owner() instanceof FactoryControllerBlockEntity && factoryThread == null) {
+      return false;
+    }
+    var recipeId = catalog.searchEntry(pending.candidate().id()).id();
     var thread = current.owner() instanceof FactoryControllerBlockEntity ? Optional.of(factoryThread) : Optional
         .<String>empty();
     var check = RecipeItemCallbackService.checkInputs(
@@ -626,8 +686,14 @@ public final class RecipeSearch {
       return new Result(RecipePlanner.Status.SELECTED, Optional.of(selected), 0);
     }
     int used = 0;
+    if (!bootstrapComplete) {
+      used += advanceBootstrap(budget);
+      if (!bootstrapComplete) {
+        return new Result(RecipePlanner.Status.BUDGET_EXHAUSTED, Optional.empty(), used);
+      }
+    }
     if (screeningCandidates != null) {
-      used += advanceCandidateScreening(budget);
+      used += advanceCandidateScreening(budget - used);
       if (screeningCandidates != null) {
         return new Result(RecipePlanner.Status.BUDGET_EXHAUSTED, Optional.empty(), used);
       }
@@ -648,7 +714,10 @@ public final class RecipeSearch {
       var prepared = preparedDefinitions.get(generic.candidate().id());
       var definition = prepared == null ? catalog.definition(generic.candidate().id()) : prepared.definition();
       if (resourceInputs == null) {
-        resourceInputs = new RecipeInputPlanning(generic.candidate().id(), definition, resourceSearches);
+        resourceInputs = new RecipeInputPlanning(
+            generic.candidate().id(),
+            definition,
+            resourceSearches.forRecipe(generic.candidate().id()));
       }
       var checkedInputs = resourceInputs.advance(budget - used);
       used += checkedInputs.workUsed();
@@ -662,8 +731,9 @@ public final class RecipeSearch {
         continue;
       }
       if (resourcePlans == null) {
-        var steps = new ArrayList<Supplier<RecipeResourcePlanning>>(resourceSearches.size());
-        for (var resource : resourceSearches) {
+        var candidateResources = resourceSearches.forRecipe(generic.candidate().id());
+        var steps = new ArrayList<Supplier<RecipeResourcePlanning>>(candidateResources.size());
+        for (var resource : candidateResources) {
           steps.add(() -> resource.outputs(generic.candidate().id(), definition));
         }
         resourcePlans = new ResourcePlanningSequence(steps);
@@ -684,14 +754,15 @@ public final class RecipeSearch {
         long inputChanceSeed = RecipeStartPlan.newInputChanceSeed();
         var needed = new HashMap<>(RecipeStartPlan.sampledInputs(generic.candidate(), inputChanceSeed, 1));
         var deductions = new ArrayList<RecipeStartPlan.Deduction>();
-        for (var slot : inputs) {
-          var expected = RecipeStartPlan.inputKey(generic.candidate(), slot.key());
-          long amount = Math.min(needed.getOrDefault(expected, 0L), slot.count());
-          if (amount == 0) {
-            continue;
+        for (var port : groupItems.inputs()) {
+          for (var slot : port) {
+            var expected = RecipeStartPlan.inputKey(generic.candidate(), slot.key());
+            long amount = Math.min(needed.getOrDefault(expected, 0L), slot.count());
+            if (amount > 0) {
+              deductions.add(new RecipeStartPlan.Deduction(slot.ref(), slot.key(), amount));
+              needed.put(expected, needed.get(expected) - amount);
+            }
           }
-          deductions.add(new RecipeStartPlan.Deduction(slot.ref(), slot.key(), amount));
-          needed.put(expected, needed.get(expected) - amount);
         }
         if (needed.values().stream().anyMatch(count -> count != 0)) {
           throw new IllegalStateException("Input slot accounting differs from exact-key plan");
@@ -699,23 +770,28 @@ public final class RecipeSearch {
         var placements = generic.insertions().stream()
             .map(
                 insertion -> RecipeStartPlan.Placement.inSlot(
-                    outputs.get(insertion.slot()).ref(),
-                    outputs.get(insertion.slot()).snapshot(),
+                    resources.outputRef(insertion.slot()),
+                    preparationSnapshot.outputs().get(insertion.slot()),
                     insertion.key(),
                     Math.toIntExact(insertion.count())))
             .toList();
         var candidate = prepared == null ? catalog.recipes().candidate(generic.candidate().id())
-            .orElseThrow() : RecipeItemCallbackService.compilePrepared(
-                prepared.definition(),
-                ResourceLocation.parse(generic.candidate().id()),
-                ticket.level().registryAccess());
+            .orElseThrow() : prepared.effective();
+        var recipeTicket = catalog.ticketForRecipe(ticket, candidate, definition);
         pendingFactoryPlan = RecipeStartPlan
-            .prepared(ticket, catalog, candidate, deductions, placements, inputChanceSeed, factoryScope)
+            .prepared(recipeTicket, catalog, candidate, deductions, placements, inputChanceSeed, factoryScope)
             .withOutputPreparationContext(factoryThread)
             .withPreparationLimit(preparationLimits.getOrDefault(generic.candidate().id(), Integer.MAX_VALUE));
         if (prepared != null) {
           pendingFactoryPlan.withPreparedInputs(prepared.definition(), prepared.original(), prepared.epoch());
         }
+      }
+      if (!pendingFactoryPlan.resourcesCurrent()) {
+        resourceInputs = null;
+        pendingFactoryPlan = null;
+        resourcePlans = null;
+        session.rejectSelected();
+        continue;
       }
       if (factoryScope != null) {
         var checked = pendingFactoryPlan.advanceFactoryChecks(factory, factoryThread, budget - used);
@@ -773,16 +849,19 @@ public final class RecipeSearch {
       pendingFactoryPlan = null;
       resourcePlans = null;
     } else {
-      // At most one rejection per captured context/catalog ID pair. A rejection
-      // in one numeric or pattern group must not suppress another group's input.
-      rejectedGroupRecipes.computeIfAbsent(groupBestIndex, ignored -> new HashSet<>()).add(plan.recipe().id());
-      groupCursor = 0;
-      groupSearch = null;
-      groupBest = null;
-      groupBestIndex = -1;
+      rejectGroupBest();
     }
     selected = null;
     return true;
+  }
+
+  private void rejectGroupBest() {
+    // Revisit groups pruned by this plan, keeping the shared physical scans.
+    rejectedGroupRecipes.computeIfAbsent(groupBestIndex, ignored -> new HashSet<>()).add(groupBest.recipe().id());
+    groupCursor = 0;
+    groupSearch = null;
+    groupBest = null;
+    groupBestIndex = -1;
   }
 
   private Result advanceGroups(int budget) {
@@ -790,6 +869,9 @@ public final class RecipeSearch {
       return new Result(RecipePlanner.Status.SELECTED, Optional.of(selected), 0);
     }
     int used = 0;
+    if (groupBest != null && !groupBest.resourcesCurrent()) {
+      rejectGroupBest();
+    }
     while (groupCursor < groups.size()) {
       if (used >= budget) {
         return new Result(RecipePlanner.Status.BUDGET_EXHAUSTED, Optional.empty(), used);
@@ -840,6 +922,10 @@ public final class RecipeSearch {
       if (interfaceFailure.isEmpty()) {
         interfaceFailure = groupSearch.interfaceFailure();
       }
+      // Preserve the last group's missing-role reason when several groups have
+      // identical roles.
+      roles.remove(groupSearch.screeningRequirements);
+      roles.add(groupSearch.screeningRequirements);
       completedGroupWork += groupSearch.totalWork();
       groupSearch = null;
       groupCursor++;
@@ -858,7 +944,7 @@ public final class RecipeSearch {
   }
 
   public boolean dependenciesCurrent() {
-    return ticket.dependenciesCurrent()
+    return (selected == null ? ticket.searchContextCurrent() : selected.resourcesCurrent())
         && catalog.isCurrent()
         && RecipeItemCallbackService.isCurrent(itemCallbackEpoch)
         && (factoryScope == null || factoryScope.current())
@@ -868,58 +954,53 @@ public final class RecipeSearch {
   /** Known absent roles after a complete search, never inventory shortages. */
   public Optional<PortKind> missingResource() {
     ticket.requireServerThread();
-    if (selected != null) {
-      return Optional.empty();
-    }
-    if (!resourcesDiagnosed) {
-      // Diagnostics cover every allowed recipe even when an input anchor excludes
-      // it. Successful searches never need this full component-role pass.
-      var candidates = catalog.recipes().candidatesFor(allowedIds);
-      if (groups == null) {
-        diagnoseResources(ticket, candidates);
-      } else {
-        for (var group : groups) {
-          diagnoseResources(group, candidates);
-        }
-      }
-      resourcesDiagnosed = true;
-    }
-    MissingResource first = null;
-    for (var missing : missingResources.values()) {
-      if (!componentReady.contains(missing.candidate().id())
-          && (first == null || precedes(missing.candidate(), first.candidate()))) {
-        first = missing;
-      }
-    }
-    return first == null ? Optional.empty() : Optional.of(first.kind());
+    return Optional.ofNullable(missingResource);
   }
 
   public String interfaceFailure() {
     return interfaceFailure;
   }
 
-  private void diagnoseResources(RecipeExecutionTicket source, List<RecipeCandidate<ItemResourceKey>> candidates) {
-    var requirements = RecipeResourceRequirements.capture(source);
-    for (var candidate : candidates) {
-      var definition = catalog.definition(candidate.id());
-      if (definition != null
-          && source.owner() instanceof FactoryControllerBlockEntity controller
-          && !controller
-              .recipeThreadAllowed(factoryThread, ResourceLocation.parse(candidate.id()), definition.executionOptions())
-          || definition != null
-              && source.owner() instanceof MachineControllerBlockEntity
-              && !definition.executionOptions().threadName().isEmpty()) {
-        continue;
-      }
-      var missing = definition == null ? Optional.<PortKind>empty() : requirements.missing(definition);
-      if (missing.isPresent()) {
-        missingResources.put(candidate.id(), new MissingResource(candidate, missing.orElseThrow()));
-      } else {
-        componentReady.add(candidate.id());
+  private Result advanceDiagnostics(int used, int budget, long deadline) {
+    if (diagnosticCandidates == null) {
+      diagnosticCandidates = catalog.recipes().candidatesFor(allowedIds);
+      if (groups == null) {
+        roles.add(screeningRequirements);
       }
     }
+    int before = used;
+    while (!resourcesDiagnosed
+        && diagnosticCursor < diagnosticCandidates.size()
+        && used < budget
+        && (used == 0 || !deadlineReached(deadline))) {
+      var candidate = diagnosticCandidates.get(diagnosticCursor);
+      var definition = catalog.definition(candidate.id());
+      used++;
+      if (diagnosticRoles == null) {
+        var entry = catalog.searchEntry(candidate.id());
+        if (definition == null || !threadAllows(entry, definition, needsInputPreparation(entry))) {
+          diagnosticCursor++;
+          continue;
+        }
+        diagnosticRoles = roles.iterator();
+      }
+      var missing = diagnosticRoles.next().missing(definition);
+      if (missing.isEmpty()) {
+        diagnosticCursor++;
+        diagnosticRoles = null;
+      } else if (!diagnosticRoles.hasNext()) {
+        // Candidate order is priority then ID. One fully equipped group suppresses its
+        // diagnosis.
+        missingResource = missing.orElseThrow();
+        resourcesDiagnosed = true;
+      }
+    }
+    addResourceWork(used - before);
+    resourcesDiagnosed |= diagnosticCursor == diagnosticCandidates.size();
+    return new Result(
+        resourcesDiagnosed ? RecipePlanner.Status.NO_MATCH : RecipePlanner.Status.BUDGET_EXHAUSTED,
+        Optional.empty(),
+        used);
   }
 
-  private record InputSlot(ItemSlotRef ref, ItemResourceKey key, long count) {
-  }
 }

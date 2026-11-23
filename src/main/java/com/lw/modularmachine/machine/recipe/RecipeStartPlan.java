@@ -297,13 +297,11 @@ public final class RecipeStartPlan {
       if (port.kind() != PortKind.ITEM_INPUT) {
         continue;
       }
-      var stacks = port.items();
-      for (int slot = 0; slot < stacks.size(); slot++) {
-        var stack = stacks.get(slot);
-        if (stack.isEmpty()) {
+      for (int slot = 0; slot < port.itemSlotCount(); slot++) {
+        var key = port.itemKey(slot);
+        if (key == null) {
           continue;
         }
-        var key = ItemResourceKey.of(stack).withSelector(port.selector());
         var expected = inputKey(recipe, key);
         long take = Math.min(port.itemAmount(slot), needed.getOrDefault(expected, 0L));
         if (take > 0) {
@@ -358,13 +356,11 @@ public final class RecipeStartPlan {
       if (port.kind() != PortKind.ITEM_INPUT) {
         continue;
       }
-      var stacks = port.items();
-      for (int slot = 0; slot < stacks.size(); slot++) {
-        var stack = stacks.get(slot);
-        if (stack.isEmpty()) {
+      for (int slot = 0; slot < port.itemSlotCount(); slot++) {
+        var key = port.itemKey(slot);
+        if (key == null) {
           continue;
         }
-        var key = ItemResourceKey.of(stack).withSelector(port.selector());
         var expected = inputKey(first.recipe, key);
         long amount = Math.min(needed.getOrDefault(expected, 0L), port.itemAmount(slot));
         if (amount > 0) {
@@ -504,14 +500,10 @@ public final class RecipeStartPlan {
     }
     for (var port : source.ports()) {
       if (port.kind() == PortKind.ITEM_INPUT) {
-        var stacks = port.items();
-        for (int slot = 0; slot < stacks.size(); slot++) {
-          var stack = stacks.get(slot);
-          if (!stack.isEmpty()) {
-            available.merge(
-                inputKey(recipe, ItemResourceKey.of(stack).withSelector(port.selector())),
-                port.itemAmount(slot),
-                Math::addExact);
+        for (int slot = 0; slot < port.itemSlotCount(); slot++) {
+          var key = port.itemKey(slot);
+          if (key != null) {
+            available.merge(inputKey(recipe, key), port.itemAmount(slot), Math::addExact);
           }
         }
       }
@@ -589,12 +581,16 @@ public final class RecipeStartPlan {
     return validateForStart(catalog);
   }
 
+  public boolean resourcesCurrent() {
+    return source.dependenciesCurrent();
+  }
+
   Optional<RecipeExecutionTicket> checkedTicket() {
     source.requireServerThread();
     if (!catalog.isCurrent() || !inputPreparationCurrent() || !preparationCurrent()) {
       return Optional.empty();
     }
-    var fresh = source.refreshIfUnchanged().filter(RecipeCommitGuard::validate);
+    var fresh = source.currentForCommit();
     return catalog.isCurrent() && inputPreparationCurrent() && preparationCurrent() ? fresh : Optional.empty();
   }
 

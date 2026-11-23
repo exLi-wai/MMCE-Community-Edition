@@ -8,6 +8,7 @@ import java.util.ArrayList;
 import java.util.List;
 import java.util.Objects;
 import java.util.Optional;
+import java.util.function.Predicate;
 import java.util.stream.Collectors;
 import net.minecraft.nbt.CompoundTag;
 import net.minecraft.resources.ResourceLocation;
@@ -81,14 +82,29 @@ public final class FactoryThreadConfiguration {
   }
 
   public List<FactoryThreadState> visitWindow(int budget) {
+    var window = new ArrayList<FactoryThreadState>();
+    visitWindow(budget, window::add);
+    return List.copyOf(window);
+  }
+
+  void visitWindow(int budget, Predicate<FactoryThreadState> visitAndContinue) {
+    if (budget < 0) {
+      throw new IllegalArgumentException("Negative scheduler budget");
+    }
+    int count = Math.min(budget, scheduler.channels().size());
     int previousCursor = scheduler.cursor();
     var previousOrder = scheduler.roundOrder();
-    var window = scheduler.visitWindow(budget);
-    if (previousCursor != scheduler.cursor() || !previousOrder.equals(scheduler.roundOrder())) {
-      host.markChanged();
+    try {
+      for (int i = 0; i < count; i++) {
+        if (!visitAndContinue.test(scheduler.visitWindow(1).getFirst())) {
+          break;
+        }
+      }
+    } finally {
+      if (previousCursor != scheduler.cursor() || !previousOrder.equals(scheduler.roundOrder())) {
+        host.markChanged();
+      }
     }
-
-    return window;
   }
 
   public void recordAttempt(String threadId, boolean started) {

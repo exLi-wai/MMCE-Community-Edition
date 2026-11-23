@@ -14,6 +14,7 @@ import java.util.List;
 import java.util.Map;
 import java.util.Objects;
 import java.util.Optional;
+import java.util.function.Supplier;
 import java.util.Set;
 import net.minecraft.core.HolderLookup;
 import net.minecraft.resources.ResourceLocation;
@@ -40,7 +41,7 @@ public final class RecipeItemCallbackService {
   private static Map<ResourceLocation, RecipeItemCallbacks.InputModifier> scriptInputModifiers = Map.of();
   private static final Set<String> reported = new HashSet<>();
 
-  public record Prepared(JsonObject declaration, long epoch) {
+  public record Prepared(MachineRecipe definition, long epoch) {
   }
 
   /** Owner-budgeted input transformation over one frozen declaration. */
@@ -54,15 +55,21 @@ public final class RecipeItemCallbackService {
     private ItemStack item;
     private long amount;
     private boolean rejected, complete;
+    private MachineRecipe definition;
 
-    private InputPreparation(JsonObject original, RecipeScriptOptions options, RecipeItemCallbacks.Context base, HolderLookup.Provider registries) {
-      result = original.deepCopy();
+    private InputPreparation(Supplier<JsonObject> declaration, MachineRecipe validated, RecipeScriptOptions options, RecipeItemCallbacks.Context base, HolderLookup.Provider registries) {
       this.base = base;
       this.registries = registries;
       capturedEpoch = epoch;
-      options.validateRows(result.getAsJsonArray("inputs").size(), result.getAsJsonArray("outputs").size());
       bindings = options.itemCallbacks().stream()
           .filter(binding -> binding.io() == RecipeModifier.Io.INPUT && !binding.modifiers().isEmpty()).toList();
+      if (validated != null && bindings.isEmpty()) {
+        definition = validated;
+        result = null;
+      } else {
+        result = declaration.get();
+        options.validateRows(result.getAsJsonArray("inputs").size(), result.getAsJsonArray("outputs").size());
+      }
     }
 
     public int workUsed() {
@@ -75,7 +82,7 @@ public final class RecipeItemCallbackService {
 
     public Optional<Prepared> prepared() {
       return complete && !rejected && capturedEpoch == epoch ? Optional
-          .of(new Prepared(result, capturedEpoch)) : Optional.empty();
+          .of(new Prepared(definition, capturedEpoch)) : Optional.empty();
     }
 
     public void advance(int budget) {
@@ -89,6 +96,11 @@ public final class RecipeItemCallbackService {
       }
       if (capturedEpoch != epoch || RecipeLifecyclePublisher.isDispatching()) {
         rejected = true;
+        return;
+      }
+      if (definition != null) {
+        workUsed = 1;
+        complete = true;
         return;
       }
       ResourceLocation activeHandler = null;
@@ -160,7 +172,7 @@ public final class RecipeItemCallbackService {
             }
           }
           MachineRecipeJson.validate(result);
-          MachineRecipe.CODEC.codec().parse(ops, result).getOrThrow();
+          definition = MachineRecipe.CODEC.codec().parse(ops, result).getOrThrow();
           complete = capturedEpoch == epoch;
           rejected = !complete;
         }
@@ -175,7 +187,16 @@ public final class RecipeItemCallbackService {
 
   public static InputPreparation beginInputs(JsonObject declaration, RecipeScriptOptions options, RecipeItemCallbacks.Context context, HolderLookup.Provider registries) {
     ServerCallbackRegistry.requireServer();
-    return new InputPreparation(declaration, options, context, registries);
+    return new InputPreparation(declaration::deepCopy, null, options, context, registries);
+  }
+
+  /**
+   * The caller supplies a fresh private declaration only when modifiers must
+   * write input rows.
+   */
+  public static InputPreparation beginInputs(MachineRecipe validated, Supplier<JsonObject> declaration, RecipeItemCallbacks.Context context, HolderLookup.Provider registries) {
+    ServerCallbackRegistry.requireServer();
+    return new InputPreparation(declaration, validated, validated.scriptOptions(), context, registries);
   }
 
   public static RecipeCandidate<ItemResourceKey> compilePrepared(MachineRecipe definition, ResourceLocation id, HolderLookup.Provider registries) {
@@ -362,9 +383,9 @@ public final class RecipeItemCallbackService {
       // by the unstarted candidate and may never execute again on restore.
       result.remove("item_callbacks");
       MachineRecipeJson.validate(result);
-      MachineRecipe.CODEC.codec().parse(ops, result).getOrThrow();
+      var definition = MachineRecipe.CODEC.codec().parse(ops, result).getOrThrow();
 
-      return capturedEpoch == epoch ? Optional.of(new Prepared(result, capturedEpoch)) : Optional.empty();
+      return capturedEpoch == epoch ? Optional.of(new Prepared(definition, capturedEpoch)) : Optional.empty();
     } catch (RuntimeException invalid) {
       report(activeHandler, base, invalid);
 

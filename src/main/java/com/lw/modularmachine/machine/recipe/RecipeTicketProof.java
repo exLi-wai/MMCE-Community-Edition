@@ -2,6 +2,7 @@ package com.lw.modularmachine.machine.recipe;
 
 import com.lw.modularmachine.blockentity.FactoryControllerBlockEntity;
 import com.lw.modularmachine.blockentity.MachineControllerBlockEntity;
+import com.lw.modularmachine.blockentity.MachinePortBlockEntity;
 import com.lw.modularmachine.api.smart.SmartInterfaceBinding;
 import com.lw.modularmachine.blockentity.SmartInterfaceBlockEntity;
 import com.lw.modularmachine.machine.controller.MachineControllerScriptDataService;
@@ -29,13 +30,14 @@ final class RecipeTicketProof {
   final long scriptRevision;
   final long capturedTick;
   final List<RecipePortSnapshot> ports;
+  final List<GroupStamp> groups;
   final CaptureMode mode;
   final List<SmartSnapshot> interfaces;
   final List<PatternInputSource> patternSources;
   final Snapshot parallel;
   final UpgradeSnapshot ordinaryUpgrades;
 
-  RecipeTicketProof(StructureService.StructureSubject owner, ServerLevel level, StructureService.Registration registration, List<RecipePortSnapshot> ports, CaptureMode mode, List<SmartSnapshot> interfaces) {
+  RecipeTicketProof(StructureService.StructureSubject owner, ServerLevel level, StructureService.Registration registration, List<RecipePortSnapshot> ports, CaptureMode mode, List<SmartSnapshot> interfaces, List<GroupStamp> groups) {
     this.owner = owner;
     controller = owner instanceof MachineControllerBlockEntity ordinary ? ordinary : null;
     this.level = level;
@@ -46,6 +48,7 @@ final class RecipeTicketProof {
     this.ports = List.copyOf(ports);
     this.mode = mode;
     this.interfaces = List.copyOf(interfaces);
+    this.groups = List.copyOf(groups);
     ordinaryUpgrades = mode == CaptureMode.ALL && controller != null ? controller.upgradeSnapshot() : null;
     parallel = mode == CaptureMode.ALL ? ParallelCapacity.capture(registration, level) : null;
     patternSources = mode == CaptureMode.ALL ? PatternProductionService.sources(owner) : List.of();
@@ -54,11 +57,20 @@ final class RecipeTicketProof {
   record SmartSnapshot(BlockPos position, SmartInterfaceBlockEntity identity, SmartInterfaceBinding binding) {
   }
 
-  boolean matchesDependencies(PatternInputSource patternSource) {
-    if (patternSource != null && !patternSource.current()) {
-      return false;
+  record GroupStamp(String part, MachinePortBlockEntity port, int group, long revision) {
+    boolean current(ServerLevel level) {
+      return !port.isRemoved()
+          && port.getLevel() == level
+          && port.schemaSupported()
+          && level.hasChunkAt(port.getBlockPos())
+          && level.getBlockEntity(port.getBlockPos()) == port
+          && port.groupRevision() == revision
+          && port.inputGroup() == group;
     }
-    if (patternSource == null && patternSources.stream().anyMatch(source -> !source.current())) {
+  }
+
+  boolean matchesDependencies(PatternInputSource patternSource, List<RecipePortSnapshot> contents) {
+    if (patternSource != null && !patternSource.current()) {
       return false;
     }
     if (scriptRevision >= 0 && MachineControllerScriptDataService.revision(owner) != scriptRevision) {
@@ -81,7 +93,10 @@ final class RecipeTicketProof {
           || !ordinary.canCommitProduction()) {
         return false;
       }
-    } else if (owner.structureLevel() != level || !registration.canCommit(level)) {
+    } else if (owner.structureLevel() != level
+        || owner.structureRegistration() != registration
+        || registration.verifier.revision() != structureRevision
+        || !owner.revalidateStructure(registration)) {
       return false;
     }
     for (var snapshot : interfaces) {
@@ -91,7 +106,7 @@ final class RecipeTicketProof {
         return false;
       }
     }
-    for (var port : ports) {
+    for (var port : contents) {
       if (!port.matches(level)) {
         return false;
       }
@@ -99,7 +114,7 @@ final class RecipeTicketProof {
     // A component comparator may reenter. Recheck plain identity/version fences
     // after all content
     // reads.
-    for (var port : ports) {
+    for (var port : contents) {
       if (!port.sameLiveStamp(level)) {
         return false;
       }
@@ -110,7 +125,9 @@ final class RecipeTicketProof {
           && registration.verifier.revision() == structureRevision
           && ordinary.canCommitProduction();
     } else {
-      qualified = owner.revalidateStructure(registration) && registration.verifier.revision() == structureRevision;
+      qualified = owner.structureRegistration() == registration
+          && registration.verifier.revision() == structureRevision
+          && registration.canCommit(level);
     }
     if (!qualified) {
       return false;
@@ -123,6 +140,11 @@ final class RecipeTicketProof {
       }
     }
 
+    for (var group : groups) {
+      if (!group.current(level)) {
+        return false;
+      }
+    }
     return (scriptRevision < 0 || MachineControllerScriptDataService.revision(owner) == scriptRevision)
         && (ordinaryUpgrades == null || controller.upgradeSnapshotCurrent(ordinaryUpgrades))
         && (parallel == null || parallel.current())

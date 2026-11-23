@@ -149,7 +149,7 @@ final class PreparedRecipeOutputs {
     if (outputs == null) {
       return false;
     }
-    var refreshed = outputs.refreshIfUnchanged().filter(RecipeCommitGuard::validate);
+    var refreshed = outputs.currentForCommit();
     if (refreshed.isEmpty()) {
       return false;
     }

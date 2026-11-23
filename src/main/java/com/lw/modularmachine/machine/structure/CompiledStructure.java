@@ -47,6 +47,7 @@ public final class CompiledStructure {
 
   private final List<BlockPos> positions;
   private final List<Integer> recipePartIndices;
+  private final Set<BlockPos> recipePartPositions;
   private final Map<Block, List<Integer>> componentIndices;
   private final Map<Long, Integer> sectionGroups;
   private final Map<BlockPos, Integer> contentGroups;
@@ -75,6 +76,8 @@ public final class CompiledStructure {
     facing = orientation.front();
     positions = data.positions;
     recipePartIndices = data.recipePartIndices;
+    recipePartPositions = recipePartIndices.stream().map(positions::get)
+        .collect(java.util.stream.Collectors.toUnmodifiableSet());
     componentIndices = data.componentIndices;
     sectionGroups = data.sections;
     contentGroups = data.contents;
@@ -600,6 +603,10 @@ public final class CompiledStructure {
   @ApiStatus.Internal
   public List<Integer> recipePartIndices() {
     return recipePartIndices;
+  }
+
+  boolean hasRecipePartAt(BlockPos pos) {
+    return recipePartPositions.contains(pos);
   }
 
   @ApiStatus.Internal

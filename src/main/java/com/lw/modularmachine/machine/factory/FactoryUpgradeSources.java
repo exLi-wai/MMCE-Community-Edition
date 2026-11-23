@@ -24,6 +24,8 @@ import net.minecraft.resources.ResourceLocation;
 import net.minecraft.server.level.ServerLevel;
 import org.jetbrains.annotations.ApiStatus;
 import com.lw.modularmachine.blockentity.UpgradeBusBlockEntity;
+import com.lw.modularmachine.block.UpgradeBusBlock;
+import com.lw.modularmachine.config.MachineConfig;
 
 /**
  * Factory source discovery, restriction proofs and idle-thread snapshot
@@ -255,6 +257,40 @@ public final class FactoryUpgradeSources {
     prepareUpgradeDiscovery();
 
     return upgradeDiscoveryPositions;
+  }
+
+  public boolean mayHaveTickWork() {
+    if (!UpgradeCatalogService.snapshot().hasTickWork()) {
+      return false;
+    }
+    var level = (ServerLevel) owner.getLevel();
+    for (var position : upgradeBusPositions()) {
+      if (!level.hasChunkAt(position)) {
+        return true;
+      }
+      if (!(level.getBlockState(position).getBlock() instanceof UpgradeBusBlock)) {
+        continue;
+      }
+      if (!(level.getBlockEntity(position) instanceof UpgradeBusBlockEntity bus) || !bus.tickCostsReady(owner)) {
+        return true;
+      }
+      if (!bus.tickCostSlots(owner).isEmpty() || !bus.tickDataSubscriptions(owner).isEmpty()) {
+        return true;
+      }
+      if (MachineConfig.CONSERVATIVE_COMMIT_CHECK.get()) {
+        try {
+          if (!bus.auditTickCosts(owner)
+              || !bus.tickCostSlots(owner).isEmpty()
+              || !bus.tickDataSubscriptions(owner).isEmpty()) {
+            return true;
+          }
+        } catch (RuntimeException unavailable) {
+          // The regular cost preparer diagnoses a stale source and holds the paid batch.
+          return true;
+        }
+      }
+    }
+    return false;
   }
 
   public List<UpgradeBusBlockEntity> upgradeCallbackBuses() {

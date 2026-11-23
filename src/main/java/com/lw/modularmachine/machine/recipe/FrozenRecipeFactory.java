@@ -87,10 +87,8 @@ final class FrozenRecipeFactory {
       declaration.addProperty("parallelized", definition.getBoolean("parallelized"));
       var prepared = RecipeItemCallbackService.prepareOutputs(declaration, frozenOptions, callbackContext, registries)
           .orElseThrow(() -> new IllegalStateException("Item callback preparation rejected the recipe"));
-      var parsed = MachineRecipe.CODEC.codec()
-          .parse(registries.createSerializationContext(JsonOps.INSTANCE), prepared.declaration()).getOrThrow();
       definition = (CompoundTag) Recipe.CODEC
-          .encodeStart(registries.createSerializationContext(NbtOps.INSTANCE), parsed).getOrThrow();
+          .encodeStart(registries.createSerializationContext(NbtOps.INSTANCE), prepared.definition()).getOrThrow();
       callbackEpoch = prepared.epoch();
     }
     int duration = definition.getInt("duration");

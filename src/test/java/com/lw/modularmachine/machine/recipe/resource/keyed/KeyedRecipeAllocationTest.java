@@ -216,7 +216,7 @@ class KeyedRecipeAllocationTest {
     var original = allocation(List.of(Map.entry(AIR, 8L)), List.of(first, second));
     var proof = verifyRequests(original);
     assertEquals(Status.PENDING, original.advanceRequests(1, proof::current).status());
-    assertTrue(proof.liveCurrent());
+    assertTrue(liveCurrent(proof));
 
     publish(allocation(List.of(Map.entry(AIR, 4L)), List.of(second)));
 
@@ -224,7 +224,7 @@ class KeyedRecipeAllocationTest {
     assertEquals(Status.REJECTED, original.advanceRequests(1, proof::current).status());
     var refreshed = new ReplenishmentProof();
     assertEquals(Status.READY, finishSliced(original.recheck(refreshed)));
-    assertTrue(refreshed.liveCurrent());
+    assertTrue(liveCurrent(refreshed));
     assertEquals(Status.READY, original.advanceRequests(1, refreshed::current).status());
     assertEquals(8, first.outstandingRequest(AIR) + second.outstandingRequest(AIR));
   }
@@ -243,7 +243,7 @@ class KeyedRecipeAllocationTest {
 
     assertEquals(Status.READY, first.advanceRequests(1, firstProof::current).status());
     assertTrue(firstProof.current());
-    if (secondProof.liveCurrent()) {
+    if (liveCurrent(secondProof)) {
       second.advanceRequests(1, secondProof::current);
     }
     assertEquals(8, bus.outstandingRequest(AIR));
@@ -252,7 +252,7 @@ class KeyedRecipeAllocationTest {
 
     var refreshed = new ReplenishmentProof();
     assertEquals(Status.READY, finishSliced(second.recheck(refreshed)));
-    assertTrue(refreshed.liveCurrent());
+    assertTrue(liveCurrent(refreshed));
     assertEquals(Status.READY, second.advanceRequests(1, refreshed::current).status());
     assertEquals(8, bus.outstandingRequest(AIR));
   }
@@ -303,13 +303,13 @@ class KeyedRecipeAllocationTest {
     assertEquals(Status.READY, finishSliced(next));
     var proof = new ReplenishmentProof();
     assertEquals(Status.READY, finishSliced(next.recheck(proof)));
-    assertTrue(proof.liveCurrent());
+    assertTrue(liveCurrent(proof));
 
     first.gameTime = 61;
 
     assertFalse(proof.current());
-    assertFalse(proof.liveCurrent());
-    assertEquals(Status.REJECTED, next.advanceRequests(1, proof::liveCurrent).status());
+    assertFalse(liveCurrent(proof));
+    assertEquals(Status.REJECTED, publishOne(next, proof).status());
     assertTrue(second.demands.isEmpty());
   }
 
@@ -325,8 +325,8 @@ class KeyedRecipeAllocationTest {
 
     disconnected.connected = true;
 
-    assertFalse(proof.liveCurrent());
-    assertEquals(Status.REJECTED, next.advanceRequests(1, proof::liveCurrent).status());
+    assertFalse(liveCurrent(proof));
+    assertEquals(Status.REJECTED, publishOne(next, proof).status());
     assertTrue(backup.demands.isEmpty());
   }
 
@@ -457,6 +457,24 @@ class KeyedRecipeAllocationTest {
   }
 
   @Test
+  void oneUnitVisitsCheckOnlyTheNetworkStockForTheNextIndependentDeficit() {
+    var network = new Port(8, Map.of());
+    network.watchStock = false;
+    network.inputLimit = 8;
+    var hatch = new Port(8, Map.of(AIR, 4L, FIRE, 4L));
+    var allocation = allocation(List.of(Map.entry(AIR, 4L), Map.entry(FIRE, 4L)), List.of(network, hatch));
+    var proof = verifyRequests(allocation);
+    int probes = network.probes;
+    for (var expected : List.of(Status.PENDING, Status.READY)) {
+      var publication = proof
+          .publishOne(allocation.nextRequestKey(), 1, 1, () -> true, current -> allocation.advanceRequests(1, current));
+      assertEquals(new RecipeResourcePlanning.Progress(expected, 1), publication);
+      assertEquals(++probes, network.probes);
+    }
+    assertEquals(Map.of(AIR, 4L, FIRE, 4L), hatch.demands);
+  }
+
+  @Test
   void liveInputRechecksKeysAndTheirSharedLimitBeforePublication() {
     var network = new Port(8, Map.of());
     network.watchStock = false;
@@ -467,14 +485,14 @@ class KeyedRecipeAllocationTest {
     assertEquals(Status.READY, finishSliced(allocation));
     var proof = new ReplenishmentProof();
     assertEquals(Status.READY, finishSliced(allocation.recheck(proof)));
-    assertTrue(proof.liveCurrent());
+    assertTrue(liveCurrent(proof));
 
     network.inputLimit = 7;
-    assertFalse(proof.liveCurrent());
+    assertFalse(liveCurrent(proof));
     network.inputLimit = 8;
     network.stock.move(AIR, -1, false);
 
-    assertEquals(Status.REJECTED, allocation.advanceRequests(1, proof::liveCurrent).status());
+    assertEquals(Status.REJECTED, publishOne(allocation, proof).status());
     assertTrue(pipe.demands.isEmpty());
   }
 
@@ -486,17 +504,40 @@ class KeyedRecipeAllocationTest {
     assertEquals(Status.READY, finishSliced(allocation));
     var proof = new ReplenishmentProof();
     assertEquals(Status.READY, finishSliced(allocation.recheck(proof)));
-    assertTrue(proof.liveCurrent());
+    assertTrue(liveCurrent(proof));
     return proof;
+  }
+
+  private static boolean liveCurrent(ReplenishmentProof proof) {
+    for (var key : List.of(AIR, FIRE)) {
+      var result = proof.publishOne(
+          key,
+          Integer.MAX_VALUE,
+          Integer.MAX_VALUE,
+          () -> true,
+          guard -> new RecipeResourcePlanning.Progress(guard.getAsBoolean() ? Status.READY : Status.REJECTED, 0));
+      if (result.status() != Status.READY) {
+        return false;
+      }
+    }
+    return true;
+  }
+
+  private static RecipeResourcePlanning.Progress publishOne(KeyedRecipeExecution.Allocation allocation, ReplenishmentProof proof) {
+    return proof.publishOne(
+        allocation.nextRequestKey(),
+        Integer.MAX_VALUE,
+        Integer.MAX_VALUE,
+        () -> true,
+        current -> allocation.advanceRequests(1, current));
   }
 
   private static void publish(KeyedRecipeExecution.Allocation allocation) {
     var proof = verifyRequests(allocation);
     RecipeResourcePlanning.Progress progress;
     do {
-      assertTrue(proof.liveCurrent());
-      progress = allocation.advanceRequests(1, proof::current);
-      assertEquals(1, progress.workUsed());
+      progress = publishOne(allocation, proof);
+      assertTrue(progress.workUsed() >= 1);
     } while (progress.status() == Status.PENDING);
     assertEquals(Status.READY, progress.status());
   }

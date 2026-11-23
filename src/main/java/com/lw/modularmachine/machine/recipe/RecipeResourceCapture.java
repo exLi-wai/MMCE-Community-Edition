@@ -4,6 +4,7 @@ import com.lw.modularmachine.machine.component.PortResourceAccess;
 import com.lw.modularmachine.machine.network.NetworkPortResource;
 import com.lw.modularmachine.machine.network.pattern.PatternResourceKey;
 import com.lw.modularmachine.blockentity.MachineControllerBlockEntity;
+import com.lw.modularmachine.blockentity.FactoryControllerBlockEntity;
 import com.lw.modularmachine.blockentity.MachinePortBlockEntity;
 import com.lw.modularmachine.api.component.ChemicalStackData;
 import com.lw.modularmachine.blockentity.SmartInterfaceBlockEntity;
@@ -39,7 +40,27 @@ final class RecipeResourceCapture {
     ENERGY_INPUTS,
     ENERGY_OUTPUTS,
     FLUID_INPUTS,
-    CHEMICAL_INPUTS
+    CHEMICAL_INPUTS,
+    CHEMICAL_OUTPUTS,
+    TICK_ITEMS,
+    TICK_FLUIDS,
+    ENERGY_IO;
+
+    boolean includes(PortKind kind) {
+      return switch (this) {
+        case ALL -> true;
+        case COMPONENTS -> false;
+        case OUTPUTS -> !kind.isInput() && kind != PortKind.ENERGY_OUTPUT;
+        case ENERGY_INPUTS -> kind == PortKind.ENERGY_INPUT;
+        case ENERGY_OUTPUTS -> kind == PortKind.ENERGY_OUTPUT;
+        case ENERGY_IO -> kind == PortKind.ENERGY_INPUT || kind == PortKind.ENERGY_OUTPUT;
+        case FLUID_INPUTS -> kind == PortKind.FLUID_INPUT;
+        case CHEMICAL_INPUTS -> kind == PortKind.CHEMICAL_INPUT;
+        case CHEMICAL_OUTPUTS -> kind == PortKind.CHEMICAL_OUTPUT;
+        case TICK_ITEMS -> kind == PortKind.ITEM_INPUT || kind == PortKind.ITEM_OUTPUT;
+        case TICK_FLUIDS -> kind == PortKind.FLUID_INPUT || kind == PortKind.FLUID_OUTPUT;
+      };
+    }
   }
 
   static Optional<RecipeExecutionTicket> capture(StructureService.StructureSubject owner, CaptureMode mode) {
@@ -59,8 +80,18 @@ final class RecipeResourceCapture {
         || owner instanceof MachineControllerBlockEntity ordinary && !ordinary.canCommitProduction()) {
       return Optional.empty();
     }
+    var cache = mode != CaptureMode.ALL && owner instanceof FactoryControllerBlockEntity factory ? factory
+        .tickResourceTickets() : null;
+    if (cache != null) {
+      cache.beginTick(level.getGameTime());
+      var reused = cache.current(mode);
+      if (reused != null) {
+        return Optional.of(reused);
+      }
+    }
     var ports = new ArrayList<RecipePortSnapshot>();
     var interfaces = new ArrayList<SmartSnapshot>();
+    var groups = new ArrayList<RecipeTicketProof.GroupStamp>();
     var positions = new HashSet<BlockPos>();
     var definition = registration.pattern.definition;
     List<Integer> indices = mode == CaptureMode.COMPONENTS ? List.of() : registration.pattern.recipePartIndices();
@@ -81,14 +112,11 @@ final class RecipeResourceCapture {
       if (part.rule().port() == null) {
         continue;
       }
-      if (mode == CaptureMode.OUTPUTS
-          && part.rule().port() != PortKind.ITEM_OUTPUT
-          && part.rule().port() != PortKind.FLUID_OUTPUT
-          && part.rule().port() != PortKind.CHEMICAL_OUTPUT
-          || mode == CaptureMode.ENERGY_INPUTS && part.rule().port() != PortKind.ENERGY_INPUT
-          || mode == CaptureMode.ENERGY_OUTPUTS && part.rule().port() != PortKind.ENERGY_OUTPUT
-          || mode == CaptureMode.FLUID_INPUTS && part.rule().port() != PortKind.FLUID_INPUT
-          || mode == CaptureMode.CHEMICAL_INPUTS && part.rule().port() != PortKind.CHEMICAL_INPUT) {
+      var kind = part.rule().port();
+      boolean contents = mode.includes(kind);
+      boolean groupOnly = (mode == CaptureMode.TICK_ITEMS || mode == CaptureMode.TICK_FLUIDS)
+          && (kind == PortKind.ITEM_INPUT || kind == PortKind.FLUID_INPUT || kind == PortKind.CHEMICAL_INPUT);
+      if (!contents && !groupOnly) {
         continue;
       }
       var position = registration.pattern.position(index);
@@ -102,14 +130,26 @@ final class RecipeResourceCapture {
       if (port.resourceTransactionInProgress()) {
         return Optional.empty();
       }
+      if (!contents || mode == CaptureMode.ALL) {
+        groups.add(new RecipeTicketProof.GroupStamp(part.id(), port, port.inputGroup(), port.groupRevision()));
+      }
+      if (!contents) {
+        continue;
+      }
       int tankCount = PortResourceAccess.require(port.kind().resource()).tanks().applyAsInt(port);
       for (int tank = 0; tank < tankCount; tank++) {
         ports.add(new RecipePortSnapshot(part.id(), position, port, level, part.selector(), tank, tankCount));
       }
     }
     ports.sort(Comparator.comparing(RecipePortSnapshot::logicalPartId).thenComparingInt(RecipePortSnapshot::tankIndex));
-    var ticket = new RecipeExecutionTicket(owner, level, registration, ports, mode, interfaces);
-    return ticket.matchesLive() ? Optional.of(ticket) : Optional.empty();
+    var ticket = new RecipeExecutionTicket(owner, level, registration, ports, mode, interfaces, groups);
+    if (!ticket.matchesLive()) {
+      return Optional.empty();
+    }
+    if (cache != null) {
+      cache.remember(mode, ticket);
+    }
+    return Optional.of(ticket);
   }
 
   static List<RecipePortSnapshot> patternPorts(ServerLevel level, CaptureMode mode, PatternInputSource source) {
@@ -120,6 +160,12 @@ final class RecipeResourceCapture {
     int fluidIndex = 0;
     int chemicalIndex = 0;
     for (var entry : source.resources().entrySet()) {
+      var kind = entry.getKey().kind();
+      if (!(mode.includes(PortKind.ITEM_INPUT) && kind == PortKind.ITEM_INPUT.resource()
+          || mode.includes(PortKind.FLUID_INPUT) && kind == PortKind.FLUID_INPUT.resource()
+          || mode.includes(PortKind.CHEMICAL_INPUT) && kind == PortKind.CHEMICAL_INPUT.resource())) {
+        continue;
+      }
       var resource = entry.getKey().resource(level.registryAccess());
       switch (resource) {
         case NetworkPortResource.Item item -> {
@@ -152,7 +198,7 @@ final class RecipeResourceCapture {
         default -> throw new IllegalArgumentException("No pattern input adapter for resource: " + resource.kind().id());
       }
     }
-    if (mode == CaptureMode.ALL) {
+    if (mode.includes(PortKind.ITEM_INPUT)) {
       result.add(
           new RecipePortSnapshot(
               source,
@@ -164,43 +210,22 @@ final class RecipeResourceCapture {
               itemKeys,
               FluidStack.EMPTY,
               ChemicalStackData.EMPTY));
-      var stacks = new ArrayList<ItemStack>();
-      var counts = new ArrayList<Long>();
-      var inventory = source.provider().independentItems();
-      for (int slot = 0; slot < inventory.getSlots(); slot++) {
-        var stack = ItemStackSnapshots.detached(inventory.getStackInSlot(slot), level.registryAccess());
-        stacks.add(stack);
-        counts.add((long) stack.getCount());
-      }
+      result.add(source.independentItemPort());
+    }
+    if (mode.includes(PortKind.FLUID_INPUT)) {
       result.add(
           new RecipePortSnapshot(
               source,
-              PortKind.ITEM_INPUT,
+              PortKind.FLUID_INPUT,
               0,
               true,
-              stacks,
-              counts,
               List.of(),
-              FluidStack.EMPTY,
+              List.of(),
+              List.of(),
+              source.capturedIndependentFluid(),
               ChemicalStackData.EMPTY));
     }
-    result.add(
-        new RecipePortSnapshot(
-            source,
-            PortKind.FLUID_INPUT,
-            0,
-            true,
-            List.of(),
-            List.of(),
-            List.of(),
-            source.provider().independentFluid().getFluid(),
-            ChemicalStackData.EMPTY));
-    return result.stream()
-        .filter(
-            port -> mode == CaptureMode.ALL
-                || mode == CaptureMode.FLUID_INPUTS && port.kind() == PortKind.FLUID_INPUT
-                || mode == CaptureMode.CHEMICAL_INPUTS && port.kind() == PortKind.CHEMICAL_INPUT)
-        .toList();
+    return List.copyOf(result);
   }
 
 }

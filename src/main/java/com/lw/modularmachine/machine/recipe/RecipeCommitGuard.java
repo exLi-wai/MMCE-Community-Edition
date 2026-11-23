@@ -1,6 +1,7 @@
 package com.lw.modularmachine.machine.recipe;
 
 import java.util.Objects;
+import java.util.List;
 
 /**
  * Server-thread preflight. A successful check does not itself commit or consume
@@ -12,8 +13,27 @@ public final class RecipeCommitGuard {
 
   public static boolean validate(RecipeExecutionTicket ticket) {
     Objects.requireNonNull(ticket, "ticket");
-    // Legacy state predicates may reenter and change structure or resources during
-    // full scan.
-    return ticket.matchesLive() && ticket.revalidateStructure() && ticket.matchesLive();
+    return ticket.commitCurrent();
+  }
+
+  /**
+   * Grouped run views share all physical ports. Each selected pattern receipt
+   * still has its own proof.
+   */
+  public static boolean validateViews(RecipeExecutionTicket root, List<RecipeExecutionTicket> views) {
+    for (var view : views) {
+      if (!root.sharesCapture(view) || view.patternSource() != null && !view.patternSource().current()) {
+        return false;
+      }
+    }
+    if (!validate(root)) {
+      return false;
+    }
+    for (var view : views) {
+      if (view.patternSource() != null && !view.patternSource().current()) {
+        return false;
+      }
+    }
+    return true;
   }
 }

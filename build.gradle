@@ -178,6 +178,7 @@ dependencies {
     localRuntime "curse.maven:apptt-1718689:${apptt_file_id}"
     localRuntime "curse.maven:Embers-1579725:${embers_file_id}"
     localRuntime "curse.maven:Athena-841890:${athena_file_id}"
+    localRuntime "curse.maven:emi-580555:${emi_file_id}"
 }
 
 tasks.named('test', Test).configure {

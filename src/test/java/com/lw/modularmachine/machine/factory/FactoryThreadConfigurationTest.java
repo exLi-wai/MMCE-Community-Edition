@@ -21,6 +21,26 @@ class FactoryThreadConfigurationTest {
   private static final ResourceLocation MACHINE = ResourceLocation.fromNamespaceAndPath("mmcece", "configuration_test");
 
   @Test
+  void visitsPersistOnlyTheFinalRoundPosition() {
+    var host = new Host();
+    var configuration = host.configuration;
+    configuration.replaceThreads(List.of(thread("a").withEnabled(false), thread("b").withEnabled(false)));
+    host.effects.clear();
+    var visited = new ArrayList<String>();
+    configuration.visitWindow(2, thread -> visited.add(thread.threadId()));
+    assertEquals(List.of("a", "b"), visited);
+    assertTrue(host.effects.isEmpty());
+    configuration.visitWindow(2, thread -> false);
+    assertEquals(1, configuration.scheduler().cursor());
+    assertEquals(List.of("dirty"), host.effects);
+    host.effects.clear();
+    visited.clear();
+    configuration.visitWindow(2, thread -> visited.add(thread.threadId()));
+    assertEquals(List.of("b", "a"), visited);
+    assertTrue(host.effects.isEmpty());
+  }
+
+  @Test
   void priorityEditPreservesRoundAndWaitingWithoutInvalidatingSearches() {
     var host = new Host();
     var configuration = host.configuration;

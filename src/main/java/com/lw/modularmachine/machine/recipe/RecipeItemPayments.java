@@ -3,13 +3,16 @@ package com.lw.modularmachine.machine.recipe;
 import com.lw.modularmachine.api.recipe.ItemPaymentData;
 import com.lw.modularmachine.machine.PortKind;
 import java.util.ArrayList;
+import java.util.HashMap;
 import java.util.HashSet;
 import java.util.List;
 import java.util.Map;
 import java.util.Optional;
+import java.util.Set;
 import net.minecraft.core.NonNullList;
 import net.minecraft.core.component.DataComponents;
 import net.minecraft.util.RandomSource;
+import net.minecraft.world.item.Item;
 import net.minecraft.world.item.ItemStack;
 import net.minecraft.world.item.crafting.RecipeType;
 import org.jetbrains.annotations.ApiStatus;
@@ -170,7 +173,7 @@ public final class RecipeItemPayments {
   private static Optional<List<RecipeItemCallbackService.InputItem>> prepare(RecipeExecutionTicket ticket, MachineRecipe recipe, Batch batch, Optional<DebitTarget> target) {
     ticket.requireServerThread();
     try {
-      var slots = captureSlots(ticket);
+      var slots = captureSlots(ticket, recipe);
       var slices = new ArrayList<RecipeItemCallbackService.InputItem>();
       if (!reserveOrdinaryInputs(recipe, batch, slots)
           || !prepareTools(recipe, batch, slots, target, slices)
@@ -184,17 +187,27 @@ public final class RecipeItemPayments {
     }
   }
 
-  private static List<Slot> captureSlots(RecipeExecutionTicket ticket) {
+  private static List<Slot> captureSlots(RecipeExecutionTicket ticket, MachineRecipe recipe) {
+    var inputTypes = new HashMap<String, Set<Item>>();
+    for (var input : recipe.inputs()) {
+      inputTypes.computeIfAbsent(input.selector(), ignored -> new HashSet<>()).add(input.ingredientStack().getItem());
+    }
+    var fuelSelectors = new HashSet<String>();
+    recipe.itemPayments().fuels().forEach(fuel -> fuelSelectors.add(fuel.selector()));
     var slots = new ArrayList<Slot>();
     var seen = new HashSet<PhysicalSlot>();
     for (var port : ticket.ports()) {
       if (port.kind() != PortKind.ITEM_INPUT) {
         continue;
       }
-      var stacks = port.items();
-      for (int index = 0; index < stacks.size(); index++) {
-        if (seen.add(new PhysicalSlot(port.physicalIdentity(), index))) {
-          slots.add(new Slot(port, index, stacks.get(index)));
+      var identity = port.physicalIdentity();
+      var types = inputTypes.get(port.selector());
+      boolean fuel = !port.patternInput() && fuelSelectors.contains(port.selector());
+      for (int index = 0; index < port.itemSlotCount(); index++) {
+        if (port.itemAmount(index) > 0
+            && seen.add(new PhysicalSlot(identity, index))
+            && (fuel || types != null && port.hasItemType(index, types))) {
+          slots.add(new Slot(port, index, port.copyItem(index)));
         }
       }
     }

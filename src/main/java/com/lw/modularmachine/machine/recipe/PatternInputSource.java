@@ -1,5 +1,7 @@
 package com.lw.modularmachine.machine.recipe;
 
+import com.lw.modularmachine.machine.PortKind;
+import com.lw.modularmachine.api.component.ChemicalStackData;
 import com.lw.modularmachine.blockentity.PatternProviderBlockEntity;
 import com.lw.modularmachine.blockentity.PatternMirrorBlockEntity;
 import com.lw.modularmachine.machine.network.pattern.*;
@@ -93,6 +95,24 @@ public final class PatternInputSource {
 
   public PatternProviderBlockEntity provider() {
     return provider;
+  }
+
+  RecipePortSnapshot independentItemPort() {
+    var amounts = independentItems.stream().map(stack -> (long) stack.getCount()).toList();
+    return new RecipePortSnapshot(
+        this,
+        PortKind.ITEM_INPUT,
+        0,
+        true,
+        independentItems,
+        amounts,
+        List.of(),
+        FluidStack.EMPTY,
+        ChemicalStackData.EMPTY);
+  }
+
+  FluidStack capturedIndependentFluid() {
+    return independentFluid.copy();
   }
   public String selector() {
     return selector;

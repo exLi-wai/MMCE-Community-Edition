@@ -111,6 +111,16 @@ public abstract class EssentiaHatch extends MachineCasingBlockEntity implements 
 
   protected abstract boolean hasRequestSource();
 
+  protected boolean observedRequestSource(ReplenishmentProof proof) {
+    boolean connected = hasRequestSource();
+    proof.observeConnection(this, connected, this::hasRequestSource);
+    return connected;
+  }
+
+  protected final void invalidateRequestProofs() {
+    requestObservers.invalidate();
+  }
+
   @Override
   public final long outstandingRequest(ResourceLocation key, ReplenishmentProof proof) {
     if (!input || !live()) {
@@ -121,11 +131,10 @@ public abstract class EssentiaHatch extends MachineCasingBlockEntity implements 
     if (pending == 0) {
       return 0;
     }
-    boolean connected = hasRequestSource();
     if (proof != null) {
       proof.observeExpiry(demands.get(key).expires(), level::getGameTime);
-      proof.addLiveCheck(() -> hasRequestSource() == connected);
     }
+    boolean connected = proof == null ? hasRequestSource() : observedRequestSource(proof);
     return connected ? pending : 0;
   }
 

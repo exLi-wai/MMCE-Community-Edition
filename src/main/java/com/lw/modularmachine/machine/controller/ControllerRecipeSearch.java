@@ -93,12 +93,12 @@ public final class ControllerRecipeSearch {
   }
 
   private void advanceRecipe(long now, int serverTick) {
+    long started = System.nanoTime();
     if (recipeSearch != null && !recipeSearch.dependenciesCurrent()) {
       recipeSearch = null;
       preparedRecipe = null;
       wakeRetry(now);
     }
-    long beginNanos = 0L;
     if (recipeSearch == null) {
       idleRecipeStatus = RecipeRunStatus.IDLE;
       interfaceFailure = "";
@@ -113,16 +113,14 @@ public final class ControllerRecipeSearch {
         backoffRecipeRetry(now);
         return;
       }
-      long started = System.nanoTime();
       try {
         recipeSearch = host.beginSearch(catalog);
       } catch (RuntimeException failure) {
         metrics.recordSearch(System.nanoTime() - started, serverTick);
         throw failure;
       }
-      beginNanos = System.nanoTime() - started;
       if (recipeSearch == null) {
-        metrics.recordSearch(beginNanos, serverTick);
+        metrics.recordSearch(System.nanoTime() - started, serverTick);
         idleAppearance = ControllerAppearanceState.PAUSED;
         backoffRecipeRetry(now);
         return;
@@ -134,11 +132,10 @@ public final class ControllerRecipeSearch {
     int startBudget = MachineConfig.RECIPE_OUTPUT_WORK.get();
     if (preparedRecipe == null) {
       RecipeSearch.Result result;
-      long started = System.nanoTime();
       try {
-        result = recipeSearch.advance(startBudget);
+        result = recipeSearch.advance(startBudget, RecipeSearch.tickDeadline(started));
       } finally {
-        metrics.recordSearch(beginNanos + (System.nanoTime() - started), serverTick);
+        metrics.recordSearch(System.nanoTime() - started, serverTick);
       }
       if (result.status() == Status.BUDGET_EXHAUSTED) {
         return;
@@ -185,6 +182,12 @@ public final class ControllerRecipeSearch {
   public void wakeRetry(long now) {
     recipeRetryInterval = RECIPE_RETRY_INITIAL;
     recipeRetryAfter = now;
+  }
+
+  public void wakeIdleRetry(long now) {
+    if (recipeRetryAfter > now) {
+      wakeRetry(now);
+    }
   }
 
   private void backoffRecipeRetry(long now) {

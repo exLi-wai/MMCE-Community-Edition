@@ -25,6 +25,7 @@ import java.util.stream.Collectors;
 @ApiStatus.Internal
 public final class RecipeSearchResourceRegistry {
   private static final Map<ResourceLocation, Factory> FACTORIES = new LinkedHashMap<>();
+  private static final Set<ResourceLocation> BUILT_INS;
   private static List<Registration> frozen;
 
   static {
@@ -83,6 +84,7 @@ public final class RecipeSearchResourceRegistry {
             RecipeResourceDefinitions.HEAT,
             BufferedRecipeResources.HEAT,
             BufferedAmountRecipeData::input));
+    BUILT_INS = Set.copyOf(FACTORIES.keySet());
   }
 
   private RecipeSearchResourceRegistry() {
@@ -120,18 +122,67 @@ public final class RecipeSearchResourceRegistry {
     }
   }
 
-  static synchronized List<RecipeSearchResource> compile(RecipeCatalog catalog) {
+  record Suite(List<RecipeSearchResource> strategies, Map<String, List<Integer>> byRecipe, boolean externalStrategies) {
+  }
+
+  static synchronized Suite compile(RecipeCatalog catalog) {
     if (frozen == null) {
       frozen = FACTORIES.entrySet().stream().map(entry -> new Registration(entry.getKey(), entry.getValue())).toList();
     }
     var supported = frozen.stream().map(Registration::id).collect(Collectors.toUnmodifiableSet());
     requireSupported(catalog, supported);
-    var compiled = new ArrayList<RecipeSearchResource>(frozen.size());
-    for (var registration : frozen) {
-      compiled.add(Objects.requireNonNull(registration.factory().compile(catalog), "compiled resource search"));
+    var active = new java.util.HashSet<ResourceLocation>();
+    var perRecipe = new LinkedHashMap<String, Set<ResourceLocation>>();
+    for (var candidate : catalog.recipes().candidates()) {
+      var ids = new java.util.HashSet<ResourceLocation>(supported);
+      // External strategies can inspect any recipe, including empty declarations.
+      ids.removeAll(BUILT_INS);
+      var definition = catalog.definition(candidate.id());
+      if (definition != null) {
+        for (var entry : definition.resourceData().entries()) {
+          if (used(entry) && entry.type() != RecipeResourceDefinitions.ITEM) {
+            ids.add(entry.type().id());
+          }
+        }
+        if (!definition.itemPayments().isEmpty()) {
+          ids.add(RecipeResourceDefinitions.ITEM.id());
+        }
+        for (var group : definition.ingredientArrays().inputs()) {
+          if (group.resource().equals("fluid")) {
+            ids.add(RecipeResourceDefinitions.FLUID.id());
+          } else if (group.resource().equals("chemical")) {
+            ids.add(RecipeResourceDefinitions.CHEMICAL.id());
+          }
+        }
+      }
+      if (!catalog.fluidInputs(candidate.id()).isEmpty() || !catalog.fluidOutputs(candidate.id()).isEmpty()) {
+        ids.add(RecipeResourceDefinitions.FLUID.id());
+      }
+      active.addAll(ids);
+      perRecipe.put(candidate.id(), ids);
     }
+    var compiled = new ArrayList<RecipeSearchResource>(frozen.size());
+    var indices = new LinkedHashMap<ResourceLocation, Integer>();
+    for (var registration : frozen) {
+      if (active.contains(registration.id())) {
+        indices.put(registration.id(), compiled.size());
+        compiled.add(Objects.requireNonNull(registration.factory().compile(catalog), "compiled resource search"));
+      }
+    }
+    var masks = new java.util.HashMap<Set<ResourceLocation>, List<Integer>>();
+    var byRecipe = new LinkedHashMap<String, List<Integer>>();
+    perRecipe.forEach(
+        (id, mask) -> byRecipe.put(
+            id,
+            masks.computeIfAbsent(
+                mask,
+                keys -> indices.entrySet().stream().filter(entry -> keys.contains(entry.getKey()))
+                    .map(Map.Entry::getValue).toList())));
+    return new Suite(List.copyOf(compiled), Map.copyOf(byRecipe), !BUILT_INS.containsAll(supported));
+  }
 
-    return List.copyOf(compiled);
+  private static <D> boolean used(RecipeResources.Entry<D> entry) {
+    return !entry.type().isEmpty(entry.data());
   }
 
   private static void requireSupported(RecipeCatalog catalog, Set<ResourceLocation> supported) {

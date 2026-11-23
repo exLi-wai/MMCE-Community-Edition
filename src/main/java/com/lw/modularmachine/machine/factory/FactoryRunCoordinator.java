@@ -1,16 +1,19 @@
 package com.lw.modularmachine.machine.factory;
 
 import com.lw.modularmachine.machine.recipe.FactoryRunResourceResult;
-import com.lw.modularmachine.machine.upgrade.UpgradeCatalogService;
 import com.lw.modularmachine.machine.recipe.FactoryOutputEngine;
 import com.lw.modularmachine.machine.recipe.FrozenRecipeRun;
 import com.lw.modularmachine.machine.recipe.RecipeLifecyclePublisher;
 import com.lw.modularmachine.machine.recipe.resource.RecipeResourceExecutionRegistry;
 import com.lw.modularmachine.api.recipe.RecipeLifecycleEvents.Type;
 import net.minecraft.core.HolderLookup;
+import net.minecraft.core.BlockPos;
+import net.minecraft.resources.ResourceLocation;
+import com.lw.modularmachine.ModularMachine;
 import java.util.List;
 import java.util.Map;
 import java.util.HashMap;
+import java.util.LinkedHashMap;
 import java.util.UUID;
 import org.jetbrains.annotations.ApiStatus;
 import java.util.Objects;
@@ -25,12 +28,41 @@ public final class FactoryRunCoordinator {
   private final FactoryRunState runState;
   private final Host host;
   private final FactoryOutputEngine outputEngine = new FactoryOutputEngine();
+  private record FailureKey(String thread, ResourceLocation recipe, String stage, Class<?> type) {
+  }
+  private record Report(long tick, long suppressed) {
+  }
+  private final LinkedHashMap<FailureKey, Report> failures = new LinkedHashMap<>();
+
+  public void warnFailure(String threadId, String stage, BlockPos position, RuntimeException failure) {
+    var runs = runState.runSet(threadId).runs();
+    var key = new FailureKey(threadId, runs.isEmpty() ? null : runs.getFirst().recipeId(), stage, failure.getClass());
+    long tick = host.gameTime();
+    var prior = failures.get(key);
+    if (prior != null && tick >= prior.tick() && tick - prior.tick() < 200) {
+      failures.put(key, new Report(prior.tick(), prior.suppressed() + 1));
+      return;
+    }
+    if (prior == null && failures.size() >= 128) {
+      failures.pollFirstEntry();
+    }
+    failures.put(key, new Report(tick, 0));
+    ModularMachine.LOGGER.warn(
+        "Factory {} failed at {} thread {} recipe {} ({} repeats suppressed)",
+        stage,
+        position,
+        threadId,
+        key.recipe(),
+        prior == null ? 0 : prior.suppressed(),
+        failure);
+  }
 
   public interface Host {
     boolean confirmed();
     HolderLookup.Provider registries();
     long gameTime();
     boolean bindingsCurrent(FrozenRecipeRun run);
+    boolean mayHaveUpgradeTickWork();
     default boolean beforeTick(String threadId, List<FrozenRecipeRun> runs) {
       return true;
     }
@@ -57,6 +89,7 @@ public final class FactoryRunCoordinator {
 
   public void unloadOutput() {
     outputEngine.clear();
+    failures.clear();
   }
 
   public FactoryOutputEngine.Result advanceOutput(String threadId, FactoryRunSet set) {
@@ -87,9 +120,10 @@ public final class FactoryRunCoordinator {
       advancePendingOutput(threadId, entry.getValue());
       return;
     }
-    var active = entry.getValue().runs().stream()
+    var expected = entry.getValue();
+    var active = expected.runs().stream()
         .filter(run -> !run.pendingOutput() && run.lastProgressTick() < host.gameTime()).toList();
-    if (!active.isEmpty() && !host.beforeTick(threadId, active)) {
+    if (!active.isEmpty() && (!host.beforeTick(threadId, active) || runState.runSet(threadId) != expected)) {
       threadConfiguration
           .updateThreadState(thread.threadId(), FactoryThreadState.State.WAITING, FactoryThreadState.Reason.NONE);
       return;
@@ -100,7 +134,7 @@ public final class FactoryRunCoordinator {
                 || run.energyOutputPerTick() > 0
                 || !run.fluidPerTick(host.registries()).isEmpty()
                 || RecipeResourceExecutionRegistry.hasTickResources(run, host.registries()))
-        || UpgradeCatalogService.snapshot().hasTickWork()) {
+        || host.mayHaveUpgradeTickWork()) {
       var result = host.tickParallel(threadId, entry.getValue());
       var status = FactoryRunStatus.from(result);
       threadConfiguration.updateThreadState(thread.threadId(), status.state(), status.reason());

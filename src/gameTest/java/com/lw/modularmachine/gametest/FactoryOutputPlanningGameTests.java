@@ -4,6 +4,7 @@ import com.lw.modularmachine.blockentity.FactoryControllerBlockEntity;
 import com.lw.modularmachine.machine.factory.FactoryThreadConfiguration.Change;
 import com.lw.modularmachine.blockentity.MachinePortBlockEntity;
 import com.lw.modularmachine.config.MachineConfig;
+import com.lw.modularmachine.machine.recipe.RecipeExecutionTicket;
 import com.lw.modularmachine.machine.factory.FactoryThreadState;
 import com.lw.modularmachine.api.upgrade.UpgradeSnapshot;
 import com.lw.modularmachine.machine.structure.StructureService;
@@ -37,6 +38,21 @@ public final class FactoryOutputPlanningGameTests {
     MachinePortBlockEntity input;
     MachinePortBlockEntity output;
     MachinePortBlockEntity fluid;
+  }
+
+  @GameTest(template = "empty16", batch = "factory_output_planning")
+  public static void same_tick_factory_capture_reuses_only_current_port_contents(GameTestHelper helper) {
+    var fixture = build(helper);
+    var before = RecipeExecutionTicket.captureTickItems(fixture.factory).orElseThrow();
+    helper.assertTrue(
+        RecipeExecutionTicket.captureTickItems(fixture.factory).orElseThrow() == before,
+        "Unchanged item ports were captured twice in one tick");
+    fixture.input.inventory().setStackInSlot(0, new ItemStack(Items.FLINT, 2));
+    var after = RecipeExecutionTicket.captureTickItems(fixture.factory).orElseThrow();
+    helper.assertTrue(
+        after != before && !before.dependenciesCurrent(),
+        "Same-tick inventory mutation kept the old item ticket current");
+    helper.succeed();
   }
 
   @AfterBatch(batch = "factory_output_planning")
@@ -77,7 +93,12 @@ public final class FactoryOutputPlanningGameTests {
         })));
   }
 
-  @GameTest(template = "empty16", batch = "factory_output_planning", timeoutTicks = 400)
+  @AfterBatch(batch = "factory_output_continuous")
+  public static void cleanupContinuous(ServerLevel level) {
+    cleanup(level);
+  }
+
+  @GameTest(template = "empty16", batch = "factory_output_continuous", timeoutTicks = 400)
   public static void available_outputs_commit_and_next_recipe_starts_in_the_completion_tick(GameTestHelper helper) {
     var server = helper.getLevel().getServer();
     server.reloadResources(server.getPackRepository().getSelectedIds())

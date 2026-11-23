@@ -24,10 +24,14 @@ final class FrozenRecipeSampling {
       long total = 0;
       long max = row.getLong("amount");
       long min = row.getLong("max_amount") > 0 ? row.getLong("min_amount") : max;
-      for (int attempt = 0; attempt < attempts; attempt++) {
-        if (chance >= 1 || chance > 0 && random.nextDouble() < chance) {
-          long quantity = min == max ? max : sampleRange(random, min, max);
-          total = Math.addExact(total, quantity);
+      if (chance >= 1 && min == max) {
+        total = Math.multiplyExact(max, attempts);
+      } else if (chance > 0) {
+        for (int attempt = 0; attempt < attempts; attempt++) {
+          if (chance >= 1 || random.nextDouble() < chance) {
+            long quantity = min == max ? max : sampleRange(random, min, max);
+            total = Math.addExact(total, quantity);
+          }
         }
       }
       if (total == 0) {

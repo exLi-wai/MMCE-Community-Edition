@@ -46,6 +46,8 @@ import com.lw.modularmachine.machine.recipe.RecipeStartPlan;
 import com.lw.modularmachine.machine.recipe.search.RecipeSearch;
 import com.lw.modularmachine.machine.recipe.PatternRunSources;
 import com.lw.modularmachine.machine.recipe.PatternProductionService;
+import com.lw.modularmachine.machine.recipe.TickOutputWork;
+import com.lw.modularmachine.machine.recipe.RecipeExecutionTicket;
 import com.lw.modularmachine.machine.recipe.MachineRecipeService;
 import com.lw.modularmachine.machine.recipe.RecipeLifecyclePublisher;
 import com.lw.modularmachine.machine.controller.MachineEventPublisher;
@@ -92,6 +94,12 @@ import java.util.HashSet;
 public final class FactoryControllerBlockEntity extends BlockEntity implements MenuProvider, UpgradeBusOwner, ControllerScriptStateOwner, ControllerCommandSubject {
   private static final int FACTORY_SCHEMA = 7;
   private final ControllerMetrics metrics = new ControllerMetrics();
+  private final RecipeExecutionTicket.TickCache tickResourceTickets = new RecipeExecutionTicket.TickCache();
+
+  @ApiStatus.Internal
+  public RecipeExecutionTicket.TickCache tickResourceTickets() {
+    return tickResourceTickets;
+  }
   private final FactoryThreadConfiguration threadConfiguration = new FactoryThreadConfiguration(
       new ThreadConfigurationHost());
   private boolean persistentStateValid = true;
@@ -234,9 +242,13 @@ public final class FactoryControllerBlockEntity extends BlockEntity implements M
     }
     @Override
     public boolean beforeTick(String threadId, List<FrozenRecipeRun> runs) {
-      return runtimeUpgrades.prepareRecipeTick(threadId, runs) == RecipeTickPreparation.Status.ALLOWED
-          && runs.stream().allMatch(this::bindingsCurrent)
-          && runSet(threadId).runs().containsAll(runs);
+      // The coordinator checks the immutable run set after any script callback.
+      // The selected free/paid path validates the bindings before advancing it.
+      return runtimeUpgrades.prepareRecipeTick(threadId, runs) == RecipeTickPreparation.Status.ALLOWED;
+    }
+    @Override
+    public boolean mayHaveUpgradeTickWork() {
+      return upgrades.mayHaveTickWork();
     }
     @Override
     public FactoryRunResourceResult tickParallel(String threadId, FactoryRunSet set) {
@@ -483,6 +495,11 @@ public final class FactoryControllerBlockEntity extends BlockEntity implements M
   }
 
   @Override
+  public void wakeRecipeSearch() {
+    searchCoordinator.wakeRetries();
+  }
+
+  @Override
   @ApiStatus.Internal
   public ControllerCommandState commandState() {
     return commandState;
@@ -572,6 +589,8 @@ public final class FactoryControllerBlockEntity extends BlockEntity implements M
   }
 
   private void detachRuntime() {
+    tickResourceTickets.clear();
+    TickOutputWork.forget(this);
     ControllerVisualDataSync.remove(this);
     clientVisualData = null;
     PatternProductionService.invalidate(this);
@@ -639,8 +658,7 @@ public final class FactoryControllerBlockEntity extends BlockEntity implements M
     }
     int occupied = 0;
     for (var entry : runState.view().entrySet()) {
-      if (!entry.getKey().equals(threadId)
-          && entry.getValue().runs().stream().anyMatch(run -> run.recipeId().equals(recipeId))) {
+      if (!entry.getKey().equals(threadId) && entry.getValue().containsRecipe(recipeId)) {
         occupied++;
       }
     }
@@ -933,6 +951,11 @@ public final class FactoryControllerBlockEntity extends BlockEntity implements M
     if (!(level instanceof ServerLevel server) || !server.getServer().isSameThread()) {
       return;
     }
+    tickResourceTickets.beginTick(server.getGameTime());
+    TickOutputWork.beginTick(
+        this,
+        server.getGameTime(),
+        () -> runState.view().values().stream().flatMap(set -> set.runs().stream()).map(FrozenRecipeRun::runId));
     RecipeCommandService.schedule(this);
     if (UpgradeLifecyclePublisher.isDispatchingAny()) {
       return;

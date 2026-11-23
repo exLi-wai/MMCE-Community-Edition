@@ -25,41 +25,110 @@ import net.neoforged.neoforge.fluids.FluidStack;
 @ApiStatus.Internal
 public final class RecipeSearchResources {
   private final RecipeCatalog catalog;
-  private final Map<RecipePortSnapshot, List<ItemSlot>> items = new IdentityHashMap<>();
+  private final Map<RecipePortSnapshot, PortInputs> items = new IdentityHashMap<>();
   private final Map<RecipePortSnapshot, StoredFluid> fluids = new IdentityHashMap<>();
   private final Map<RecipePortSnapshot, ChemicalResourceKey> chemicals = new IdentityHashMap<>();
-  private final Map<ItemSlotDomain, Map<ItemResourceKey, Long>> limits = new HashMap<>();
+  private final Map<ItemSlotDomain, ResourceSnapshot.SlotLimit<ItemResourceKey>> limits = new HashMap<>();
+  private final List<ItemSlotRef> outputRefs = new ArrayList<>();
+  private final List<ResourceSnapshot.OutputSlot<ItemResourceKey>> buildingOutputs = new ArrayList<>();
+  private List<ResourceSnapshot.OutputSlot<ItemResourceKey>> outputSpaces;
 
   RecipeSearchResources(RecipeCatalog catalog) {
     this.catalog = Objects.requireNonNull(catalog, "catalog");
   }
 
-  List<ItemSlot> items(RecipePortSnapshot port) {
-    if (port.kind().resource() != ResourceType.ITEM) {
-      throw new IllegalArgumentException("Not an item port");
+  /**
+   * Shared physical item inputs are tallied once; each group merges distinct
+   * keys.
+   */
+  final class GroupItems {
+    private final RecipeExecutionTicket ticket;
+    private final List<List<ItemSlot>> inputs = new ArrayList<>();
+    private final Map<ItemResourceKey, Long> counts = new HashMap<>();
+    private int portIndex;
+    private int slotIndex;
+    private java.util.Iterator<Map.Entry<ItemResourceKey, Long>> portCounts;
+
+    GroupItems(RecipeExecutionTicket ticket) {
+      this.ticket = ticket;
     }
 
-    return items.computeIfAbsent(port, this::captureItems);
+    int advance(int budget) {
+      int used = 0;
+      while (portIndex < ticket.ports().size() && used < budget) {
+        var port = ticket.ports().get(portIndex);
+        used++;
+        if (port.kind() == PortKind.ITEM_INPUT) {
+          var input = items.computeIfAbsent(port, ignored -> new PortInputs());
+          if (input.next < port.itemSlotCount()) {
+            int slot = input.next++;
+            var key = port.itemKey(slot);
+            if (key != null) {
+              long count = port.itemAmount(slot);
+              input.slots.add(new ItemSlot(new ItemSlotRef(port.partId(), slot), key, count));
+              input.counts.merge(key, count, Math::addExact);
+              if (!catalog.itemInputAliases().isEmpty() || catalog.hasDynamicInputRecipes()) {
+                var alias = key.ignoringComponents();
+                if (catalog.itemInputAliases().contains(alias) || catalog.hasDynamicInputRecipes()) {
+                  input.counts.merge(alias, count, Math::addExact);
+                }
+              }
+            }
+            continue;
+          }
+          if (portCounts == null) {
+            inputs.add(input.slots);
+            portCounts = input.counts.entrySet().iterator();
+          }
+          if (portCounts.hasNext()) {
+            var entry = portCounts.next();
+            counts.merge(entry.getKey(), entry.getValue(), Math::addExact);
+            continue;
+          }
+          portCounts = null;
+        } else if (port.kind() == PortKind.ITEM_OUTPUT && outputSpaces == null && slotIndex < port.itemSlotCount()) {
+          int slot = slotIndex++;
+          int capacity = port.slotLimits().get(slot);
+          var domain = new ItemSlotDomain(capacity, port.selector(), port.bulkItems());
+          var accepted = limits
+              .computeIfAbsent(domain, current -> current.outputLimits(catalog.recipes().outputKeys()));
+          var output = new ResourceSnapshot.OutputSlot<>(port.itemKey(slot), port.itemAmount(slot), capacity, accepted);
+          outputRefs.add(new ItemSlotRef(port.partId(), slot));
+          buildingOutputs.add(output);
+          continue;
+        }
+        portIndex++;
+        slotIndex = 0;
+      }
+      if (complete() && outputSpaces == null) {
+        // Every group has the same physical output ports, in the same order.
+        outputSpaces = List.copyOf(buildingOutputs);
+        buildingOutputs.clear();
+      }
+      return used;
+    }
+
+    boolean complete() {
+      return portIndex == ticket.ports().size();
+    }
+
+    List<List<ItemSlot>> inputs() {
+      return inputs;
+    }
+
+    ResourceSnapshot<ItemResourceKey> snapshot() {
+      return new ResourceSnapshot<>(ticket.structureRevision(), counts, outputSpaces);
+    }
   }
 
-  private List<ItemSlot> captureItems(RecipePortSnapshot port) {
-    var stacks = port.items();
-    var result = new ArrayList<ItemSlot>(stacks.size());
-    for (int slot = 0; slot < stacks.size(); slot++) {
-      var stack = stacks.get(slot);
-      var key = stack.isEmpty() ? null : ItemResourceKey.of(stack).withSelector(port.selector());
-      var ref = new ItemSlotRef(port.partId(), slot);
-      ResourceSnapshot.OutputSlot<ItemResourceKey> output = null;
-      if (port.kind() == PortKind.ITEM_OUTPUT) {
-        int capacity = port.slotLimits().get(slot);
-        var domain = new ItemSlotDomain(capacity, port.selector(), port.bulkItems());
-        var accepted = limits.computeIfAbsent(domain, current -> current.limits(catalog.recipes().outputKeys()));
-        output = new ResourceSnapshot.OutputSlot<>(key, stack.getCount(), capacity, accepted);
-      }
-      result.add(new ItemSlot(ref, key, port.itemAmount(slot), output));
-    }
+  private static final class PortInputs {
+    private final List<ItemSlot> slots = new ArrayList<>();
+    private final Map<ItemResourceKey, Long> counts = new HashMap<>();
+    private int next;
+  }
 
-    return List.copyOf(result);
+  ItemSlotRef outputRef(int index) {
+    return outputRefs.get(index);
   }
 
   Fluids fluids(RecipeExecutionTicket ticket) {
@@ -101,11 +170,7 @@ public final class RecipeSearchResources {
     return Set.copyOf(keys);
   }
 
-  record ItemSlot(
-      ItemSlotRef ref,
-      ItemResourceKey key,
-      long count,
-      ResourceSnapshot.OutputSlot<ItemResourceKey> output) {
+  record ItemSlot(ItemSlotRef ref, ItemResourceKey key, long count) {
   }
 
   private static final class StoredFluid {

@@ -17,6 +17,13 @@ import net.minecraft.gametest.framework.GameTest;
 import net.minecraft.gametest.framework.GameTestHelper;
 import net.minecraft.resources.ResourceLocation;
 import net.minecraft.server.level.ServerLevel;
+import net.minecraft.server.level.TicketType;
+import net.minecraft.world.level.ChunkPos;
+import java.util.Comparator;
+import java.util.HashSet;
+import java.util.Set;
+import java.util.function.Consumer;
+import java.util.function.Function;
 import net.minecraft.world.item.Item;
 import net.minecraft.world.item.ItemStack;
 import net.minecraft.world.item.Items;
@@ -33,20 +40,22 @@ import net.neoforged.neoforge.gametest.PrefixGameTestTemplate;
 public final class RecipeEnergyLifecycleGameTests {
   private static final ResourceLocation MACHINE = id("test_recipe_energy_lifecycle");
   private static BlockPos failureActionOrigin;
+  private static final TicketType<ChunkPos> FAILURE_FIXTURE_TICKET = TicketType
+      .create("mmcece_failure_fixture", Comparator.comparingLong(ChunkPos::toLong));
+  private static final Set<ChunkPos> failureFixtureChunks = new HashSet<>();
 
   private RecipeEnergyLifecycleGameTests() {
   }
 
   @GameTest(template = "empty16", batch = "recipe_energy_lifecycle", timeoutTicks = 600)
   public static void fe_per_tick_is_atomic_waits_and_splits_across_input_hatches(GameTestHelper helper) {
-    reload(helper, () -> {
+    reloadFixture(helper, RecipeEnergyLifecycleGameTests::build, controller -> {
       try {
-        var controller = build(helper);
         var energyA = port(helper, "energy_a");
         var energyB = port(helper, "energy_b");
         energyA.energy().receiveEnergy(10, false);
         start(helper, controller, Items.DIRT);
-        helper.runAfterDelay(2, () -> {
+        afterWorldTick(helper, controller.runningRecipe().orElseThrow().lastProgressTick(), () -> {
           try {
             controller.serverTick();
             controller.serverTick();
@@ -64,7 +73,7 @@ public final class RecipeEnergyLifecycleGameTests {
                         && count(port(helper, "item_out"), Items.IRON_INGOT) == 1
                         && energyA.energy().stored() == 0,
                     "Paid FE run did not charge each progress tick and output exactly once");
-                insufficientEnergyWaits(helper);
+                readyFixture(helper, build(helper), next -> insufficientEnergyWaits(helper, next));
               } catch (RuntimeException failure) {
                 helper.fail("FE run completion failed: " + failure);
               }
@@ -81,18 +90,20 @@ public final class RecipeEnergyLifecycleGameTests {
 
   @GameTest(template = "empty16", batch = "recipe_failure_policy_lifecycle", timeoutTicks = 600)
   public static void reset_and_decrease_actions_apply_on_resource_shortage_and_preserve_fees(GameTestHelper helper) {
-    reload(helper, () -> {
+    reloadFixture(helper, RecipeEnergyLifecycleGameTests::buildFailureActionFixture, reset -> {
       try {
-        var reset = buildFailureActionFixture(helper);
         var resetEngine = new RecipeRunEngine();
         var resetEnergy = RecipeResourceTicketGameTests.port(helper, reset, "energy_a");
         resetEnergy.energy().receiveEnergy(5, false);
         start(helper, reset, Items.DIRT);
         afterWorldTick(helper, helper.getLevel().getGameTime(), () -> {
           try {
-            resetEngine.tick(reset, helper.getLevel());
-            helper
-                .assertTrue(reset.runningRecipe().orElseThrow().progress() == 1, "Reset fixture did not advance once");
+            var status = resetEngine.tick(reset, helper.getLevel());
+            helper.assertTrue(
+                reset.runningRecipe().orElseThrow().progress() == 1 && resetEnergy.energy().stored() == 0,
+                "Reset fixture did not pay and advance once: status=" + status + ", energy=" + resetEnergy.energy()
+                    .stored() + ", tick=" + helper.getLevel()
+                        .getGameTime() + ", last=" + reset.runningRecipe().orElseThrow().lastProgressTick());
             afterWorldTick(helper, helper.getLevel().getGameTime(), () -> {
               try {
                 resetEngine.tick(reset, helper.getLevel());
@@ -119,7 +130,10 @@ public final class RecipeEnergyLifecycleGameTests {
   }
 
   private static void startDecreaseFailureAction(GameTestHelper helper) {
-    var decrease = buildFailureActionFixture(helper);
+    readyFixture(helper, buildFailureActionFixture(helper), decrease -> beginDecrease(helper, decrease));
+  }
+
+  private static void beginDecrease(GameTestHelper helper, MachineControllerBlockEntity decrease) {
     var energy = RecipeResourceTicketGameTests.port(helper, decrease, "energy_a");
     energy.energy().receiveEnergy(15, false);
     RecipeResourceTicketGameTests.port(helper, decrease, "item_in").inventory()
@@ -173,7 +187,12 @@ public final class RecipeEnergyLifecycleGameTests {
     failureActionOrigin = helper.absolutePos(new BlockPos(7, 5, 7)).offset(10000, 0, 10000);
     for (int x : new int[]{-2, 2}) {
       for (int z : new int[]{-2, 3}) {
-        helper.getLevel().getChunkAt(failureActionOrigin.offset(x, 0, z));
+        var pos = new ChunkPos(failureActionOrigin.offset(x, 0, z));
+        if (failureFixtureChunks.add(pos)) {
+          // Radius zero holds a FULL chunk without enabling block entity ticks.
+          helper.getLevel().getChunkSource().addRegionTicket(FAILURE_FIXTURE_TICKET, pos, 0, pos);
+        }
+        helper.getLevel().getChunk(pos.x, pos.z);
       }
     }
 
@@ -195,14 +214,17 @@ public final class RecipeEnergyLifecycleGameTests {
         }
       }
     }
+    for (var pos : failureFixtureChunks) {
+      level.getChunkSource().removeRegionTicket(FAILURE_FIXTURE_TICKET, pos, 0, pos);
+    }
+    failureFixtureChunks.clear();
     failureActionOrigin = null;
   }
 
-  @GameTest(template = "empty16", batch = "recipe_energy_lifecycle", timeoutTicks = 600)
+  @GameTest(template = "empty16", batch = "fixed_fluid_input_lifecycle", timeoutTicks = 600)
   public static void fixed_fluid_input_is_required_during_search_and_consumed_at_start(GameTestHelper helper) {
-    reload(helper, () -> {
+    reloadFixture(helper, RecipeEnergyLifecycleGameTests::build, controller -> {
       try {
-        var controller = build(helper);
         var input = port(helper, "item_in");
         var fluid = port(helper, "fluid_a");
         input.inventory().setStackInSlot(0, new ItemStack(Items.ENDER_PEARL));
@@ -214,7 +236,7 @@ public final class RecipeEnergyLifecycleGameTests {
         helper.assertTrue(
             fluid.fluidTank().isEmpty() && input.inventory().getStackInSlot(0).isEmpty(),
             "Fluid-input startup did not atomically consume both resources");
-        helper.runAfterDelay(2, () -> {
+        afterWorldTick(helper, controller.runningRecipe().orElseThrow().lastProgressTick(), () -> {
           try {
             controller.serverTick();
             helper.assertTrue(
@@ -237,9 +259,8 @@ public final class RecipeEnergyLifecycleGameTests {
 
   @GameTest(template = "empty16", batch = "recipe_energy_lifecycle", timeoutTicks = 600)
   public static void fixed_fluid_output_commits_with_item_output_atomically(GameTestHelper helper) {
-    reload(helper, () -> {
+    reloadFixture(helper, RecipeEnergyLifecycleGameTests::buildFluidOutput, controller -> {
       try {
-        var controller = buildFluidOutput(helper);
         var input = port(helper, "item_in");
         input.inventory().setStackInSlot(0, new ItemStack(Items.CHORUS_FRUIT));
         var plan = RecipeSearch.begin(controller).orElseThrow().advance(10_000).plan().orElseThrow();
@@ -268,8 +289,7 @@ public final class RecipeEnergyLifecycleGameTests {
 
   @GameTest(template = "empty16", batch = "fluid_output_recovery", timeoutTicks = 1200)
   public static void fluid_outputs_check_admission_add_only_the_delta_and_resume_saved_pending_run(GameTestHelper helper) {
-    reload(helper, () -> {
-      var controller = buildFluidOutput(helper);
+    reloadFixture(helper, RecipeEnergyLifecycleGameTests::buildFluidOutput, controller -> {
       var input = port(helper, "item_in");
       var fluid = port(helper, "fluid_out");
       input.inventory().setStackInSlot(0, new ItemStack(Items.CHORUS_FRUIT));
@@ -306,19 +326,20 @@ public final class RecipeEnergyLifecycleGameTests {
                 && fluid.fluidTank().getFluidAmount() == 1000
                 && count(port(helper, "item_out"), Items.IRON_INGOT) == 1,
             "Output to an existing stack did not add exactly 40 mB: " + controller.recipeRunStatus());
-        savedPendingFluidOutput(helper);
+        readyFixture(helper, buildFluidOutput(helper), next -> savedPendingFluidOutput(helper, next));
       });
     });
   }
 
   @GameTest(template = "empty16", batch = "fluid_output_allocation", timeoutTicks = 600)
   public static void mixed_fluids_share_capacity_and_backtrack_between_unequal_tanks(GameTestHelper helper) {
-    reload(helper, () -> {
-      var controller = buildFluidOutput(helper);
-      var origin = controller.getBlockPos();
-      place(helper, origin, new BlockPos(0, -1, 1), "fluid_output_hatch_tiny");
+    reloadFixture(helper, h -> {
+      var controller = buildFluidOutput(h);
+      place(h, controller.getBlockPos(), new BlockPos(0, -1, 1), "fluid_output_hatch_tiny");
       controller.bindMachine(id("test_recipe_fluid_allocation"));
-      confirm(helper, controller);
+      return controller;
+    }, controller -> {
+      var origin = controller.getBlockPos();
       var large = port(helper, "fluid_out");
       var small = (MachinePortBlockEntity) helper.getLevel().getBlockEntity(origin.offset(0, -1, 1));
       port(helper, "item_in").inventory().setStackInSlot(0, new ItemStack(Items.CHORUS_FRUIT));
@@ -348,8 +369,7 @@ public final class RecipeEnergyLifecycleGameTests {
     });
   }
 
-  private static void savedPendingFluidOutput(GameTestHelper helper) {
-    var controller = buildFluidOutput(helper);
+  private static void savedPendingFluidOutput(GameTestHelper helper, MachineControllerBlockEntity controller) {
     var input = port(helper, "item_in");
     var output = port(helper, "item_out");
     var fluid = port(helper, "fluid_out");
@@ -390,8 +410,7 @@ public final class RecipeEnergyLifecycleGameTests {
     });
   }
 
-  private static void insufficientEnergyWaits(GameTestHelper helper) {
-    var waitingController = build(helper);
+  private static void insufficientEnergyWaits(GameTestHelper helper, MachineControllerBlockEntity waitingController) {
     var waitingEnergy = port(helper, "energy_a");
     waitingEnergy.energy().receiveEnergy(4, false);
     start(helper, waitingController, Items.SAND);
@@ -410,7 +429,7 @@ public final class RecipeEnergyLifecycleGameTests {
                     && count(port(helper, "item_out"), Items.GOLD_INGOT) == 1
                     && waitingEnergy.energy().stored() == 0,
                 "Run did not resume after the full FE fee became available");
-            splitEnergyHatches(helper);
+            readyFixture(helper, build(helper), next -> splitEnergyHatches(helper, next));
           } catch (RuntimeException failure) {
             helper.fail("FE wait recovery failed: " + failure);
           }
@@ -421,8 +440,7 @@ public final class RecipeEnergyLifecycleGameTests {
     });
   }
 
-  private static void splitEnergyHatches(GameTestHelper helper) {
-    var controller = build(helper);
+  private static void splitEnergyHatches(GameTestHelper helper, MachineControllerBlockEntity controller) {
     var energyA = port(helper, "energy_a");
     var energyB = port(helper, "energy_b");
     energyA.energy().receiveEnergy(3, false);
@@ -437,15 +455,14 @@ public final class RecipeEnergyLifecycleGameTests {
                 && energyA.energy().stored() == 0
                 && energyB.energy().stored() == 0,
             "FE fee was not atomically split across energy input hatches");
-        fluidFeeWaitsWithoutPartiallyCharging(helper);
+        readyFixture(helper, build(helper), next -> fluidFeeWaitsWithoutPartiallyCharging(helper, next));
       } catch (RuntimeException failure) {
         helper.fail("Multi-hatch FE payment failed: " + failure);
       }
     });
   }
 
-  private static void fluidFeeWaitsWithoutPartiallyCharging(GameTestHelper helper) {
-    var controller = build(helper);
+  private static void fluidFeeWaitsWithoutPartiallyCharging(GameTestHelper helper, MachineControllerBlockEntity controller) {
     var energy = port(helper, "energy_a");
     var fluidA = port(helper, "fluid_a");
     var fluidB = port(helper, "fluid_b");
@@ -478,7 +495,7 @@ public final class RecipeEnergyLifecycleGameTests {
                     && fluidA.fluidTank().isEmpty()
                     && fluidB.fluidTank().getFluid().getFluid() == Fluids.LAVA,
                 "Hybrid fee did not resume atomically or consumed the wrong fluid");
-            splitFluidHatches(helper);
+            readyFixture(helper, build(helper), next -> splitFluidHatches(helper, next));
           } catch (RuntimeException failure) {
             helper.fail("Hybrid FE/fluid fee recovery failed: " + failure);
           }
@@ -489,8 +506,7 @@ public final class RecipeEnergyLifecycleGameTests {
     });
   }
 
-  private static void splitFluidHatches(GameTestHelper helper) {
-    var controller = build(helper);
+  private static void splitFluidHatches(GameTestHelper helper, MachineControllerBlockEntity controller) {
     var fluidA = port(helper, "fluid_a");
     var fluidB = port(helper, "fluid_b");
     fluidA.fluidTank().fill(new FluidStack(Fluids.WATER, 30), FluidAction.EXECUTE);
@@ -516,7 +532,7 @@ public final class RecipeEnergyLifecycleGameTests {
     });
   }
 
-  private static void reload(GameTestHelper helper, Runnable next) {
+  private static void reloadFixture(GameTestHelper helper, Function<GameTestHelper, MachineControllerBlockEntity> build, Consumer<MachineControllerBlockEntity> next) {
     var server = helper.getLevel().getServer();
     server.reloadResources(server.getPackRepository().getSelectedIds())
         .whenComplete((ignored, failure) -> server.execute(() -> {
@@ -524,8 +540,17 @@ public final class RecipeEnergyLifecycleGameTests {
             helper.fail("FE recipe reload failed: " + failure);
             return;
           }
-          next.run();
+          readyFixture(helper, build.apply(helper), next);
         }));
+  }
+
+  private static void readyFixture(GameTestHelper helper, MachineControllerBlockEntity controller, Consumer<MachineControllerBlockEntity> next) {
+    // Fresh ports invalidate the structure proof when NeoForge delivers onLoad.
+    // Let that world tick finish before supplying any material or measuring fees.
+    helper.runAfterDelay(2, () -> {
+      confirm(helper, controller);
+      next.accept(controller);
+    });
   }
 
   private static MachineControllerBlockEntity build(GameTestHelper helper) {

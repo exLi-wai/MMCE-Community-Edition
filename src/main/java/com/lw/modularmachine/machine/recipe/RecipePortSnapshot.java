@@ -11,10 +11,12 @@ import com.lw.modularmachine.machine.recipe.search.ItemSlotDomain;
 import com.lw.modularmachine.util.thread.ServerThreadGuard;
 import java.util.ArrayList;
 import java.util.List;
+import java.util.Set;
 import java.util.UUID;
 import net.minecraft.core.BlockPos;
 import net.minecraft.core.NonNullList;
 import net.minecraft.server.level.ServerLevel;
+import net.minecraft.world.item.Item;
 import net.minecraft.world.item.ItemStack;
 import net.neoforged.neoforge.fluids.FluidStack;
 import org.jetbrains.annotations.ApiStatus;
@@ -36,6 +38,7 @@ public final class RecipePortSnapshot {
   private final PortKind kind;
   private final long revision;
   private final List<ItemStack> items;
+  private ItemResourceKey[] itemKeys;
   private final List<Long> itemAmounts;
   private final PatternInputSource pattern;
   private final List<PatternResourceKey> patternKeys;
@@ -203,14 +206,43 @@ public final class RecipePortSnapshot {
     return items.stream().map(stack -> ItemStackSnapshots.detached(stack, level.registryAccess())).toList();
   }
 
-  int itemSlotCount() {
+  public int itemSlotCount() {
     ServerThreadGuard.require(level, "Recipe resource access");
     return items.size();
+  }
+
+  /**
+   * Exact immutable key of a captured slot, including its selector; empty slots
+   * have no key.
+   */
+  public ItemResourceKey itemKey(int slot) {
+    ServerThreadGuard.require(level, "Recipe resource access");
+    var stack = items.get(slot);
+    if (stack.isEmpty()) {
+      return null;
+    }
+    if (itemKeys == null) {
+      itemKeys = new ItemResourceKey[items.size()];
+    }
+    if (itemKeys[slot] == null) {
+      itemKeys[slot] = ItemResourceKey.fromSnapshot(stack, selector);
+    }
+    return itemKeys[slot];
   }
 
   boolean matchesItem(int slot, ItemResourceKey key) {
     ServerThreadGuard.require(level, "Recipe resource access");
     return key.matches(items.get(slot));
+  }
+
+  ItemStack copyItem(int slot) {
+    ServerThreadGuard.require(level, "Recipe resource access");
+    return ItemStackSnapshots.detached(items.get(slot), level.registryAccess());
+  }
+
+  boolean hasItemType(int slot, Set<Item> itemsAllowed) {
+    ServerThreadGuard.require(level, "Recipe resource access");
+    return itemsAllowed.contains(items.get(slot).getItem());
   }
 
   long remainingItemOutputCapacity(ItemResourceKey key) {
@@ -229,7 +261,7 @@ public final class RecipePortSnapshot {
     return remaining;
   }
 
-  NonNullList<ItemStack> copyItemContents() {
+  public NonNullList<ItemStack> copyItemContents() {
     ServerThreadGuard.require(level, "Recipe resource access");
     var copy = NonNullList.withSize(items.size(), ItemStack.EMPTY);
     for (int slot = 0; slot < items.size(); slot++) {

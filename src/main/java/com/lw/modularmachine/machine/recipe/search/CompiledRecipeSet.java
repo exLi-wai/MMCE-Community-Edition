@@ -39,27 +39,9 @@ public final class CompiledRecipeSet<K> {
       if (!ids.add(recipe.id())) {
         throw new IllegalArgumentException("Duplicate recipe ID: " + recipe.id());
       }
-      var input = new LinkedHashMap<K, Long>();
-      var output = new LinkedHashMap<K, Long>();
-      var recipeOutputKeys = new HashSet<K>();
-      try {
-        for (var demand : recipe.inputs()) {
-          input.merge(demand.key(), demand.count(), Math::addExact);
-        }
-        for (var demand : recipe.outputs()) {
-          recipeOutputKeys.add(demand.key());
-          if (!demand.ignoreOutputCheck()) {
-            output.merge(demand.key(), demand.count(), Math::addExact);
-          }
-        }
-      } catch (ArithmeticException overflow) {
-        throw new IllegalArgumentException("Demand overflow in recipe " + recipe.id(), overflow);
-      }
-      if (recipeOutputKeys.size() > MAX_DISTINCT_OUTPUTS) {
-        throw new IllegalArgumentException("Too many distinct output keys");
-      }
-      pending.add(new Pending<>(recipe, input, output));
-      keys.addAll(recipeOutputKeys);
+      var counts = demands(recipe);
+      pending.add(counts);
+      keys.addAll(counts.keys());
     }
     pending.sort(
         Comparator.<Pending<K>>comparingInt(entry -> entry.recipe().priority()).reversed()
@@ -234,6 +216,35 @@ public final class CompiledRecipeSet<K> {
     }
   }
 
-  private record Pending<K>(RecipeCandidate<K> recipe, Map<K, Long> input, Map<K, Long> output) {
+  static <K> Entry<K> compileCandidate(RecipeCandidate<K> recipe) {
+    var counts = demands(recipe);
+    var anchor = counts.input().isEmpty() ? null : counts.input().keySet().iterator().next();
+    return new Entry<>(0, recipe, counts.input(), counts.output(), anchor);
+  }
+
+  private static <K> Pending<K> demands(RecipeCandidate<K> recipe) {
+    var input = new LinkedHashMap<K, Long>();
+    var output = new LinkedHashMap<K, Long>();
+    var keys = new HashSet<K>();
+    try {
+      for (var demand : recipe.inputs()) {
+        input.merge(demand.key(), demand.count(), Math::addExact);
+      }
+      for (var demand : recipe.outputs()) {
+        keys.add(demand.key());
+        if (!demand.ignoreOutputCheck()) {
+          output.merge(demand.key(), demand.count(), Math::addExact);
+        }
+      }
+    } catch (ArithmeticException overflow) {
+      throw new IllegalArgumentException("Demand overflow in recipe " + recipe.id(), overflow);
+    }
+    if (keys.size() > MAX_DISTINCT_OUTPUTS) {
+      throw new IllegalArgumentException("Too many distinct output keys");
+    }
+    return new Pending<>(recipe, input, output, keys);
+  }
+
+  private record Pending<K>(RecipeCandidate<K> recipe, Map<K, Long> input, Map<K, Long> output, Set<K> keys) {
   }
 }

@@ -4,13 +4,18 @@ import com.lw.modularmachine.machine.recipe.RecipeResourceCapture.CaptureMode;
 import com.lw.modularmachine.machine.recipe.RecipeTicketProof.SmartSnapshot;
 import com.lw.modularmachine.blockentity.MachineControllerBlockEntity;
 import com.lw.modularmachine.machine.PortKind;
+import com.lw.modularmachine.machine.recipe.search.RecipeResourceRequirements.RequiredPort;
 import com.lw.modularmachine.api.upgrade.UpgradeSnapshot;
 import com.lw.modularmachine.api.smart.SmartNumberRequirement;
 import com.lw.modularmachine.machine.structure.StructureService;
 import com.lw.modularmachine.util.thread.ServerThreadGuard;
 import com.google.common.collect.Iterators;
 import java.util.ArrayList;
+import java.util.AbstractList;
+import java.util.HashMap;
+import java.util.Objects;
 import java.util.Comparator;
+import java.util.EnumMap;
 import java.util.Iterator;
 import java.util.List;
 import java.util.Map;
@@ -28,28 +33,95 @@ import org.jetbrains.annotations.ApiStatus;
  */
 @ApiStatus.Internal
 public final class RecipeExecutionTicket {
+  /**
+   * Factory-owned, server-thread cache. Each hit still checks live contents
+   * before reuse.
+   */
+  public static final class TickCache {
+    private final EnumMap<CaptureMode, RecipeExecutionTicket> tickets = new EnumMap<>(CaptureMode.class);
+    private long tick = Long.MIN_VALUE;
+
+    public void beginTick(long now) {
+      if (tick != now) {
+        tickets.clear();
+        tick = now;
+      }
+    }
+
+    RecipeExecutionTicket current(CaptureMode mode) {
+      var ticket = tickets.get(mode);
+      return ticket != null && ticket.matchesLive() ? ticket : null;
+    }
+
+    void remember(CaptureMode mode, RecipeExecutionTicket ticket) {
+      tickets.put(mode, ticket);
+    }
+
+    public void clear() {
+      tickets.clear();
+    }
+  }
+
   private final RecipeTicketProof proof;
   private final int inputGroup;
   private final List<RecipePortSnapshot> selectedPorts;
+  private final List<RecipePortSnapshot> virtualPorts;
   private final PatternInputSource patternSource;
+  private final Set<RequiredPort> recipePorts;
 
-  RecipeExecutionTicket(StructureService.StructureSubject owner, ServerLevel level, StructureService.Registration registration, List<RecipePortSnapshot> ports, CaptureMode mode, List<SmartSnapshot> interfaces) {
-    proof = new RecipeTicketProof(owner, level, registration, ports, mode, interfaces);
+  RecipeExecutionTicket(StructureService.StructureSubject owner, ServerLevel level, StructureService.Registration registration, List<RecipePortSnapshot> ports, CaptureMode mode, List<SmartSnapshot> interfaces, List<RecipeTicketProof.GroupStamp> groups) {
+    proof = new RecipeTicketProof(owner, level, registration, ports, mode, interfaces, groups);
     inputGroup = InputGroup.SHARED;
     patternSource = null;
+    virtualPorts = List.of();
+    recipePorts = null;
     selectedPorts = selectPorts(ports, inputGroup);
   }
 
   private RecipeExecutionTicket(RecipeExecutionTicket source, int inputGroup, PatternInputSource patternSource) {
+    this(source, inputGroup, patternSource, selectPorts(source.proof.ports, inputGroup), patternSource == null ? List
+        .of() : RecipeResourceCapture.patternPorts(source.proof.level, source.proof.mode, patternSource));
+  }
+
+  private RecipeExecutionTicket(RecipeExecutionTicket source, int inputGroup, PatternInputSource patternSource, List<RecipePortSnapshot> physical, List<RecipePortSnapshot> virtual) {
     this.inputGroup = InputGroup.require(inputGroup);
     proof = source.proof;
     this.patternSource = patternSource;
-    var selected = new ArrayList<RecipePortSnapshot>();
-    if (patternSource != null) {
-      selected.addAll(RecipeResourceCapture.patternPorts(proof.level, proof.mode, patternSource));
+    virtualPorts = virtual;
+    recipePorts = source.recipePorts;
+    List<RecipePortSnapshot> selected;
+    if (virtual.isEmpty()) {
+      selected = physical;
+    } else {
+      selected = new ArrayList<RecipePortSnapshot>(virtual.size() + physical.size());
+      selected.addAll(virtual);
+      selected.addAll(physical);
+      selected = List.copyOf(selected);
     }
-    selected.addAll(selectPorts(proof.ports, inputGroup));
-    selectedPorts = List.copyOf(selected);
+    selectedPorts = filterPorts(selected, recipePorts);
+  }
+
+  private RecipeExecutionTicket(RecipeExecutionTicket source, Set<RequiredPort> recipePorts) {
+    proof = source.proof;
+    inputGroup = source.inputGroup;
+    patternSource = source.patternSource;
+    virtualPorts = source.virtualPorts;
+    this.recipePorts = Set.copyOf(recipePorts);
+    selectedPorts = filterPorts(source.selectedPorts, this.recipePorts);
+  }
+
+  private static List<RecipePortSnapshot> filterPorts(List<RecipePortSnapshot> ports, Set<RequiredPort> required) {
+    return required == null ? ports : ports.stream()
+        .filter(port -> required.contains(new RequiredPort(port.kind(), port.selector()))).toList();
+  }
+
+  /**
+   * Restrict both the start planner's view and its content proof to the selected
+   * recipe's roles.
+   */
+  public RecipeExecutionTicket forRecipePorts(Set<RequiredPort> required) {
+    requireServerThread();
+    return new RecipeExecutionTicket(this, required);
   }
 
   private static List<RecipePortSnapshot> selectPorts(List<RecipePortSnapshot> ports, int group) {
@@ -81,7 +153,7 @@ public final class RecipeExecutionTicket {
   }
 
   public RecipeExecutionTicket withPatternSource(PatternInputSource source) {
-    return new RecipeExecutionTicket(this, inputGroup, source);
+    return source == patternSource ? this : new RecipeExecutionTicket(this, inputGroup, source);
   }
 
   public Optional<RecipeExecutionTicket> forRun(FrozenRecipeRun run) {
@@ -89,16 +161,38 @@ public final class RecipeExecutionTicket {
   }
 
   public List<RecipeExecutionTicket> searchContexts() {
-    var result = new ArrayList<RecipeExecutionTicket>();
-    for (var source : proof.patternSources) {
-      for (int group : inputGroups()) {
-        result.add(withInputGroup(group).withPatternSource(source));
+    var groups = inputGroups();
+    if (groups.size() == 1 && proof.patternSources.isEmpty()) {
+      return List.of(this);
+    }
+    return new AbstractList<>() {
+      private final int size = Math.multiplyExact(groups.size(), proof.patternSources.size() + 1);
+      private final Map<Integer, RecipeExecutionTicket> visits = new HashMap<>();
+      private final Map<Integer, List<RecipePortSnapshot>> physical = new HashMap<>();
+      private final Map<PatternInputSource, List<RecipePortSnapshot>> virtual = new HashMap<>();
+
+      @Override
+      public RecipeExecutionTicket get(int index) {
+        requireServerThread();
+        Objects.checkIndex(index, size);
+        return visits.computeIfAbsent(index, this::create);
       }
-    }
-    for (int group : inputGroups()) {
-      result.add(withInputGroup(group));
-    }
-    return List.copyOf(result);
+
+      private RecipeExecutionTicket create(int index) {
+        int group = groups.get(index % groups.size());
+        int sourceIndex = index / groups.size();
+        var source = sourceIndex == proof.patternSources.size() ? null : proof.patternSources.get(sourceIndex);
+        var ports = physical.computeIfAbsent(group, key -> selectPorts(proof.ports, key));
+        var patternPorts = source == null ? List.<RecipePortSnapshot>of() : virtual
+            .computeIfAbsent(source, key -> RecipeResourceCapture.patternPorts(proof.level, proof.mode, key));
+        return new RecipeExecutionTicket(RecipeExecutionTicket.this, group, source, ports, patternPorts);
+      }
+
+      @Override
+      public int size() {
+        return size;
+      }
+    };
   }
 
   public int inputGroup() {
@@ -126,7 +220,7 @@ public final class RecipeExecutionTicket {
 
   List<RecipePortSnapshot> allPorts() {
     var result = new ArrayList<>(proof.ports);
-    selectedPorts.stream().filter(RecipePortSnapshot::patternInput).forEach(result::add);
+    result.addAll(virtualPorts);
     return List.copyOf(result);
   }
 
@@ -146,7 +240,8 @@ public final class RecipeExecutionTicket {
   boolean inputGroupsMatch(Map<String, Integer> expected) {
     requireServerThread();
 
-    return proof.ports.stream().allMatch(port -> expected.getOrDefault(port.logicalPartId(), 0) == port.inputGroup());
+    return proof.groups.stream().allMatch(group -> expected.getOrDefault(group.part(), 0) == group.group())
+        && proof.ports.stream().allMatch(port -> expected.getOrDefault(port.logicalPartId(), 0) == port.inputGroup());
   }
 
   /**
@@ -185,6 +280,14 @@ public final class RecipeExecutionTicket {
     return RecipeResourceCapture.capture(owner, CaptureMode.ENERGY_OUTPUTS);
   }
 
+  public static Optional<RecipeExecutionTicket> captureTickItems(StructureService.StructureSubject owner) {
+    return RecipeResourceCapture.capture(owner, CaptureMode.TICK_ITEMS);
+  }
+
+  public static Optional<RecipeExecutionTicket> captureTickFluids(StructureService.StructureSubject owner) {
+    return RecipeResourceCapture.capture(owner, CaptureMode.TICK_FLUIDS);
+  }
+
   static Optional<RecipeExecutionTicket> captureFluidInputs(MachineControllerBlockEntity controller) {
     return RecipeResourceCapture.capture(controller, CaptureMode.FLUID_INPUTS);
   }
@@ -195,6 +298,10 @@ public final class RecipeExecutionTicket {
 
   public static Optional<RecipeExecutionTicket> captureChemicalInputs(StructureService.StructureSubject owner) {
     return RecipeResourceCapture.capture(owner, CaptureMode.CHEMICAL_INPUTS);
+  }
+
+  public static Optional<RecipeExecutionTicket> captureChemicalOutputs(StructureService.StructureSubject owner) {
+    return RecipeResourceCapture.capture(owner, CaptureMode.CHEMICAL_OUTPUTS);
   }
 
   /**
@@ -309,7 +416,23 @@ public final class RecipeExecutionTicket {
     ServerThreadGuard.require(proof.level, "Recipe resource access");
     // FE tick limits are not resource revisions. This initial ticket is same-tick
     // only.
-    return proof.capturedTick == proof.level.getGameTime() && proof.matchesDependencies(patternSource);
+    return proof.capturedTick == proof.level.getGameTime() && dependenciesCurrent();
+  }
+
+  boolean commitCurrent() {
+    requireServerThread();
+    if (proof.capturedTick != proof.level.getGameTime()
+        || proof.owner.structureRegistration() != proof.registration
+        || proof.registration.verifier.revision() != proof.structureRevision) {
+      return false;
+    }
+    // Factory dependency validation already revalidates modifiers. Run the ordinary
+    // controller's conservative predicates before comparing live resource contents.
+    return (proof.controller == null || revalidateStructure()) && matchesLive();
+  }
+
+  boolean sharesCapture(RecipeExecutionTicket other) {
+    return proof == other.proof;
   }
 
   /**
@@ -318,14 +441,38 @@ public final class RecipeExecutionTicket {
    */
   public Optional<RecipeExecutionTicket> refreshIfUnchanged() {
     ServerThreadGuard.require(proof.level, "Recipe resource access");
-    return proof.matchesDependencies(patternSource) ? RecipeResourceCapture.capture(proof.owner, proof.mode)
-        .map(ticket -> ticket.withInputGroup(inputGroup).withPatternSource(patternSource)) : Optional.empty();
+    if (!dependenciesCurrent()) {
+      return Optional.empty();
+    }
+    if (proof.capturedTick == proof.level.getGameTime()) {
+      return Optional.of(this);
+    }
+    return RecipeResourceCapture.capture(proof.owner, proof.mode)
+        .map(ticket -> ticket.withInputGroup(inputGroup).withPatternSource(patternSource))
+        .map(ticket -> recipePorts == null ? ticket : ticket.forRecipePorts(recipePorts));
+  }
+
+  public Optional<RecipeExecutionTicket> currentForCommit() {
+    requireServerThread();
+    if (proof.capturedTick == proof.level.getGameTime()) {
+      return RecipeCommitGuard.validate(this) ? Optional.of(this) : Optional.empty();
+    }
+    return refreshIfUnchanged().filter(RecipeCommitGuard::validate);
   }
 
   @ApiStatus.Internal
   public boolean dependenciesCurrent() {
     ServerThreadGuard.require(proof.level, "Recipe resource access");
-    return proof.matchesDependencies(patternSource);
+    return (recipePorts != null
+        || patternSource != null
+        || proof.patternSources.stream().allMatch(PatternInputSource::current))
+        && proof.matchesDependencies(patternSource, recipePorts == null ? proof.ports : selectedPorts);
+  }
+
+  /** The detached search may continue while unrelated inventories change. */
+  public boolean searchContextCurrent() {
+    requireServerThread();
+    return proof.matchesDependencies(patternSource, List.of());
   }
 
 }

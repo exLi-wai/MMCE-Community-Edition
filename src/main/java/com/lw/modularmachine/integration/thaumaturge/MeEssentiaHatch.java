@@ -33,6 +33,16 @@ public final class MeEssentiaHatch extends EssentiaHatch implements IInWorldGrid
     public void onSaveChanges(MeEssentiaHatch hatch, IGridNode node) {
       hatch.setChanged();
     }
+
+    @Override
+    public void onStateChanged(MeEssentiaHatch hatch, IGridNode node, State state) {
+      hatch.invalidateRequestProofs();
+    }
+
+    @Override
+    public void onGridChanged(MeEssentiaHatch hatch, IGridNode node) {
+      hatch.invalidateRequestProofs();
+    }
   };
   private final boolean direct;
   private final IActionSource source = IActionSource.ofMachine(this);
@@ -61,6 +71,7 @@ public final class MeEssentiaHatch extends EssentiaHatch implements IInWorldGrid
               .setIdlePowerUsage(1).setVisualRepresentation(getBlockState().getBlock());
           node.loadFromNBT(retainedNode);
           node.create(level, worldPosition);
+          invalidateRequestProofs();
         }
       });
     }
@@ -150,6 +161,12 @@ public final class MeEssentiaHatch extends EssentiaHatch implements IInWorldGrid
   @Override
   protected boolean hasRequestSource() {
     return !direct && inventory() != null;
+  }
+
+  @Override
+  protected boolean observedRequestSource(ReplenishmentProof proof) {
+    // The outstanding request already watches this hatch's node and lifecycle.
+    return hasRequestSource();
   }
 
   @Override

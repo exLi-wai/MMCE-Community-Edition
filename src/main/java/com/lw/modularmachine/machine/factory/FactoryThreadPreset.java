@@ -159,9 +159,7 @@ public record FactoryThreadPreset(List<Thread> threads, int maximumExtraThreads)
 
   /** Definition-owned core allowlists intersect user locks at every new start. */
   public static Set<String> allowedRecipes(ResourceLocation machine, String threadId, ResourceLocation lockedRecipe) {
-    var definition = StructureService.definition(machine);
-    var preset = definition == null ? null : definition.factoryPreset().threads().stream()
-        .filter(thread -> thread.id().equals(threadId) && thread.core()).findFirst().orElse(null);
+    var preset = corePreset(machine, threadId);
     if (preset == null) {
       return lockedRecipe == null ? null : Set.of(lockedRecipe.toString());
     }
@@ -172,8 +170,20 @@ public record FactoryThreadPreset(List<Thread> threads, int maximumExtraThreads)
   }
 
   public static boolean accepts(ResourceLocation machine, String threadId, ResourceLocation recipe) {
-    var allowed = allowedRecipes(machine, threadId, null);
-    return allowed == null || allowed.contains(recipe.toString());
+    var preset = corePreset(machine, threadId);
+    return preset == null || preset.allowedRecipes().contains(recipe);
+  }
+
+  private static Thread corePreset(ResourceLocation machine, String threadId) {
+    var definition = StructureService.definition(machine);
+    if (definition != null) {
+      for (var thread : definition.factoryPreset().threads()) {
+        if (thread.core() && thread.id().equals(threadId)) {
+          return thread;
+        }
+      }
+    }
+    return null;
   }
 
   public boolean isCore(String threadId) {

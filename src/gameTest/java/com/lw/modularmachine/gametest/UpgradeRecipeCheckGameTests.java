@@ -44,6 +44,7 @@ public final class UpgradeRecipeCheckGameTests {
   private static final ResourceLocation HANDLER = id("test_upgrade_recipe_gate");
   private static final ResourceLocation A = id("mmcece/test_upgrade_check_a");
   private static final ResourceLocation B = id("mmcece/test_upgrade_check_b");
+  private static final ResourceLocation ARRAY = id("mmcece/test_upgrade_check_array");
   private static final String THREAD = "upgrade_thread";
   private static List<UpgradeDefinition> savedDefinitions;
 
@@ -79,7 +80,7 @@ public final class UpgradeRecipeCheckGameTests {
 
   private static void verifyVeto(GameTestHelper helper, Fixture fixture) {
     fixture.input().inventory().setStackInSlot(0, new ItemStack(Items.DIRT, 2));
-    fixture.factory().serverTick();
+    finishSearchSlice(fixture);
     helper
         .assertTrue(
             fixture.factory().run(THREAD).isEmpty()
@@ -111,11 +112,25 @@ public final class UpgradeRecipeCheckGameTests {
             "Check context dropped probabilistic output metadata");
       }
 
+      if (context.recipeId().equals(ARRAY)) {
+        return UpgradeRecipeChecks.Decision.ALLOW;
+      }
       return mode.get() != 0
           && context.recipeId().equals(B) ? UpgradeRecipeChecks.Decision.ALLOW : UpgradeRecipeChecks.Decision.REJECT;
     };
     UpgradeRecipeChecks.register(HANDLER, checker);
     synchronizeUpgrades(helper, fixture);
+    fixture.input().inventory().setStackInSlot(0, new ItemStack(Items.CLAY_BALL));
+    var rawArray = RecipeSearch.begin(fixture.factory(), Set.of(ARRAY.toString())).orElseThrow();
+    helper.assertTrue(
+        budgeted(helper, rawArray, calls).status() == RecipePlanner.Status.NO_MATCH && calls.isEmpty(),
+        "Threadless search tried to prepare an IngredientArray without a factory thread");
+    var threadedArray = RecipeSearch.beginFactory(fixture.factory(), THREAD).orElseThrow();
+    helper.assertTrue(
+        budgeted(helper, threadedArray, calls).plan().orElseThrow().recipe().id().equals(ARRAY.toString())
+            && calls.equals(List.of(ARRAY, ARRAY)),
+        "A real factory thread could not prepare the same IngredientArray");
+    calls.clear();
     fixture.input().inventory().setStackInSlot(0, new ItemStack(Items.DIRT, 2));
     var rejected = RecipeSearch.beginFactory(fixture.factory(), THREAD).orElseThrow();
     helper.assertTrue(
@@ -160,15 +175,20 @@ public final class UpgradeRecipeCheckGameTests {
     }
     helper.assertTrue(calls.size() == acceptedCalls, "Selected plan repeated pure checkers");
     var rawA = rawPlan(fixture, A);
+    var singleVeto = FactoryRecipeStarter.start(fixture.factory(), THREAD, rawA);
+    var parallelVeto = FactoryParallelStarter.commit(fixture.factory(), THREAD, Collections.nCopies(2, rawA));
     helper.assertTrue(
-        FactoryRecipeStarter.start(fixture.factory(), THREAD, rawA) == FactoryRecipeStarter.Result.CHECK_REJECTED
-            && FactoryParallelStarter.commit(
-                fixture.factory(),
-                THREAD,
-                Collections.nCopies(2, rawA)) == FactoryParallelStarter.Result.CHECK_REJECTED
+        singleVeto == FactoryRecipeStarter.Result.CHECK_REJECTED
+            && parallelVeto == FactoryParallelStarter.Result.CHECK_REJECTED
             && fixture.input().inventory().getStackInSlot(0).getCount() == 2
             && fixture.factory().run(THREAD).isEmpty(),
-        "Direct single or parallel starter bypassed checker veto");
+        "Direct single or parallel starter bypassed checker veto: " + singleVeto + ", " + parallelVeto + ", parallel limit=" + fixture
+            .factory()
+            .effectiveParallelLimit(THREAD) + ", machine max=" + fixture.factory()
+                .structureRegistration().pattern.definition
+                .maxParallelism() + ", machine parallel=" + fixture.factory().structureRegistration().pattern.definition
+                    .parallelizable() + ", snapshot=" + fixture.factory().scheduler().requireChannel(THREAD)
+                        .upgradeSnapshot() + ", sources=" + fixture.factory().upgrades().sources());
     int beforeCommit = calls.size();
     helper.assertTrue(
         FactoryRecipeStarter.start(fixture.factory(), THREAD, accepted) == FactoryRecipeStarter.Result.STARTED
@@ -190,7 +210,7 @@ public final class UpgradeRecipeCheckGameTests {
       synchronizeUpgrades(helper, fixture);
       fixture.input().inventory().setStackInSlot(0, new ItemStack(Items.DIRT, 2));
       int beforeAuto = calls.size();
-      fixture.factory().serverTick();
+      finishSearchSlice(fixture);
       helper.assertTrue(
           fixture.factory().runSet(THREAD).runs().size() == 2
               && calls.subList(beforeAuto, calls.size()).equals(List.of(A, B))
@@ -219,14 +239,14 @@ public final class UpgradeRecipeCheckGameTests {
     data.putInt("parallel_add", -1);
     invalid.set(DataComponents.CUSTOM_DATA, CustomData.of(data));
     fixture.bus().inventory().setStackInSlot(0, invalid);
-    fixture.factory().serverTick();
-    helper
-        .assertTrue(
-            fixture.bus().recipeCheckRequired()
-                && fixture.factory().run(THREAD).isEmpty()
-                && fixture.factory().scheduler().channels().getFirst()
-                    .reason() == FactoryThreadState.Reason.CHECK_ERROR,
-            "Earlier invalid slot hid a required checker in the next slot");
+    finishSearchSlice(fixture);
+    helper.assertTrue(
+        fixture.bus().recipeCheckRequired()
+            && fixture.factory().run(THREAD).isEmpty()
+            && fixture.factory().scheduler().channels().getFirst().reason() == FactoryThreadState.Reason.CHECK_ERROR,
+        "Earlier invalid slot hid a required checker in the next slot: bound=" + fixture.bus()
+            .isBoundTo(fixture.factory()) + ", required=" + fixture.bus()
+                .recipeCheckRequired() + ", reason=" + fixture.factory().scheduler().channels().getFirst().reason());
     fixture.bus().inventory().setStackInSlot(0, new ItemStack(Items.SUGAR));
     var count = new AtomicInteger();
     UpgradeRecipeChecks.Checker throwing = (context, upgrade) -> {
@@ -262,13 +282,13 @@ public final class UpgradeRecipeCheckGameTests {
             "Checker exception retried every tick, fell back, or consumed input");
     UpgradeRecipeChecks.invalidate(HANDLER);
     synchronizeUpgrades(helper, fixture);
-    fixture.factory().serverTick();
+    finishSearchSlice(fixture);
     helper.assertTrue(
         count.get() == 2 && fixture.factory().run(THREAD).isEmpty(),
         "Explicit invalidation did not retry failed check");
     UpgradeRecipeChecks.register(HANDLER, (context, upgrade) -> null);
     synchronizeUpgrades(helper, fixture);
-    fixture.factory().serverTick();
+    finishSearchSlice(fixture);
     helper.assertTrue(
         fixture.factory().run(THREAD).isEmpty()
             && fixture.factory().scheduler().channels().getFirst().reason() == FactoryThreadState.Reason.CHECK_ERROR,
@@ -278,13 +298,15 @@ public final class UpgradeRecipeCheckGameTests {
       return UpgradeRecipeChecks.Decision.ALLOW;
     });
     synchronizeUpgrades(helper, fixture);
-    fixture.factory().serverTick();
+    finishSearchSlice(fixture);
     helper.assertTrue(
         fixture.factory().run(THREAD).isEmpty()
             && fixture.input().inventory().getStackInSlot(0).getCount() == 1
             && fixture.factory().scheduler().channels().getFirst()
                 .reason() == FactoryThreadState.Reason.STALE_RESOURCES,
-        "Resource mutation inside checker retained a start proof");
+        "Resource mutation inside checker retained a start proof: run=" + fixture.factory()
+            .run(THREAD) + ", input=" + fixture.input().inventory().getStackInSlot(0)
+                .getCount() + ", reason=" + fixture.factory().scheduler().channels().getFirst().reason());
     fixture.input().inventory().setStackInSlot(0, new ItemStack(Items.DIRT, 2));
     UpgradeRecipeChecks.Checker stable = (context, upgrade) -> {
       count.incrementAndGet();
@@ -303,7 +325,7 @@ public final class UpgradeRecipeCheckGameTests {
       return UpgradeRecipeChecks.Decision.ALLOW;
     });
     synchronizeUpgrades(helper, fixture);
-    fixture.factory().serverTick();
+    finishSearchSlice(fixture);
     helper.assertTrue(
         fixture.factory().run(THREAD).isEmpty()
             && fixture.input().inventory().getStackInSlot(0).getCount() == 2
@@ -312,19 +334,19 @@ public final class UpgradeRecipeCheckGameTests {
         "Self-replacing checker published an old accepted result");
     synchronizeUpgrades(helper, fixture);
     var rawB = rawPlan(fixture, B);
-    int oldBudget = MachineConfig.RECIPE_OUTPUT_WORK.get();
+    int oldBudget = MachineConfig.FACTORY_SEARCH_WORK.get();
     int before = count.get();
     try {
-      MachineConfig.RECIPE_OUTPUT_WORK.set(1);
+      MachineConfig.FACTORY_SEARCH_WORK.set(1);
+      var partial = FactoryParallelStarter.commit(fixture.factory(), THREAD, Collections.nCopies(2, rawB));
       helper.assertTrue(
-          FactoryParallelStarter.commit(
-              fixture.factory(),
-              THREAD,
-              Collections.nCopies(2, rawB)) == FactoryParallelStarter.Result.CHECK_PENDING
+          partial == FactoryParallelStarter.Result.CHECK_PENDING
               && fixture.factory().run(THREAD).isEmpty()
               && count.get() == before + 1
               && fixture.input().inventory().getStackInSlot(0).getCount() == 2,
-          "Partial checker budget consumed input or failed to resume");
+          "Partial checker budget consumed input or failed to resume: " + partial + ", calls=" + (count
+              .get() - before) + ", parallel limit=" + fixture.factory().effectiveParallelLimit(THREAD));
+      MachineConfig.FACTORY_SEARCH_WORK.set(oldBudget);
       helper.assertTrue(
           FactoryParallelStarter
               .commit(fixture.factory(), THREAD, Collections.nCopies(2, rawB)) == FactoryParallelStarter.Result.STARTED
@@ -332,7 +354,7 @@ public final class UpgradeRecipeCheckGameTests {
               && fixture.factory().runSet(THREAD).runs().size() == 2,
           "Direct parallel startup repeated checks per run or lost continuation");
     } finally {
-      MachineConfig.RECIPE_OUTPUT_WORK.set(oldBudget);
+      MachineConfig.FACTORY_SEARCH_WORK.set(oldBudget);
     }
     awaitOutput(helper, fixture, 2, 120, () -> {
       helper.assertTrue(
@@ -369,6 +391,9 @@ public final class UpgradeRecipeCheckGameTests {
           bus.inventory().setStackInSlot(0, new ItemStack(Items.SUGAR, 2));
           bus.inventory().setStackInSlot(1, new ItemStack(Items.SUGAR));
           UpgradeBusGameTests.confirm(helper, factory);
+          bus.bindOwner(factory);
+          helper.assertTrue(bus.hasOwnerBinding(factory), "Checker fixture could not bind upgrade source");
+          bus.serverTick();
           next.accept(
               new Fixture(
                   factory,
@@ -386,6 +411,16 @@ public final class UpgradeRecipeCheckGameTests {
     fixture.factory().runState().finishRunStart(THREAD, false);
   }
 
+  private static void finishSearchSlice(Fixture fixture) {
+    for (int visit = 0; visit < 600; visit++) {
+      fixture.factory().serverTick();
+      if (fixture.factory().scheduler().requireChannel(THREAD).reason() != FactoryThreadState.Reason.SEARCH_BUDGET) {
+        return;
+      }
+    }
+    throw new IllegalStateException("Factory search did not finish within its work slices");
+  }
+
   private static RecipeSearch.Result budgeted(GameTestHelper helper, RecipeSearch search, List<ResourceLocation> calls) {
     for (int attempt = 0; attempt < 600; attempt++) {
       var result = search.advance(1);
@@ -401,8 +436,13 @@ public final class UpgradeRecipeCheckGameTests {
   }
 
   private static RecipeStartPlan rawPlan(Fixture fixture, ResourceLocation recipe) {
-    return RecipeSearch.begin(fixture.factory(), Set.of(recipe.toString())).orElseThrow().advance(65_536).plan()
-        .orElseThrow();
+    var search = RecipeSearch.begin(fixture.factory(), Set.of(recipe.toString()))
+        .orElseThrow(() -> new IllegalStateException("Cannot capture generic factory search for " + recipe));
+    var result = search.advance(65_536);
+    return result.plan().orElseThrow(
+        () -> new IllegalStateException(
+            "Generic factory search for " + recipe + " ended with " + result.status() + " and missing role " + search
+                .missingResource()));
   }
 
   private static void awaitOutput(GameTestHelper helper, Fixture fixture, int expected, int remaining, Runnable complete) {

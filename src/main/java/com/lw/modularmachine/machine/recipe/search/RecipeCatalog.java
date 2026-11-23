@@ -2,6 +2,7 @@ package com.lw.modularmachine.machine.recipe.search;
 
 import com.lw.modularmachine.machine.recipe.ItemResourceKey;
 import com.lw.modularmachine.machine.recipe.MachineRecipe;
+import com.lw.modularmachine.machine.recipe.RecipeItemPreparation;
 import com.lw.modularmachine.machine.recipe.search.index.item.ItemRecipeIndex;
 import com.lw.modularmachine.machine.recipe.RecipeExecutionTicket;
 import com.lw.modularmachine.machine.recipe.search.index.RequiredInputQuery;
@@ -38,8 +39,12 @@ public final class RecipeCatalog {
   private final List<RecipeModifier> contextRules;
   private final Map<String, RecipeSelectors> selectors;
   private final ItemRecipeIndex itemIndex;
-  private final List<RecipeSearchResource> resourceSearches;
+  private final RecipeSearchResourceRegistry.Suite resourceSearches;
   private final BitSet dynamicInputRanks;
+  record SearchEntry(ResourceLocation id, boolean transformsInputs, CompiledRecipeSet.Entry<ItemResourceKey> inputs) {
+  }
+
+  private final Map<String, SearchEntry> searchEntries;
 
   /**
    * Both base and controller-specific catalogs index the effective definitions
@@ -102,15 +107,26 @@ public final class RecipeCatalog {
     this.selectors = Map.copyOf(selectors);
     itemIndex = new ItemRecipeIndex(recipes);
     dynamicInputRanks = new BitSet(recipes.size());
+    var planningEntries = new HashMap<String, SearchEntry>();
     for (int rank = 0; rank < recipes.candidates().size(); rank++) {
-      var definition = this.definitions.get(recipes.candidates().get(rank).id());
-      if (definition != null
+      var entry = recipes.entries().get(rank);
+      var definition = this.definitions.get(entry.recipe.id());
+      var candidate = RecipeItemPreparation.inputCandidate(entry.recipe, definition);
+      boolean transforms = definition != null
           && (!definition.ingredientArrays().isEmpty()
               || definition.scriptOptions().itemCallbacks().stream()
-                  .anyMatch(binding -> binding.io() == RecipeModifier.Io.INPUT && !binding.modifiers().isEmpty()))) {
+                  .anyMatch(binding -> binding.io() == RecipeModifier.Io.INPUT && !binding.modifiers().isEmpty()));
+      planningEntries.put(
+          candidate.id(),
+          new SearchEntry(
+              definition == null ? null : ResourceLocation.parse(candidate.id()),
+              transforms,
+              candidate == entry.recipe ? entry : CompiledRecipeSet.compileCandidate(candidate)));
+      if (transforms) {
         dynamicInputRanks.set(rank);
       }
     }
+    searchEntries = Map.copyOf(planningEntries);
     resourceSearches = RecipeSearchResourceRegistry.compile(this);
   }
 
@@ -127,6 +143,7 @@ public final class RecipeCatalog {
     itemIndex = prepared.itemIndex;
     resourceSearches = prepared.resourceSearches;
     dynamicInputRanks = prepared.dynamicInputRanks;
+    searchEntries = prepared.searchEntries;
   }
 
   /** Fresh publication identity over immutable, already compiled base data. */
@@ -159,8 +176,42 @@ public final class RecipeCatalog {
     return itemIndex.aliases();
   }
 
-  List<RecipeSearchResource.Captured> captureResources(RecipeExecutionTicket ticket, RecipeSearchResources resources) {
-    return resourceSearches.stream().map(resource -> resource.capture(ticket, resources)).toList();
+  SearchEntry searchEntry(String id) {
+    return searchEntries.get(id);
+  }
+
+  final class CapturedResources {
+    private final List<RecipeSearchResource.Captured> all = new ArrayList<>();
+    private final Map<List<Integer>, List<RecipeSearchResource.Captured>> subsets = new HashMap<>();
+
+    boolean complete() {
+      return all.size() == resourceSearches.strategies().size();
+    }
+
+    void captureNext(RecipeExecutionTicket ticket, RecipeSearchResources resources) {
+      all.add(resourceSearches.strategies().get(all.size()).capture(ticket, resources));
+    }
+
+    List<RecipeSearchResource.Captured> all() {
+      return all;
+    }
+
+    List<RecipeSearchResource.Captured> forRecipe(String id) {
+      var indices = resourceSearches.byRecipe().getOrDefault(id, List.of());
+      return indices.size() == all.size() ? all : subsets
+          .computeIfAbsent(indices, selected -> selected.stream().map(all::get).toList());
+    }
+  }
+
+  List<RecipeSearchResource.Captured> captureForRecipe(String id, RecipeExecutionTicket ticket, RecipeSearchResources resources) {
+    return resourceSearches.byRecipe().getOrDefault(id, List.of()).stream()
+        .map(index -> resourceSearches.strategies().get(index).capture(ticket, resources)).toList();
+  }
+
+  RecipeExecutionTicket ticketForRecipe(RecipeExecutionTicket ticket, RecipeCandidate<ItemResourceKey> candidate, MachineRecipe definition) {
+    // An extension may inspect any physical port, including undeclared roles.
+    return resourceSearches.externalStrategies() ? ticket : ticket
+        .forRecipePorts(RecipeResourceRequirements.forCandidate(this, candidate, definition));
   }
 
   List<RecipeCandidate<ItemResourceKey>> candidatesForInputs(Map<ItemResourceKey, Long> items, List<RecipeSearchResource.Captured> resources, Set<String> allowedIds) {

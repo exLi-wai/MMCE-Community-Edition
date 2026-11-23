@@ -5,6 +5,8 @@ import com.lw.modularmachine.api.recipe.ChemicalRecipeData;
 import com.google.gson.JsonObject;
 import com.lw.modularmachine.machine.PortKind;
 import com.lw.modularmachine.machine.structure.MachineDefinition;
+import com.lw.modularmachine.machine.structure.CompiledStructure;
+import java.lang.ref.WeakReference;
 import java.util.EnumSet;
 import java.util.LinkedHashMap;
 import java.util.List;
@@ -31,6 +33,7 @@ final class FrozenRecipeBindings {
   private final Map<String, Integer> dynamicLengths;
   private final PatternRunSources.Binding patternSource;
   private final Set<PortKind> patternInputs;
+  private volatile WeakReference<CompiledStructure> verifiedPattern;
 
   FrozenRecipeBindings(CompoundTag source) {
     if (source.contains("dynamic_lengths") && !source.contains("dynamic_lengths", Tag.TAG_COMPOUND)) {
@@ -228,6 +231,18 @@ final class FrozenRecipeBindings {
       ports++;
     }
     return ports == logicalPorts.size();
+  }
+
+  boolean matchesPattern(CompiledStructure pattern) {
+    var previous = verifiedPattern;
+    if (previous != null && previous.get() == pattern) {
+      return true;
+    }
+    if (!matchesDefinition(pattern.definition, pattern.recipePartIndices())) {
+      return false;
+    }
+    verifiedPattern = new WeakReference<>(pattern);
+    return true;
   }
 
   boolean matchesPatternSource(PatternRunSources.Binding binding) {

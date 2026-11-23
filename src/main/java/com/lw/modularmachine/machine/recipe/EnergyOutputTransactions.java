@@ -9,6 +9,7 @@ import com.lw.modularmachine.machine.structure.StructureService;
 import java.util.ArrayList;
 import java.util.LinkedHashMap;
 import java.util.List;
+import java.util.Optional;
 
 /**
  * Internal long-energy output participant in the existing per-tick transaction.
@@ -42,8 +43,14 @@ final class EnergyOutputTransactions {
       return status;
     }
 
-    boolean current() {
-      return status == Status.READY && (ticket == null || RecipeCommitGuard.validate(ticket));
+    boolean current(RecipeExecutionTicket inputs) {
+      return status == Status.READY
+          && (ticket == null || RecipeCommitGuard.validate(ticket))
+          && (inputs == null || inputs == ticket || RecipeCommitGuard.validate(inputs));
+    }
+
+    Optional<RecipeExecutionTicket> inputs(StructureService.StructureSubject owner) {
+      return ticket == null ? RecipeExecutionTicket.captureEnergyInputs(owner) : Optional.of(ticket);
     }
 
     void acquire() {
@@ -88,7 +95,10 @@ final class EnergyOutputTransactions {
     if (required.isEmpty()) {
       return new Batch(Status.READY, null, List.of());
     }
-    var ticket = RecipeExecutionTicket.captureEnergyOutputs(owner).orElse(null);
+    boolean hasInput = runs.stream().anyMatch(run -> run.energyPerTick() > 0);
+    var ticket = (hasInput ? RecipeResourceCapture.capture(
+        owner,
+        RecipeResourceCapture.CaptureMode.ENERGY_IO) : RecipeExecutionTicket.captureEnergyOutputs(owner)).orElse(null);
     if (ticket == null) {
       return new Batch(Status.UNAVAILABLE, null, List.of());
     }
