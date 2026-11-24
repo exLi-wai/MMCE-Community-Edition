@@ -92,10 +92,6 @@ public final class PatternProviderScreen extends AbstractContainerScreen<Pattern
     graphics.drawString(font, Component.translatable("menu.mmcece.pattern.cached"), 180, 11, 0x404040, false);
     graphics.drawString(font, playerInventoryTitle, 7, 101, 0x404040, false);
     graphics.drawString(font, Component.translatable("menu.mmcece.pattern.independent"), 180, 158, 0x404040, false);
-    if (menu.status() != null && menu.status().snapshot().selectedSlot() != PatternProviderPayloads.ALL_SLOTS) {
-      var selected = menu.getSlot(menu.status().snapshot().selectedSlot());
-      graphics.renderOutline(selected.x - 1, selected.y - 1, 18, 18, 0xFF205A70);
-    }
     int entry = cacheAt(mouseX, mouseY);
     if (menu.status() != null && entry >= 0 && entry < menu.status().snapshot().entries().size()) {
       renderSlotHighlight(graphics, 181 + entry % 3 * 18, 28 + entry / 3 * 18, 0);

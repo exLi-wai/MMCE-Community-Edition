@@ -32,6 +32,7 @@ import net.minecraft.world.level.block.Rotation;
 import net.minecraft.world.level.block.Block;
 import net.minecraft.world.level.block.state.BlockState;
 import org.jetbrains.annotations.ApiStatus;
+import java.util.stream.Collectors;
 
 /**
  * Immutable absolute layout. Production uses Builder; synchronous constructors
@@ -76,8 +77,7 @@ public final class CompiledStructure {
     facing = orientation.front();
     positions = data.positions;
     recipePartIndices = data.recipePartIndices;
-    recipePartPositions = recipePartIndices.stream().map(positions::get)
-        .collect(java.util.stream.Collectors.toUnmodifiableSet());
+    recipePartPositions = recipePartIndices.stream().map(positions::get).collect(Collectors.toUnmodifiableSet());
     componentIndices = data.componentIndices;
     sectionGroups = data.sections;
     contentGroups = data.contents;

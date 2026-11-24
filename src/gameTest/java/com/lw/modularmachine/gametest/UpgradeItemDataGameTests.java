@@ -12,6 +12,8 @@ import com.lw.modularmachine.machine.upgrade.UpgradeDefinition;
 import com.lw.modularmachine.api.upgrade.UpgradeEntry;
 import com.lw.modularmachine.api.upgrade.UpgradeEvents;
 import com.lw.modularmachine.api.upgrade.UpgradeItemData;
+import com.lw.modularmachine.api.upgrade.UpgradeRuntimeData;
+import com.lw.modularmachine.machine.upgrade.UpgradeRestrictions;
 import com.lw.modularmachine.machine.upgrade.UpgradeCatalogService;
 import com.lw.modularmachine.machine.upgrade.UpgradeStartCosts;
 import com.lw.modularmachine.machine.recipe.FactoryParallelStarter;
@@ -23,6 +25,7 @@ import com.lw.modularmachine.registry.MachineRegistries;
 import java.util.ArrayList;
 import java.util.Collections;
 import java.util.List;
+import java.util.Optional;
 import java.util.Set;
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.atomic.AtomicInteger;
@@ -53,6 +56,7 @@ public final class UpgradeItemDataGameTests {
   private static final ResourceLocation HANDLER = id("test_upgrade_item_data");
   private static final ResourceLocation EFFECT = id("test_item_data_effect");
   private static final ResourceLocation OBSERVER = id("test_item_data_observer");
+  private static final ResourceLocation FINISH_HANDLER = id("test_finish_copy");
   private static final String THREAD = "upgrade_thread";
   private static List<UpgradeDefinition> savedDefinitions;
 
@@ -82,6 +86,82 @@ public final class UpgradeItemDataGameTests {
       UpgradeCatalogService.replaceDefinitions(savedDefinitions);
       savedDefinitions = null;
     }
+  }
+
+  @AfterBatch(batch = "factory_finished_upgrade_copy")
+  public static void cleanupFinishedCopy(ServerLevel level) {
+    TestOutputComponent.ON_OUTPUT_COPY.remove();
+    UpgradeRuntimeData.remove(FINISH_HANDLER);
+    cleanup();
+  }
+
+  @GameTest(template = "empty16", batch = "factory_finished_upgrade_copy", timeoutTicks = 800)
+  public static void finished_upgrade_write_rechecks_in_place_stack_edit_during_output_copy(GameTestHelper helper) {
+    begin(helper, false, fixture -> {
+      var bus = fixture.busB();
+      fixture.busA().inventory().setStackInSlot(0, ItemStack.EMPTY);
+      var finish = new UpgradeDefinition(
+          ResourceLocation.withDefaultNamespace("phantom_membrane"),
+          new UpgradeEntry(FINISH_HANDLER, 0, 1, 1, 1, 1, 1, 1),
+          new UpgradeCompatibility(Set.of(MACHINE), Set.of()),
+          null,
+          null,
+          null,
+          null,
+          null,
+          null,
+          null,
+          UpgradeRestrictions.NONE,
+          null,
+          null,
+          FINISH_HANDLER);
+      var offered = new ArrayList<Integer>();
+      boolean[] edited = {false};
+      UpgradeRuntimeData.register(FINISH_HANDLER, (context, data) -> {
+        var item = context.items().getFirst();
+        offered.add(item.originalCount());
+        if (!edited[0]) {
+          TestOutputComponent.ON_OUTPUT_COPY.set(() -> {
+            long revision = bus.upgradeRevision();
+            bus.inventory().getStackInSlot(0).grow(1);
+            helper.assertTrue(revision == bus.upgradeRevision(), "The in-place edit unexpectedly notified the bus");
+            edited[0] = true;
+          });
+        } else {
+          helper.assertTrue(
+              fixture.factory().run(THREAD).isPresent()
+                  && fixture.output().inventory().getStackInSlot(0).isEmpty()
+                  && !UpgradeItemData.read(bus.inventory().getStackInSlot(0)).contains("seen_count"),
+              "The stale attempt published a partial completion");
+        }
+        var next = item.data();
+        next.putInt("seen_count", item.originalCount());
+        return new UpgradeRuntimeData.Update(
+            Optional.empty(),
+            List.of(UpgradeRuntimeData.ItemUpdate.data(item.slot(), next)));
+      });
+      UpgradeCatalogService.replaceDefinitions(List.of(finish));
+      var marker = new ItemStack(Items.STICK);
+      marker.set(TestOutputComponent.TYPE, 1);
+      fixture.output().inventory().setStackInSlot(1, marker);
+      fixture.input().inventory().setStackInSlot(0, new ItemStack(Items.DIRT));
+      awaitOutput(helper, fixture, 1, 250, () -> {
+        var item = bus.inventory().getStackInSlot(0);
+        helper.assertTrue(
+            edited[0] && offered.getFirst() == 1 && offered.getLast() == 2,
+            "FINISHED did not replace the stale one-item proposal after output serialization: " + offered);
+        helper.assertTrue(
+            item.is(Items.PHANTOM_MEMBRANE)
+                && item.getCount() == 2
+                && UpgradeItemData.read(item).getInt("seen_count") == 2,
+            "Completion overwrote the added upgrade or installed stale item data");
+        helper.assertTrue(
+            fixture.input().inventory().getStackInSlot(0).isEmpty()
+                && ItemStack.matches(marker, fixture.output().inventory().getStackInSlot(1)),
+            "Completion did not settle the original payment and preserve the output marker");
+        helper.succeed();
+      });
+    });
   }
 
   @GameTest(template = "empty16", batch = "upgrade_item_data", timeoutTicks = 800)

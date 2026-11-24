@@ -37,7 +37,7 @@ final class RecipeTicketProof {
   final Snapshot parallel;
   final UpgradeSnapshot ordinaryUpgrades;
 
-  RecipeTicketProof(StructureService.StructureSubject owner, ServerLevel level, StructureService.Registration registration, List<RecipePortSnapshot> ports, CaptureMode mode, List<SmartSnapshot> interfaces, List<GroupStamp> groups) {
+  RecipeTicketProof(StructureService.StructureSubject owner, ServerLevel level, StructureService.Registration registration, List<RecipePortSnapshot> ports, CaptureMode mode, List<SmartSnapshot> interfaces, List<GroupStamp> groups, List<PatternInputSource> patternSources) {
     this.owner = owner;
     controller = owner instanceof MachineControllerBlockEntity ordinary ? ordinary : null;
     this.level = level;
@@ -51,10 +51,31 @@ final class RecipeTicketProof {
     this.groups = List.copyOf(groups);
     ordinaryUpgrades = mode == CaptureMode.ALL && controller != null ? controller.upgradeSnapshot() : null;
     parallel = mode == CaptureMode.ALL ? ParallelCapacity.capture(registration, level) : null;
-    patternSources = mode == CaptureMode.ALL ? PatternProductionService.sources(owner) : List.of();
+    this.patternSources = patternSources != null ? patternSources : mode == CaptureMode.ALL ? PatternProductionService
+        .sources(owner) : List.of();
   }
 
   record SmartSnapshot(BlockPos position, SmartInterfaceBlockEntity identity, SmartInterfaceBinding binding) {
+  }
+
+  RecipeTicketProof(RecipeTicketProof outputs, List<RecipePortSnapshot> ports, long tick) {
+    if (outputs.mode != CaptureMode.OUTPUTS) {
+      throw new IllegalArgumentException("Expected a paid output ticket");
+    }
+    owner = outputs.owner;
+    controller = outputs.controller;
+    level = outputs.level;
+    registration = outputs.registration;
+    structureRevision = outputs.structureRevision;
+    scriptRevision = outputs.scriptRevision;
+    capturedTick = tick;
+    this.ports = ports;
+    mode = outputs.mode;
+    interfaces = outputs.interfaces;
+    groups = outputs.groups;
+    parallel = outputs.parallel;
+    ordinaryUpgrades = outputs.ordinaryUpgrades;
+    patternSources = outputs.patternSources;
   }
 
   record GroupStamp(String part, MachinePortBlockEntity port, int group, long revision) {

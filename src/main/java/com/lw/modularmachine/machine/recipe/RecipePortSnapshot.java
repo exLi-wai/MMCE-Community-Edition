@@ -356,8 +356,7 @@ public final class RecipePortSnapshot {
         return false;
       }
       for (int slot = 0; slot < items.size(); slot++) {
-        if (identity.inventory().getSlotLimit(slot) != limits.get(slot)
-            || !ItemStack.matches(items.get(slot), identity.inventory().getStackInSlot(slot))) {
+        if (!itemSlotMatches(slot)) {
           return false;
         }
       }
@@ -383,5 +382,17 @@ public final class RecipePortSnapshot {
         || energy == identity.energy().stored()
             && capacity == identity.energy().capacity()
             && transferLimit == identity.energy().transferLimit();
+  }
+
+  boolean itemInputSlotCurrent(ServerLevel level, int slot) {
+    return sameLiveStamp(level)
+        && !identity.resourceTransactionInProgress()
+        && identity.inventory().getSlots() == items.size()
+        && (items.isEmpty() || itemSlotMatches(slot));
+  }
+
+  private boolean itemSlotMatches(int slot) {
+    return identity.inventory().getSlotLimit(slot) == limits.get(slot)
+        && ItemStack.matches(items.get(slot), identity.inventory().getStackInSlot(slot));
   }
 }

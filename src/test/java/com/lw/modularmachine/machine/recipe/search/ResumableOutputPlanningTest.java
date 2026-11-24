@@ -1,6 +1,7 @@
 package com.lw.modularmachine.machine.recipe.search;
 
 import com.lw.modularmachine.api.recipe.resource.RecipeResourcePlanning;
+import com.lw.modularmachine.machine.recipe.RecipeOutputClaims;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Map;
@@ -9,6 +10,44 @@ import org.junit.jupiter.api.Test;
 import static org.junit.jupiter.api.Assertions.*;
 
 class ResumableOutputPlanningTest {
+  @Test
+  void frozenAlternatingOverflowKeepsLongRowsAndReusesDeclarationsAcrossOutputSnapshots() {
+    var claims = new RecipeOutputClaims<String>();
+    claims.add("b", Long.MAX_VALUE, true);
+    claims.add("b", 3, true);
+    claims.add("required", 1, false);
+    for (int index = 0; index < 8192; index++) {
+      claims.add(index % 2 == 0 ? "a" : "b", 1, true);
+    }
+    var baseline = claims.claims();
+    var rows = claims.freeze();
+    assertEquals(Long.MAX_VALUE, rows.get(1).count());
+    assertEquals(3, rows.get(2).count());
+    assertEquals(baseline, List.copyOf(rows));
+    assertThrows(IllegalStateException.class, () -> claims.add("a", 1, true));
+    var compiled = new RecipePlanner.PaidOutputs<>("ordered", rows);
+    for (int freeSlots = 1; freeSlots <= 3; freeSlots++) {
+      var slots = new ArrayList<ResourceSnapshot.OutputSlot<String>>();
+      for (int index = 0; index < freeSlots; index++) {
+        slots.add(new ResourceSnapshot.OutputSlot<>(null, 0, 16));
+      }
+      var snapshot = new ResourceSnapshot<>(freeSlots, Map.<String, Long>of(), slots);
+      var expected = RecipePlanner.prepareOutputs(snapshot, RecipeCandidate.outputOnly("ordered", baseline))
+          .advance(100_000).plan().orElseThrow();
+      var session = compiled.prepare(snapshot);
+      var result = session.advance(0);
+      while (result.status() == RecipePlanner.Status.BUDGET_EXHAUSTED) {
+        result = session.advance(1);
+        assertEquals(1, result.workUsed());
+        assertTrue(session.totalWork() <= 100_000);
+      }
+      var actual = result.plan().orElseThrow();
+      assertEquals(expected.insertions(), actual.insertions());
+      assertSame(rows, actual.candidate().outputs());
+      assertEquals(0, session.advance(1).workUsed());
+    }
+  }
+
   @Test
   void feasibleOutputLargerThanOldFixedBudgetResumesAndSharesWorkWithNextResource() {
     var claims = new ArrayList<RecipeCandidate.Output<String>>();

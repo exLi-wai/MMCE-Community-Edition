@@ -49,6 +49,38 @@ public final class FactoryOutputPlanningGameTests {
     MachinePortBlockEntity fluid;
   }
 
+  @AfterBatch(batch = "factory_output_component_copy")
+  public static void clearComponentCallback(ServerLevel level) {
+    TestOutputComponent.ON_OUTPUT_COPY.remove();
+  }
+
+  @GameTest(template = "empty16", batch = "factory_output_component_copy", timeoutTicks = 300)
+  public static void output_copy_revalidates_an_unreported_change_to_another_slot(GameTestHelper helper) {
+    var fixture = build(helper);
+    var inventory = fixture.output.inventory();
+    var marker = new ItemStack(Items.STICK);
+    marker.set(TestOutputComponent.TYPE, 1);
+    inventory.setStackInSlot(1, marker);
+    inventory.setStackInSlot(2, new ItemStack(Items.FLINT));
+    long[] editTick = {-1L};
+    TestOutputComponent.ON_OUTPUT_COPY.set(() -> {
+      long revision = fixture.output.resourceRevision();
+      inventory.getStackInSlot(2).grow(1);
+      helper.assertTrue(fixture.output.resourceRevision() == revision, "Component edit unexpectedly changed revision");
+      editTick[0] = helper.getLevel().getGameTime();
+    });
+    fixture.input.inventory().setStackInSlot(0, new ItemStack(Items.DIRT));
+    until(helper, 200, () -> countIron(fixture) == 1, () -> {
+      helper.assertTrue(
+          editTick[0] >= 0 && inventory.getStackInSlot(2).getCount() == 2,
+          "Output replacement overwrote an in-place slot edit during component serialization");
+      helper.assertTrue(
+          fixture.fluid.fluidTank().getFluidAmount() == 40 && fixture.input.inventory().getStackInSlot(0).isEmpty(),
+          "Replanning must settle the paid outputs exactly once");
+      helper.succeed();
+    });
+  }
+
   @GameTest(template = "empty16", batch = "factory_locked_restart", timeoutTicks = 400)
   public static void locked_item_only_restart_debits_current_components_in_mixed_catalog(GameTestHelper helper) {
     var machine = id("test_recipe_lifecycle");
@@ -199,8 +231,8 @@ public final class FactoryOutputPlanningGameTests {
         after != before && !before.dependenciesCurrent(),
         "Same-tick inventory mutation kept the old item ticket current");
     var live = fixture.input.inventory().getStackInSlot(0);
-    var name = net.minecraft.network.chat.Component.literal("before");
-    live.set(net.minecraft.core.component.DataComponents.CUSTOM_NAME, name);
+    var name = Component.literal("before");
+    live.set(DataComponents.CUSTOM_NAME, name);
     var firstFull = RecipeExecutionTicket.capture(fixture.factory).orElseThrow();
     var firstPort = firstFull.ports().stream().filter(port -> port.position().equals(fixture.input.getBlockPos()))
         .findFirst().orElseThrow();
@@ -264,6 +296,162 @@ public final class FactoryOutputPlanningGameTests {
   @AfterBatch(batch = "factory_output_continuous")
   public static void cleanupContinuous(ServerLevel level) {
     cleanup(level);
+  }
+
+  @AfterBatch(batch = "factory_batch_output_budget")
+  public static void cleanupBatchOutput(ServerLevel level) {
+    cleanup(level);
+  }
+
+  @AfterBatch(batch = "factory_scoped_output")
+  public static void cleanupScopedOutput(ServerLevel level) {
+    cleanup(level);
+  }
+
+  @AfterBatch(batch = "factory_shared_selector_output")
+  public static void cleanupSharedSelectorOutput(ServerLevel level) {
+    cleanup(level);
+  }
+
+  @GameTest(template = "empty16", batch = "factory_shared_selector_output", timeoutTicks = 460)
+  public static void paid_output_settles_while_either_same_selector_bus_changes(GameTestHelper helper) {
+    var level = helper.getLevel();
+    var secondPos = helper.absolutePos(new BlockPos(7, 4, 8));
+    level.setBlockAndUpdate(secondPos, MachineRegistries.PORTS.get("item_output_bus_normal").get().defaultBlockState());
+    var second = (MachinePortBlockEntity) level.getBlockEntity(secondPos);
+    var fixture = build(helper, id("test_factory_shared_output"), id("mmcece/test_factory_shared_output"));
+    savedBudget = MachineConfig.FACTORY_OUTPUT_WORK.get();
+    MachineConfig.FACTORY_OUTPUT_WORK.set(4);
+    fixture.output.inventory().setStackInSlot(0, new ItemStack(Items.IRON_INGOT, 8));
+    second.inventory().setStackInSlot(0, new ItemStack(Items.IRON_INGOT, 8));
+    settleUnderChurn(helper, fixture, second, () -> {
+      helper.assertTrue(countIron(fixture) == 9, "The stable first stack did not receive the paid output");
+      settleUnderChurn(helper, fixture, fixture.output, () -> {
+        var first = fixture.output.inventory().getStackInSlot(0);
+        var last = second.inventory().getStackInSlot(0);
+        helper.assertTrue(
+            first.is(Items.IRON_INGOT)
+                && last.is(Items.IRON_INGOT)
+                && first.getCount() + last.getCount() == 18
+                && fixture.input.inventory().getStackInSlot(0).isEmpty(),
+            "Two paid runs must add exactly two ingots to the partial stacks");
+        cleanup(level);
+        helper.succeed();
+      });
+    });
+  }
+
+  private static void settleUnderChurn(GameTestHelper helper, Fixture fixture, MachinePortBlockEntity noisy, Runnable next) {
+    fixture.input.inventory().setStackInSlot(0, new ItemStack(Items.DIRT));
+    until(
+        helper,
+        100,
+        () -> fixture.factory.run(THREAD).map(run -> run.pendingOutput()).orElse(false),
+        () -> until(helper, 100, () -> {
+          int amount = 1 + (int) (helper.getLevel().getGameTime() % 32);
+          noisy.inventory().setStackInSlot(1, new ItemStack(Items.FLINT, amount));
+          fixture.factory.serverTick();
+          var live = noisy.inventory().getStackInSlot(1);
+          helper.assertTrue(
+              live.is(Items.FLINT) && live.getCount() == amount,
+              "Planning overwrote the pipe's last change");
+          return fixture.factory.run(THREAD).isEmpty();
+        }, next));
+  }
+
+  @GameTest(template = "empty16", batch = "factory_scoped_output", timeoutTicks = 500)
+  public static void unrelated_output_churn_preserves_planning_and_target_changes_still_block(GameTestHelper helper) {
+    var level = helper.getLevel();
+    var otherPos = helper.absolutePos(new BlockPos(7, 4, 8));
+    level.setBlockAndUpdate(otherPos, MachineRegistries.PORTS.get("item_output_bus_normal").get().defaultBlockState());
+    var other = (MachinePortBlockEntity) level.getBlockEntity(otherPos);
+    var fixture = build(helper, id("test_factory_scoped_output"), id("mmcece/test_factory_scoped_output"));
+    savedBudget = MachineConfig.FACTORY_OUTPUT_WORK.get();
+    MachineConfig.FACTORY_OUTPUT_WORK.set(1);
+    fixture.input.inventory().setStackInSlot(0, new ItemStack(Items.DIRT));
+    until(helper, 100, () -> fixture.factory.run(THREAD).map(run -> run.pendingOutput()).orElse(false), () -> {
+      var paid = fixture.factory.run(THREAD).orElseThrow().runId();
+      Runnable churn = () -> {
+        int amount = 1 + (int) (level.getGameTime() % 32);
+        other.inventory().setStackInSlot(0, new ItemStack(Items.FLINT, amount));
+        fixture.fluid.fluidTank().setFluid(new FluidStack(Fluids.WATER, amount));
+        fixture.factory.serverTick();
+        helper.assertTrue(
+            other.inventory().getStackInSlot(0).getCount() == amount
+                && fixture.fluid.fluidTank().getFluidAmount() == amount,
+            "Output planning overwrote unrelated storage");
+      };
+      int[] visits = {0};
+      until(helper, 150, () -> {
+        if (++visits[0] == 7) {
+          for (int slot = 0; slot < fixture.output.inventory().getSlots(); slot++) {
+            fixture.output.inventory().setStackInSlot(slot, new ItemStack(Items.STONE, 64));
+          }
+        }
+        churn.run();
+        return reason(fixture) == FactoryThreadState.Reason.OUTPUT_BLOCKED;
+      }, () -> {
+        helper.assertTrue(
+            countIron(fixture) == 0 && fixture.factory.run(THREAD).orElseThrow().runId().equals(paid),
+            "A full target should retain the original paid run");
+        fixture.output.inventory().setStackInSlot(0, ItemStack.EMPTY);
+        until(helper, 150, () -> {
+          churn.run();
+          return fixture.factory.run(THREAD).isEmpty();
+        }, () -> {
+          helper.assertTrue(
+              countIron(fixture) == 1 && fixture.input.inventory().getStackInSlot(0).isEmpty(),
+              "Output did not settle exactly once under continuous unrelated output changes");
+          cleanup(level);
+          helper.succeed();
+        });
+      });
+    });
+  }
+
+  @GameTest(template = "empty16", batch = "factory_batch_output_budget", timeoutTicks = 800)
+  public static void parallel_output_claims_share_the_layout_budget_and_resume_after_blockage(GameTestHelper helper) {
+    var fixture = build(helper);
+    after(helper, () -> {
+      confirm(helper, fixture.factory);
+      int copies = 8;
+      var thread = fixture.factory.scheduler().requireChannel(THREAD);
+      helper.assertTrue(
+          fixture.factory.threadConfiguration()
+              .update(THREAD, thread.revision(), Change.parallelLimit(copies, thread.upgradeRevision() + 1)),
+          "Could not configure eight factory instances");
+      savedBudget = MachineConfig.FACTORY_OUTPUT_WORK.get();
+      MachineConfig.FACTORY_OUTPUT_WORK.set(1);
+      fixture.input.inventory().setStackInSlot(0, new ItemStack(Items.DIRT, copies));
+      until(helper, 100, () -> fixture.factory.runSet(THREAD).runs().size() == copies, () -> {
+        fixture.fluid.fluidTank().setFluid(new FluidStack(Fluids.LAVA, 100));
+        until(
+            helper,
+            100,
+            () -> fixture.factory.runSet(THREAD).runs().stream().allMatch(run -> run.pendingOutput()),
+            () -> {
+              helper.runAfterDelay(12, () -> {
+                helper.assertTrue(
+                    reason(fixture) == FactoryThreadState.Reason.OUTPUT_PLANNING
+                        && fixture.factory.runSet(THREAD).runs().size() == copies
+                        && countIron(fixture) == 0,
+                    "Eight paid item/fluid rows reached a blocked tank before the twelve one-work slices elapsed");
+                until(helper, 150, () -> reason(fixture) == FactoryThreadState.Reason.OUTPUT_BLOCKED, () -> {
+                  fixture.fluid.fluidTank().setFluid(FluidStack.EMPTY);
+                  until(helper, 150, () -> fixture.factory.runSet(THREAD).runs().isEmpty(), () -> {
+                    helper.assertTrue(
+                        countIron(fixture) == copies
+                            && fixture.fluid.fluidTank().getFluidAmount() == copies * 40
+                            && fixture.input.inventory().getStackInSlot(0).isEmpty(),
+                        "Budgeted output lost or duplicated frozen products");
+                    cleanup(helper.getLevel());
+                    helper.succeed();
+                  });
+                });
+              });
+            });
+      });
+    });
   }
 
   @GameTest(template = "empty16", batch = "factory_output_continuous", timeoutTicks = 400)

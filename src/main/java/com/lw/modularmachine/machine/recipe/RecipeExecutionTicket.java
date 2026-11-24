@@ -1,10 +1,10 @@
 package com.lw.modularmachine.machine.recipe;
 
 import com.lw.modularmachine.machine.recipe.RecipeResourceCapture.CaptureMode;
-import com.lw.modularmachine.machine.recipe.RecipeTicketProof.SmartSnapshot;
 import com.lw.modularmachine.blockentity.MachineControllerBlockEntity;
 import com.lw.modularmachine.blockentity.MachinePortBlockEntity;
 import com.lw.modularmachine.machine.PortKind;
+import com.lw.modularmachine.machine.recipe.search.RecipeCatalog;
 import com.lw.modularmachine.machine.recipe.search.RecipeResourceRequirements.RequiredPort;
 import com.lw.modularmachine.api.upgrade.UpgradeSnapshot;
 import com.lw.modularmachine.api.smart.SmartNumberRequirement;
@@ -41,6 +41,7 @@ public final class RecipeExecutionTicket {
    */
   public static final class TickCache {
     private final EnumMap<CaptureMode, RecipeExecutionTicket> tickets = new EnumMap<>(CaptureMode.class);
+    private final Map<Set<RequiredPort>, RecipeExecutionTicket> outputTickets = new HashMap<>();
     private record SlotImages(MachinePortBlockEntity port, ItemStack[] images) {
     }
     private final Map<BlockPos, SlotImages> itemPorts = new HashMap<>();
@@ -50,17 +51,29 @@ public final class RecipeExecutionTicket {
     public void beginTick(long now) {
       if (tick != now) {
         tickets.clear();
+        outputTickets.clear();
         tick = now;
       }
     }
 
-    RecipeExecutionTicket current(CaptureMode mode) {
-      var ticket = tickets.get(mode);
+    RecipeExecutionTicket current(CaptureMode mode, Set<RequiredPort> required) {
+      var ticket = required == null ? tickets.get(mode) : outputTickets.get(required);
       return ticket != null && ticket.matchesLive() ? ticket : null;
     }
 
-    void remember(CaptureMode mode, RecipeExecutionTicket ticket) {
-      tickets.put(mode, ticket);
+    void remember(CaptureMode mode, Set<RequiredPort> required, RecipeExecutionTicket ticket) {
+      if (required == null) {
+        tickets.put(mode, ticket);
+      } else {
+        outputTickets.put(required, ticket);
+      }
+    }
+
+    RecipeExecutionTicket searchCapture(StructureService.Registration registration) {
+      var ticket = tickets.get(CaptureMode.ALL);
+      return ticket != null
+          && ticket.proof.registration == registration
+          && ticket.proof.structureRevision == registration.verifier.revision() ? ticket : null;
     }
 
     ItemStack[] itemImages(StructureService.Registration registration, MachinePortBlockEntity port) {
@@ -80,6 +93,7 @@ public final class RecipeExecutionTicket {
 
     public void clear() {
       tickets.clear();
+      outputTickets.clear();
       itemPorts.clear();
       itemRegistration = null;
     }
@@ -92,13 +106,30 @@ public final class RecipeExecutionTicket {
   private final PatternInputSource patternSource;
   private final Set<RequiredPort> recipePorts;
 
-  RecipeExecutionTicket(StructureService.StructureSubject owner, ServerLevel level, StructureService.Registration registration, List<RecipePortSnapshot> ports, CaptureMode mode, List<SmartSnapshot> interfaces, List<RecipeTicketProof.GroupStamp> groups) {
-    proof = new RecipeTicketProof(owner, level, registration, ports, mode, interfaces, groups);
+  RecipeExecutionTicket(RecipeTicketProof proof, Set<RequiredPort> capturedRoles) {
+    this(proof, selectPorts(proof.ports, InputGroup.SHARED), capturedRoles);
+  }
+
+  private RecipeExecutionTicket(RecipeTicketProof proof, List<RecipePortSnapshot> selectedPorts, Set<RequiredPort> capturedRoles) {
+    this.proof = proof;
     inputGroup = InputGroup.SHARED;
     patternSource = null;
     virtualPorts = List.of();
-    recipePorts = null;
-    selectedPorts = selectPorts(ports, inputGroup);
+    recipePorts = capturedRoles == null ? null : Set.copyOf(capturedRoles);
+    this.selectedPorts = selectedPorts;
+  }
+
+  RecipeExecutionTicket renewSearch(List<PatternInputSource> sources) {
+    var next = new RecipeTicketProof(
+        proof.owner,
+        proof.level,
+        proof.registration,
+        proof.ports,
+        proof.mode,
+        proof.interfaces,
+        proof.groups,
+        sources);
+    return new RecipeExecutionTicket(next, selectedPorts, null);
   }
 
   private RecipeExecutionTicket(RecipeExecutionTicket source, int inputGroup, PatternInputSource patternSource) {
@@ -145,6 +176,13 @@ public final class RecipeExecutionTicket {
   public RecipeExecutionTicket forRecipePorts(Set<RequiredPort> required) {
     requireServerThread();
     return new RecipeExecutionTicket(this, required);
+  }
+
+  RecipeExecutionTicket forOutputParts(java.util.function.Predicate<RecipePortSnapshot> include) {
+    requireServerThread();
+    var ports = selectedPorts.stream().filter(include).toList();
+    var narrowed = new RecipeTicketProof(proof, ports, proof.capturedTick);
+    return new RecipeExecutionTicket(narrowed, ports, recipePorts);
   }
 
   private static List<RecipePortSnapshot> selectPorts(List<RecipePortSnapshot> ports, int group) {
@@ -241,6 +279,11 @@ public final class RecipeExecutionTicket {
     return proof.ordinaryUpgrades;
   }
 
+  public RecipeInputMiss.Capture beginMissingFactoryInputs(String threadId, RecipeCatalog catalog) {
+    requireServerThread();
+    return RecipeInputMiss.begin(proof, threadId, catalog);
+  }
+
   List<RecipePortSnapshot> allPorts() {
     var result = new ArrayList<>(proof.ports);
     result.addAll(virtualPorts);
@@ -277,6 +320,11 @@ public final class RecipeExecutionTicket {
 
   public static Optional<RecipeExecutionTicket> capture(StructureService.StructureSubject owner) {
     return RecipeResourceCapture.capture(owner, CaptureMode.ALL);
+  }
+
+  /** Each factory search observes fresh orders and its own pattern rotation. */
+  public static Optional<RecipeExecutionTicket> captureForSearch(StructureService.StructureSubject owner) {
+    return RecipeResourceCapture.capture(owner, CaptureMode.ALL, true);
   }
 
   public static Optional<RecipeExecutionTicket> captureComponents(StructureService.StructureSubject owner) {
@@ -469,6 +517,12 @@ public final class RecipeExecutionTicket {
     }
     if (proof.capturedTick == proof.level.getGameTime()) {
       return Optional.of(this);
+    }
+    if (proof.mode == CaptureMode.OUTPUTS && recipePorts != null) {
+      // Output-only snapshots have no per-tick FE limit. Retain the exact physical
+      // contents and original structure proof just verified above.
+      var refreshed = new RecipeTicketProof(proof, proof.ports, proof.level.getGameTime());
+      return Optional.of(new RecipeExecutionTicket(refreshed, selectedPorts, recipePorts));
     }
     return RecipeResourceCapture.capture(proof.owner, proof.mode)
         .map(ticket -> ticket.withInputGroup(inputGroup).withPatternSource(patternSource))

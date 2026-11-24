@@ -7,6 +7,7 @@ import com.lw.modularmachine.machine.recipe.RecipeExecutionTicket;
 import com.lw.modularmachine.machine.PortKind;
 import com.lw.modularmachine.machine.factory.FactoryThreadState;
 import java.util.EnumMap;
+import java.util.Collection;
 import java.util.HashSet;
 import java.util.LinkedHashSet;
 import java.util.List;
@@ -148,6 +149,15 @@ public final class RecipeResourceRequirements {
 
   private boolean has(PortKind kind, String selector) {
     return selectors.getOrDefault(kind, Set.of()).contains(selector);
+  }
+
+  boolean containsAll(Collection<RequiredPort> required) {
+    for (var port : required) {
+      if (!has(port.kind(), port.selector())) {
+        return false;
+      }
+    }
+    return true;
   }
 
   @Override

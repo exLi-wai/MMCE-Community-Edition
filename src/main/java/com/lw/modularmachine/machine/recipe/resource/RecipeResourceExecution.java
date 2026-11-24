@@ -3,6 +3,8 @@ package com.lw.modularmachine.machine.recipe.resource;
 import com.lw.modularmachine.api.recipe.resource.RecipeResourcePlanning;
 import com.lw.modularmachine.machine.recipe.FrozenRecipeRun;
 import com.lw.modularmachine.machine.recipe.RecipeExecutionTicket;
+import com.lw.modularmachine.machine.recipe.search.RecipeResourceRequirements.RequiredPort;
+import java.util.Set;
 import com.lw.modularmachine.machine.structure.StructureService;
 import java.util.List;
 import java.util.Objects;
@@ -139,6 +141,9 @@ public final class RecipeResourceExecution {
   }
 
   public interface Output extends Preparation {
+    default void addDiscardedOutputPorts(Set<RequiredPort> ports) {
+    }
+
     default boolean searchCurrent(RecipeExecutionTicket ticket) {
       var result = prepared(ticket);
       return result != null && result.current();

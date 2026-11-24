@@ -1,6 +1,7 @@
 package com.lw.modularmachine.machine.recipe.search;
 
 import com.lw.modularmachine.machine.recipe.search.index.RequiredInputIndex;
+import com.lw.modularmachine.machine.recipe.RecipeOutputClaims;
 import org.jetbrains.annotations.ApiStatus;
 import java.util.ArrayList;
 import java.util.BitSet;
@@ -165,7 +166,8 @@ public final class CompiledRecipeSet<K> {
     Entry(int rank, RecipeCandidate<K> recipe, Map<K, Long> input, Map<K, Long> output, K anchor) {
       this.rank = rank;
       this.recipe = recipe;
-      overflowOutputs = recipe.outputs().stream().filter(RecipeCandidate.Output::ignoreOutputCheck).toList();
+      overflowOutputs = recipe.outputs() instanceof RecipeOutputClaims.FrozenRows<K> rows ? rows.overflow() : recipe
+          .outputs().stream().filter(RecipeCandidate.Output::ignoreOutputCheck).toList();
       this.input = Map.copyOf(input);
       inputEntries = input.entrySet().stream().map(entry -> Map.entry(entry.getKey(), entry.getValue())).toList();
       anchorKey = anchor;

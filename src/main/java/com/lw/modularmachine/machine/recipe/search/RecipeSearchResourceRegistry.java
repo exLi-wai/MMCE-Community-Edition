@@ -20,6 +20,8 @@ import java.util.Set;
 import net.minecraft.resources.ResourceLocation;
 import org.jetbrains.annotations.ApiStatus;
 import java.util.stream.Collectors;
+import java.util.HashMap;
+import java.util.HashSet;
 
 /** Internal Java registration, frozen before the first catalog is compiled. */
 @ApiStatus.Internal
@@ -131,10 +133,10 @@ public final class RecipeSearchResourceRegistry {
     }
     var supported = frozen.stream().map(Registration::id).collect(Collectors.toUnmodifiableSet());
     requireSupported(catalog, supported);
-    var active = new java.util.HashSet<ResourceLocation>();
+    var active = new HashSet<ResourceLocation>();
     var perRecipe = new LinkedHashMap<String, Set<ResourceLocation>>();
     for (var candidate : catalog.recipes().candidates()) {
-      var ids = new java.util.HashSet<ResourceLocation>(supported);
+      var ids = new HashSet<ResourceLocation>(supported);
       // External strategies can inspect any recipe, including empty declarations.
       ids.removeAll(BUILT_INS);
       var definition = catalog.definition(candidate.id());
@@ -169,7 +171,7 @@ public final class RecipeSearchResourceRegistry {
         compiled.add(Objects.requireNonNull(registration.factory().compile(catalog), "compiled resource search"));
       }
     }
-    var masks = new java.util.HashMap<Set<ResourceLocation>, List<Integer>>();
+    var masks = new HashMap<Set<ResourceLocation>, List<Integer>>();
     var byRecipe = new LinkedHashMap<String, List<Integer>>();
     perRecipe.forEach(
         (id, mask) -> byRecipe.put(

@@ -10,10 +10,29 @@ import java.util.Set;
 import java.util.UUID;
 import org.junit.jupiter.api.Test;
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertNotSame;
 import static org.junit.jupiter.api.Assertions.assertThrows;
+import static org.junit.jupiter.api.Assertions.assertTrue;
 
 class FactoryRunSetTest {
+  @Test
+  void allPendingOutputFollowsImmutableBatchMutations() {
+    var a = failureRun(new UUID(4, 1), 20, 10);
+    var b = failureRun(new UUID(4, 2), 20, 10);
+    var pendingA = a.finished();
+    var pendingB = b.finished();
+    var mixed = FactoryRunSet.ofRuns(List.of(pendingA)).add(b);
+    assertFalse(FactoryRunSet.empty().allPendingOutput());
+    assertFalse(mixed.allPendingOutput());
+    assertTrue(mixed.replace(pendingB).allPendingOutput());
+    assertTrue(mixed.replaceAll(Map.of(b.runId(), pendingB)).allPendingOutput());
+    assertTrue(mixed.remove(b.runId()).allPendingOutput());
+    assertFalse(mixed.remove(a.runId()).allPendingOutput());
+    assertTrue(mixed.applyFailureDecisions(Map.of(), Set.of(b.runId())).allPendingOutput());
+    assertFalse(mixed.allPendingOutput());
+  }
+
   @Test
   void emptySetIsImmutableAndRejectsDuplicateOrMissingRuns() {
     var run = FrozenRecipeRun.read(FrozenRecipeRunTest.valid());

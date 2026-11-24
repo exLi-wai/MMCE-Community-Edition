@@ -28,28 +28,74 @@ public final class ItemOutputLayout {
   private final ResourceSnapshot<ItemResourceKey> snapshot;
 
   public ItemOutputLayout(RecipeExecutionTicket ticket, Set<ItemResourceKey> keys) {
-    var refs = new ArrayList<Slot>();
-    var spaces = new ArrayList<ResourceSnapshot.OutputSlot<ItemResourceKey>>();
-    var keysSnapshot = Set.copyOf(keys);
-    var limitsBySize = new HashMap<ItemSlotDomain, ResourceSnapshot.SlotLimit<ItemResourceKey>>();
-    for (var port : ticket.ports()) {
-      if (port.kind() != PortKind.ITEM_OUTPUT) {
-        continue;
-      }
-      for (int i = 0; i < port.itemSlotCount(); i++) {
+    this(new Capture(ticket, keys).finish());
+  }
+
+  private ItemOutputLayout(Capture capture) {
+    slots = List.copyOf(capture.refs);
+    snapshot = new ResourceSnapshot<>(capture.ticket.structureRevision(), Map.of(), capture.spaces);
+  }
+
+  public static final class Capture {
+    private final RecipeExecutionTicket ticket;
+    private final Set<ItemResourceKey> keys;
+    private final List<Slot> refs = new ArrayList<>();
+    private final List<ResourceSnapshot.OutputSlot<ItemResourceKey>> spaces = new ArrayList<>();
+    private final Map<ItemSlotDomain, ResourceSnapshot.SlotLimit<ItemResourceKey>> limitsBySize = new HashMap<>();
+    private int portIndex, slot;
+
+    public Capture(RecipeExecutionTicket ticket, Set<ItemResourceKey> keys) {
+      this.ticket = ticket;
+      this.keys = Set.copyOf(keys);
+    }
+
+    public int advance(int budget) {
+      int used = 0;
+      while (portIndex < ticket.ports().size() && used < budget) {
+        used++;
+        var port = ticket.ports().get(portIndex);
+        if (port.kind() != PortKind.ITEM_OUTPUT || slot == port.itemSlotCount()) {
+          portIndex++;
+          slot = 0;
+          continue;
+        }
+        int i = slot++;
         int limit = port.slotLimits().get(i);
         var domain = new ItemSlotDomain(limit, port.selector(), port.bulkItems());
-        var limits = limitsBySize.computeIfAbsent(domain, current -> current.outputLimits(keysSnapshot));
+        var limits = limitsBySize.computeIfAbsent(domain, current -> current.outputLimits(keys));
         refs.add(new Slot(port, i, domain));
         spaces.add(new ResourceSnapshot.OutputSlot<>(port.itemKey(i), port.itemAmount(i), limit, limits));
       }
+      return used;
     }
-    slots = List.copyOf(refs);
-    snapshot = new ResourceSnapshot<>(ticket.structureRevision(), Map.of(), spaces);
+
+    private Capture finish() {
+      advance(Integer.MAX_VALUE);
+      return this;
+    }
+
+    public boolean complete() {
+      return portIndex == ticket.ports().size();
+    }
+
+    public ItemOutputLayout layout() {
+      if (!complete()) {
+        throw new IllegalStateException("Incomplete item output capture");
+      }
+      return new ItemOutputLayout(this);
+    }
   }
 
   public ResourceSnapshot<ItemResourceKey> snapshot() {
     return snapshot;
+  }
+
+  public Set<String> targetParts(RecipePlan<ItemResourceKey> placement) {
+    var targets = new HashSet<String>();
+    for (var insertion : placement.insertions()) {
+      targets.add(slots.get(insertion.slot()).port().partId());
+    }
+    return targets;
   }
 
   public Map<String, NonNullList<ItemStack>> prepare(RecipePlan<ItemResourceKey> placement) {

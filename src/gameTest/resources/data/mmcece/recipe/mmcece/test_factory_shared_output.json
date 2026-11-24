@@ -1,0 +1,7 @@
+{
+  "type": "mmcece:machine",
+  "machine": "mmcece:test_factory_shared_output",
+  "duration": 2,
+  "inputs": [{"stack": {"id": "minecraft:dirt"}, "amount": 1}],
+  "outputs": [{"stack": {"id": "minecraft:iron_ingot"}, "amount": 1}]
+}

@@ -1,5 +1,6 @@
 package com.lw.modularmachine.machine.structure;
 
+import com.lw.modularmachine.blockentity.MachinePortBlockEntity;
 import com.lw.modularmachine.api.controller.VerificationFailure;
 import com.lw.modularmachine.machine.structure.StructureLevelState.ScriptCleanup;
 import com.lw.modularmachine.api.controller.VerificationState;
@@ -900,6 +901,10 @@ public final class StructureService {
     boolean structureRemoved();
 
     default void wakeRecipeSearch() {
+    }
+
+    default void wakeRecipeSearch(MachinePortBlockEntity port) {
+      wakeRecipeSearch();
     }
 
     MachineOrientation structureOrientation(ServerLevel level);

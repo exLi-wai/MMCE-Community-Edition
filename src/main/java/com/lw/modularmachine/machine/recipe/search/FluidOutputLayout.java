@@ -4,10 +4,11 @@ import com.lw.modularmachine.machine.recipe.RecipeExecutionTicket;
 import com.lw.modularmachine.api.recipe.FluidRequirement;
 import com.lw.modularmachine.machine.PortKind;
 import java.util.ArrayList;
-import java.util.HashMap;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.HashSet;
+import java.util.Set;
 import net.minecraft.core.HolderLookup;
 import net.neoforged.neoforge.fluids.FluidStack;
 import org.jetbrains.annotations.ApiStatus;
@@ -18,28 +19,64 @@ public final class FluidOutputLayout {
   private final List<String> parts;
   private final ResourceSnapshot<FluidResourceKey> snapshot;
   private final HolderLookup.Provider registries;
-  private final List<String> selectors;
 
   public FluidOutputLayout(RecipeExecutionTicket ticket, HolderLookup.Provider registries) {
-    this.registries = registries;
-    var ids = new ArrayList<String>();
-    var labels = new ArrayList<String>();
-    var spaces = new ArrayList<ResourceSnapshot.OutputSlot<FluidResourceKey>>();
-    for (var port : ticket.ports()) {
-      if (port.kind() == PortKind.FLUID_OUTPUT) {
-        var stored = port.fluid();
-        ids.add(port.partId());
-        labels.add(port.selector());
-        spaces.add(
-            new ResourceSnapshot.OutputSlot<>(
-                stored.isEmpty() ? null : new FluidResourceKey(stored, registries).withSelector(port.selector()),
-                stored.getAmount(),
-                port.capacity()));
-      }
+    this(new Capture(ticket, registries).finish());
+  }
+
+  private FluidOutputLayout(Capture capture) {
+    registries = capture.registries;
+    parts = List.copyOf(capture.ids);
+    snapshot = new ResourceSnapshot<>(capture.ticket.structureRevision(), Map.of(), capture.spaces);
+  }
+
+  public static final class Capture {
+    private final RecipeExecutionTicket ticket;
+    private final HolderLookup.Provider registries;
+    private final List<String> ids = new ArrayList<>();
+    private final List<ResourceSnapshot.OutputSlot<FluidResourceKey>> spaces = new ArrayList<>();
+    private int index;
+
+    public Capture(RecipeExecutionTicket ticket, HolderLookup.Provider registries) {
+      this.ticket = ticket;
+      this.registries = registries;
     }
-    parts = List.copyOf(ids);
-    selectors = List.copyOf(labels);
-    snapshot = new ResourceSnapshot<>(ticket.structureRevision(), Map.of(), spaces);
+
+    public int advance(int budget) {
+      int used = 0;
+      while (index < ticket.ports().size() && used < budget) {
+        used++;
+        var port = ticket.ports().get(index++);
+        if (port.kind() == PortKind.FLUID_OUTPUT) {
+          var stored = port.fluid();
+          String selector = port.selector();
+          ids.add(port.partId());
+          spaces.add(
+              new ResourceSnapshot.OutputSlot<>(
+                  stored.isEmpty() ? null : new FluidResourceKey(stored, registries).withSelector(port.selector()),
+                  stored.getAmount(),
+                  port.capacity(),
+                  (key, capacity) -> selector.equals(key.selector()) ? capacity : 0));
+        }
+      }
+      return used;
+    }
+
+    private Capture finish() {
+      advance(Integer.MAX_VALUE);
+      return this;
+    }
+
+    public boolean complete() {
+      return index == ticket.ports().size();
+    }
+
+    public FluidOutputLayout layout() {
+      if (!complete()) {
+        throw new IllegalStateException("Incomplete fluid output capture");
+      }
+      return new FluidOutputLayout(this);
+    }
   }
 
   public Planning plan(List<FluidStack> requirements) {
@@ -59,7 +96,13 @@ public final class FluidOutputLayout {
   }
 
   public Planning planClaims(List<RecipeCandidate.Output<FluidResourceKey>> claims) {
-    return new Planning(claims);
+    return new Planning(
+        claims.isEmpty() ? null : RecipePlanner
+            .prepareOutputs(snapshot, RecipeCandidate.outputOnly("fluid_outputs", claims)));
+  }
+
+  public Planning planPaidOutputs(RecipePlanner.PaidOutputs<FluidResourceKey> outputs) {
+    return new Planning(outputs.prepare(snapshot));
   }
 
   public Planning planRequirements(List<FluidRequirement> requirements, String selector) {
@@ -79,19 +122,8 @@ public final class FluidOutputLayout {
     private RecipePlan<FluidResourceKey> selected;
     private RecipePlanner.Status status;
 
-    private Planning(List<RecipeCandidate.Output<FluidResourceKey>> claims) {
-      var spaces = new ArrayList<ResourceSnapshot.OutputSlot<FluidResourceKey>>();
-      for (int index = 0; index < snapshot.outputs().size(); index++) {
-        var slot = snapshot.outputs().get(index);
-        var limits = new HashMap<FluidResourceKey, Long>();
-        for (var claim : claims) {
-          limits.put(claim.key(), selectors.get(index).equals(claim.key().selector()) ? slot.capacity() : 0L);
-        }
-        spaces.add(new ResourceSnapshot.OutputSlot<>(slot.key(), slot.count(), slot.capacity(), limits));
-      }
-      var selectedDomain = new ResourceSnapshot<FluidResourceKey>(snapshot.revision(), Map.of(), spaces);
-      session = claims.isEmpty() ? null : RecipePlanner
-          .prepareOutputs(selectedDomain, RecipeCandidate.outputOnly("fluid_outputs", claims));
+    private Planning(RecipePlanner.Session<FluidResourceKey> session) {
+      this.session = session;
       status = session == null ? RecipePlanner.Status.SELECTED : RecipePlanner.Status.BUDGET_EXHAUSTED;
     }
 
@@ -126,6 +158,18 @@ public final class FluidOutputLayout {
       }
 
       return Map.copyOf(result);
+    }
+
+    public Set<FluidResourceKey> discardedOverflow() {
+      return session == null ? Set.of() : session.discardedOverflow();
+    }
+
+    public Set<String> targetParts() {
+      var targets = new HashSet<String>();
+      for (var insertion : selected.insertions()) {
+        targets.add(parts.get(insertion.slot()));
+      }
+      return targets;
     }
   }
 }

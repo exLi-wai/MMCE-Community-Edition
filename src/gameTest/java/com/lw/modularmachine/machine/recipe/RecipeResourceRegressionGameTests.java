@@ -14,20 +14,26 @@ import com.lw.modularmachine.machine.recipe.search.CompiledRecipeSet;
 import com.lw.modularmachine.machine.recipe.search.RecipeCatalog;
 import com.lw.modularmachine.machine.recipe.search.RecipePlanner;
 import com.lw.modularmachine.machine.recipe.search.RecipeResourceRequirements;
+import com.lw.modularmachine.machine.recipe.search.RecipeResourceRequirements.RequiredPort;
+import com.lw.modularmachine.machine.PortKind;
 import com.lw.modularmachine.machine.recipe.search.RecipeSearch;
 import com.lw.modularmachine.machine.structure.StructureService;
 import com.lw.modularmachine.registry.MachineRegistries;
 import com.mojang.serialization.JsonOps;
 import io.netty.buffer.Unpooled;
 import java.util.HashMap;
+import java.util.HashSet;
 import java.util.List;
 import java.util.Map;
+import java.util.Set;
 import net.minecraft.core.BlockPos;
 import net.minecraft.core.NonNullList;
+import net.minecraft.core.component.DataComponents;
 import net.minecraft.gametest.framework.GameTest;
 import net.minecraft.gametest.framework.GameTestHelper;
 import net.minecraft.nbt.Tag;
 import net.minecraft.network.RegistryFriendlyByteBuf;
+import net.minecraft.network.chat.Component;
 import net.minecraft.resources.ResourceLocation;
 import net.minecraft.world.item.ItemStack;
 import net.minecraft.world.item.Items;
@@ -36,6 +42,7 @@ import net.minecraft.world.level.material.Fluids;
 import net.neoforged.neoforge.fluids.FluidStack;
 import net.neoforged.neoforge.gametest.GameTestHolder;
 import net.neoforged.neoforge.gametest.PrefixGameTestTemplate;
+import com.lw.modularmachine.api.component.ResourceType;
 
 /**
  * Focused physical-payment, selector persistence and parallel admission
@@ -50,6 +57,73 @@ public final class RecipeResourceRegressionGameTests {
       "fluid_output_hatch_normal", "energy_input_hatch_normal", "energy_output_hatch_normal"};
 
   private RecipeResourceRegressionGameTests() {
+  }
+
+  @GameTest(template = "empty16", timeoutTicks = 80)
+  public static void factory_output_capture_reuses_only_current_role_sets(GameTestHelper helper) {
+    var owner = build(helper, true).owner();
+    var item = new RequiredPort(PortKind.ITEM_OUTPUT, "");
+    var fluid = new RequiredPort(PortKind.FLUID_OUTPUT, "");
+    var output = (MachinePortBlockEntity) helper.getLevel().getBlockEntity(owner.structurePosition().offset(1, 0, 1));
+    output.inventory().setStackInSlot(0, new ItemStack(Items.STICK));
+    var roles = new HashSet<>(Set.of(item));
+    var original = RecipeResourceCapture.captureOutputs(owner, roles).orElseThrow();
+    roles.add(fluid);
+    var combined = RecipeResourceCapture.captureOutputs(owner, roles).orElseThrow();
+    helper.assertTrue(
+        combined != original && combined.ports().stream().anyMatch(p -> p.kind() == PortKind.FLUID_OUTPUT),
+        "Changing a caller-owned role set changed the cached item-only view");
+    helper.assertTrue(
+        RecipeResourceCapture.captureOutputs(owner, Set.of(item)).orElseThrow() == original,
+        "Equal output roles rebuilt an unchanged same-tick capture");
+    var all = RecipeResourceCapture.captureOutputs(owner, null).orElseThrow();
+    helper.assertTrue(
+        all != original && all == RecipeExecutionTicket.captureOutputs(owner).orElseThrow(),
+        "Unfiltered output capture reused the item-only view");
+    long revision = output.resourceRevision();
+    output.inventory().getStackInSlot(0).grow(1);
+    helper.assertTrue(output.resourceRevision() == revision, "Fixture did not exercise an unstamped slot edit");
+    var updated = RecipeResourceCapture.captureOutputs(owner, Set.of(item)).orElseThrow();
+    helper.assertTrue(
+        updated != original && updated.ports().getFirst().itemAmount(0) == 2,
+        "Reusing a filtered output capture ignored a live slot edit");
+    helper.runAfterDelay(1, () -> {
+      var later = RecipeResourceCapture.captureOutputs(owner, Set.of(item)).orElseThrow();
+      helper.assertTrue(
+          later != updated && later.ports().getFirst().itemAmount(0) == 2,
+          "Filtered output capture crossed the server tick boundary");
+      helper.succeed();
+    });
+  }
+
+  @GameTest(template = "empty16", timeoutTicks = 80)
+  public static void same_tick_factory_search_reuses_and_revalidates_physical_ports(GameTestHelper helper) {
+    var owner = build(helper, true).owner();
+    var first = RecipeExecutionTicket.captureForSearch(owner).orElseThrow();
+    var second = RecipeExecutionTicket.captureForSearch(owner).orElseThrow();
+    helper.assertTrue(first.ports() == second.ports(), "Two searches rebuilt an unchanged physical port list");
+    helper.assertTrue(!first.sharesCapture(second), "Separate searches shared commit authority");
+    var independent = RecipeExecutionTicket.capture(owner).orElseThrow();
+    helper.assertTrue(first.ports() != independent.ports(), "An independent full capture reused the search ticket");
+
+    var input = input(helper, first);
+    long revision = input.resourceRevision();
+    input.inventory().getStackInSlot(0).set(DataComponents.CUSTOM_NAME, Component.literal("changed"));
+    helper.assertTrue(revision == input.resourceRevision(), "Fixture did not exercise an unstamped component edit");
+    helper.assertTrue(!first.dependenciesCurrent(), "Old input proof survived an in-place component edit");
+    var updated = RecipeExecutionTicket.captureForSearch(owner).orElseThrow();
+    var itemPort = updated.ports().stream().filter(port -> port.identity() == input).findFirst().orElseThrow();
+    helper.assertTrue(
+        Component.literal("changed").equals(itemPort.items().getFirst().get(DataComponents.CUSTOM_NAME)),
+        "A same-tick search returned stale item components");
+
+    helper.assertTrue(input.configureInputGroup(1, input.groupRevision()), "Could not isolate the edited input");
+    var regrouped = RecipeExecutionTicket.captureForSearch(owner).orElseThrow();
+    helper.assertTrue(
+        regrouped.ports().stream().noneMatch(port -> port.identity() == input)
+            && regrouped.withInputGroup(1).ports().stream().anyMatch(port -> port.identity() == input),
+        "The cached shared group retained a reassigned port");
+    helper.succeed();
   }
 
   @GameTest(template = "empty16", timeoutTicks = 80)
@@ -109,8 +183,7 @@ public final class RecipeResourceRegressionGameTests {
     var fluid = RecipeExecutionTicket.captureTickFluids(owner).orElseThrow();
     var item = RecipeExecutionTicket.captureTickItems(owner).orElseThrow();
     helper.assertTrue(
-        fluid.ports().stream()
-            .allMatch(port -> port.kind().resource() == com.lw.modularmachine.api.component.ResourceType.FLUID),
+        fluid.ports().stream().allMatch(port -> port.kind().resource() == ResourceType.FLUID),
         "Fluid planning captured unrelated contents");
     helper.assertTrue(item.currentForCommit().orElseThrow() == item, "Same-tick commit recaptured the inventory");
     items.inventory().getStackInSlot(0).grow(1);

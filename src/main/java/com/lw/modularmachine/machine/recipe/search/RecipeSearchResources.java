@@ -18,6 +18,7 @@ import java.util.Map;
 import java.util.Objects;
 import java.util.Set;
 import net.neoforged.neoforge.fluids.FluidStack;
+import java.util.Iterator;
 
 /**
  * Internal server-owned views for one captured search and its input groups.
@@ -55,7 +56,7 @@ public final class RecipeSearchResources {
     private final Map<ItemResourceKey, Long> counts = new HashMap<>();
     private int portIndex;
     private int slotIndex;
-    private java.util.Iterator<Map.Entry<ItemResourceKey, Long>> portCounts;
+    private Iterator<Map.Entry<ItemResourceKey, Long>> portCounts;
 
     GroupItems(RecipeExecutionTicket ticket) {
       this.ticket = ticket;

@@ -120,6 +120,16 @@ public final class PatternProductionService {
     }
   }
 
+  static boolean hasObservedNoGateways(StructureService.StructureSubject owner) {
+    var state = OWNERS.get(owner);
+    var registration = owner.structureRegistration();
+    return registration != null
+        && state != null
+        && state.registration.get() == registration
+        && state.structureRevision == registration.verifier.revision()
+        && state.gateways.isEmpty();
+  }
+
   public static List<PatternInputSource> sources(StructureService.StructureSubject owner) {
     if (!(owner.structureLevel() instanceof ServerLevel level)) {
       return List.of();

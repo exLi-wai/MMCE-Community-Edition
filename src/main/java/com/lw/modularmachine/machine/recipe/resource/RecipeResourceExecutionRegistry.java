@@ -26,6 +26,8 @@ import com.lw.modularmachine.machine.recipe.resource.keyed.KeyedRecipeResources;
 import com.lw.modularmachine.util.Mods;
 import com.lw.modularmachine.machine.recipe.resource.fluid.FluidTickResourceExecution;
 import com.lw.modularmachine.machine.recipe.search.RecipePlanner;
+import com.lw.modularmachine.machine.recipe.search.RecipeResourceRequirements.RequiredPort;
+import java.util.Set;
 import com.lw.modularmachine.machine.recipe.search.ResourcePlanningSequence;
 import com.lw.modularmachine.machine.structure.StructureService;
 import com.lw.modularmachine.machine.upgrade.UpgradeRecipeCheckHandlers;
@@ -42,6 +44,7 @@ import net.minecraft.nbt.NbtOps;
 import net.minecraft.resources.ResourceLocation;
 import net.minecraft.server.level.ServerLevel;
 import org.jetbrains.annotations.ApiStatus;
+import java.util.Collections;
 
 /**
  * Internal typed execution directory. Existing item/fluid/energy plans retain
@@ -52,6 +55,7 @@ import org.jetbrains.annotations.ApiStatus;
 public final class RecipeResourceExecutionRegistry {
   private static final Map<RecipeResourceType<?>, Boolean> ENGINE_OWNED = new IdentityHashMap<>();
   private static final List<Binding<?>> BINDINGS = new ArrayList<>();
+  private static final int BUILTIN_BINDINGS;
   private static volatile List<Binding<?>> installed;
 
   static {
@@ -86,6 +90,7 @@ public final class RecipeResourceExecutionRegistry {
     MeteorExecution.register();
     KeyedRecipeResources.register();
     ConstellationExecution.register();
+    BUILTIN_BINDINGS = BINDINGS.size();
   }
 
   private RecipeResourceExecutionRegistry() {
@@ -604,36 +609,82 @@ public final class RecipeResourceExecutionRegistry {
 
   public static OutputPlanning prepareOutputs(RecipeExecutionTicket ticket, List<FrozenRecipeRun> runs) {
     ticket.requireServerThread();
-    var bindings = snapshot();
-    var resources = runs.stream().map(run -> run.resourceData(ticket.level().registryAccess())).toList();
-    resources.forEach(value -> requireSupported(value, bindings));
-    var plans = new ArrayList<Supplier<RecipeResourceExecution.Output>>();
-    for (var binding : bindings) {
-      prepareOutputs(binding, ticket, runs, resources).ifPresent(plans::add);
+    var claims = new OutputClaims();
+    for (var run : runs) {
+      claims.add(run, ticket.level().registryAccess());
     }
-
-    return new OutputPlanning(ticket, List.copyOf(plans));
+    return claims.plan(ticket);
   }
 
-  private static <D> Optional<Supplier<RecipeResourceExecution.Output>> prepareOutputs(Binding<D> binding, RecipeExecutionTicket ticket, List<FrozenRecipeRun> runs, List<RecipeResources> resources) {
-    var claims = new ArrayList<RecipeResourceExecution.Run<D>>();
-    for (int index = 0; index < runs.size(); index++) {
-      var data = resources.get(index).get(binding.type());
+  private static final class BindingOutputs<D> {
+    private final Binding<D> binding;
+    private final List<RecipeResourceExecution.Run<D>> claims = new ArrayList<>();
+
+    BindingOutputs(Binding<D> binding) {
+      this.binding = binding;
+    }
+
+    boolean add(FrozenRecipeRun run, RecipeResources resources) {
+      var data = resources.get(binding.type());
       if (binding.type().hasOutputs(data)) {
-        claims.add(new RecipeResourceExecution.Run<>(runs.get(index), data));
+        claims.add(new RecipeResourceExecution.Run<>(run, data));
+        return true;
+      }
+      return false;
+    }
+    void plan(RecipeExecutionTicket ticket, List<Supplier<RecipeResourceExecution.Output>> plans) {
+      if (!claims.isEmpty()) {
+        var captured = Collections.unmodifiableList(claims);
+        plans.add(
+            () -> Objects.requireNonNull(
+                binding.finish().prepare(currentPreparationTicket(ticket), captured),
+                "resource output plan"));
+      }
+    }
+  }
+
+  /**
+   * Paid declarations survive ticket replacement. Live output planners are
+   * rebuilt for each ticket.
+   */
+  public static final class OutputClaims {
+    private final List<Binding<?>> bindings = snapshot();
+    private final List<BindingOutputs<?>> outputs = new ArrayList<>();
+    private boolean externalOutputs;
+    private boolean sealed;
+
+    public OutputClaims() {
+      for (var binding : bindings) {
+        outputs.add(new BindingOutputs<>(binding));
       }
     }
 
-    if (claims.isEmpty()) {
-      return Optional.empty();
+    public void add(FrozenRecipeRun run, HolderLookup.Provider registries) {
+      if (sealed) {
+        throw new IllegalStateException("Output declarations already planned");
+      }
+      var resources = run.resourceData(registries);
+      requireSupported(resources, bindings);
+      for (int i = 0; i < outputs.size(); i++) {
+        if (outputs.get(i).add(run, resources) && i >= BUILTIN_BINDINGS) {
+          externalOutputs = true;
+        }
+      }
     }
 
-    var captured = List.copyOf(claims);
+    /**
+     * External finish strategies may inspect any native output port on the ticket.
+     */
+    public boolean requiresAllOutputPorts() {
+      return externalOutputs;
+    }
 
-    return Optional.of(
-        () -> Objects.requireNonNull(
-            binding.finish().prepare(currentPreparationTicket(ticket), captured),
-            "resource output plan"));
+    public OutputPlanning plan(RecipeExecutionTicket ticket) {
+      sealed = true;
+      var plans = new ArrayList<Supplier<RecipeResourceExecution.Output>>();
+      outputs.forEach(output -> output.plan(ticket, plans));
+      return new OutputPlanning(ticket, plans);
+    }
   }
 
   public static final class Prepared implements PreparedRecipeResource {
@@ -768,6 +819,10 @@ public final class RecipeResourceExecutionRegistry {
           .map(plan -> Objects.requireNonNull(plan.prepared(checked), "prepared resource output")).toList();
 
       return new Prepared(participants, List.of(checked), !participants.isEmpty());
+    }
+
+    public void addDiscardedOutputPorts(Set<RequiredPort> ports) {
+      plans.forEach(plan -> plan.addDiscardedOutputPorts(ports));
     }
   }
 }

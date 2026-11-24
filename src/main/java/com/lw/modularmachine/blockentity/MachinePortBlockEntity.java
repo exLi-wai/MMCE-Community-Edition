@@ -200,7 +200,7 @@ public class MachinePortBlockEntity extends BlockEntity implements MenuProvider,
       }
       resourceRevision = Math.incrementExact(resourceRevision);
       setChanged();
-      StructureChangeRouter.resourceChanged(server, worldPosition);
+      StructureChangeRouter.resourceChanged(server, this);
     }
   }
 
@@ -371,7 +371,7 @@ public class MachinePortBlockEntity extends BlockEntity implements MenuProvider,
       if (notify && !published) {
         published = true;
         setChanged();
-        StructureChangeRouter.resourceChanged((ServerLevel) level, worldPosition);
+        StructureChangeRouter.resourceChanged((ServerLevel) level, MachinePortBlockEntity.this);
       }
     }
 
@@ -433,7 +433,7 @@ public class MachinePortBlockEntity extends BlockEntity implements MenuProvider,
       if (notify && !published) {
         published = true;
         setChanged();
-        StructureChangeRouter.resourceChanged((ServerLevel) level, worldPosition);
+        StructureChangeRouter.resourceChanged((ServerLevel) level, MachinePortBlockEntity.this);
       }
     }
 
@@ -505,7 +505,7 @@ public class MachinePortBlockEntity extends BlockEntity implements MenuProvider,
       if (notify && !published) {
         published = true;
         setChanged();
-        StructureChangeRouter.resourceChanged((ServerLevel) level, worldPosition);
+        StructureChangeRouter.resourceChanged((ServerLevel) level, MachinePortBlockEntity.this);
       }
     }
 
@@ -555,7 +555,7 @@ public class MachinePortBlockEntity extends BlockEntity implements MenuProvider,
       if (notify && !published) {
         published = true;
         setChanged();
-        StructureChangeRouter.resourceChanged((ServerLevel) level, worldPosition);
+        StructureChangeRouter.resourceChanged((ServerLevel) level, MachinePortBlockEntity.this);
       }
     }
 
@@ -727,7 +727,7 @@ public class MachinePortBlockEntity extends BlockEntity implements MenuProvider,
       machineColor = color;
       MachineColorable.update(this);
       if (level instanceof ServerLevel server) {
-        StructureChangeRouter.resourceChanged(server, worldPosition);
+        StructureChangeRouter.resourceChanged(server, this);
       }
     }
   }

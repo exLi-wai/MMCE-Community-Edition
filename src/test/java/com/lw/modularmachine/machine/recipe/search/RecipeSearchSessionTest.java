@@ -11,15 +11,16 @@ import java.util.Map;
 import java.util.Set;
 import org.junit.jupiter.api.Test;
 import static org.junit.jupiter.api.Assertions.*;
+import java.util.concurrent.atomic.AtomicInteger;
+import net.minecraft.resources.ResourceLocation;
 
 class RecipeSearchSessionTest {
-  private static final net.minecraft.resources.ResourceLocation REQUEST = net.minecraft.resources.ResourceLocation
-      .withDefaultNamespace("request");
+  private static final ResourceLocation REQUEST = ResourceLocation.withDefaultNamespace("request");
 
   @Test
   void unwatchedReplenishmentReadsMustFitThePublishingVisit() {
     var proof = new RecipeSearchResource.ReplenishmentProof();
-    var reads = new java.util.concurrent.atomic.AtomicInteger();
+    var reads = new AtomicInteger();
     for (int i = 0; i < 3; i++) {
       proof.addLiveCheck(() -> {
         reads.incrementAndGet();
@@ -42,7 +43,7 @@ class RecipeSearchSessionTest {
   @Test
   void severalKeysAtOneHatchShareOneFinalConnectionRead() {
     var proof = new RecipeSearchResource.ReplenishmentProof();
-    var reads = new java.util.concurrent.atomic.AtomicInteger();
+    var reads = new AtomicInteger();
     var hatch = new Object();
     for (int key = 0; key < 3; key++) {
       proof.observeConnection(hatch, true, () -> reads.incrementAndGet() > 0);
@@ -204,7 +205,7 @@ class RecipeSearchSessionTest {
 
   @Test
   void outputSlotsShareTheirCapacityPolicyWithoutQueryingEveryProductDuringCapture() {
-    var queries = new java.util.concurrent.atomic.AtomicInteger();
+    var queries = new AtomicInteger();
     ResourceSnapshot.SlotLimit<String> policy = (key, capacity) -> {
       queries.incrementAndGet();
       return key.equals("product") ? 1 : 0;

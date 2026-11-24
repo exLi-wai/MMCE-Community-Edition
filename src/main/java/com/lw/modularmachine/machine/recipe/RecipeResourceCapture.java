@@ -10,6 +10,7 @@ import com.lw.modularmachine.api.component.ChemicalStackData;
 import com.lw.modularmachine.api.component.ResourceType;
 import com.lw.modularmachine.blockentity.SmartInterfaceBlockEntity;
 import com.lw.modularmachine.machine.PortKind;
+import com.lw.modularmachine.machine.recipe.search.RecipeResourceRequirements.RequiredPort;
 import com.lw.modularmachine.machine.structure.StructureService;
 import com.lw.modularmachine.util.thread.ServerThreadGuard;
 import java.util.ArrayList;
@@ -17,6 +18,7 @@ import java.util.Comparator;
 import java.util.HashSet;
 import java.util.List;
 import java.util.Optional;
+import java.util.Set;
 import net.minecraft.core.BlockPos;
 import net.minecraft.server.level.ServerLevel;
 import net.minecraft.world.item.ItemStack;
@@ -65,6 +67,18 @@ final class RecipeResourceCapture {
   }
 
   static Optional<RecipeExecutionTicket> capture(StructureService.StructureSubject owner, CaptureMode mode) {
+    return capture(owner, mode, false);
+  }
+
+  static Optional<RecipeExecutionTicket> capture(StructureService.StructureSubject owner, CaptureMode mode, boolean factorySearch) {
+    return capture(owner, mode, factorySearch, null);
+  }
+
+  static Optional<RecipeExecutionTicket> captureOutputs(StructureService.StructureSubject owner, Set<RequiredPort> required) {
+    return capture(owner, CaptureMode.OUTPUTS, false, required == null ? null : Set.copyOf(required));
+  }
+
+  private static Optional<RecipeExecutionTicket> capture(StructureService.StructureSubject owner, CaptureMode mode, boolean factorySearch, Set<RequiredPort> required) {
     if (mode == CaptureMode.ALL
         && owner instanceof MachineControllerBlockEntity ordinary
         && owner.structureLevel() instanceof ServerLevel server) {
@@ -82,11 +96,23 @@ final class RecipeResourceCapture {
       return Optional.empty();
     }
     var cache = owner instanceof FactoryControllerBlockEntity factory ? factory.tickResourceTickets() : null;
-    if (cache != null && mode != CaptureMode.ALL) {
+    List<PatternInputSource> sources = null;
+    if (cache != null && (mode != CaptureMode.ALL || factorySearch)) {
       cache.beginTick(level.getGameTime());
-      var reused = cache.current(mode);
-      if (reused != null) {
-        return Optional.of(reused);
+      if (mode == CaptureMode.ALL) {
+        var previous = cache.searchCapture(registration);
+        if (previous != null) {
+          sources = PatternProductionService.sources(owner);
+          var next = previous.renewSearch(sources);
+          if (next.structureRevision() == previous.structureRevision() && next.matchesLive()) {
+            return Optional.of(next);
+          }
+        }
+      } else {
+        var reused = cache.current(mode, required);
+        if (reused != null) {
+          return Optional.of(reused);
+        }
       }
     }
     var ports = new ArrayList<RecipePortSnapshot>();
@@ -113,6 +139,9 @@ final class RecipeResourceCapture {
         continue;
       }
       var kind = part.rule().port();
+      if (required != null && !required.contains(new RequiredPort(kind, part.selector()))) {
+        continue;
+      }
       boolean contents = mode.includes(kind);
       boolean groupOnly = (mode == CaptureMode.TICK_ITEMS || mode == CaptureMode.TICK_FLUIDS)
           && (kind == PortKind.ITEM_INPUT || kind == PortKind.FLUID_INPUT || kind == PortKind.CHEMICAL_INPUT);
@@ -143,12 +172,13 @@ final class RecipeResourceCapture {
       }
     }
     ports.sort(Comparator.comparing(RecipePortSnapshot::logicalPartId).thenComparingInt(RecipePortSnapshot::tankIndex));
-    var ticket = new RecipeExecutionTicket(owner, level, registration, ports, mode, interfaces, groups);
+    var proof = new RecipeTicketProof(owner, level, registration, ports, mode, interfaces, groups, sources);
+    var ticket = new RecipeExecutionTicket(proof, required);
     if (!ticket.matchesLive()) {
       return Optional.empty();
     }
-    if (cache != null && mode != CaptureMode.ALL) {
-      cache.remember(mode, ticket);
+    if (cache != null && (mode != CaptureMode.ALL || factorySearch)) {
+      cache.remember(mode, required, ticket);
     }
     return Optional.of(ticket);
   }

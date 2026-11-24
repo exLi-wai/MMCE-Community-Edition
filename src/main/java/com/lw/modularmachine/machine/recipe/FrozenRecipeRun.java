@@ -48,6 +48,7 @@ public final class FrozenRecipeRun {
     RecipeResources replayedTick;
     RecipeResourceExecutionRegistry.TickStrategies tickStrategies;
     TriggeredResourceData triggers;
+    List<ChemicalRequirement> chemicalOutputs;
   }
   private final UUID runId;
   private final ResourceLocation machineId, recipeId;
@@ -275,9 +276,16 @@ public final class FrozenRecipeRun {
     if (!pendingOutput()) {
       throw new IllegalStateException("Outputs have not been generated");
     }
-
-    return ChemicalRecipeSampling
-        .sample(chemicals.outputs(), randomSeed, parallelInstances, RecipeModifier.Io.OUTPUT, -1);
+    if (chemicals.outputs().isEmpty()) {
+      return List.of();
+    }
+    synchronized (resourceCache) {
+      if (resourceCache.chemicalOutputs == null) {
+        resourceCache.chemicalOutputs = ChemicalRecipeSampling
+            .sample(chemicals.outputs(), randomSeed, parallelInstances, RecipeModifier.Io.OUTPUT, -1);
+      }
+      return resourceCache.chemicalOutputs;
+    }
   }
 
   public int progress() {
@@ -428,25 +436,31 @@ public final class FrozenRecipeRun {
    * or the live recipe manager.
    */
   public List<RecipeCandidate.Output<ItemResourceKey>> outputClaims(HolderLookup.Provider registries) {
+    var result = new ArrayList<RecipeCandidate.Output<ItemResourceKey>>();
+    int count = outputRowCount("outputs");
+    for (int i = 0; i < count; i++) {
+      result.add(outputClaim(i, registries));
+    }
+    return List.copyOf(result);
+  }
+
+  int outputRowCount(String name) {
     if (!pendingOutput()) {
       throw new IllegalStateException("Outputs have not been generated");
     }
-    var rows = data.getList("outputs", Tag.TAG_COMPOUND);
-    var result = new ArrayList<RecipeCandidate.Output<ItemResourceKey>>();
-    for (int i = 0; i < rows.size(); i++) {
-      var row = rows.getCompound(i);
-      var stack = ItemStack.SINGLE_ITEM_CODEC
-          .parse(registries.createSerializationContext(NbtOps.INSTANCE), row.getCompound("stack")).getOrThrow();
-      result.add(
-          new RecipeCandidate.Output<>(
-              ItemResourceKey.of(stack, registries).withSelector(row.getString("selector")),
-              MachineRecipeJson.integer(
-                  NbtOps.INSTANCE.convertTo(JsonOps.INSTANCE, row.get("amount")),
-                  "$.outputs[" + i + "].amount"),
-              false,
-              row.getBoolean("ignore_output_check")));
-    }
-    return List.copyOf(result);
+    return data.getList(name, Tag.TAG_COMPOUND).size();
+  }
+
+  RecipeCandidate.Output<ItemResourceKey> outputClaim(int i, HolderLookup.Provider registries) {
+    var row = data.getList("outputs", Tag.TAG_COMPOUND).getCompound(i);
+    var stack = ItemStack.SINGLE_ITEM_CODEC
+        .parse(registries.createSerializationContext(NbtOps.INSTANCE), row.getCompound("stack")).getOrThrow();
+    return new RecipeCandidate.Output<>(
+        ItemResourceKey.of(stack, registries).withSelector(row.getString("selector")),
+        MachineRecipeJson
+            .integer(NbtOps.INSTANCE.convertTo(JsonOps.INSTANCE, row.get("amount")), "$.outputs[" + i + "].amount"),
+        false,
+        row.getBoolean("ignore_output_check"));
   }
 
   /**
@@ -502,17 +516,18 @@ public final class FrozenRecipeRun {
   }
 
   public List<FluidRequirement> fluidOutputRequirements(HolderLookup.Provider registries) {
-    if (!pendingOutput()) {
-      throw new IllegalStateException("Outputs have not been generated");
-    }
-    var rows = data.getList("fluid_outputs", Tag.TAG_COMPOUND);
     var result = new ArrayList<FluidRequirement>();
-    for (int i = 0; i < rows.size(); i++) {
-      result.add(
-          FluidRequirement.CODEC.parse(registries.createSerializationContext(NbtOps.INSTANCE), rows.getCompound(i))
-              .getOrThrow());
+    int count = outputRowCount("fluid_outputs");
+    for (int i = 0; i < count; i++) {
+      result.add(fluidOutputRequirement(i, registries));
     }
     return List.copyOf(result);
+  }
+
+  FluidRequirement fluidOutputRequirement(int i, HolderLookup.Provider registries) {
+    return FluidRequirement.CODEC.parse(
+        registries.createSerializationContext(NbtOps.INSTANCE),
+        data.getList("fluid_outputs", Tag.TAG_COMPOUND).getCompound(i)).getOrThrow();
   }
 
   /**

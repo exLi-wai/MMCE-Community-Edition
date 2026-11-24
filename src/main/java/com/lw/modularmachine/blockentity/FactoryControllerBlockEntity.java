@@ -501,6 +501,11 @@ public final class FactoryControllerBlockEntity extends BlockEntity implements M
   }
 
   @Override
+  public void wakeRecipeSearch(MachinePortBlockEntity port) {
+    searchCoordinator.wakeRetries(port);
+  }
+
+  @Override
   @ApiStatus.Internal
   public ControllerCommandState commandState() {
     return commandState;

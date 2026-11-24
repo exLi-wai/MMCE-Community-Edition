@@ -116,7 +116,7 @@ public final class FactoryRunCoordinator {
     if (thread == null || !thread.enabled()) {
       return;
     }
-    if (entry.getValue().runs().stream().allMatch(FrozenRecipeRun::pendingOutput)) {
+    if (entry.getValue().allPendingOutput()) {
       advancePendingOutput(threadId, entry.getValue());
       return;
     }
@@ -206,7 +206,7 @@ public final class FactoryRunCoordinator {
       threadReason = FactoryThreadState.Reason.NONE;
     }
     var currentSet = runState.runSet(threadId);
-    if (!currentSet.runs().isEmpty() && currentSet.runs().stream().allMatch(FrozenRecipeRun::pendingOutput)) {
+    if (currentSet.allPendingOutput()) {
       advancePendingOutput(threadId, currentSet);
       return;
     }
@@ -215,10 +215,7 @@ public final class FactoryRunCoordinator {
 
   private void advancePendingOutput(String threadId, FactoryRunSet completed) {
     var thread = threadConfiguration.scheduler().channel(threadId);
-    if (thread == null
-        || completed == null
-        || completed.runs().isEmpty()
-        || completed.runs().stream().anyMatch(run -> !run.pendingOutput())) {
+    if (thread == null || completed == null || !completed.allPendingOutput()) {
       return;
     }
     var result = advanceOutput(threadId, completed);

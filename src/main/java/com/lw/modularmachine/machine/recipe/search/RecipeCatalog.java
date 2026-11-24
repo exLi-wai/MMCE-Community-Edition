@@ -14,6 +14,7 @@ import java.util.Collection;
 import java.util.ArrayList;
 import java.util.BitSet;
 import java.util.HashMap;
+import java.util.HashSet;
 import java.util.List;
 import java.util.Map;
 import java.util.Objects;
@@ -29,6 +30,7 @@ import org.jetbrains.annotations.ApiStatus;
  */
 @ApiStatus.Internal
 public final class RecipeCatalog {
+  private static final int DIAGNOSTIC_PORT_SLICE = 32;
   private final ResourceLocation machineId;
   private final CompiledRecipeSet<ItemResourceKey> recipes;
   private final Map<String, List<FluidStack>> fluidInputs;
@@ -41,6 +43,7 @@ public final class RecipeCatalog {
   private final ItemRecipeIndex itemIndex;
   private final RecipeSearchResourceRegistry.Suite resourceSearches;
   private final BitSet dynamicInputRanks;
+  private final Set<RecipeResourceRequirements.RequiredPort> requiredPorts;
   record SearchEntry(ResourceLocation id, boolean transformsInputs, CompiledRecipeSet.Entry<ItemResourceKey> inputs) {
   }
 
@@ -107,10 +110,14 @@ public final class RecipeCatalog {
     this.selectors = Map.copyOf(selectors);
     itemIndex = new ItemRecipeIndex(recipes);
     dynamicInputRanks = new BitSet(recipes.size());
+    var ports = new HashSet<RecipeResourceRequirements.RequiredPort>();
     var planningEntries = new HashMap<String, SearchEntry>();
     for (int rank = 0; rank < recipes.candidates().size(); rank++) {
       var entry = recipes.entries().get(rank);
       var definition = this.definitions.get(entry.recipe.id());
+      if (definition != null) {
+        ports.addAll(definition.requiredPorts());
+      }
       var candidate = RecipeItemPreparation.inputCandidate(entry.recipe, definition);
       boolean transforms = definition != null
           && (!definition.ingredientArrays().isEmpty()
@@ -127,6 +134,7 @@ public final class RecipeCatalog {
       }
     }
     searchEntries = Map.copyOf(planningEntries);
+    requiredPorts = Set.copyOf(ports);
     resourceSearches = RecipeSearchResourceRegistry.compile(this);
   }
 
@@ -144,6 +152,7 @@ public final class RecipeCatalog {
     resourceSearches = prepared.resourceSearches;
     dynamicInputRanks = prepared.dynamicInputRanks;
     searchEntries = prepared.searchEntries;
+    requiredPorts = prepared.requiredPorts;
   }
 
   /** Fresh publication identity over immutable, already compiled base data. */
@@ -160,6 +169,17 @@ public final class RecipeCatalog {
 
   boolean supportsLockedRestart() {
     return !resourceSearches.externalStrategies();
+  }
+
+  boolean allDiagnosticRolesPresent(RecipeResourceRequirements roles, CandidateFilter filter) {
+    if (filter.allowedIds != null && filter.allowedIds.size() == 1) {
+      var definition = definitions.get(filter.allowedIds.iterator().next());
+      return definition == null
+          || definition.requiredPorts().size() <= DIAGNOSTIC_PORT_SLICE
+              && roles.containsAll(definition.requiredPorts());
+    }
+    // Large selector sets keep the normal resumable diagnostic pass.
+    return requiredPorts.size() <= DIAGNOSTIC_PORT_SLICE && roles.containsAll(requiredPorts);
   }
 
   /**
@@ -219,6 +239,8 @@ public final class RecipeCatalog {
     private final List<RecipeSearchResource.Captured> all = new ArrayList<>();
     private final Map<List<Integer>, List<RecipeSearchResource.Captured>> subsets = new HashMap<>();
     private final List<Integer> selectedStrategies;
+    private ResourceInputQuery fluidInputs;
+    private boolean otherInputAnchors;
 
     CapturedResources(String lockedRecipe) {
       selectedStrategies = lockedRecipe == null ? null : resourceSearches.byRecipe().get(lockedRecipe);
@@ -231,11 +253,33 @@ public final class RecipeCatalog {
 
     void captureNext(RecipeExecutionTicket ticket, RecipeSearchResources resources) {
       int index = selectedStrategies == null ? all.size() : selectedStrategies.get(all.size());
-      all.add(resourceSearches.strategies().get(index).capture(ticket, resources));
+      var strategy = resourceSearches.strategies().get(index);
+      var captured = strategy.capture(ticket, resources);
+      all.add(captured);
+      if (strategy instanceof FluidRecipeSearchResource) {
+        fluidInputs = captured.inputs();
+      } else if (!resourceSearches.externalStrategies()) {
+        otherInputAnchors |= captured.inputs().hasAnchors();
+      }
     }
 
     List<RecipeSearchResource.Captured> all() {
       return all;
+    }
+
+    boolean missingPhysicalInputs(Map<ItemResourceKey, Long> items, CandidateFilter filter) {
+      if (!filter.dynamicRanks.isEmpty()
+          || resourceSearches.externalStrategies()
+          || filter.firstRank >= recipes.size()) {
+        return false;
+      }
+      int singleRank = recipes.size() == 1
+          || filter.allowedIds != null && filter.allowedIds.size() == 1 ? filter.firstRank : -1;
+      return physicalInputsExcluded(
+          new RequiredInputQuery<>(itemIndex.inputs(), items),
+          fluidInputs,
+          otherInputAnchors,
+          singleRank);
     }
 
     List<RecipeSearchResource.Captured> forRecipe(String id) {
@@ -246,6 +290,23 @@ public final class RecipeCatalog {
       return indices.size() == all.size() ? all : subsets
           .computeIfAbsent(indices, selected -> selected.stream().map(all::get).toList());
     }
+  }
+
+  /**
+   * Called only after the complete, unpruned static candidate intersection was
+   * empty.
+   */
+  static boolean physicalInputsExcluded(ResourceInputQuery items, ResourceInputQuery fluids, boolean otherInputAnchors, int singleRank) {
+    if (!items.hasAnchors() && (fluids == null || !fluids.hasAnchors())) {
+      return false;
+    }
+    if (!otherInputAnchors) {
+      return true;
+    }
+    // With competing indexes an empty intersection has ambiguous provenance. A
+    // locked rank
+    // costs at most two key lookups. Broader filters keep normal retries.
+    return singleRank >= 0 && (!items.matchesRank(singleRank) || fluids != null && !fluids.matchesRank(singleRank));
   }
 
   List<RecipeSearchResource.Captured> captureForRecipe(String id, RecipeExecutionTicket ticket, RecipeSearchResources resources) {

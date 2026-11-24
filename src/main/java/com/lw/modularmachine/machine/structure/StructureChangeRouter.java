@@ -96,6 +96,14 @@ public final class StructureChangeRouter {
   }
 
   public static void resourceChanged(ServerLevel level, BlockPos pos) {
+    resourceChanged(level, pos, null);
+  }
+
+  public static void resourceChanged(ServerLevel level, MachinePortBlockEntity port) {
+    resourceChanged(level, port.getBlockPos(), port);
+  }
+
+  private static void resourceChanged(ServerLevel level, BlockPos pos, MachinePortBlockEntity port) {
     ServerThreadGuard.require(level, "Structure state accessed");
     StructureLevelState state = StructureService.levelState(level);
     if (state == null) {
@@ -109,7 +117,11 @@ public final class StructureChangeRouter {
     }
     for (Registration registration : watched) {
       if (registration.valid && registration.pattern.hasRecipePartAt(pos)) {
-        registration.controller.wakeRecipeSearch();
+        if (port != null) {
+          registration.controller.wakeRecipeSearch(port);
+        } else {
+          registration.controller.wakeRecipeSearch();
+        }
       }
       if (registration.valid && registration.pattern.watchesContentsAt(pos)) {
         markDirty(state, registration, registration.pattern.groupFor(pos), false, false, level.getGameTime());

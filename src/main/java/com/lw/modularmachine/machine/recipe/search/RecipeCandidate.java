@@ -2,6 +2,7 @@ package com.lw.modularmachine.machine.recipe.search;
 
 import org.jetbrains.annotations.ApiStatus;
 import com.lw.modularmachine.api.smart.SmartNumberRequirement;
+import com.lw.modularmachine.machine.recipe.RecipeOutputClaims;
 import java.util.List;
 import java.util.Objects;
 
@@ -21,7 +22,9 @@ public record RecipeCandidate<K>(
       throw new IllegalArgumentException("Recipe id is required");
     }
     inputs = List.copyOf(Objects.requireNonNull(inputs, "inputs"));
-    outputs = List.copyOf(Objects.requireNonNull(outputs, "outputs"));
+    if (!(outputs instanceof RecipeOutputClaims.FrozenRows<?>)) {
+      outputs = List.copyOf(Objects.requireNonNull(outputs, "outputs"));
+    }
     interfaceInputs = List.copyOf(interfaceInputs);
   }
 

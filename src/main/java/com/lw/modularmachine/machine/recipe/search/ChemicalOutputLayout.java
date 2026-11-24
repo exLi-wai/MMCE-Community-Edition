@@ -6,6 +6,7 @@ import java.util.ArrayList;
 import java.util.HashMap;
 import java.util.LinkedHashMap;
 import java.util.List;
+import java.util.Set;
 import java.util.Map;
 import com.lw.modularmachine.api.component.ChemicalStackData;
 import com.lw.modularmachine.api.recipe.ChemicalRequirement;
@@ -110,6 +111,10 @@ public final class ChemicalOutputLayout {
       }
 
       return Map.copyOf(result);
+    }
+
+    public Set<ChemicalResourceKey> discardedOverflow() {
+      return session == null ? Set.of() : session.discardedOverflow();
     }
   }
 }

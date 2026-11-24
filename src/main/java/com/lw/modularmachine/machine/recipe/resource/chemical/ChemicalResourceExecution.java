@@ -27,6 +27,8 @@ import org.jetbrains.annotations.ApiStatus;
 import com.lw.modularmachine.machine.PortKind;
 import com.lw.modularmachine.machine.recipe.resource.RecipeResourceTransaction;
 import com.lw.modularmachine.machine.recipe.search.RecipeResourceRequirements;
+import com.lw.modularmachine.machine.recipe.search.RecipeResourceRequirements.RequiredPort;
+import java.util.Set;
 import net.minecraft.core.BlockPos;
 
 /** Physical Chemical rules adapted into the shared execution stages. */
@@ -281,19 +283,16 @@ public final class ChemicalResourceExecution {
 
   public static RecipeResourceExecution.Finish<ChemicalRecipeData> finish() {
     return (ticket, runs) -> {
-      var claims = outputClaims(
-          runs.stream()
-              .map(
-                  value -> ChemicalRecipeSampling.sample(
-                      value.data().outputs(),
-                      value.run().randomSeed(),
-                      value.run().parallelInstances(),
-                      RecipeModifier.Io.OUTPUT,
-                      -1))
-              .toList());
+      var claims = outputClaims(runs.stream().map(value -> value.run().chemicalOutputs()).toList());
       var plan = new ChemicalOutputLayout(ticket).planClaims(claims);
 
       return new RecipeResourceExecution.Output() {
+        @Override
+        public void addDiscardedOutputPorts(Set<RequiredPort> ports) {
+          plan.discardedOverflow()
+              .forEach(key -> ports.add(new RequiredPort(PortKind.CHEMICAL_OUTPUT, key.selector())));
+        }
+
         @Override
         public Status status() {
           return convert(plan.status());

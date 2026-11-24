@@ -6,6 +6,7 @@ import com.lw.modularmachine.machine.recipe.RecipeStartPlan;
 import com.lw.modularmachine.machine.recipe.ItemResourceKey;
 import com.lw.modularmachine.machine.recipe.MachineRecipeService;
 import com.lw.modularmachine.machine.recipe.RecipeExecutionTicket;
+import com.lw.modularmachine.machine.recipe.RecipeInputMiss;
 import com.lw.modularmachine.machine.recipe.MachineRecipe;
 import com.lw.modularmachine.machine.recipe.RecipeItemCallbackService;
 import com.lw.modularmachine.machine.recipe.RecipeItemPreparation;
@@ -33,6 +34,8 @@ import java.util.Set;
 import java.util.function.Supplier;
 import org.jetbrains.annotations.ApiStatus;
 import com.lw.modularmachine.machine.factory.FactoryThreadPreset;
+import java.util.Iterator;
+import java.util.LinkedHashSet;
 
 /**
  * Server-owned multi-resource search with resumable candidate and output
@@ -99,12 +102,17 @@ public final class RecipeSearch {
   private int groupBestIndex = -1;
   private final Map<Integer, BitSet> rejectedGroupRecipes = new HashMap<>();
   private long completedGroupWork;
-  private final java.util.LinkedHashSet<RecipeResourceRequirements> roles = new java.util.LinkedHashSet<>();
+  private final LinkedHashSet<RecipeResourceRequirements> roles = new LinkedHashSet<>();
   private List<RecipeCandidate<ItemResourceKey>> diagnosticCandidates;
   private int diagnosticCursor;
-  private java.util.Iterator<RecipeResourceRequirements> diagnosticRoles;
+  private Iterator<RecipeResourceRequirements> diagnosticRoles;
   private PortKind missingResource;
   private boolean resourcesDiagnosed;
+  private boolean physicalInputsMissing;
+  private boolean allGroupsMissingInputs = true;
+  private boolean allDiagnosticRolesPresent;
+  private RecipeInputMiss inputMiss;
+  private RecipeInputMiss.Capture inputMissCapture;
   private String interfaceFailure = "";
 
   /** Static recipe metadata retained after a successful locked factory start. */
@@ -249,6 +257,12 @@ public final class RecipeSearch {
               filter,
               rankLimit,
               rejectedRanks);
+      physicalInputsMissing = factoryThread != null
+          && ticket.owner() instanceof FactoryControllerBlockEntity
+          && screeningCandidates.isEmpty()
+          && rankLimit == Integer.MAX_VALUE
+          && rejectedRanks == null
+          && resourceSearches.missingPhysicalInputs(preparationSnapshot.inputs(), filter);
       bootstrapComplete = true;
       used++;
     }
@@ -497,7 +511,7 @@ public final class RecipeSearch {
     // capture enforces server affinity before the search reads any inventory or
     // compiles slot
     // limits.
-    var captured = RecipeExecutionTicket.capture(owner);
+    var captured = RecipeExecutionTicket.captureForSearch(owner);
     if (captured.isEmpty() || !owner.structureMachineId().equals(catalog.machineId()) || !catalog.isCurrent()) {
       return Optional.empty();
     }
@@ -1022,6 +1036,10 @@ public final class RecipeSearch {
       // identical roles.
       roles.remove(groupSearch.screeningRequirements);
       roles.add(groupSearch.screeningRequirements);
+      allGroupsMissingInputs &= groupSearch.physicalInputsMissing;
+      if (!allDiagnosticRolesPresent) {
+        allDiagnosticRolesPresent = catalog.allDiagnosticRolesPresent(groupSearch.screeningRequirements, filter);
+      }
       completedGroupWork += groupSearch.totalWork();
       groupSearch = null;
       groupCursor++;
@@ -1052,12 +1070,34 @@ public final class RecipeSearch {
     return interfaceFailure;
   }
 
+  public RecipeInputMiss missingInputs() {
+    return inputMiss;
+  }
+
+  public boolean buildingInputMiss() {
+    return inputMissCapture != null;
+  }
+
   private Result advanceDiagnostics(int used, int budget, long deadline) {
     if (diagnosticCandidates == null) {
-      diagnosticCandidates = catalog.recipes().candidatesFor(filter.allowedIds);
       if (groups == null) {
         roles.add(screeningRequirements);
+        allDiagnosticRolesPresent = catalog.allDiagnosticRolesPresent(screeningRequirements, filter);
       }
+      diagnosticCandidates = allDiagnosticRolesPresent ? List.of() : catalog.recipes().candidatesFor(filter.allowedIds);
+      if (allDiagnosticRolesPresent && (groups == null ? physicalInputsMissing : allGroupsMissingInputs)) {
+        inputMissCapture = ticket.beginMissingFactoryInputs(factoryThread, catalog);
+      }
+    }
+    if (inputMissCapture != null) {
+      int captured = inputMissCapture.advance(budget - used, deadline);
+      addResourceWork(captured);
+      used += captured;
+      inputMiss = inputMissCapture.result();
+      if (inputMiss == null) {
+        return new Result(RecipePlanner.Status.BUDGET_EXHAUSTED, Optional.empty(), used);
+      }
+      inputMissCapture = null;
     }
     int before = used;
     while (!resourcesDiagnosed

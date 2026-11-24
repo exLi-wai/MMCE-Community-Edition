@@ -1,0 +1,9 @@
+{
+  "orientation": {"policy": "all_24"},
+  "parts": [
+    {"part_id": "item_in", "offset": [-1, 0, 1], "block": "item_input"},
+    {"part_id": "item_out", "offset": [1, 0, 1], "block": "item_output"},
+    {"part_id": "fluid_out", "offset": [0, 1, 1], "block": "fluid_output"},
+    {"part_id": "other_output", "offset": [0, -1, 1], "block": "item_output", "selector": "other"}
+  ]
+}

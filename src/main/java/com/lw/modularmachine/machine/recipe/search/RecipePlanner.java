@@ -1,6 +1,9 @@
 package com.lw.modularmachine.machine.recipe.search;
 
 import org.jetbrains.annotations.ApiStatus;
+import com.lw.modularmachine.machine.recipe.RecipeOutputClaims;
+import java.util.Iterator;
+import java.util.HashSet;
 import java.math.BigInteger;
 import java.util.ArrayList;
 import java.util.Collection;
@@ -72,6 +75,19 @@ public final class RecipePlanner {
     return new Session<>(snapshot, List.of(CompiledRecipeSet.compileCandidate(paidOutput)), true);
   }
 
+  public static final class PaidOutputs<K> {
+    private final List<CompiledRecipeSet.Entry<K>> entries;
+
+    public PaidOutputs(String id, RecipeOutputClaims.FrozenRows<K> rows) {
+      var candidate = RecipeCandidate.outputOnly(id, rows);
+      entries = List.of(new CompiledRecipeSet.Entry<>(0, candidate, Map.of(), rows.required(), null));
+    }
+
+    public Session<K> prepare(ResourceSnapshot<K> snapshot) {
+      return new Session<>(snapshot, entries, true);
+    }
+  }
+
   /**
    * One owner at a time; advance never touches the world or re-sorts/restarts
    * candidates.
@@ -103,8 +119,15 @@ public final class RecipePlanner {
     private BigInteger emptyCapacity;
     private int capacityKey, capacitySlot;
     private long capacityCount;
-    private int overflowRow, overflowSlot;
+    private Iterator<RecipeCandidate.Output<K>> overflow;
+    private RecipeCandidate.Output<K> overflowOutput;
+    private int overflowSlot;
     private long overflowRemaining;
+    private Set<K> discardedOverflow = Set.of();
+
+    public Set<K> discardedOverflow() {
+      return Set.copyOf(discardedOverflow);
+    }
 
     private Session(ResourceSnapshot<K> snapshot, List<CompiledRecipeSet.Entry<K>> candidates, boolean outputOnly) {
       this.snapshot = Objects.requireNonNull(snapshot, "snapshot");
@@ -172,6 +195,7 @@ public final class RecipePlanner {
       missingTypes = remaining.length;
       inputCursor = outputCursor = depth = 0;
       insertions.clear();
+      discardedOverflow = Set.of();
       emptySlots.clear();
       emptyCapacity = BigInteger.ZERO;
       phase = outputOnly ? Phase.EXISTING : Phase.INPUT;
@@ -335,9 +359,15 @@ public final class RecipePlanner {
               new RecipePlan.Insertion<>(emptySlots.get(i), current.outputKeys.get(chosen[i]), amounts[i]));
         }
       }
-      overflowRow = overflowSlot = 0;
-      overflowRemaining = current.overflowOutputs.isEmpty() ? 0 : current.overflowOutputs.getFirst().count();
+      overflow = current.overflowOutputs.iterator();
+      nextOverflow();
       phase = Phase.OVERFLOW;
+    }
+
+    private void nextOverflow() {
+      overflowSlot = 0;
+      overflowOutput = overflow.hasNext() ? overflow.next() : null;
+      overflowRemaining = overflowOutput == null ? 0 : overflowOutput.count();
     }
 
     /**
@@ -345,18 +375,21 @@ public final class RecipePlanner {
      * remainder.
      */
     private void placeOverflow() {
-      if (overflowRow == current.overflowOutputs.size()) {
+      if (overflowOutput == null) {
         select();
         return;
       }
       if (overflowRemaining == 0 || overflowSlot == snapshot.outputs().size()) {
-        overflowRow++;
-        overflowSlot = 0;
-        overflowRemaining = overflowRow == current.overflowOutputs.size() ? 0 : current.overflowOutputs.get(overflowRow)
-            .count();
+        if (overflowRemaining > 0) {
+          if (discardedOverflow.isEmpty()) {
+            discardedOverflow = new HashSet<>();
+          }
+          discardedOverflow.add(overflowOutput.key());
+        }
+        nextOverflow();
         return;
       }
-      var output = current.overflowOutputs.get(overflowRow);
+      var output = overflowOutput;
       int index = overflowSlot++;
       var slot = snapshot.outputs().get(index);
       var prior = insertions.get(index);
