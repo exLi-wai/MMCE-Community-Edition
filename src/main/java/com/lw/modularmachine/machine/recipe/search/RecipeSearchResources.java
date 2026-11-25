@@ -1,5 +1,6 @@
 package com.lw.modularmachine.machine.recipe.search;
 
+import com.lw.modularmachine.api.recipe.FluidRequirement;
 import com.lw.modularmachine.machine.recipe.RecipePortSnapshot;
 import com.lw.modularmachine.api.component.ResourceType;
 import org.jetbrains.annotations.ApiStatus;
@@ -266,14 +267,15 @@ public final class RecipeSearchResources {
       return new RequiredInputQuery<>(index.inputs(), inputs);
     }
 
-    boolean inputsAvailable(List<FluidStack> required, String selector) {
+    boolean inputsAvailable(List<FluidRequirement> required, String defaultSelector) {
       if (required.isEmpty()) {
         return true;
       }
       var reserved = new HashMap<String, Long>();
-      for (var demand : required) {
+      for (var row : required) {
+        var demand = row.stack();
         int remaining = demand.getAmount();
-        var key = new FluidRecipeIndex.Key(demand.getFluid(), selector);
+        var key = new FluidRecipeIndex.Key(demand.getFluid(), row.selector(defaultSelector));
         for (var stored : inputs.getOrDefault(key, List.of())) {
           if (!FluidStack.isSameFluidSameComponents(stored.stack, demand)) {
             continue;
@@ -295,13 +297,14 @@ public final class RecipeSearchResources {
       return true;
     }
 
-    boolean outputsAvailable(List<FluidStack> required, String selector) {
+    boolean outputsAvailable(List<FluidRequirement> required, String defaultSelector) {
       if (required.isEmpty()) {
         return true;
       }
       var reserved = new HashMap<String, Integer>();
-      var ports = outputs.getOrDefault(selector, List.of());
-      for (var demand : required) {
+      for (var row : required) {
+        var demand = row.stack();
+        var ports = outputs.getOrDefault(row.selector(defaultSelector), List.of());
         int remaining = demand.getAmount();
         for (var stored : ports) {
           if (!stored.stack.isEmpty() && !FluidStack.isSameFluidSameComponents(stored.stack, demand)) {

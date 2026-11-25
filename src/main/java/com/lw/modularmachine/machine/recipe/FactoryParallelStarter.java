@@ -6,7 +6,6 @@ import com.lw.modularmachine.machine.recipe.search.RecipeResourceRequirements;
 import com.lw.modularmachine.ModularMachine;
 import com.lw.modularmachine.blockentity.FactoryControllerBlockEntity;
 import com.lw.modularmachine.config.MachineConfig;
-import com.lw.modularmachine.machine.PortKind;
 import com.lw.modularmachine.machine.factory.FactoryParallelBatch;
 import com.lw.modularmachine.api.upgrade.UpgradeSnapshot;
 import java.util.ArrayList;
@@ -17,7 +16,6 @@ import java.util.Objects;
 import net.minecraft.core.NonNullList;
 import net.minecraft.resources.ResourceLocation;
 import net.minecraft.world.item.ItemStack;
-import net.neoforged.neoforge.fluids.FluidStack;
 import java.util.Optional;
 import com.lw.modularmachine.machine.upgrade.UpgradeRecipeCheckHandlers;
 
@@ -114,7 +112,7 @@ public final class FactoryParallelStarter {
       }
       var ports = indexPorts(ticket);
       var replacements = new HashMap<String, NonNullList<ItemStack>>();
-      var fluidRequirements = nativeRecipe.orElseThrow().fluidInputs();
+      var fluidRequirements = nativeRecipe.orElseThrow().fluidInputRequirements();
       if (!sameStartScope(uniquePlans, plans.getFirst(), ticket)) {
         return Result.STALE;
       }
@@ -185,18 +183,14 @@ public final class FactoryParallelStarter {
           .recipeThreadAllowed(threadId, runs.getFirst().recipeId(), nativeRecipe.orElseThrow().executionOptions())) {
         return Result.STALE;
       }
-      var fluidDebits = planFluidDebits(
-          ticket,
-          fluidRequirements,
-          plans.size(),
-          nativeRecipe.orElseThrow().selectors().fluidInput());
+      var fluidDebits = StartupFluidAllocation
+          .plan(ticket, fluidRequirements, nativeRecipe.orElseThrow().selectors().fluidInput(), row -> plans.size());
       if (fluidDebits == null) {
         return Result.STALE;
       }
-      fluidDebits = planFluidDebits(
+      fluidDebits = StartupFluidAllocation.plan(
           ticket,
           runs.stream().flatMap(run -> run.fluidInputClaims(factory.getLevel().registryAccess()).stream()).toList(),
-          1,
           nativeRecipe.orElseThrow().selectors().fluidInput());
       if (fluidDebits == null) {
         return Result.STALE;
@@ -341,41 +335,6 @@ public final class FactoryParallelStarter {
     }
 
     return runs;
-  }
-
-  private record FluidDebit(RecipePortSnapshot port, FluidStack amount) {
-  }
-
-  private static List<FluidDebit> planFluidDebits(RecipeExecutionTicket ticket, List<FluidStack> requirements, int instances, String selector) {
-    var result = new ArrayList<FluidDebit>();
-    var reserved = new HashMap<String, Long>();
-    for (var requirement : requirements) {
-      long remaining = Math.multiplyExact((long) requirement.getAmount(), instances);
-      for (var port : ticket.ports()) {
-        if (port.kind() != PortKind.FLUID_INPUT
-            || !port.selector().equals(selector)
-            || !FluidStack.isSameFluidSameComponents(port.fluid(), requirement)) {
-          continue;
-        }
-        long used = reserved.getOrDefault(port.partId(), 0L);
-        long available = Math.max(0, port.fluidAmount() - used);
-        while (remaining > 0 && available > 0) {
-          int amount = (int) Math.min(Integer.MAX_VALUE, Math.min(remaining, available));
-          result.add(new FluidDebit(port, requirement.copyWithAmount(amount)));
-          used += amount;
-          reserved.put(port.partId(), used);
-          remaining -= amount;
-          available -= amount;
-        }
-        if (remaining == 0) {
-          break;
-        }
-      }
-      if (remaining > 0) {
-        return null;
-      }
-    }
-    return List.copyOf(result);
   }
 
   public record Admission(Result result, FactoryParallelBatch batch) {

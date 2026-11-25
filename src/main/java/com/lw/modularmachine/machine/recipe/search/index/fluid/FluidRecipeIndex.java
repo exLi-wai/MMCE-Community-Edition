@@ -3,13 +3,13 @@ package com.lw.modularmachine.machine.recipe.search.index.fluid;
 import com.lw.modularmachine.machine.recipe.ResourceSelector;
 import com.lw.modularmachine.machine.recipe.search.index.RequiredInputIndex;
 import com.lw.modularmachine.api.recipe.RecipeSelectors;
+import com.lw.modularmachine.api.recipe.FluidRequirement;
 import java.util.ArrayList;
 import java.util.LinkedHashSet;
 import java.util.List;
-import java.util.Map;
+import java.util.function.Function;
 import java.util.Objects;
 import net.minecraft.world.level.material.Fluid;
-import net.neoforged.neoforge.fluids.FluidStack;
 import org.jetbrains.annotations.ApiStatus;
 
 /**
@@ -20,15 +20,13 @@ import org.jetbrains.annotations.ApiStatus;
 public final class FluidRecipeIndex {
   private final RequiredInputIndex<Key> inputs;
 
-  public FluidRecipeIndex(List<String> recipeIds, Map<String, List<FluidStack>> inputs, Map<String, RecipeSelectors> selectors) {
+  public FluidRecipeIndex(List<String> recipeIds, Function<String, List<FluidRequirement>> inputs, Function<String, RecipeSelectors> selectors) {
     var requirements = new ArrayList<RequiredInputIndex.RecipeInputs<Key>>(recipeIds.size());
     for (var recipeId : recipeIds) {
       var keys = new LinkedHashSet<Key>();
-      String selector = selectors.getOrDefault(recipeId, RecipeSelectors.NONE).fluidInput();
-      for (var input : inputs.getOrDefault(recipeId, List.of())) {
-        if (!input.isEmpty()) {
-          keys.add(new Key(input.getFluid(), selector));
-        }
+      String defaultSelector = selectors.apply(recipeId).fluidInput();
+      for (var input : inputs.apply(recipeId)) {
+        keys.add(new Key(input.stack().getFluid(), input.selector(defaultSelector)));
       }
       requirements.add(new RequiredInputIndex.RecipeInputs<>(recipeId, List.copyOf(keys)));
     }

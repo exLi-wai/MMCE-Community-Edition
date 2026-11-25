@@ -1,6 +1,7 @@
 package com.lw.modularmachine.gametest;
 
 import com.lw.modularmachine.api.recipe.RecipeRunStatus;
+import com.lw.modularmachine.api.recipe.RecipeModifier;
 import java.util.stream.Collectors;
 import com.lw.modularmachine.api.recipe.MachineRecipeBuilder;
 import com.lw.modularmachine.api.recipe.adapter.RecipeAdapterContext;
@@ -12,6 +13,7 @@ import com.lw.modularmachine.block.MachineControllerBlock;
 import com.lw.modularmachine.blockentity.MachineControllerBlockEntity;
 import com.lw.modularmachine.blockentity.MachinePortBlockEntity;
 import com.lw.modularmachine.api.orientation.MachineOrientation;
+import com.lw.modularmachine.machine.recipe.MachineRecipe;
 import com.lw.modularmachine.machine.recipe.MachineRecipeService;
 import com.lw.modularmachine.machine.structure.StructureService;
 import com.lw.modularmachine.registry.MachineRegistries;
@@ -201,7 +203,33 @@ public final class RecipeAdapterGameTests {
             && recipe.duration() == 20
             && recipe.priority() == 5,
         "The native recipe did not retain accumulated energy or configured duration/priority");
+    var fluidMachine = ResourceLocation.parse("mmcece:test_fluid_row_routes");
+    var probe = RecipeAdapterScriptSources.snapshot().imports().get(fluidMachine).stream()
+        .filter(value -> value.id().equals("selector_probe")).findFirst().orElseThrow();
+    var fluidContext = new RecipeAdapterContext(
+        fluidMachine,
+        probe,
+        server.registryAccess(),
+        List.of(holder),
+        RecipeAdapterTags.from(server.registryAccess()));
+    var fluidImport = fluidContext.builder(source, "minecraft:iron_ore", 200).id();
+    assertFluidRowSelectors(helper, MachineRecipeService.definition(server, fluidImport).orElseThrow());
     helper.succeed();
+  }
+
+  private static void assertFluidRowSelectors(GameTestHelper helper, MachineRecipe recipe) {
+    var inputs = recipe.fluidInputRequirements().stream().map(row -> row.selector(recipe.selectors().fluidInput()))
+        .toList();
+    var outputs = recipe.fluidOutputRequirements().stream().map(row -> row.selector(recipe.selectors().fluidOutput()))
+        .toList();
+    var triggers = recipe.triggeredResources().rows();
+    helper.assertValueEqual(inputs, List.of("feed", "", "hot"), "Fluid input row selectors");
+    helper.assertValueEqual(outputs, List.of("return"), "Fluid completion row selector");
+    helper.assertTrue(
+        triggers.size() == 2
+            && triggers.stream().anyMatch(row -> row.tick() == 2 && row.selector().equals("drain"))
+            && triggers.stream().anyMatch(row -> row.tick() == 3 && row.selector().isEmpty()),
+        "Triggered fluids must retain their own effective selector");
   }
 
   @GameTest(template = "empty16", timeoutTicks = 100)
@@ -248,6 +276,28 @@ public final class RecipeAdapterGameTests {
         "A zero trigger must keep the completion row and its preview");
     var itemArguments = MachineRecipeService
         .definition(server, ResourceLocation.parse("kubejs:builder_smoke/item_argument_types")).orElseThrow();
+    var fluids = MachineRecipeService
+        .definition(server, ResourceLocation.parse("kubejs:builder_smoke/fluid_row_selectors")).orElseThrow();
+    assertFluidRowSelectors(helper, fluids);
+    var triggered = MachineRecipeService
+        .definition(server, ResourceLocation.parse("kubejs:builder_smoke/trigger_only_fluids")).orElseThrow();
+    helper.assertTrue(
+        triggered.fluidInputRequirements().isEmpty() && triggered.fluidOutputRequirements().isEmpty(),
+        "All fluid rows should be scheduled at their trigger ticks");
+    var rows = triggered.triggeredResources().rows();
+    helper.assertTrue(
+        rows.size() == 2
+            && rows.stream().anyMatch(
+                row -> row.io() == RecipeModifier.Io.INPUT
+                    && row.tick() == 4
+                    && row.amount() == 15
+                    && row.selector().equals("feed"))
+            && rows.stream().anyMatch(
+                row -> row.io() == RecipeModifier.Io.OUTPUT
+                    && row.tick() == 9
+                    && row.amount() == 25
+                    && row.selector().isEmpty()),
+        "Trigger-only fluid inputs and outputs must retain their progress, amount and effective selector");
     var groups = itemArguments.ingredientArrays().inputs();
     helper.assertTrue(
         groups.size() == 2

@@ -1,15 +1,12 @@
 package com.lw.modularmachine.machine.recipe.search;
 
 import com.lw.modularmachine.api.recipe.resource.RecipeResourcePlanning;
-import com.lw.modularmachine.api.recipe.RecipeSelectors;
+import com.lw.modularmachine.api.recipe.FluidRequirement;
 import com.lw.modularmachine.machine.recipe.MachineRecipe;
 import com.lw.modularmachine.machine.recipe.RecipeExecutionTicket;
 import com.lw.modularmachine.machine.recipe.search.index.ResourceInputQuery;
 import com.lw.modularmachine.machine.recipe.search.index.fluid.FluidRecipeIndex;
-import java.util.HashMap;
 import java.util.List;
-import java.util.Map;
-import net.neoforged.neoforge.fluids.FluidStack;
 import org.jetbrains.annotations.ApiStatus;
 
 /**
@@ -19,23 +16,11 @@ import org.jetbrains.annotations.ApiStatus;
 final class FluidRecipeSearchResource implements RecipeSearchResource {
   private final RecipeCatalog catalog;
   private final FluidRecipeIndex index;
-  private final Map<String, List<FluidStack>> inputs;
-  private final Map<String, List<FluidStack>> outputs;
 
   FluidRecipeSearchResource(RecipeCatalog catalog) {
     this.catalog = catalog;
     var ids = catalog.recipes().candidates().stream().map(RecipeCandidate::id).toList();
-    var capturedInputs = new HashMap<String, List<FluidStack>>();
-    var capturedOutputs = new HashMap<String, List<FluidStack>>();
-    var selectors = new HashMap<String, RecipeSelectors>();
-    for (var id : ids) {
-      capturedInputs.put(id, catalog.fluidInputs(id));
-      capturedOutputs.put(id, catalog.fluidOutputs(id));
-      selectors.put(id, catalog.selectors(id));
-    }
-    inputs = Map.copyOf(capturedInputs);
-    outputs = Map.copyOf(capturedOutputs);
-    index = new FluidRecipeIndex(ids, inputs, selectors);
+    index = new FluidRecipeIndex(ids, catalog::fluidInputRequirements, catalog::selectors);
   }
 
   @Override
@@ -54,7 +39,8 @@ final class FluidRecipeSearchResource implements RecipeSearchResource {
       @Override
       public boolean available(String recipeId, MachineRecipe definition) {
         var selectors = definition == null ? catalog.selectors(recipeId) : definition.selectors();
-        var requiredInputs = definition == null ? inputs.getOrDefault(recipeId, List.of()) : definition.fluidInputs();
+        var requiredInputs = definition == null ? catalog.fluidInputRequirements(recipeId) : definition
+            .fluidInputRequirements();
         var requiredOutputs = requiredOutputs(recipeId, definition);
 
         return fluids.inputsAvailable(requiredInputs, selectors.fluidInput())
@@ -66,7 +52,7 @@ final class FluidRecipeSearchResource implements RecipeSearchResource {
         if (layout == null) {
           layout = new FluidOutputLayout(ticket, ticket.level().registryAccess());
         }
-        var planning = layout.plan(
+        var planning = layout.planRequirements(
             requiredOutputs(recipeId, definition),
             definition == null ? catalog.selectors(recipeId).fluidOutput() : definition.selectors().fluidOutput());
 
@@ -75,7 +61,8 @@ final class FluidRecipeSearchResource implements RecipeSearchResource {
     };
   }
 
-  private List<FluidStack> requiredOutputs(String recipeId, MachineRecipe definition) {
-    return definition == null ? outputs.getOrDefault(recipeId, List.of()) : definition.guaranteedFluidOutputs();
+  private List<FluidRequirement> requiredOutputs(String recipeId, MachineRecipe definition) {
+    return definition == null ? catalog.guaranteedFluidOutputs(recipeId) : definition
+        .guaranteedFluidOutputRequirements();
   }
 }

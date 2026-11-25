@@ -7,7 +7,9 @@ import com.lw.modularmachine.machine.PortKind;
 import com.lw.modularmachine.machine.structure.MachineDefinition;
 import com.lw.modularmachine.machine.structure.CompiledStructure;
 import java.lang.ref.WeakReference;
+import java.util.EnumMap;
 import java.util.EnumSet;
+import java.util.HashSet;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
@@ -134,55 +136,57 @@ final class FrozenRecipeBindings {
   }
 
   void validateResources(JsonObject declaration, RecipeSelectors selectors, ChemicalRecipeData chemicals) {
+    var available = availableSelectors();
     if (declaration.has("triggered_resources")) {
       for (var value : declaration.getAsJsonArray("triggered_resources")) {
         var row = value.getAsJsonObject();
         requirePort(
+            available,
             PortKind.valueOf(
                 row.get("resource").getAsString().toUpperCase(Locale.ROOT) + "_" + row.get("io").getAsString()
                     .toUpperCase(Locale.ROOT)),
             row.has("selector") ? row.get("selector").getAsString() : "");
       }
     }
-    if (!declaration.getAsJsonArray("inputs").isEmpty()
-        && !logicalPorts.containsValue(PortKind.ITEM_INPUT)
-        && !patternInputs.contains(PortKind.ITEM_INPUT)
-        || hasRequiredOutputs(declaration, "outputs") && !logicalPorts.containsValue(PortKind.ITEM_OUTPUT)) {
+    if (!declaration.getAsJsonArray("inputs").isEmpty() && !available.containsKey(PortKind.ITEM_INPUT)
+        || hasRequiredOutputs(declaration, "outputs") && !available.containsKey(PortKind.ITEM_OUTPUT)) {
       throw new IllegalArgumentException("Item requirements lack logical item ports");
     }
-    chemicals.inputs().forEach(value -> requirePort(PortKind.CHEMICAL_INPUT, value.selector()));
-    chemicals.perTick().forEach(value -> requirePort(PortKind.CHEMICAL_INPUT, value.selector()));
+    chemicals.inputs().forEach(value -> requirePort(available, PortKind.CHEMICAL_INPUT, value.selector()));
+    chemicals.perTick().forEach(value -> requirePort(available, PortKind.CHEMICAL_INPUT, value.selector()));
     chemicals.outputs().stream().filter(value -> !value.ignoreOutputCheck())
-        .forEach(value -> requirePort(PortKind.CHEMICAL_OUTPUT, value.selector()));
-    chemicals.perTickOutputs().forEach(value -> requirePort(PortKind.CHEMICAL_OUTPUT, value.selector()));
-    if (declaration.has("fluid_inputs")) {
-      requirePort(PortKind.FLUID_INPUT, selectors.fluidInput());
-    }
-    if (hasRequiredOutputs(declaration, "fluid_outputs")) {
-      requirePort(PortKind.FLUID_OUTPUT, selectors.fluidOutput());
-    }
+        .forEach(value -> requirePort(available, PortKind.CHEMICAL_OUTPUT, value.selector()));
+    chemicals.perTickOutputs().forEach(value -> requirePort(available, PortKind.CHEMICAL_OUTPUT, value.selector()));
+    requireFluidPorts(available, declaration, "fluid_inputs", PortKind.FLUID_INPUT, selectors.fluidInput());
+    requireFluidPorts(available, declaration, "fluid_outputs", PortKind.FLUID_OUTPUT, selectors.fluidOutput());
     if (declaration.has("fluid_per_tick")) {
-      requirePort(PortKind.FLUID_INPUT, selectors.fluidPerTick());
+      requirePort(available, PortKind.FLUID_INPUT, selectors.fluidPerTick());
     }
-    if (declaration.has("fluid_per_tick_inputs")) {
-      for (var row : declaration.getAsJsonArray("fluid_per_tick_inputs")) {
-        var fluid = row.getAsJsonObject();
-        String selector = fluid.has("selector") ? fluid.get("selector").getAsString() : selectors.fluidPerTick();
-        requirePort(PortKind.FLUID_INPUT, selector);
-      }
-    }
-    if (declaration.has("fluid_per_tick_outputs")) {
-      for (var row : declaration.getAsJsonArray("fluid_per_tick_outputs")) {
-        var fluid = row.getAsJsonObject();
-        requirePort(PortKind.FLUID_OUTPUT, fluid.has("selector") ? fluid.get("selector").getAsString() : "");
-      }
-    }
+    requireFluidPorts(available, declaration, "fluid_per_tick_inputs", PortKind.FLUID_INPUT, selectors.fluidPerTick());
+    requireFluidPorts(available, declaration, "fluid_per_tick_outputs", PortKind.FLUID_OUTPUT, "");
     if (declaration.has("energy_per_tick") && declaration.get("energy_per_tick").getAsLong() > 0) {
-      requirePort(PortKind.ENERGY_INPUT, selectors.energyInput());
+      requirePort(available, PortKind.ENERGY_INPUT, selectors.energyInput());
     }
     if (declaration.has("energy_output_per_tick") && declaration.get("energy_output_per_tick").getAsLong() > 0) {
-      requirePort(PortKind.ENERGY_OUTPUT, selectors.energyOutput());
+      requirePort(available, PortKind.ENERGY_OUTPUT, selectors.energyOutput());
     }
+  }
+
+  private Map<PortKind, Set<String>> availableSelectors() {
+    var available = new EnumMap<PortKind, Set<String>>(PortKind.class);
+    logicalPorts.forEach((id, kind) -> {
+      // Item presence checks accept any group; routed requirements use only eligible
+      // selectors.
+      var selectors = available.computeIfAbsent(kind, ignored -> new HashSet<>());
+      int group = logicalInputGroups.get(id);
+      if (!kind.isInput() || group == InputGroup.SHARED || group == inputGroup) {
+        selectors.add(logicalSelectors.get(id));
+      }
+    });
+    for (var kind : patternInputs) {
+      available.computeIfAbsent(kind, ignored -> new HashSet<>()).add(patternSource.selector());
+    }
+    return available;
   }
 
   private static boolean hasRequiredOutputs(JsonObject declaration, String field) {
@@ -199,15 +203,20 @@ final class FrozenRecipeBindings {
     return false;
   }
 
-  private void requirePort(PortKind kind, String selector) {
-    boolean found = patternInputs.contains(kind) && selector.equals(patternSource.selector())
-        || logicalPorts.entrySet().stream().anyMatch(
-            entry -> entry.getValue() == kind
-                && selector.equals(logicalSelectors.get(entry.getKey()))
-                && (!kind.isInput()
-                    || logicalInputGroups.get(entry.getKey()) == InputGroup.SHARED
-                    || logicalInputGroups.get(entry.getKey()) == inputGroup));
-    if (!found) {
+  private static void requireFluidPorts(Map<PortKind, Set<String>> available, JsonObject declaration, String field, PortKind kind, String defaultSelector) {
+    if (declaration.has(field)) {
+      for (var value : declaration.getAsJsonArray(field)) {
+        var row = value.getAsJsonObject();
+        if (row.has("ignore_output_check") && row.get("ignore_output_check").getAsBoolean()) {
+          continue;
+        }
+        requirePort(available, kind, row.has("selector") ? row.get("selector").getAsString() : defaultSelector);
+      }
+    }
+  }
+
+  private static void requirePort(Map<PortKind, Set<String>> available, PortKind kind, String selector) {
+    if (!available.getOrDefault(kind, Set.of()).contains(selector)) {
       throw new IllegalArgumentException("Frozen recipe lacks a matching " + kind.path() + " port");
     }
   }

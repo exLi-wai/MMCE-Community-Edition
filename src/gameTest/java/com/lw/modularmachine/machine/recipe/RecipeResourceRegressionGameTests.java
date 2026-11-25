@@ -3,6 +3,8 @@ package com.lw.modularmachine.machine.recipe;
 import com.google.gson.JsonObject;
 import com.google.gson.JsonParser;
 import com.lw.modularmachine.api.orientation.MachineOrientation;
+import com.lw.modularmachine.api.recipe.MachineRecipeBuilder;
+import com.lw.modularmachine.api.recipe.RecipeSelectors;
 import com.lw.modularmachine.api.upgrade.UpgradeSnapshot;
 import com.lw.modularmachine.block.FactoryControllerBlock;
 import com.lw.modularmachine.block.MachineControllerBlock;
@@ -263,6 +265,39 @@ public final class RecipeResourceRegressionGameTests {
     helper.assertTrue(
         changes.values().stream().flatMap(List::stream).filter(stack -> stack.is(Items.BUCKET)).count() == 2,
         "Container fuel shared heat or lost a bucket");
+    helper.succeed();
+  }
+
+  @GameTest(template = "empty16", timeoutTicks = 80)
+  public static void start_and_finish_fluid_rows_keep_distinct_selectors_through_the_native_codec(GameTestHelper helper) {
+    var registries = helper.getLevel().registryAccess();
+    var water = new FluidStack(Fluids.WATER, 50);
+    var defaults = new RecipeSelectors("feed", "waste", "", "coolant");
+    var source = MachineRecipeBuilder.create(ResourceLocation.parse("mmcece:mmcece/routed_fluid"), MACHINE, 5)
+        .selectors(defaults).fluidInput(water).fluidInput(water, 1, "").fluidInput(water, 1, "rinse").fluidOutput(water)
+        .fluidOutput(water, 0.5, "").fluidOutput(water, 1, "steam").fluidPerTickInput(water).toJson(registries);
+    var buffer = new RegistryFriendlyByteBuf(Unpooled.buffer(), registries);
+    try {
+      MachineRecipe.STREAM_CODEC.encode(buffer, decode(helper, source));
+      var recipe = MachineRecipe.STREAM_CODEC.decode(buffer);
+      helper.assertTrue(
+          recipe.fluidInputRequirements().stream().map(row -> row.selector(defaults.fluidInput())).toList()
+              .equals(List.of("feed", "", "rinse")),
+          "Native codec changed startup fluid selectors");
+      helper.assertTrue(
+          recipe.fluidOutputRequirements().stream().map(row -> row.selector(defaults.fluidOutput())).toList()
+              .equals(List.of("waste", "", "steam")),
+          "Native codec changed completion fluid selectors");
+      helper.assertTrue(
+          recipe.guaranteedFluidOutputRequirements().stream().map(row -> row.selector(defaults.fluidOutput())).toList()
+              .equals(List.of("waste", "steam")),
+          "Guaranteed output declarations lost their selectors or included an optional output");
+      helper.assertTrue(
+          recipe.fluidPerTickInputs().getFirst().selector(defaults.fluidPerTick()).equals("coolant"),
+          "An omitted builder selector replaced the tick phase default");
+    } finally {
+      buffer.release();
+    }
     helper.succeed();
   }
 

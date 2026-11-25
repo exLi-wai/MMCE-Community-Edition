@@ -62,11 +62,11 @@ public final class RecipeResourceRequirements {
     }
     var ports = new HashSet<RequiredPort>();
     String id = candidate.id();
-    if (!catalog.fluidInputs(id).isEmpty()) {
-      ports.add(new RequiredPort(PortKind.FLUID_INPUT, catalog.selectors(id).fluidInput()));
+    for (var row : catalog.fluidInputRequirements(id)) {
+      ports.add(new RequiredPort(PortKind.FLUID_INPUT, row.selector(catalog.selectors(id).fluidInput())));
     }
-    if (!catalog.fluidOutputs(id).isEmpty()) {
-      ports.add(new RequiredPort(PortKind.FLUID_OUTPUT, catalog.selectors(id).fluidOutput()));
+    for (var row : catalog.guaranteedFluidOutputs(id)) {
+      ports.add(new RequiredPort(PortKind.FLUID_OUTPUT, row.selector(catalog.selectors(id).fluidOutput())));
     }
     candidate.inputs().forEach(input -> ports.add(new RequiredPort(PortKind.ITEM_INPUT, input.key().selector())));
     candidate.outputs().stream().filter(output -> !output.ignoreOutputCheck())
@@ -112,11 +112,13 @@ public final class RecipeResourceRequirements {
         ports.add(new RequiredPort(PortKind.ITEM_OUTPUT, output.selector()));
       }
     }
-    if (!recipe.fluidInputRequirements().isEmpty()) {
-      ports.add(new RequiredPort(PortKind.FLUID_INPUT, recipe.selectors().fluidInput()));
+    for (var input : recipe.fluidInputRequirements()) {
+      ports.add(new RequiredPort(PortKind.FLUID_INPUT, input.selector(recipe.selectors().fluidInput())));
     }
-    if (recipe.fluidOutputRequirements().stream().anyMatch(output -> !output.ignoreOutputCheck())) {
-      ports.add(new RequiredPort(PortKind.FLUID_OUTPUT, recipe.selectors().fluidOutput()));
+    for (var output : recipe.fluidOutputRequirements()) {
+      if (!output.ignoreOutputCheck()) {
+        ports.add(new RequiredPort(PortKind.FLUID_OUTPUT, output.selector(recipe.selectors().fluidOutput())));
+      }
     }
     if (recipe.energyPerTick() > 0) {
       ports.add(new RequiredPort(PortKind.ENERGY_INPUT, recipe.selectors().energyInput()));

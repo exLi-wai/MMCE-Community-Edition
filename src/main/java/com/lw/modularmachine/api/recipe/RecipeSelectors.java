@@ -9,8 +9,7 @@ import com.mojang.serialization.codecs.RecordCodecBuilder;
 import java.util.Set;
 
 /**
- * Fluid/energy phases select one disjoint port cohort; item requirements carry
- * their own selector.
+ * Default port groups for fluid rows and port groups for energy phases.
  */
 public record RecipeSelectors(
     String fluidInput,

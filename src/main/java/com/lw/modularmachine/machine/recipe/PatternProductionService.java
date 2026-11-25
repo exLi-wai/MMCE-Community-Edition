@@ -502,9 +502,10 @@ public final class PatternProductionService {
         }
         add(outputs, new NetworkPortResource.Item(item.prototype(level.registryAccess())), item.amount(), level);
       }
-      for (var fluid : recipe.fluidInputs()) {
+      for (var row : recipe.fluidInputRequirements()) {
+        var fluid = row.stack();
         add(
-            inputs.computeIfAbsent(recipe.selectors().fluidInput(), ignored -> new HashMap<>()),
+            inputs.computeIfAbsent(row.selector(recipe.selectors().fluidInput()), ignored -> new HashMap<>()),
             new NetworkPortResource.Fluid(fluid),
             fluid.getAmount(),
             level);

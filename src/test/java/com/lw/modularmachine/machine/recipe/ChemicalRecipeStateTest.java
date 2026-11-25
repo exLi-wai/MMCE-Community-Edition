@@ -116,8 +116,12 @@ class ChemicalRecipeStateTest {
     assertTrue(recovered.definition().getList("outputs", Tag.TAG_COMPOUND).isEmpty());
 
     var changedGroup = recovered.save();
-    changedGroup.getList("ports", Tag.TAG_COMPOUND).getCompound(0).putInt("input_group", 8);
+    var recoveredPorts = changedGroup.getList("ports", Tag.TAG_COMPOUND);
+    recoveredPorts.add(port("other", "CHEMICAL_INPUT", "other", 7));
+    recoveredPorts.getCompound(0).putInt("input_group", 8);
     assertThrows(IllegalArgumentException.class, () -> FrozenRecipeRun.read(changedGroup));
+    recoveredPorts.getCompound(0).putInt("input_group", InputGroup.SHARED);
+    assertEquals(7, FrozenRecipeRun.read(changedGroup).inputGroup());
   }
 
   private static CompoundTag port(String id, String kind, String selector, int group) {

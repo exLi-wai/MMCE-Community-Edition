@@ -528,9 +528,7 @@ public final class KubeJSRecipeBuilder {
         throw new IllegalArgumentException("Too many fluid-per-tick requirements");
       }
       lastFluid = new FluidRow(detachedFluid(fluid));
-      if (!output) {
-        lastFluid.selector = fluidPerTickSelector;
-      }
+      lastFluid.selector = output ? "" : fluidPerTickSelector;
       rows.add(lastFluid);
       last = output ? LastRequirement.FLUID_PER_TICK_OUTPUT : LastRequirement.FLUID_PER_TICK;
       lastItem = null;
@@ -981,17 +979,13 @@ public final class KubeJSRecipeBuilder {
         setEnergyOutputTag(selector);
       } else if (last == LastRequirement.CHEMICAL && lastChemical != null) {
         lastChemical.selector = selector;
-      } else if (last == LastRequirement.FLUID_INPUT) {
-        setFluidInputTag(selector);
-      } else if (last == LastRequirement.FLUID_OUTPUT) {
-        setFluidOutputTag(selector);
-      } else if (last == LastRequirement.FLUID_PER_TICK) {
-        lastFluid.selector = selector;
-      } else if (last == LastRequirement.FLUID_PER_TICK_OUTPUT) {
+      } else if (last == LastRequirement.FLUID_INPUT
+          || last == LastRequirement.FLUID_OUTPUT
+          || last == LastRequirement.FLUID_PER_TICK
+          || last == LastRequirement.FLUID_PER_TICK_OUTPUT) {
         lastFluid.selector = selector;
       } else {
-        throw new IllegalStateException(
-            "Tags require a last item, chemical, fluid phase, or unique energy requirement");
+        throw new IllegalStateException("Tags require a last item, chemical, fluid, or unique energy requirement");
       }
       return this;
     }
@@ -1447,31 +1441,15 @@ public final class KubeJSRecipeBuilder {
       if (!fluidPerTickInputs.isEmpty()) {
         json.add(
             "fluid_per_tick_inputs",
-            encode(
-                FluidRequirement.CODEC.listOf(),
-                fluidPerTickInputs.stream().map(FluidRow::tickRequirement).toList()));
+            encode(FluidRequirement.CODEC.listOf(), fluidPerTickInputs.stream().map(FluidRow::requirement).toList()));
       }
       if (!fluidPerTickOutputs.isEmpty()) {
         json.add(
             "fluid_per_tick_outputs",
-            encode(
-                FluidRequirement.CODEC.listOf(),
-                fluidPerTickOutputs.stream().map(FluidRow::tickRequirement).toList()));
+            encode(FluidRequirement.CODEC.listOf(), fluidPerTickOutputs.stream().map(FluidRow::requirement).toList()));
       }
-      if (!fluidInputs.isEmpty()) {
-        json.add(
-            "fluid_inputs",
-            encode(
-                FluidRequirement.CODEC.listOf(),
-                fluidInputs.stream().filter(row -> row.triggerTime == 0).map(FluidRow::requirement).toList()));
-      }
-      if (!fluidOutputs.isEmpty()) {
-        json.add(
-            "fluid_outputs",
-            encode(
-                FluidRequirement.CODEC.listOf(),
-                fluidOutputs.stream().filter(row -> row.triggerTime == 0).map(FluidRow::requirement).toList()));
-      }
+      addUntimedFluids(json, "fluid_inputs", fluidInputs);
+      addUntimedFluids(json, "fluid_outputs", fluidOutputs);
       var chemicals = new ChemicalRecipeData(
           chemicalInputs.stream().filter(row -> row.triggerTime == 0).map(ChemicalRow::requirement).toList(),
           chemicalOutputs.stream().filter(row -> row.triggerTime == 0).map(ChemicalRow::requirement).toList(),
@@ -1523,6 +1501,13 @@ public final class KubeJSRecipeBuilder {
       return array;
     }
 
+    private void addUntimedFluids(JsonObject json, String field, List<FluidRow> rows) {
+      var ordinary = rows.stream().filter(row -> row.triggerTime == 0).map(FluidRow::requirement).toList();
+      if (!ordinary.isEmpty()) {
+        json.add(field, encode(FluidRequirement.CODEC.listOf(), ordinary));
+      }
+    }
+
     private TriggeredResourceData triggeredRows() {
       var rows = new ArrayList<TriggeredResourceData.Row>();
       for (var source : List.of(inputs, outputs)) {
@@ -1563,7 +1548,9 @@ public final class KubeJSRecipeBuilder {
                     row.triggerRepeatable,
                     row.stack.getAmount(),
                     row.chance,
-                    source == fluidInputs ? fluidInputSelector : fluidOutputSelector,
+                    Objects.requireNonNullElse(
+                        row.selector,
+                        source == fluidInputs ? fluidInputSelector : fluidOutputSelector),
                     Optional.empty(),
                     Optional.of(row.stack.copyWithAmount(1)),
                     Optional.empty(),

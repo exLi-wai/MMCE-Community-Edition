@@ -97,11 +97,12 @@ public final class MachineRecipeBuilder {
   }
 
   public MachineRecipeBuilder fluidPerTick(FluidStack fluid) {
-    return fluidPerTickInput(fluid, 1, "");
+    return fluidPerTickInput(fluid);
   }
 
   public MachineRecipeBuilder fluidPerTickInput(FluidStack fluid) {
-    return fluidPerTickInput(fluid, 1, "");
+    fluidPerTickInputs.add(new FluidRequirement(requireFluid(fluid), 1));
+    return this;
   }
 
   public MachineRecipeBuilder fluidPerTickInput(FluidStack fluid, double chance, String selector) {
@@ -110,7 +111,8 @@ public final class MachineRecipeBuilder {
   }
 
   public MachineRecipeBuilder fluidPerTickOutput(FluidStack fluid) {
-    return fluidPerTickOutput(fluid, 1, "");
+    fluidPerTickOutputs.add(new FluidRequirement(requireFluid(fluid), 1));
+    return this;
   }
 
   public MachineRecipeBuilder fluidPerTickOutput(FluidStack fluid, double chance, String selector) {
@@ -127,12 +129,22 @@ public final class MachineRecipeBuilder {
     return this;
   }
 
+  public MachineRecipeBuilder fluidInput(FluidStack fluid, double chance, String selector) {
+    fluidInputs.add(new FluidRequirement(requireFluid(fluid), chance, false, selector));
+    return this;
+  }
+
   public MachineRecipeBuilder fluidOutput(FluidStack fluid) {
     return fluidOutput(fluid, 1);
   }
 
   public MachineRecipeBuilder fluidOutput(FluidStack fluid, double chance) {
     fluidOutputs.add(new FluidRequirement(requireFluid(fluid), chance));
+    return this;
+  }
+
+  public MachineRecipeBuilder fluidOutput(FluidStack fluid, double chance, String selector) {
+    fluidOutputs.add(new FluidRequirement(requireFluid(fluid), chance, false, selector));
     return this;
   }
 

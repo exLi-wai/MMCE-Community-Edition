@@ -245,7 +245,7 @@ public final class MachineRecipeDisplay {
     if (perTick) {
       selector = input ? row.selector(recipe.selectors().fluidPerTick()) : row.selector();
     } else {
-      selector = input ? recipe.selectors().fluidInput() : recipe.selectors().fluidOutput();
+      selector = row.selector(input ? recipe.selectors().fluidInput() : recipe.selectors().fluidOutput());
     }
     var result = new ArrayList<Component>();
     result.add(

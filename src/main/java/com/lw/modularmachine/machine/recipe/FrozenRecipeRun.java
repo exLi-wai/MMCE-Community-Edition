@@ -534,16 +534,16 @@ public final class FrozenRecipeRun {
    * The original full demand remains frozen; only the one-time consumed quantity
    * is sampled.
    */
-  List<FluidStack> fluidInputClaims(HolderLookup.Provider registries) {
+  List<FluidRequirement> fluidInputClaims(HolderLookup.Provider registries) {
     var rows = FrozenRecipeSampling.sampledFluids(
         data.getCompound("definition").getList("fluid_inputs", Tag.TAG_COMPOUND),
         randomSeed,
         parallelInstances,
         true);
-    var result = new ArrayList<FluidStack>();
+    var result = new ArrayList<FluidRequirement>();
     for (int index = 0; index < rows.size(); index++) {
       result.add(
-          FluidStack.CODEC.parse(registries.createSerializationContext(NbtOps.INSTANCE), rows.getCompound(index))
+          FluidRequirement.CODEC.parse(registries.createSerializationContext(NbtOps.INSTANCE), rows.getCompound(index))
               .getOrThrow());
     }
     return List.copyOf(result);

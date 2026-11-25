@@ -494,9 +494,6 @@ public final class MachineRecipeJson {
         throw error(path + ".parallel_unaffected", "Per-tick fluids scale with every parallel instance");
       }
       if (fluid.has("selector")) {
-        if (!field.startsWith("fluid_per_tick")) {
-          throw error(path + ".selector", "Start and completion fluids use their phase selector");
-        }
         ResourceSelector.require(string(fluid.get("selector"), path + ".selector"));
       }
       identifier(fluid.get("id"), path + ".id");

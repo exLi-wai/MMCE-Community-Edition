@@ -1,3 +1,14 @@
+function addSelectorProbeFluids(builder) {
+  return builder.setFluidInputTag('feed')
+    .addFluidInput(Fluid.of('minecraft:water', 10))
+    .addFluidInput(Fluid.of('minecraft:water', 20)).setTag('')
+    .addFluidInput(Fluid.of('minecraft:lava', 30)).setTag('hot')
+    .addFluidOutput(Fluid.of('minecraft:water', 40)).setTag('return')
+    .addFluidOutput(Fluid.of('minecraft:water', 50)).setTriggerTime(2)
+    .addFluidOutput(Fluid.of('minecraft:water', 60)).setTriggerTime(3).setTag('')
+    .setFluidOutputTag('drain')
+}
+
 MMCECERecipeAdapterEvents.register(event => {
   event.create('mmcece:test_missing_resource_ports', 'minecraft:furnace')
     .setImportId('crt_naming_smoke')
@@ -5,6 +16,11 @@ MMCECERecipeAdapterEvents.register(event => {
     .addEnergyPerTickInput(16)
     .setDuration(20)
     .setPriority(5)
+    .setSourceRecipes(['minecraft:iron_ingot_from_smelting_iron_ore'])
+    .build()
+
+  addSelectorProbeFluids(event.create('mmcece:test_fluid_row_routes', 'minecraft:furnace'))
+    .setImportId('selector_probe')
     .setSourceRecipes(['minecraft:iron_ingot_from_smelting_iron_ore'])
     .build()
 
@@ -26,6 +42,14 @@ ServerEvents.recipes(event => {
     .build()
 
   const triggerProbe = id => RecipeBuilder.newBuilder(event, 'kubejs:builder_smoke/' + id, 'mmcece:test_missing_resource_ports', 20)
+  addSelectorProbeFluids(RecipeBuilder.newBuilder(event, 'kubejs:builder_smoke/fluid_row_selectors',
+    'mmcece:test_fluid_row_routes', 20)).build()
+  RecipeBuilder.newBuilder(event, 'kubejs:builder_smoke/trigger_only_fluids', 'mmcece:test_fluid_row_routes', 20)
+    .setFluidInputTag('feed')
+    .addFluidInput(Fluid.of('minecraft:water', 15)).setTriggerTime(4)
+    .setFluidOutputTag('drain')
+    .addFluidOutput(Fluid.of('minecraft:lava', 25)).setTag('').setTriggerTime(9)
+    .build()
   const rejectPreview = builder => {
     try {
       builder.build()

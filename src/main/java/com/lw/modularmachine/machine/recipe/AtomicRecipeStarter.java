@@ -225,7 +225,7 @@ public final class AtomicRecipeStarter {
       // acquisition.
       patterns.bindStart(checked.orElseThrow(), List.of(run));
       for (var debit : fluidDebits) {
-        var port = ports.get(debit.partId());
+        var port = debit.port();
         if (port.patternInput()) {
           patterns.consumeFluid(port, debit.amount());
         }
@@ -265,7 +265,7 @@ public final class AtomicRecipeStarter {
         }
       }
       for (var debit : fluidDebits) {
-        if (!ports.get(debit.partId()).patternInput() && !fluidLeases.get(debit.partId()).drainExact(debit.amount())) {
+        if (!debit.port().patternInput() && !fluidLeases.get(debit.port().partId()).drainExact(debit.amount())) {
           return Result.STALE;
         }
       }
@@ -382,13 +382,9 @@ public final class AtomicRecipeStarter {
   private static List<StartupFluidAllocation.Debit> planFluidDebits(RecipeExecutionTicket checked, MachineRecipe recipe, FrozenRecipeRun run, int instances, HolderLookup.Provider registries) {
     var required = StartupFluidAllocation.plan(
         checked,
-        recipe.fluidInputRequirements().stream()
-            .map(
-                requirement -> requirement.stack().copyWithAmount(
-                    requirement.parallelUnaffected() ? requirement.stack().getAmount() : Math
-                        .multiplyExact(requirement.stack().getAmount(), instances)))
-            .toList(),
-        recipe.selectors().fluidInput());
+        recipe.fluidInputRequirements(),
+        recipe.selectors().fluidInput(),
+        row -> row.parallelUnaffected() ? 1 : instances);
     if (required == null) {
       return null;
     }

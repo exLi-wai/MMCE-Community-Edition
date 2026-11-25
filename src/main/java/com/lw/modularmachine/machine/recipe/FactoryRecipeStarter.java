@@ -121,8 +121,10 @@ public final class FactoryRecipeStarter {
             slot,
             contents.get(slot).copyWithCount(Math.toIntExact(contents.get(slot).getCount() - deduction.count())));
       }
-      var fluidDebits = StartupFluidAllocation
-          .plan(ticket, nativeRecipe.orElseThrow().fluidInputs(), nativeRecipe.orElseThrow().selectors().fluidInput());
+      var fluidDebits = StartupFluidAllocation.plan(
+          ticket,
+          nativeRecipe.orElseThrow().fluidInputRequirements(),
+          nativeRecipe.orElseThrow().selectors().fluidInput());
       if (fluidDebits == null) {
         return Result.STALE;
       }
@@ -203,7 +205,7 @@ public final class FactoryRecipeStarter {
       }
       patterns.bindStart(ticket, List.of(run));
       for (var debit : fluidDebits) {
-        var port = ports.get(debit.partId());
+        var port = debit.port();
         if (port.patternInput()) {
           patterns.consumeFluid(port, debit.amount());
         }
@@ -220,7 +222,7 @@ public final class FactoryRecipeStarter {
       }
       resources.acquire(ticket, replacements, !fluidDebits.isEmpty());
       for (var debit : fluidDebits) {
-        if (!ports.get(debit.partId()).patternInput() && !resources.drainFluid(debit.partId(), debit.amount())) {
+        if (!debit.port().patternInput() && !resources.drainFluid(debit.port().partId(), debit.amount())) {
           return Result.STALE;
         }
       }

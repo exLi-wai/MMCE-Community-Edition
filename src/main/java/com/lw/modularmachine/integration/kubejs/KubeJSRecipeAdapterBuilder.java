@@ -247,13 +247,9 @@ public final class KubeJSRecipeAdapterBuilder extends KubeJSResourceRecipeBuilde
       var fluid = source.deepCopy();
       fluid.remove("chance");
       fluid.remove("parallel_unaffected");
+      fluid.remove("selector");
       fluid.addProperty("amount", 1);
       row.add("fluid", fluid);
-      source.addProperty(
-          "selector",
-          selectors.getOrDefault(
-              phase == TriggerPhase.FLUID_INPUT ? RecipeAdapterCustomization.Phase.FLUID_INPUT : RecipeAdapterCustomization.Phase.FLUID_OUTPUT,
-              ""));
     } else {
       source = ChemicalRequirement.CODEC
           .encodeStart(
@@ -934,9 +930,8 @@ public final class KubeJSRecipeAdapterBuilder extends KubeJSResourceRecipeBuilde
             lastChemicals.size() - 1,
             new ChemicalRequirement(previous.chemical(), previous.amount(), selector, previous.chance()));
       }
-      case FLUID_INPUT -> cohort(RecipeAdapterCustomization.Phase.FLUID_INPUT, selector);
-      case FLUID_OUTPUT -> cohort(RecipeAdapterCustomization.Phase.FLUID_OUTPUT, selector);
-      case FLUID_PER_TICK, FLUID_PER_TICK_OUTPUT -> setLastFluidProperty("selector", new JsonPrimitive(selector));
+      case FLUID_INPUT, FLUID_OUTPUT, FLUID_PER_TICK, FLUID_PER_TICK_OUTPUT ->
+        setLastFluidProperty("selector", new JsonPrimitive(selector));
       case ENERGY -> {
         if (energyRequirements != 1) {
           throw owner.reject("Adapter energy tags require one energy requirement");

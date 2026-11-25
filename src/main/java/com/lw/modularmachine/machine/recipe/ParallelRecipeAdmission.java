@@ -41,7 +41,8 @@ final class ParallelRecipeAdmission {
     for (var requirement : definition.fluidInputRequirements()) {
       var fluid = requirement.stack();
       (aggregateDefinition && requirement.parallelUnaffected() ? fixedFluids : requiredFluids).merge(
-          new FluidResourceKey(fluid, plan.source().level().registryAccess()),
+          new FluidResourceKey(fluid, plan.source().level().registryAccess())
+              .withSelector(requirement.selector(definition.selectors().fluidInput())),
           (long) fluid.getAmount(),
           Math::addExact);
       if (aggregateDefinition && !requirement.parallelUnaffected()) {
@@ -54,7 +55,7 @@ final class ParallelRecipeAdmission {
       long available = 0;
       for (var port : plan.source().ports()) {
         if (port.kind() == PortKind.FLUID_INPUT
-            && port.selector().equals(definition.selectors().fluidInput())
+            && port.selector().equals(key.selector())
             && FluidStack.isSameFluidSameComponents(key.amount(1), port.fluid())) {
           available = Math.addExact(available, port.fluidAmount());
         }
@@ -122,7 +123,7 @@ final class ParallelRecipeAdmission {
         .map(
             requirement -> new RecipeCandidate.Output<>(
                 new FluidResourceKey(requirement.stack(), plan.source().level().registryAccess())
-                    .withSelector(definition.selectors().fluidOutput()),
+                    .withSelector(requirement.selector(definition.selectors().fluidOutput())),
                 requirement.parallelUnaffected() && aggregateDefinition ? requirement.stack().getAmount() : Math
                     .multiplyExact((long) requirement.stack().getAmount(), instances),
                 false,

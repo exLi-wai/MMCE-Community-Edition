@@ -10,6 +10,7 @@ import com.lw.modularmachine.machine.recipe.search.index.ResourceInputQuery;
 import com.lw.modularmachine.machine.recipe.search.index.ResourceCandidateSelection;
 import com.lw.modularmachine.api.recipe.RecipeModifier;
 import com.lw.modularmachine.api.recipe.RecipeSelectors;
+import com.lw.modularmachine.api.recipe.FluidRequirement;
 import java.util.Collection;
 import java.util.ArrayList;
 import java.util.BitSet;
@@ -33,8 +34,8 @@ public final class RecipeCatalog {
   private static final int DIAGNOSTIC_PORT_SLICE = 32;
   private final ResourceLocation machineId;
   private final CompiledRecipeSet<ItemResourceKey> recipes;
-  private final Map<String, List<FluidStack>> fluidInputs;
-  private final Map<String, List<FluidStack>> fluidOutputs;
+  private final Map<String, List<FluidRequirement>> fluidInputs;
+  private final Map<String, List<FluidRequirement>> fluidOutputs;
   private final BooleanSupplier authority;
   private final RecipeCatalog root;
   private final Map<String, MachineRecipe> definitions;
@@ -54,24 +55,15 @@ public final class RecipeCatalog {
    * for their candidates.
    */
   public static RecipeCatalog fromDefinitions(ResourceLocation machineId, Collection<RecipeCandidate<ItemResourceKey>> candidates, Map<String, MachineRecipe> definitions, BooleanSupplier authority, RecipeCatalog root, List<RecipeModifier> contextRules) {
-    var inputs = new HashMap<String, List<FluidStack>>();
-    var outputs = new HashMap<String, List<FluidStack>>();
-    var selectors = new HashMap<String, RecipeSelectors>();
-    definitions.forEach((id, recipe) -> {
-      inputs.put(id, recipe.fluidInputs());
-      outputs.put(id, recipe.guaranteedFluidOutputs());
-      selectors.put(id, recipe.selectors());
-    });
     return new RecipeCatalog(
         machineId,
         new CompiledRecipeSet<>(candidates),
-        inputs,
-        outputs,
+        Map.of(),
+        Map.of(),
         authority,
         root,
         definitions,
-        contextRules,
-        selectors);
+        contextRules);
   }
 
   public RecipeCatalog(ResourceLocation machineId, Collection<RecipeCandidate<ItemResourceKey>> candidates) {
@@ -97,12 +89,14 @@ public final class RecipeCatalog {
   public RecipeCatalog(ResourceLocation machineId, CompiledRecipeSet<ItemResourceKey> recipes, Map<String, List<FluidStack>> fluidInputs, Map<String, List<FluidStack>> fluidOutputs, BooleanSupplier authority, RecipeCatalog root, Map<String, MachineRecipe> definitions, List<RecipeModifier> contextRules, Map<String, RecipeSelectors> selectors) {
     this.machineId = Objects.requireNonNull(machineId, "machineId");
     this.recipes = Objects.requireNonNull(recipes, "recipes");
-    var copied = new HashMap<String, List<FluidStack>>();
-    fluidInputs.forEach((id, values) -> copied.put(id, values.stream().map(FluidStack::copy).toList()));
-    this.fluidInputs = Map.copyOf(copied);
-    var outputCopies = new HashMap<String, List<FluidStack>>();
-    fluidOutputs.forEach((id, values) -> outputCopies.put(id, values.stream().map(FluidStack::copy).toList()));
-    this.fluidOutputs = Map.copyOf(outputCopies);
+    var inputRows = fluidRows(fluidInputs);
+    var outputRows = fluidRows(fluidOutputs);
+    definitions.forEach((id, recipe) -> {
+      inputRows.put(id, recipe.fluidInputRequirements());
+      outputRows.put(id, recipe.guaranteedFluidOutputRequirements());
+    });
+    this.fluidInputs = Map.copyOf(inputRows);
+    this.fluidOutputs = Map.copyOf(outputRows);
     this.authority = Objects.requireNonNull(authority, "authority");
     this.root = root == null ? this : root.root();
     this.definitions = Map.copyOf(definitions);
@@ -153,6 +147,15 @@ public final class RecipeCatalog {
     dynamicInputRanks = prepared.dynamicInputRanks;
     searchEntries = prepared.searchEntries;
     requiredPorts = prepared.requiredPorts;
+  }
+
+  private static Map<String, List<FluidRequirement>> fluidRows(Map<String, List<FluidStack>> stacks) {
+    var result = new HashMap<String, List<FluidRequirement>>();
+    stacks.forEach(
+        (id, values) -> result.put(
+            id,
+            values.stream().filter(stack -> !stack.isEmpty()).map(stack -> new FluidRequirement(stack, 1)).toList()));
+    return result;
   }
 
   /** Fresh publication identity over immutable, already compiled base data. */
@@ -333,7 +336,8 @@ public final class RecipeCatalog {
   }
 
   public RecipeSelectors selectors(String recipeId) {
-    return selectors.getOrDefault(recipeId, RecipeSelectors.NONE);
+    var recipe = definitions.get(recipeId);
+    return recipe == null ? selectors.getOrDefault(recipeId, RecipeSelectors.NONE) : recipe.selectors();
   }
 
   public RecipeCatalog root() {
@@ -357,11 +361,19 @@ public final class RecipeCatalog {
   }
 
   public List<FluidStack> fluidInputs(String recipeId) {
-    return fluidInputs.getOrDefault(recipeId, List.of()).stream().map(FluidStack::copy).toList();
+    return fluidInputRequirements(recipeId).stream().map(FluidRequirement::stack).toList();
   }
 
   public List<FluidStack> fluidOutputs(String recipeId) {
-    return fluidOutputs.getOrDefault(recipeId, List.of()).stream().map(FluidStack::copy).toList();
+    return guaranteedFluidOutputs(recipeId).stream().map(FluidRequirement::stack).toList();
+  }
+
+  List<FluidRequirement> fluidInputRequirements(String recipeId) {
+    return fluidInputs.getOrDefault(recipeId, List.of());
+  }
+
+  List<FluidRequirement> guaranteedFluidOutputs(String recipeId) {
+    return fluidOutputs.getOrDefault(recipeId, List.of());
   }
 
   public boolean isCurrent() {

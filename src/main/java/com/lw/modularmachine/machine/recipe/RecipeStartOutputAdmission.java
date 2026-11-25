@@ -132,7 +132,7 @@ final class RecipeStartOutputAdmission {
         .map(
             requirement -> new RecipeCandidate.Output<>(
                 new FluidResourceKey(requirement.stack(), registries)
-                    .withSelector(definition.selectors().fluidOutput()),
+                    .withSelector(requirement.selector(definition.selectors().fluidOutput())),
                 Math.multiplyExact((long) requirement.stack().getAmount(), instances),
                 false,
                 requirement.ignoreOutputCheck()))

@@ -1,0 +1,9 @@
+{
+  "orientation": {"policy": "all_24"},
+  "parts": [
+    {"part_id": "feed", "offset": [-1, 0, 1], "block": "fluid_input", "selector": "feed"},
+    {"part_id": "coolant", "offset": [1, 0, 1], "block": "fluid_input", "selector": "coolant"},
+    {"part_id": "product", "offset": [0, 1, 1], "block": "fluid_output", "selector": "product"},
+    {"part_id": "untagged", "offset": [0, -1, 1], "block": "fluid_output"}
+  ]
+}

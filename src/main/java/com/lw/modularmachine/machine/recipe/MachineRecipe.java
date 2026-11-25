@@ -53,6 +53,8 @@ import org.jetbrains.annotations.ApiStatus;
  * or bypass machine admission.
  */
 public final class MachineRecipe implements Recipe<RecipeInput> {
+  private static final int WIRE_VERSION = 20;
+
   private record Extras(
       RecipeExecutionOptions executionOptions,
       RecipeScriptOptions scriptOptions,
@@ -424,8 +426,13 @@ public final class MachineRecipe implements Recipe<RecipeInput> {
    */
   @ApiStatus.Internal
   public List<FluidStack> guaranteedFluidOutputs() {
+    return guaranteedFluidOutputRequirements().stream().map(FluidRequirement::stack).toList();
+  }
+
+  @ApiStatus.Internal
+  public List<FluidRequirement> guaranteedFluidOutputRequirements() {
     return fluidOutputRequirements().stream().filter(output -> output.chance() == 1.0D && !output.ignoreOutputCheck())
-        .map(FluidRequirement::stack).toList();
+        .toList();
   }
 
   public List<FluidRequirement> fluidInputRequirements() {
@@ -547,13 +554,13 @@ public final class MachineRecipe implements Recipe<RecipeInput> {
     if (!(encoded instanceof CompoundTag tag)) {
       throw new IllegalArgumentException("Machine recipe codec did not produce a compound");
     }
-    buffer.writeVarInt(19);
+    buffer.writeVarInt(WIRE_VERSION);
     buffer.writeNbt(tag);
   }
 
   private static MachineRecipe read(RegistryFriendlyByteBuf buffer) {
     try {
-      if (buffer.readVarInt() != 19) {
+      if (buffer.readVarInt() != WIRE_VERSION) {
         throw new DecoderException("Unsupported machine recipe wire schema");
       }
       var encoded = buffer.readNbt();

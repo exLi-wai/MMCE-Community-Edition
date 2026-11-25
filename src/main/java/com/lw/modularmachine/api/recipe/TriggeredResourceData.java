@@ -99,5 +99,43 @@ public record TriggeredResourceData(List<Row> rows) {
     public Optional<FluidStack> fluid() {
       return fluid.map(FluidStack::copy);
     }
+
+    @Override
+    public boolean equals(Object other) {
+      return other instanceof Row row
+          && resource.equals(row.resource)
+          && io == row.io
+          && tick == row.tick
+          && repeatable == row.repeatable
+          && amount == row.amount
+          && Double.compare(chance, row.chance) == 0
+          && selector.equals(row.selector)
+          && chemical.equals(row.chemical)
+          && parallelUnaffected == row.parallelUnaffected
+          && match.equals(row.match)
+          && ItemStack.matches(item.orElse(ItemStack.EMPTY), row.item.orElse(ItemStack.EMPTY))
+          && FluidStack.matches(fluid.orElse(FluidStack.EMPTY), row.fluid.orElse(FluidStack.EMPTY));
+    }
+
+    @Override
+    public int hashCode() {
+      var stack = item.orElse(ItemStack.EMPTY);
+      var liquid = fluid.orElse(FluidStack.EMPTY);
+      return Objects.hash(
+          resource,
+          io,
+          tick,
+          repeatable,
+          amount,
+          chance,
+          selector,
+          chemical,
+          parallelUnaffected,
+          match,
+          stack.getItem(),
+          stack.getComponents(),
+          liquid.getFluid(),
+          liquid.getComponents());
+    }
   }
 }

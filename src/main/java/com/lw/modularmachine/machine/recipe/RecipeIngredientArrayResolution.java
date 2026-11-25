@@ -158,15 +158,8 @@ public final class RecipeIngredientArrayResolution {
     var row = FluidStack.CODEC.encodeStart(ops, stack).getOrThrow().getAsJsonObject();
     row.addProperty("chance", chance);
     row.addProperty("parallel_unaffected", group.parallelUnaffected());
-    var inputs = array(result, "fluid_inputs");
-    var selectors = result.has("selectors") ? result.getAsJsonObject("selectors") : new JsonObject();
-    String existing = selectors.has("fluid_input") ? selectors.get("fluid_input").getAsString() : "";
-    if (!inputs.isEmpty() && !existing.equals(group.selector())) {
-      throw new IllegalArgumentException("Fluid ingredient groups and ordinary inputs must share their phase selector");
-    }
-    inputs.add(row);
-    selectors.addProperty("fluid_input", group.selector());
-    result.add("selectors", selectors);
+    row.addProperty("selector", group.selector());
+    array(result, "fluid_inputs").add(row);
   }
 
   private static void appendChemicalInput(JsonObject result, IngredientArrayData.Group group, IngredientArrayData.Choice choice, double chance) {
@@ -218,7 +211,6 @@ public final class RecipeIngredientArrayResolution {
         || declaration.getAsJsonArray().size() > IngredientArrayData.MAX_GROUPS) {
       throw new IllegalArgumentException("Ingredient arrays require a bounded group array");
     }
-    String fluidSelector = null;
     for (var element : declaration.getAsJsonArray()) {
       var group = requireGroup(element);
       String selector = group.has("selector") ? group.get("selector").getAsString() : "";
@@ -229,12 +221,6 @@ public final class RecipeIngredientArrayResolution {
       validateCatalystRules(group, optional);
       String kind = validateAlternatives(group.getAsJsonArray("alternatives"));
       validateFixedParallel(group, kind);
-      if (kind.equals("fluid")) {
-        if (fluidSelector != null && !fluidSelector.equals(selector)) {
-          throw new IllegalArgumentException("Fluid ingredient arrays share their input phase selector");
-        }
-        fluidSelector = selector;
-      }
     }
   }
 

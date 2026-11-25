@@ -73,18 +73,18 @@ final class KubeJSRecipeRows {
     double chance = 1;
     boolean parallelUnaffected;
     boolean ignoreOutputCheck;
-    String selector = "";
+    String selector;
 
     FluidRow(FluidStack stack) {
       this.stack = stack;
     }
 
     FluidRequirement requirement() {
-      return new FluidRequirement(stack, chance, parallelUnaffected).withIgnoreOutputCheck(ignoreOutputCheck);
-    }
-
-    FluidRequirement tickRequirement() {
-      return new FluidRequirement(stack, chance, parallelUnaffected, selector).withIgnoreOutputCheck(ignoreOutputCheck);
+      var requirement = selector == null ? new FluidRequirement(
+          stack,
+          chance,
+          parallelUnaffected) : new FluidRequirement(stack, chance, parallelUnaffected, selector);
+      return requirement.withIgnoreOutputCheck(ignoreOutputCheck);
     }
   }
 

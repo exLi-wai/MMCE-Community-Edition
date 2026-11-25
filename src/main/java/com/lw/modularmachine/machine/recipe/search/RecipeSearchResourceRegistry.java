@@ -157,7 +157,8 @@ public final class RecipeSearchResourceRegistry {
           }
         }
       }
-      if (!catalog.fluidInputs(candidate.id()).isEmpty() || !catalog.fluidOutputs(candidate.id()).isEmpty()) {
+      if (!catalog.fluidInputRequirements(candidate.id()).isEmpty()
+          || !catalog.guaranteedFluidOutputs(candidate.id()).isEmpty()) {
         ids.add(RecipeResourceDefinitions.FLUID.id());
       }
       active.addAll(ids);

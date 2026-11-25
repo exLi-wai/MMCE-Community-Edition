@@ -1,0 +1,16 @@
+{
+  "type": "mmcece:machine",
+  "machine": "mmcece:test_fluid_row_routes",
+  "duration": 10,
+  "inputs": [],
+  "outputs": [],
+  "selectors": {"fluid_input": "feed", "fluid_output": "product"},
+  "fluid_inputs": [
+    {"id": "minecraft:water", "amount": 30},
+    {"id": "minecraft:water", "amount": 70, "selector": "coolant"}
+  ],
+  "fluid_outputs": [
+    {"id": "minecraft:water", "amount": 13},
+    {"id": "minecraft:water", "amount": 27, "selector": ""}
+  ]
+}

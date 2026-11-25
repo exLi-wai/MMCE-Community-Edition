@@ -99,11 +99,12 @@ public final class FactoryOutputEngine {
         } else if (fluidRow < run.outputRowCount("fluid_outputs")) {
           var requirement = run.fluidOutputRequirement(fluidRow++, level.registryAccess());
           var fluid = requirement.stack();
+          String selector = requirement.selector(run.selectors().fluidOutput());
           fluidTotals.add(
-              new FluidResourceKey(fluid, level.registryAccess()).withSelector(run.selectors().fluidOutput()),
+              new FluidResourceKey(fluid, level.registryAccess()).withSelector(selector),
               (long) fluid.getAmount(),
               requirement.ignoreOutputCheck());
-          outputPorts.add(new RequiredPort(PortKind.FLUID_OUTPUT, run.selectors().fluidOutput()));
+          outputPorts.add(new RequiredPort(PortKind.FLUID_OUTPUT, selector));
         } else {
           extensions.add(run, level.registryAccess());
           for (var row : run.chemicalOutputs()) {

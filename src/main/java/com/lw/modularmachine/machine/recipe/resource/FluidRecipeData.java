@@ -8,7 +8,10 @@ import java.util.List;
 import net.neoforged.neoforge.fluids.FluidStack;
 import org.jetbrains.annotations.ApiStatus;
 
-/** Component-preserving fluid rows, with independently routed tick phases. */
+/**
+ * Component-preserving fluid rows with an optional selector on each
+ * declaration.
+ */
 @ApiStatus.Internal
 public record FluidRecipeData(
     List<FluidRequirement> inputs,

@@ -119,6 +119,51 @@ class MachineRecipeCopiesTest {
   }
 
   @Test
+  void copiedFluidRowsKeepExplicitEmptyAndInheritOnlyWhenOmitted() {
+    var source = JsonParser.parseString("""
+        {"machine":"test:b","duration":10,"selectors":{"fluid_input":"source_in","fluid_output":"source_out"},
+         "fluid_inputs":[{"id":"minecraft:water","amount":1},{"id":"minecraft:lava","amount":2,"selector":"hot"}],
+         "fluid_outputs":[{"id":"minecraft:water","amount":1,"selector":""}]}
+        """).getAsJsonObject();
+    var original = source.deepCopy();
+    var unmarked = new RecipeAdapterCustomization.FluidResource("""
+        {"id":"minecraft:water","amount":3,"selector":""}
+        """);
+    var inherited = new RecipeAdapterCustomization.FluidResource("""
+        {"id":"minecraft:water","amount":4}
+        """);
+    var customization = new RecipeAdapterCustomization(
+        List.of(),
+        List.of(),
+        List.of(unmarked),
+        List.of(inherited),
+        Optional.empty(),
+        List.of(),
+        List.of(),
+        List.of(),
+        List.of(),
+        Map.of(),
+        Optional.empty(),
+        Optional.empty());
+    var copied = MachineRecipeCopies.copy(
+        source,
+        A,
+        new RecipeAdapterImport("copy", B, List.of(), true, 0, 0, 0, customization),
+        RegistryAccess.EMPTY);
+    assertEquals(original, source);
+    assertEquals(original.get("selectors"), copied.get("selectors"));
+    var inputs = copied.getAsJsonArray("fluid_inputs");
+    assertEquals(3, inputs.size());
+    assertFalse(inputs.get(0).getAsJsonObject().has("selector"));
+    assertEquals("hot", inputs.get(1).getAsJsonObject().get("selector").getAsString());
+    assertEquals("", inputs.get(2).getAsJsonObject().get("selector").getAsString());
+    var outputs = copied.getAsJsonArray("fluid_outputs");
+    assertEquals(2, outputs.size());
+    assertEquals("", outputs.get(0).getAsJsonObject().get("selector").getAsString());
+    assertFalse(outputs.get(1).getAsJsonObject().has("selector"));
+  }
+
+  @Test
   void resourceOnlyMachineCopiesAcceptCustomizationWithoutItemArrays() {
     var source = JsonParser.parseString("""
         {"machine":"test:b","duration":20,"energy_per_tick":10,

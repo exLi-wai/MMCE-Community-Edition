@@ -56,7 +56,7 @@ final class RecipeAdapterCustomizations {
       }
       result.add("item_payments", payments);
     }
-    for (String field : List.of("inputs", "ingredient_arrays", "random_item_outputs", "triggered_resources")) {
+    for (String field : List.of("inputs", "ingredient_arrays", "random_item_outputs")) {
       if (additions.has(field)) {
         append(result, field, additions.getAsJsonArray(field));
       }
@@ -136,6 +136,22 @@ final class RecipeAdapterCustomizations {
         selectors.addProperty(phase.field(), selector);
       });
       result.add("selectors", selectors);
+    }
+    if (additions.has("triggered_resources")) {
+      var triggers = additions.getAsJsonArray("triggered_resources");
+      var selectors = result.getAsJsonObject("selectors");
+      if (selectors != null) {
+        for (var element : triggers) {
+          var row = element.getAsJsonObject();
+          if (row.get("resource").getAsString().equals("fluid") && !row.has("selector")) {
+            var selector = selectors.get("fluid_" + row.get("io").getAsString());
+            if (selector != null) {
+              row.add("selector", selector);
+            }
+          }
+        }
+      }
+      append(result, "triggered_resources", triggers);
     }
     customization.parallelized().ifPresent(value -> result.addProperty("parallelized", value));
     customization.failureAction().ifPresent(value -> result.addProperty("failure_action", value.serialized()));
