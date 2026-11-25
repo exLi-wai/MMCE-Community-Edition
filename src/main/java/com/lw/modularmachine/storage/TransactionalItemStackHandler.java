@@ -1,5 +1,6 @@
 package com.lw.modularmachine.storage;
 
+import java.util.BitSet;
 import net.minecraft.core.HolderLookup;
 import net.minecraft.core.NonNullList;
 import net.minecraft.nbt.CompoundTag;
@@ -7,6 +8,7 @@ import net.minecraft.nbt.ListTag;
 import net.minecraft.nbt.Tag;
 import net.minecraft.world.item.ItemStack;
 import net.neoforged.neoforge.items.ItemStackHandler;
+import org.jetbrains.annotations.ApiStatus;
 
 /**
  * Owned inventory: no callbacks while swapping prepared contents; ordinary APIs
@@ -17,6 +19,7 @@ public final class TransactionalItemStackHandler extends ItemStackHandler {
   private final Runnable beforeWrite;
   private final Runnable changed;
   private final int slotLimit;
+  private final int writableSlots;
   private Lease active;
 
   public TransactionalItemStackHandler(int size, Runnable threadCheck, Runnable beforeWrite, Runnable changed) {
@@ -29,6 +32,7 @@ public final class TransactionalItemStackHandler extends ItemStackHandler {
       throw new IllegalArgumentException("Invalid owned slot capacity");
     }
     this.slotLimit = slotLimit;
+    writableSlots = size;
     this.threadCheck = threadCheck;
     this.beforeWrite = beforeWrite;
     this.changed = changed;
@@ -66,18 +70,24 @@ public final class TransactionalItemStackHandler extends ItemStackHandler {
   @Override
   public int getSlotLimit(int slot) {
     readAllowed();
-    return slotLimit;
+    return slot < writableSlots ? slotLimit : stacks.get(slot).getCount();
+  }
+
+  /** Configured receiving slots; retained tail slots are extraction-only. */
+  public int writableSlots() {
+    readAllowed();
+    return writableSlots;
   }
 
   @Override
   protected int getStackLimit(int slot, ItemStack stack) {
-    return slotLimit > 64 ? slotLimit : super.getStackLimit(slot, stack);
+    return slotLimit > 64 ? getSlotLimit(slot) : super.getStackLimit(slot, stack);
   }
 
   @Override
   public boolean isItemValid(int slot, ItemStack stack) {
     readAllowed();
-    return super.isItemValid(slot, stack);
+    return slot < writableSlots && super.isItemValid(slot, stack);
   }
 
   @Override
@@ -92,6 +102,7 @@ public final class TransactionalItemStackHandler extends ItemStackHandler {
   @Override
   public void setStackInSlot(int slot, ItemStack stack) {
     writeAllowed();
+    requireRetainedChange(slot, stacks.get(slot), stack);
     super.setStackInSlot(slot, stack);
   }
 
@@ -102,7 +113,8 @@ public final class TransactionalItemStackHandler extends ItemStackHandler {
     } else {
       writeAllowed();
     }
-    return super.insertItem(slot, stack, simulate);
+    validateSlotIndex(slot);
+    return slot < writableSlots ? super.insertItem(slot, stack, simulate) : stack;
   }
 
   @Override
@@ -136,6 +148,72 @@ public final class TransactionalItemStackHandler extends ItemStackHandler {
       return data;
     }
     return super.serializeNBT(registries);
+  }
+
+  /**
+   * Restores a configurable ordinary bus only at its load boundary. Parse before
+   * replacing contents, retain occupied slots beyond the new setting up to the
+   * saved-format bound and never resize while a lease is active. The slot indices
+   * remain stable until reload.
+   */
+  @ApiStatus.Internal
+  public void deserializeConfiguredSlots(HolderLookup.Provider registries, CompoundTag data, int maximumWritableSlots, int maximumSavedSlots) {
+    writeAllowed();
+    int savedSlots = data.getInt("Size");
+    if (slotLimit != 64
+        || writableSlots < 1
+        || writableSlots > maximumWritableSlots
+        || maximumSavedSlots < maximumWritableSlots
+        || !data.contains("Size", Tag.TAG_INT)
+        || savedSlots < 1
+        || savedSlots > maximumSavedSlots
+        || data.contains("BulkItems")
+        || data.contains("Items") && !data.contains("Items", Tag.TAG_LIST)) {
+      throw new IllegalArgumentException("Invalid configured item bus inventory");
+    }
+    var raw = data.get("Items");
+    if (raw instanceof ListTag list && !list.isEmpty() && list.getElementType() != Tag.TAG_COMPOUND) {
+      throw new IllegalArgumentException("Item slots require compound entries");
+    }
+    var entries = data.getList("Items", Tag.TAG_COMPOUND);
+    if (entries.size() > savedSlots) {
+      throw new IllegalArgumentException("Too many saved item slots");
+    }
+    var loaded = NonNullList.withSize(Math.max(writableSlots, savedSlots), ItemStack.EMPTY);
+    var occupied = new BitSet(savedSlots);
+    int retainedSlots = writableSlots;
+    for (int index = 0; index < entries.size(); index++) {
+      var entry = entries.getCompound(index);
+      int slot = entry.getInt("Slot");
+      if (!entry.contains("Slot", Tag.TAG_INT) || slot < 0 || slot >= savedSlots || occupied.get(slot)) {
+        throw new IllegalArgumentException("Invalid or duplicate saved item slot");
+      }
+      occupied.set(slot);
+      var stack = ItemStack.parse(registries, entry)
+          .orElseThrow(() -> new IllegalArgumentException("Invalid saved item stack"));
+      if (stack.isEmpty() || stack.getCount() > Math.min(slotLimit, stack.getMaxStackSize())) {
+        throw new IllegalArgumentException("Saved item stack exceeds its slot limit");
+      }
+      loaded.set(slot, stack);
+      retainedSlots = Math.max(retainedSlots, slot + 1);
+    }
+    var restored = NonNullList.withSize(retainedSlots, ItemStack.EMPTY);
+    for (int slot = 0; slot < retainedSlots; slot++) {
+      restored.set(slot, loaded.get(slot));
+    }
+    stacks = restored;
+    onLoad();
+    changed.run();
+  }
+
+  private void requireRetainedChange(int slot, ItemStack before, ItemStack after) {
+    if (slot >= writableSlots
+        && !after.isEmpty()
+        && (before.isEmpty()
+            || !ItemStack.isSameItemSameComponents(before, after)
+            || after.getCount() > before.getCount())) {
+      throw new IllegalArgumentException("Retained item slots only allow extraction");
+    }
   }
 
   @Override
@@ -213,6 +291,9 @@ public final class TransactionalItemStackHandler extends ItemStackHandler {
       check();
       if (contents == null || contents.size() != before.size()) {
         throw new IllegalArgumentException("Prepared slot count differs");
+      }
+      for (int slot = writableSlots; slot < before.size(); slot++) {
+        requireRetainedChange(slot, before.get(slot), contents.get(slot));
       }
       stacks = contents;
     }

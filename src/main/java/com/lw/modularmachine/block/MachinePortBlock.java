@@ -75,7 +75,7 @@ public class MachinePortBlock extends BaseEntityBlock {
   }
 
   public int itemSlots() {
-    return kind.resource() == ResourceType.ITEM ? (int) tier.capacity() : 0;
+    return kind.resource() == ResourceType.ITEM ? MachineConfig.itemBusSlots(tier, kind) : 0;
   }
 
   public int itemSlotLimit() {
@@ -101,10 +101,10 @@ public class MachinePortBlock extends BaseEntityBlock {
   }
 
   private void appendItemTooltip(List<Component> tooltip) {
+    int slots = itemSlots();
     tooltip.add(
-        Component.translatable(
-            tier.capacity() == 1 ? "tooltip.mmcece.item_bus.slot" : "tooltip.mmcece.item_bus.slots",
-            tier.capacity()).withStyle(ChatFormatting.GRAY));
+        Component.translatable(slots == 1 ? "tooltip.mmcece.item_bus.slot" : "tooltip.mmcece.item_bus.slots", slots)
+            .withStyle(ChatFormatting.GRAY));
     appendInputGroupTooltip(tooltip);
   }
 
@@ -149,9 +149,9 @@ public class MachinePortBlock extends BaseEntityBlock {
   protected InteractionResult useWithoutItem(BlockState state, Level level, BlockPos pos, Player player, BlockHitResult hit) {
     if (!level.isClientSide && level.getBlockEntity(pos) instanceof MachinePortBlockEntity port) {
       if (port.schemaSupported() && kind.resource() == ResourceType.ITEM) {
-        ((ServerPlayer) player).openMenu(port, pos);
+        port.openMenu((ServerPlayer) player);
       } else if (port.schemaSupported()) {
-        ((ServerPlayer) player).openMenu(port, pos);
+        port.openMenu((ServerPlayer) player);
       } else {
         player.displayClientMessage(port.statusMessage(), false);
       }

@@ -3,6 +3,7 @@ package com.lw.modularmachine.config;
 import com.lw.modularmachine.machine.EmberHatchTier;
 import com.lw.modularmachine.machine.HatchTier;
 import com.lw.modularmachine.machine.ParallelControllerTier;
+import com.lw.modularmachine.machine.PortKind;
 import com.lw.modularmachine.machine.StarlightInputTier;
 import com.lw.modularmachine.machine.UpgradeBusTier;
 import com.lw.modularmachine.api.recipe.RecipeFailureAction;
@@ -16,6 +17,10 @@ import net.minecraft.resources.ResourceLocation;
 import net.neoforged.neoforge.common.ModConfigSpec;
 
 public final class MachineConfig {
+  // A single ordinary output bus must fit the existing output planner budget.
+  public static final int MAX_ITEM_BUS_SLOTS = 1024;
+  // Retain inventories saved before the configurable bus limit was reduced.
+  public static final int MAX_RETAINED_ITEM_BUS_SLOTS = 8192;
   public static final int MAX_ESSENTIA_OUTPUT_CAPACITY = 65_536;
   public static final ModConfigSpec SPEC;
   public static final ModConfigSpec.BooleanValue CLEAN_CUSTOM_DATA_ON_STRUCTURE_CHECK_FAILED;
@@ -37,6 +42,8 @@ public final class MachineConfig {
   public static final ModConfigSpec.IntValue ASSEMBLY_WORK_PER_TICK;
   public static final ModConfigSpec.IntValue ASSEMBLY_SLICE_WORK;
   public static final Map<ParallelControllerTier, ModConfigSpec.IntValue> PARALLEL_CONTROLLER_MAXIMA;
+  public static final Map<String, ModConfigSpec.IntValue> ITEM_INPUT_BUS_SLOTS;
+  public static final Map<String, ModConfigSpec.IntValue> ITEM_OUTPUT_BUS_SLOTS;
   public static final Map<String, ModConfigSpec.IntValue> FLUID_HATCH_CAPACITY;
   public static final Map<String, ModConfigSpec.LongValue> CHEMICAL_HATCH_CAPACITY;
   public static final Map<String, ModConfigSpec.LongValue> ENERGY_HATCH_CAPACITY;
@@ -157,6 +164,8 @@ public final class MachineConfig {
         .defineInRange("sliceWork", 64, 1, 4096);
     builder.pop();
 
+    ITEM_INPUT_BUS_SLOTS = itemBusValues(builder, PortKind.ITEM_INPUT);
+    ITEM_OUTPUT_BUS_SLOTS = itemBusValues(builder, PortKind.ITEM_OUTPUT);
     FLUID_HATCH_CAPACITY = hatchValues(builder, "fluid_hatch", HatchTier.FLUIDS, false, Integer.MAX_VALUE);
     CHEMICAL_HATCH_CAPACITY = chemicalValues(builder);
     ENERGY_HATCH_CAPACITY = energyValues(builder, "energy_hatch", false, Long.MAX_VALUE);
@@ -270,6 +279,18 @@ public final class MachineConfig {
   public static int assemblySliceWork() {
     return SPEC.isLoaded() ? ASSEMBLY_SLICE_WORK.get() : 64;
   }
+
+  public static int itemBusSlots(HatchTier tier, PortKind kind) {
+    var values = kind.isInput() ? ITEM_INPUT_BUS_SLOTS : ITEM_OUTPUT_BUS_SLOTS;
+    var value = values.get(tier.name());
+    int fallback = (int) tier.capacity();
+    if (value == null || !SPEC.isLoaded()) {
+      return fallback;
+    }
+
+    return Math.max(1, Math.min(MAX_ITEM_BUS_SLOTS, value.get()));
+  }
+
   public static long fluidHatchCapacity(HatchTier tier) {
     return hatchValue(FLUID_HATCH_CAPACITY, tier.name(), tier.capacity());
   }
@@ -341,6 +362,23 @@ public final class MachineConfig {
 
   private static <T extends Number> T configuredCapacity(ModConfigSpec.ConfigValue<T> value) {
     return SPEC.isLoaded() ? value.get() : value.getDefault();
+  }
+
+  private static Map<String, ModConfigSpec.IntValue> itemBusValues(ModConfigSpec.Builder builder, PortKind kind) {
+    String section = kind.path();
+    builder.translation("mmcece.config." + section).push(section);
+    var values = new LinkedHashMap<String, ModConfigSpec.IntValue>();
+    for (var tier : HatchTier.ITEMS) {
+      values.put(
+          tier.name(),
+          builder.translation("mmcece.config." + section + "." + tier.name()).comment(
+              "Number of item slots for this bus tier and direction. Each slot keeps its original stack limit, up to 64 items.",
+              "Re-enter the world after changing. Existing stored items are preserved when reducing the slot count.")
+              .worldRestart().defineInRange(tier.name(), (int) tier.capacity(), 1, MAX_ITEM_BUS_SLOTS));
+    }
+    builder.pop();
+
+    return Map.copyOf(values);
   }
 
   private static Map<String, ModConfigSpec.IntValue> hatchValues(ModConfigSpec.Builder builder, String section, List<HatchTier> tiers, boolean transfer, int max) {

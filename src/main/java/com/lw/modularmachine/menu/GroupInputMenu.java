@@ -136,7 +136,7 @@ public final class GroupInputMenu extends AbstractContainerMenu {
       return false;
     }
     if (player instanceof ServerPlayer serverPlayer) {
-      serverPlayer.openMenu(port, port.getBlockPos());
+      port.openMenu(serverPlayer);
     }
 
     return true;

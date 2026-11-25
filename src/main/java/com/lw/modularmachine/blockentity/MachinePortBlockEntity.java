@@ -142,7 +142,8 @@ public class MachinePortBlockEntity extends BlockEntity implements MenuProvider,
 
       @Override
       public ItemStack extractItem(int slot, int amount, boolean simulate) {
-        return unsupportedData == null && !kind.isInput() ? items.extractItem(slot, amount, simulate) : ItemStack.EMPTY;
+        return unsupportedData == null && (!kind.isInput() || slot >= items.writableSlots()) ? items
+            .extractItem(slot, amount, simulate) : ItemStack.EMPTY;
       }
 
       @Override
@@ -683,6 +684,10 @@ public class MachinePortBlockEntity extends BlockEntity implements MenuProvider,
     return false;
   }
 
+  public int writableItemSlots() {
+    return items.writableSlots();
+  }
+
   public boolean resourceTransactionInProgress() {
     if (items.isInTransaction() || tank.isInTransaction() || chemicalTank.isInTransaction()) {
       return true;
@@ -820,14 +825,26 @@ public class MachinePortBlockEntity extends BlockEntity implements MenuProvider,
     groupRevision++;
     if (kind.resource() == ResourceType.ITEM && data.contains("items")) {
       CompoundTag inventoryData = data.getCompound("items");
-      if (inventoryData.getInt("Size") != items.getSlots()) {
+      try {
+        if (!bulkItems()) {
+          items.deserializeConfiguredSlots(
+              registries,
+              inventoryData,
+              MachineConfig.MAX_ITEM_BUS_SLOTS,
+              MachineConfig.MAX_RETAINED_ITEM_BUS_SLOTS);
+        } else {
+          if (inventoryData.getInt("Size") != items.getSlots()) {
+            throw new IllegalArgumentException("Saved item slot count differs");
+          }
+          items.deserializeNBT(registries, inventoryData);
+        }
+      } catch (IllegalArgumentException invalid) {
         unsupportedData = data.copy();
         if (level instanceof ServerLevel server) {
           StructureChangeRouter.blockChanged(server, worldPosition);
         }
         return;
       }
-      items.deserializeNBT(registries, inventoryData);
     }
     if (kind.resource() == ResourceType.FLUID && data.contains("fluid")) {
       tank.readFromNBT(registries, data.getCompound("fluid"));
@@ -876,6 +893,20 @@ public class MachinePortBlockEntity extends BlockEntity implements MenuProvider,
   @Override
   public Component getDisplayName() {
     return getBlockState().getBlock().getName();
+  }
+
+  /** Ordinary item menus receive the server's actual and writable slot counts. */
+  public void openMenu(ServerPlayer player) {
+    if (kind.resource() == ResourceType.ITEM && !bulkItems()) {
+      player.openMenu(this, buffer -> {
+        buffer.writeVarInt(MachinePortMenu.OPEN_VERSION);
+        buffer.writeBlockPos(worldPosition);
+        buffer.writeVarInt(items.getSlots());
+        buffer.writeVarInt(items.writableSlots());
+      });
+    } else {
+      player.openMenu(this, worldPosition);
+    }
   }
 
   @Override
