@@ -15,8 +15,8 @@ import net.minecraft.world.item.context.UseOnContext;
 import net.minecraft.world.level.Level;
 
 /**
- * Main-hand selection interactions. Preview is client-only; export remains
- * disconnected.
+ * Main-hand selection interactions. Preview is client-only; export submission
+ * is authorized and saved by the server.
  */
 public final class RangedConstructToolItem extends Item {
   public RangedConstructToolItem(Properties properties) {

@@ -6,6 +6,7 @@ import com.lw.modularmachine.block.FactoryControllerBlock;
 import com.lw.modularmachine.block.MachineControllerBlock;
 import com.lw.modularmachine.item.RangedConstructToolItem;
 import com.lw.modularmachine.machine.selection.PartOverrides;
+import com.lw.modularmachine.machine.selection.RangedSelectionExportFile;
 import com.lw.modularmachine.machine.selection.RangedSelectionData.Box;
 import com.lw.modularmachine.machine.selection.RangedSelectionData.Design;
 import com.lw.modularmachine.machine.selection.RangedSelectionData.PartEdit;

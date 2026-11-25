@@ -23,5 +23,6 @@ public final class MachinePayloadRegistration {
     modEventBus.addListener(GroupInputPayloads::register);
     modEventBus.addListener(NetworkPortPayloads::register);
     modEventBus.addListener(PatternProviderPayloads::register);
+    modEventBus.addListener(RangedSelectionExportPayloads::register);
   }
 }

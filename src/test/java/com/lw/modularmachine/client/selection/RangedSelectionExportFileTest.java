@@ -4,6 +4,7 @@ import com.google.gson.JsonObject;
 import com.google.gson.JsonArray;
 import com.google.gson.JsonParser;
 import com.lw.modularmachine.machine.orientation.StateOrientationAdapters;
+import com.lw.modularmachine.machine.selection.RangedSelectionExportFile;
 import com.lw.modularmachine.machine.selection.RangedSelectionData.Design;
 import com.lw.modularmachine.machine.structure.DynamicPatternDefinition;
 import com.lw.modularmachine.machine.structure.MachineDefinitionDefaults;
@@ -133,8 +134,12 @@ class RangedSelectionExportFileTest {
     var invalid = snapshot("{\"offset\":[0,0,0],\"block\":\"item_input\",\"interface\":\"missing\"}");
     var failure = assertThrows(
         CompletionException.class,
-        () -> RangedSelectionExportFile.merge(selected, invalid, Design.defaults(), Runnable::run, Runnable::run)
-            .join());
+        () -> RangedSelectionExportFile.merge(
+            selected,
+            invalid.submission(Design.defaults(), "selection"),
+            Design.defaults().orientation(),
+            Runnable::run,
+            Runnable::run).join());
     assertTrue(failure.getCause().getMessage().contains("Smart interface roles"), failure::getMessage);
     assertEquals(MACHINE, Files.readString(file));
   }
@@ -148,8 +153,12 @@ class RangedSelectionExportFileTest {
     Files.writeString(variables, "{\"INPUT_VAR\":\"item_input\"}");
     var selected = RangedSelectionExportFile.capture(gameDirectory, "machine");
     var pending = new ArrayDeque<Runnable>();
-    var attempt = RangedSelectionExportFile
-        .merge(selected, snapshot(OUTPUT_PART), Design.defaults(), pending::add, Runnable::run);
+    var attempt = RangedSelectionExportFile.merge(
+        selected,
+        snapshot(OUTPUT_PART).submission(Design.defaults(), "selection"),
+        Design.defaults().orientation(),
+        pending::add,
+        Runnable::run);
     Files.writeString(variables, "{\"INPUT_VAR\":\"energy_output\"}");
     pending.remove().run();
     assertInstanceOf(IOException.class, assertThrows(CompletionException.class, attempt::join).getCause());
@@ -193,8 +202,12 @@ class RangedSelectionExportFileTest {
     var addition = snapshot("{\"offset\":[0,0,0],\"block\":\"minecraft:stone\"}");
     var failure = assertThrows(
         CompletionException.class,
-        () -> RangedSelectionExportFile.merge(selected, addition, Design.defaults(), Runnable::run, Runnable::run)
-            .join());
+        () -> RangedSelectionExportFile.merge(
+            selected,
+            addition.submission(Design.defaults(), "selection"),
+            Design.defaults().orientation(),
+            Runnable::run,
+            Runnable::run).join());
     assertTrue(failure.getCause().getMessage().contains("4194304 block alternatives"), failure::getMessage);
     assertEquals(MACHINE, Files.readString(file));
   }
@@ -258,8 +271,12 @@ class RangedSelectionExportFileTest {
     Files.writeString(other, MACHINE);
     var selected = RangedSelectionExportFile.capture(gameDirectory, "machine");
     var worker = new ArrayDeque<Runnable>();
-    var attempt = RangedSelectionExportFile
-        .merge(selected, snapshot(OUTPUT_PART), Design.defaults(), Runnable::run, worker::add);
+    var attempt = RangedSelectionExportFile.merge(
+        selected,
+        snapshot(OUTPUT_PART).submission(Design.defaults(), "selection"),
+        Design.defaults().orientation(),
+        Runnable::run,
+        worker::add);
     worker.remove().run();
     String changed = MACHINE.replace("item_input", "energy_output");
     Files.writeString(other, changed);
@@ -338,8 +355,12 @@ class RangedSelectionExportFileTest {
   }
 
   private static RangedSelectionExportFile.Saved merge(RangedSelectionExportFile.Target target) {
-    return RangedSelectionExportFile
-        .merge(target, snapshot(OUTPUT_PART), Design.defaults(), Runnable::run, Runnable::run).join();
+    return RangedSelectionExportFile.merge(
+        target,
+        snapshot(OUTPUT_PART).submission(Design.defaults(), "selection"),
+        Design.defaults().orientation(),
+        Runnable::run,
+        Runnable::run).join();
   }
 
   private static RangedSelectionExportSnapshot snapshot(String declaration) {

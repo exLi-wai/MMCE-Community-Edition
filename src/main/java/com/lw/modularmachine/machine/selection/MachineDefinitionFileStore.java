@@ -117,8 +117,7 @@ public final class MachineDefinitionFileStore {
   }
 
   /**
-   * Serializes client export replacement with the integrated server's definition
-   * editor.
+   * Serializes selection export replacement with the server's definition editor.
    */
   public static void replaceExistingExport(Path directory, Path file, String expectedHash, byte[] bytes, PublicationCheck check)
       throws IOException {

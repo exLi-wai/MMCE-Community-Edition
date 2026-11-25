@@ -6,15 +6,11 @@ import com.lw.modularmachine.client.preview.StructurePreviewScreen;
 import com.lw.modularmachine.client.selection.RangedSelectionClient.Target;
 import com.lw.modularmachine.config.MachineConfig;
 import com.lw.modularmachine.machine.selection.RangedSelectionData.Design;
-import com.lw.modularmachine.machine.structure.MachineDefinitionConfig;
+import com.lw.modularmachine.machine.selection.RangedSelectionExportFile;
 import com.lw.modularmachine.registry.MachineRegistries;
 import com.lw.modularmachine.util.client.gui.GuiTextures;
-import java.io.IOException;
-import java.nio.file.Path;
 import java.util.Set;
-import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.CompletionException;
-import net.minecraft.Util;
 import net.minecraft.client.gui.GuiGraphics;
 import net.minecraft.client.gui.components.EditBox;
 import net.minecraft.network.chat.Component;
@@ -43,12 +39,7 @@ public final class RangedConstructToolScreen extends StructurePreviewScreen {
   private Component exportStatus;
   private boolean saving;
 
-  private record ExportRequest(
-      Design design,
-      RangedSelectionCapture capture,
-      Path directory,
-      String baseName,
-      CompletableFuture<RangedSelectionExportFile.Target> target) {
+  private record ExportRequest(Design design, RangedSelectionCapture capture, String baseName) {
   }
 
   public RangedConstructToolScreen() {
@@ -219,15 +210,7 @@ public final class RangedConstructToolScreen extends StructurePreviewScreen {
     try {
       String baseName = append ? RangedSelectionExportFile
           .targetName(exportDesign.targetFile()) : RangedSelectionExportFile.baseName(exportDesign.fileName());
-      Path directory = MachineDefinitionConfig.directory();
-      var target = append ? CompletableFuture.supplyAsync(() -> {
-        try {
-          return RangedSelectionExportFile.capture(directory, baseName);
-        } catch (IOException failure) {
-          throw new CompletionException(failure);
-        }
-      }, Util.ioPool()) : null;
-      exportRequest = new ExportRequest(exportDesign, RangedSelectionClient.capture(), directory, baseName, target);
+      exportRequest = new ExportRequest(exportDesign, RangedSelectionClient.capture(), baseName);
       exportStatus = RangedSelectionClient.text("export_waiting");
       advanceExport();
     } catch (IllegalArgumentException invalid) {
@@ -244,18 +227,6 @@ public final class RangedConstructToolScreen extends StructurePreviewScreen {
     if (capture != request.capture() || request.design() != RangedSelectionClient.design()) {
       cancelExport("export_changed");
       return;
-    }
-    if (request.target() != null) {
-      if (!request.target().isDone()) {
-        return;
-      }
-      try {
-        request.target().join();
-      } catch (CompletionException failure) {
-        exportRequest = null;
-        exportStatus = exportFailure(failure);
-        return;
-      }
     }
     var error = capture.error();
     if (!error.getString().isEmpty()) {
@@ -287,31 +258,14 @@ public final class RangedConstructToolScreen extends StructurePreviewScreen {
     saving = true;
     exportStatus = RangedSelectionClient.text("export_saving");
     var client = minecraft;
-    CompletableFuture<RangedSelectionExportFile.Saved> publication;
-    if (request.target() != null) {
-      var server = client.getSingleplayerServer();
-      publication = RangedSelectionExportFile
-          .merge(request.target().join(), snapshot, request.design(), server != null ? server : client, Util.ioPool());
-    } else {
-      publication = CompletableFuture.supplyAsync(() -> {
-        try {
-          return RangedSelectionExportFile.save(
-              request.directory().resolve("mmcece"),
-              request.baseName(),
-              snapshot.root(request.design(), request.baseName()));
-        } catch (IOException failure) {
-          throw new CompletionException(failure);
-        }
-      }, Util.ioPool());
-    }
+    var publication = RangedSelectionExportClient.save(snapshot, request.design(), request.baseName());
     publication.whenComplete((saved, failure) -> client.execute(() -> {
       saving = false;
       if (failure == null) {
         if (!request.design().append()) {
           RangedSelectionClient.exported(request.capture(), request.design(), saved.name());
         }
-        exportStatus = RangedSelectionClient
-            .text(request.design().append() ? "append_saved" : "export_saved", saved.file().toString());
+        exportStatus = saved.message();
       } else {
         exportStatus = exportFailure(failure);
       }
@@ -324,6 +278,9 @@ public final class RangedConstructToolScreen extends StructurePreviewScreen {
   private static Component exportFailure(Throwable failure) {
     Throwable cause = failure instanceof CompletionException && failure.getCause() != null ? failure
         .getCause() : failure;
+    if (cause instanceof RangedSelectionExportClient.Failure rejected) {
+      return rejected.message();
+    }
     String detail = cause.getMessage() == null ? cause.getClass().getSimpleName() : cause.getMessage();
     return RangedSelectionClient.text("export_failed", detail.substring(0, Math.min(512, detail.length())));
   }

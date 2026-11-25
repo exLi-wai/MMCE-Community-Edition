@@ -73,6 +73,24 @@ public final class RangedSelectionExportSnapshot {
     return DynamicDefinitionEditor.appendSegments(target, dynamicDeclarations(current, existingIds));
   }
 
+  /**
+   * Leaves automatic segment IDs for the server to allocate against its target
+   * file.
+   */
+  public JsonObject submission(Design current, String exportName) {
+    var root = root(current, exportName);
+    var dynamic = root.getAsJsonArray("dynamic_patterns");
+    if (dynamic != null) {
+      for (int index = 0; index < patterns.size(); index++) {
+        if (patterns.get(index).id.isEmpty()) {
+          dynamic.get(index).getAsJsonObject().remove("id");
+        }
+      }
+    }
+
+    return root;
+  }
+
   private JsonArray dynamicDeclarations(Design current, Set<String> existingIds) {
     var maximums = new HashMap<String, Integer>();
     for (int index = 0; index < current.keys().size(); index++) {

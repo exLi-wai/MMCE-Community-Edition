@@ -8,6 +8,7 @@ import com.lw.modularmachine.client.NetworkPortScreen;
 import com.lw.modularmachine.client.PatternProviderScreen;
 import com.lw.modularmachine.client.preview.WorldProjection;
 import com.lw.modularmachine.client.preview.ClientMachineCatalog;
+import com.lw.modularmachine.client.selection.RangedSelectionExportClient;
 import com.lw.modularmachine.integration.kubejs.KubeJSControllerClientBridge;
 import com.lw.modularmachine.menu.FactoryControllerMenu;
 import com.lw.modularmachine.menu.GroupInputMenu;
@@ -24,6 +25,7 @@ import com.lw.modularmachine.network.NetworkPortPayloads;
 import com.lw.modularmachine.network.ParallelControllerPayloads;
 import com.lw.modularmachine.network.PatternProviderPayloads;
 import com.lw.modularmachine.network.ProjectionPayloads;
+import com.lw.modularmachine.network.RangedSelectionExportPayloads;
 import com.lw.modularmachine.network.SmartInterfacePayloads;
 import com.lw.modularmachine.network.UpgradeBusPayloads;
 import net.minecraft.client.Minecraft;
@@ -50,6 +52,7 @@ public final class ClientPayloadReceivers {
     MachinePayloads.setClientReceiver(MachineControllerStatusClient::receive);
     NetworkPortPayloads.setClientReceiver(NetworkPortScreen::receive);
     PatternProviderPayloads.setClientReceiver(PatternProviderScreen::receive);
+    RangedSelectionExportPayloads.setReceiver(RangedSelectionExportClient::receive);
     KubeJSControllerClientBridge.setInstaller(ControllerClientPublisher::install);
     UpgradeBusPayloads.setClientReceiver(MachineControllerStatusClient::receiveUpgradeBus);
     ParallelControllerPayloads.setClientReceiver(payload -> {

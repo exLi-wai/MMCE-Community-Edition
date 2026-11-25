@@ -1,13 +1,12 @@
-package com.lw.modularmachine.client.selection;
+package com.lw.modularmachine.machine.selection;
 
 import com.google.gson.Gson;
 import com.google.gson.GsonBuilder;
+import com.google.gson.JsonArray;
 import com.google.gson.JsonElement;
 import com.google.gson.JsonObject;
+import com.lw.modularmachine.api.orientation.MachineOrientation;
 import com.lw.modularmachine.machine.orientation.StateOrientationAdapters;
-import com.lw.modularmachine.machine.selection.DynamicDefinitionEditor;
-import com.lw.modularmachine.machine.selection.MachineDefinitionFileStore;
-import com.lw.modularmachine.machine.selection.RangedSelectionData.Design;
 import com.lw.modularmachine.machine.structure.DynamicLayoutValidator;
 import com.lw.modularmachine.machine.structure.DynamicPatternDefinition;
 import com.lw.modularmachine.machine.structure.MachineDefinition;
@@ -29,21 +28,25 @@ import java.nio.file.StandardOpenOption;
 import java.time.LocalDateTime;
 import java.time.format.DateTimeFormatter;
 import java.util.Locale;
+import java.util.HashSet;
 import java.util.List;
 import java.util.Map;
 import java.util.Objects;
+import java.util.Set;
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.CompletionException;
 import java.util.concurrent.Executor;
+import java.util.function.BooleanSupplier;
 import net.minecraft.resources.ResourceLocation;
 import org.jetbrains.annotations.ApiStatus;
 
 /**
- * Worker-only publication of client preview snapshots and merges into existing
- * exports.
+ * Worker-only publication of detached selection declarations and merges into
+ * existing exports. Callers must not mutate detached submissions until
+ * completion. Cancellation suppliers may only read thread-safe flags.
  */
 @ApiStatus.Internal
-final class RangedSelectionExportFile {
+public final class RangedSelectionExportFile {
   private static final Gson JSON = new GsonBuilder().setPrettyPrinting().create();
   private static final DateTimeFormatter STAMP = DateTimeFormatter.ofPattern("yyyyMMdd_HHmmss", Locale.ROOT);
   private static final int MAX_COLLISIONS = 10_000;
@@ -51,10 +54,10 @@ final class RangedSelectionExportFile {
   private static final int MAX_TARGET_NAME_LENGTH = MAX_BASE_NAME_LENGTH + 1 + Integer.toString(MAX_COLLISIONS)
       .length();
 
-  record Saved(Path file, String name) {
+  public record Saved(Path file, String name) {
   }
 
-  static final class Target {
+  public static final class Target {
     private final Path machineryRoot, file;
     private final String name;
     private final String hash;
@@ -81,14 +84,14 @@ final class RangedSelectionExportFile {
   private RangedSelectionExportFile() {
   }
 
-  static String baseName(String requestedName) {
+  public static String baseName(String requestedName) {
     if (requestedName.isBlank()) {
       return "selection_" + STAMP.format(LocalDateTime.now());
     }
     return normalizeName(requestedName, MAX_BASE_NAME_LENGTH);
   }
 
-  static String targetName(String requestedName) {
+  public static String targetName(String requestedName) {
     return normalizeName(requestedName, MAX_TARGET_NAME_LENGTH);
   }
 
@@ -102,9 +105,15 @@ final class RangedSelectionExportFile {
     return name;
   }
 
-  static Saved save(Path definitionDirectory, String baseName, JsonObject root) throws IOException {
+  public static Saved save(Path definitionDirectory, String baseName, JsonObject root) throws IOException {
+    return save(definitionDirectory, baseName, root, () -> true);
+  }
+
+  public static Saved save(Path definitionDirectory, String baseName, JsonObject root, BooleanSupplier active)
+      throws IOException {
     validateName(baseName, MAX_BASE_NAME_LENGTH);
-    byte[] bytes = encode(root);
+    checkActive(active);
+    byte[] bytes = encode(normalizeSubmission(root, Set.of()));
     Path directory = directory(Objects.requireNonNull(definitionDirectory));
     Path temporary = Files.createTempFile(directory, ".mmcece-selection-", ".tmp");
     boolean published = false;
@@ -121,6 +130,7 @@ final class RangedSelectionExportFile {
         Path file = directory.resolve(candidate + ".json");
         try {
           // Publish only complete JSON to the reload directory, without replacing a file.
+          checkActive(active);
           Files.createLink(file, temporary);
         } catch (FileAlreadyExistsException occupied) {
           continue;
@@ -142,7 +152,7 @@ final class RangedSelectionExportFile {
     }
   }
 
-  static Target capture(Path machineryRoot, String baseName) throws IOException {
+  public static Target capture(Path machineryRoot, String baseName) throws IOException {
     validateName(baseName, MAX_TARGET_NAME_LENGTH);
     Path root = machineryRoot.toAbsolutePath().normalize();
     Path directory = root.resolve("mmcece");
@@ -150,14 +160,19 @@ final class RangedSelectionExportFile {
     return new Target(root, file, baseName, MachineDefinitionFileStore.readExistingExport(directory, file));
   }
 
-  static CompletableFuture<Saved> merge(Target target, RangedSelectionExportSnapshot snapshot, Design design, Executor registryExecutor, Executor worker) {
-    return CompletableFuture.supplyAsync(() -> prepare(target, snapshot, design), worker).thenCompose(
-        prepared -> CompletableFuture
-            .supplyAsync(() -> StateOrientationAdapters.capture(prepared.references()), registryExecutor)
-            .thenApplyAsync(registry -> validateAndSave(target, design, prepared, registry), worker));
+  public static CompletableFuture<Saved> merge(Target target, JsonObject submission, MachineOrientation orientation, Executor registryExecutor, Executor worker) {
+    return merge(target, submission, orientation, registryExecutor, worker, () -> true);
   }
 
-  private static Saved validateAndSave(Target target, Design design, Prepared prepared, StateOrientationAdapters.RegistrySnapshot registry) {
+  public static CompletableFuture<Saved> merge(Target target, JsonObject submission, MachineOrientation orientation, Executor registryExecutor, Executor worker, BooleanSupplier active) {
+    Objects.requireNonNull(active);
+    return CompletableFuture.supplyAsync(() -> prepare(target, submission), worker).thenCompose(
+        prepared -> CompletableFuture
+            .supplyAsync(() -> StateOrientationAdapters.capture(prepared.references()), registryExecutor)
+            .thenApplyAsync(registry -> validateAndSave(target, orientation, prepared, registry, active), worker));
+  }
+
+  private static Saved validateAndSave(Target target, MachineOrientation orientation, Prepared prepared, StateOrientationAdapters.RegistrySnapshot registry, BooleanSupplier active) {
     var defaults = MachineDefinitionDefaults.capture();
     var definition = MachineDefinitionScripts.compile(
         prepared.scripts(),
@@ -167,18 +182,21 @@ final class RangedSelectionExportFile {
             registry,
             defaults,
             prepared.additions()));
-    if (!definition.allows(design.orientation())) {
+    if (!definition.allows(orientation)) {
       throw new IllegalArgumentException(
           "The complete definition cannot represent the selected controller orientation");
     }
     try {
+      checkActive(active);
       MachineDefinitionFileStore
           .replaceExistingExport(target.file.getParent(), target.file, target.hash, prepared.bytes(), () -> {
+            checkActive(active);
             prepared.directory().verifySiblings(target.machineryRoot, target.file);
             if (!MachineDefinitionScripts.current(prepared.scripts())
                 || !defaults.equals(MachineDefinitionDefaults.capture())) {
               throw new IOException("Machine scripts or defaults changed during validation; retry the export");
             }
+            checkActive(active);
           });
       return new Saved(target.file, target.name);
     } catch (IOException failure) {
@@ -186,17 +204,22 @@ final class RangedSelectionExportFile {
     }
   }
 
-  static MachineDefinition validateCandidate(ResourceLocation machine, Map<ResourceLocation, JsonElement> effectiveRoots, StateOrientationAdapters.RegistrySnapshot registry, MachineDefinitionDefaults defaults, List<DynamicPatternDefinition.Declaration> additions) {
+  public static MachineDefinition validateCandidate(ResourceLocation machine, Map<ResourceLocation, JsonElement> effectiveRoots, StateOrientationAdapters.RegistrySnapshot registry, MachineDefinitionDefaults defaults, List<DynamicPatternDefinition.Declaration> additions) {
     var definition = MachineDefinitionReloadListener.compileCandidate(effectiveRoots, registry, defaults).get(machine);
     DynamicDefinitionEditor.requireLoadedSegments(definition, additions);
     DynamicLayoutValidator.validate(definition);
     return definition;
   }
 
-  private static Prepared prepare(Target target, RangedSelectionExportSnapshot snapshot, Design design) {
+  private static Prepared prepare(Target target, JsonObject submission) {
     var machine = MachineDefinitionConfig.id(target.machineryRoot.relativize(target.file));
-    var merged = snapshot.appendTo(target.original, design);
-    int existing = DynamicPatternDefinition.declarations(target.original, "$").size();
+    var existingDeclarations = DynamicPatternDefinition.declarations(target.original, "$");
+    var existingIds = new HashSet<String>();
+    existingDeclarations.forEach(declaration -> existingIds.add(declaration.id()));
+    var normalized = normalizeSubmission(submission, existingIds);
+    var patterns = normalized.has("dynamic_patterns") ? normalized.getAsJsonArray("dynamic_patterns") : new JsonArray();
+    var merged = DynamicDefinitionEditor.appendSegments(target.original, patterns);
+    int existing = existingDeclarations.size();
     var declarations = DynamicPatternDefinition.declarations(merged, "$");
     var additions = declarations.subList(existing, declarations.size());
     try {
@@ -218,6 +241,49 @@ final class RangedSelectionExportFile {
           StateOrientationAdapters.distinctReferences(references));
     } catch (IOException failure) {
       throw new CompletionException(failure);
+    }
+  }
+
+  private static JsonObject normalizeSubmission(JsonObject submission, Set<String> existingIds) {
+    var normalized = Objects.requireNonNull(submission).deepCopy();
+    if (!normalized.has("dynamic_patterns")) {
+      return normalized;
+    }
+    var patterns = normalized.getAsJsonArray("dynamic_patterns");
+    var usedIds = new HashSet<>(existingIds);
+    for (var element : patterns) {
+      var pattern = element.getAsJsonObject();
+      if (!pattern.has("id")) {
+        continue;
+      }
+      var identifier = pattern.get("id");
+      if (!identifier.isJsonPrimitive() || !identifier.getAsJsonPrimitive().isString()) {
+        throw new IllegalArgumentException("Expected a dynamic segment ID string");
+      }
+      String id = identifier.getAsString();
+      if (!id.matches("[a-zA-Z0-9_.-]{1,64}") || !usedIds.add(id)) {
+        throw new IllegalArgumentException("Invalid or duplicate dynamic segment ID: " + id);
+      }
+    }
+    int suffix = 1;
+    for (var element : patterns) {
+      var pattern = element.getAsJsonObject();
+      if (pattern.has("id")) {
+        continue;
+      }
+      while (usedIds.contains("segment_" + suffix)) {
+        suffix++;
+      }
+      String id = "segment_" + suffix++;
+      pattern.addProperty("id", id);
+      usedIds.add(id);
+    }
+    return normalized;
+  }
+
+  private static void checkActive(BooleanSupplier active) throws IOException {
+    if (!Objects.requireNonNull(active).getAsBoolean()) {
+      throw new IOException("Ranged selection export was cancelled");
     }
   }
 
