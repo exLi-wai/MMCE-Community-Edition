@@ -7,6 +7,7 @@ import com.lw.modularmachine.block.MachineControllerBlock;
 import com.lw.modularmachine.blockentity.FactoryControllerBlockEntity;
 import com.lw.modularmachine.blockentity.MachineControllerBlockEntity;
 import com.lw.modularmachine.blockentity.MachinePortBlockEntity;
+import com.lw.modularmachine.machine.factory.FactoryThreadConfiguration;
 import com.lw.modularmachine.machine.factory.FactoryThreadState.State;
 import com.lw.modularmachine.machine.factory.FactoryThreadState;
 import com.lw.modularmachine.api.upgrade.UpgradeSnapshot;
@@ -39,6 +40,7 @@ import net.minecraft.server.packs.PackType;
 import net.minecraft.world.item.ItemStack;
 import net.minecraft.world.item.Items;
 import net.minecraft.world.item.crafting.Recipe;
+import net.minecraft.world.item.crafting.RecipeHolder;
 import net.minecraft.world.item.crafting.SingleRecipeInput;
 import net.minecraft.world.level.block.entity.BlockEntity;
 import net.minecraft.world.level.block.state.properties.BlockStateProperties;
@@ -315,9 +317,13 @@ public final class NativeMachineRecipeGameTests {
             helper.assertTrue(
                 manager == server.getRecipeManager()
                     && view != manager.getRecipes()
-                    && !plan.validateForStart()
-                    && MachineRecipeService.catalogFor(controller).isEmpty(),
+                    && !catalog.isCurrent()
+                    && !plan.validateForStart(),
                 "Same-manager replacement reused stale catalog authority");
+            var refreshed = MachineRecipeService.catalogFor(controller).orElseThrow();
+            helper.assertTrue(
+                refreshed.isCurrent() && refreshed != catalog && !legacyPlan.validateForStart(),
+                "Publishing the replacement view revived a previous plan");
             helper.assertTrue(
                 input.inventory().getStackInSlot(0).getCount() == 2
                     && output.inventory().getStackInSlot(0).getCount() == 63,
@@ -350,6 +356,86 @@ public final class NativeMachineRecipeGameTests {
             helper.fail("Native lifecycle assertion: " + error);
           }
         }));
+  }
+
+  @GameTest(template = "empty16", batch = "factory_lock_recipe_rebuild", timeoutTicks = 200)
+  public static void factory_lock_survives_foreign_recipe_rebuild_and_rejects_changed_machine_recipes(GameTestHelper helper) {
+    var level = helper.getLevel();
+    var server = level.getServer();
+    var manager = server.getRecipeManager();
+    var machine = id("test_recipe_resources");
+    var recipeId = id("mmcece/test_native_a");
+    var recipe = MachineRecipeService.definition(server, recipeId).orElseThrow();
+    var origin = helper.absolutePos(new BlockPos(7, 5, 7));
+    var controller = RecipeResourceTicketGameTests.build(helper, origin, MachineOrientation.IDENTITY);
+    var input = RecipeResourceTicketGameTests.port(helper, controller, "item_in");
+    var output = RecipeResourceTicketGameTests.port(helper, controller, "item_out");
+    level.setBlockAndUpdate(
+        origin,
+        MachineRegistries.FACTORY_CONTROLLER.get().defaultBlockState()
+            .setValue(FactoryControllerBlock.FACING, Direction.NORTH).setValue(FactoryControllerBlock.ROLL, 0));
+    var factory = (FactoryControllerBlockEntity) level.getBlockEntity(origin);
+    var configuration = factory.threadConfiguration();
+    helper.assertTrue(
+        configuration.configureMachine(machine) == FactoryThreadConfiguration.ConfigurationResult.SUCCESS,
+        "Factory did not install its main thread");
+    for (int i = 0; i < 200 && !factory.canCommitStructure(); i++) {
+      StructureService.advance(level, 512, 64, 50_000_000L);
+    }
+    helper.assertTrue(factory.canCommitStructure(), "Factory fixture did not form");
+
+    var originals = List.copyOf(manager.getRecipes());
+    var ordinary = originals.stream().filter(holder -> !(holder.value() instanceof MachineRecipe)).findFirst()
+        .orElseThrow();
+    var changed = new ArrayList<RecipeHolder<?>>(originals);
+    changed.removeIf(holder -> holder.id().equals(recipeId));
+    changed.add(new RecipeHolder<>(recipeId, recipe));
+    changed.add(new RecipeHolder<>(id("test_foreign_generated"), ordinary.value()));
+    try {
+      manager.replaceRecipes(changed);
+      var thread = factory.scheduler().channel("main");
+      helper.assertTrue(
+          configuration.update("main", thread.revision(), FactoryThreadConfiguration.Change.lockedRecipe(recipeId))
+              && recipeId.equals(factory.scheduler().channel("main").lockedRecipe()),
+          "Adding an ordinary recipe prevented the factory lock");
+      changed.remove(ordinary);
+      manager.replaceRecipes(changed);
+      helper.assertTrue(
+          MachineRecipeService.definition(server, recipeId).orElseThrow() == recipe,
+          "Removing an ordinary recipe hid the validated machine recipe");
+
+      var extraId = id("mmcece/test_unvalidated_machine");
+      changed.add(new RecipeHolder<>(extraId, recipe));
+      manager.replaceRecipes(changed);
+      helper
+          .assertTrue(MachineRecipeService.catalogFor(factory).isEmpty(), "An unvalidated machine recipe was accepted");
+      changed.removeIf(holder -> holder.id().equals(extraId));
+      changed.removeIf(holder -> holder.id().equals(recipeId));
+      manager.replaceRecipes(changed);
+      helper.assertTrue(MachineRecipeService.catalogFor(factory).isEmpty(), "A missing machine recipe was accepted");
+      var ops = level.registryAccess().createSerializationContext(JsonOps.INSTANCE);
+      var copy = Recipe.CODEC.parse(ops, Recipe.CODEC.encodeStart(ops, recipe).getOrThrow()).getOrThrow();
+      changed.add(new RecipeHolder<>(recipeId, copy));
+      manager.replaceRecipes(changed);
+      helper.assertTrue(
+          MachineRecipeService.catalogFor(factory).isEmpty(),
+          "A new recipe instance reused its validated ID");
+    } finally {
+      manager.replaceRecipes(originals);
+    }
+    helper.assertTrue(
+        MachineRecipeService.definition(server, recipeId).orElseThrow() == recipe,
+        "Restoring the validated recipes did not recover the factory catalog");
+    input.inventory().setStackInSlot(0, new ItemStack(Items.DIRT, 2));
+    helper.succeedWhen(() -> {
+      var produced = output.inventory().getStackInSlot(0);
+      helper.assertTrue(
+          produced.is(Items.IRON_INGOT)
+              && produced.getCount() == 1
+              && input.inventory().getStackInSlot(0).isEmpty()
+              && recipeId.equals(factory.scheduler().channel("main").lockedRecipe()),
+          "Factory did not finish its locked recipe after a table rebuild");
+    });
   }
 
   @GameTest(templateNamespace = "mmcece_recipe_codec", template = "empty16", batch = "native_recipe_delta", timeoutTicks = 600)

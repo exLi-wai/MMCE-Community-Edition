@@ -51,7 +51,7 @@ public final class MachineRecipeService {
 
   private record Prepared(
       long structureEpoch,
-      Collection<RecipeHolder<?>> recipeView,
+      CheckedRecipeView recipeView,
       Map<ResourceLocation, RecipeCatalog> catalogs,
       Map<ResourceLocation, MachineRecipe> definitions,
       Map<ResourceLocation, RecipeModifierTemplate> templates,
@@ -60,6 +60,30 @@ public final class MachineRecipeService {
       RecipeScriptCallbacks.Snapshot itemCallbacks,
       Map<ResourceLocation, ResourceLocation> nativeOwners,
       Map<ResourceLocation, ResourceLocation> scriptOwners) {
+  }
+
+  /**
+   * Remembers whether the last observed table contains this generation's
+   * validated recipes.
+   */
+  private static final class CheckedRecipeView {
+    private Collection<RecipeHolder<?>> checked;
+    private boolean matches;
+
+    boolean matches(RecipeManager manager, Collection<RecipeHolder<?>> view, Map<ResourceLocation, MachineRecipe> definitions) {
+      if (view != checked) {
+        // Other mods can rebuild the table after reload. All validated machine
+        // recipes (including adapter outputs) must still occupy their original IDs.
+        var recipes = manager.getAllRecipesFor(MachineRecipeRegistries.ITEM_TYPE.get());
+        matches = recipes.size() == definitions.size() && recipes.stream().allMatch(holder -> {
+          var definition = definitions.get(holder.id());
+          var installed = manager.byKey(holder.id()).orElse(null);
+          return holder.value() == definition && installed != null && installed.value() == definition;
+        });
+        checked = view;
+      }
+      return matches;
+    }
   }
 
   private MachineRecipeService() {
@@ -187,7 +211,7 @@ public final class MachineRecipeService {
     }
     var candidate = new Prepared(
         StructureService.definitionEpoch(),
-        manager.getRecipes(),
+        new CheckedRecipeView(),
         catalogs,
         Map.copyOf(effective),
         Map.copyOf(templates),
@@ -566,9 +590,11 @@ public final class MachineRecipeService {
     ServerThreadGuard.require(server, "Machine recipe catalog accessed");
     var manager = server.getRecipeManager();
     var prepared = PREPARED.get(manager);
-    if (prepared == null
-        || prepared.structureEpoch() != StructureService.definitionEpoch()
-        || prepared.recipeView() != manager.getRecipes()) {
+    if (prepared == null || prepared.structureEpoch() != StructureService.definitionEpoch()) {
+      return null;
+    }
+    var view = manager.getRecipes();
+    if (!prepared.recipeView().matches(manager, view, prepared.definitions())) {
       return null;
     }
     var published = ACTIVE.get(server);
@@ -582,10 +608,13 @@ public final class MachineRecipeService {
     }
     boolean durationMultiplier = MachineConfig.durationMultiplierEnabled();
     var defaults = MachineRecipeJson.currentDefaults();
-    if (alreadyPublished && published.durationMultiplier == durationMultiplier && published.defaults.equals(defaults)) {
+    if (alreadyPublished
+        && published.recipeView == view
+        && published.durationMultiplier == durationMultiplier
+        && published.defaults.equals(defaults)) {
       return published;
     }
-    var next = new Published(server, manager, prepared, durationMultiplier, defaults);
+    var next = new Published(server, manager, prepared, view, durationMultiplier, defaults);
     if (!alreadyPublished) {
       RecipeScriptCallbacks.install(prepared.itemCallbacks());
     }
@@ -598,6 +627,7 @@ public final class MachineRecipeService {
     final MinecraftServer server;
     final RecipeManager manager;
     final Prepared prepared;
+    final Collection<RecipeHolder<?>> recipeView;
     final boolean durationMultiplier;
     final MachineRecipeJson.Defaults defaults;
     final Map<ResourceLocation, RecipeCatalog> catalogs;
@@ -606,10 +636,11 @@ public final class MachineRecipeService {
         0.75F,
         true);
 
-    Published(MinecraftServer server, RecipeManager manager, Prepared prepared, boolean durationMultiplier, MachineRecipeJson.Defaults defaults) {
+    Published(MinecraftServer server, RecipeManager manager, Prepared prepared, Collection<RecipeHolder<?>> recipeView, boolean durationMultiplier, MachineRecipeJson.Defaults defaults) {
       this.server = server;
       this.manager = manager;
       this.prepared = prepared;
+      this.recipeView = recipeView;
       this.durationMultiplier = durationMultiplier;
       this.defaults = defaults;
       var values = new HashMap<ResourceLocation, RecipeCatalog>();
@@ -622,7 +653,7 @@ public final class MachineRecipeService {
       return ACTIVE.get(server) == this
           && PREPARED.get(manager) == prepared
           && server.getRecipeManager() == manager
-          && manager.getRecipes() == prepared.recipeView()
+          && manager.getRecipes() == recipeView
           && MachineConfig.durationMultiplierEnabled() == durationMultiplier
           && MachineRecipeJson.currentDefaults().equals(defaults)
           && StructureService.definitionEpoch() == prepared.structureEpoch();

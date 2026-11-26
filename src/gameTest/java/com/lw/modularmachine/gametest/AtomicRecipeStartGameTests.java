@@ -134,6 +134,11 @@ public final class AtomicRecipeStartGameTests {
             } finally {
               TestPredicateBlock.CALLBACK.set(null);
             }
+            helper.assertTrue(
+                plan(legacy).start() == AtomicRecipeStarter.Result.STARTED
+                    && input.inventory().getStackInSlot(0).isEmpty()
+                    && legacy.runningRecipe().isPresent(),
+                "A fresh plan could not start against unchanged machine recipes after the replacement");
             server.reloadResources(server.getPackRepository().getSelectedIds())
                 .whenComplete((again, recoveryFailure) -> server.execute(() -> {
                   if (recoveryFailure != null) {
