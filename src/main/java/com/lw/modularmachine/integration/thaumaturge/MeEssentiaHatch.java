@@ -11,17 +11,23 @@ import appeng.api.networking.security.IActionHost;
 import appeng.api.networking.security.IActionSource;
 import appeng.api.storage.MEStorage;
 import appeng.api.util.AECableType;
+import com.leclowndu93150.thaumaturge.api.aspect.IAspect;
 import com.lw.modularmachine.api.recipe.resource.RecipeResourceParticipant;
 import com.lw.modularmachine.machine.recipe.search.RecipeSearchResource.ReplenishmentProof;
 import com.lw.modularmachine.registry.MachineRegistries;
 import com.traverse.appliedthaumaturge.me.key.EssentiaKey;
 import java.util.EnumSet;
+import java.util.function.ObjLongConsumer;
 import net.minecraft.core.BlockPos;
 import net.minecraft.core.Direction;
+import net.minecraft.core.Holder;
 import net.minecraft.core.HolderLookup;
 import net.minecraft.nbt.CompoundTag;
 import net.minecraft.resources.ResourceLocation;
 import net.minecraft.server.level.ServerLevel;
+import net.minecraft.world.InteractionHand;
+import net.minecraft.world.entity.player.Player;
+import net.minecraft.world.item.ItemStack;
 import net.minecraft.world.level.block.state.BlockState;
 import org.jetbrains.annotations.ApiStatus;
 import java.util.List;
@@ -121,6 +127,26 @@ public final class MeEssentiaHatch extends EssentiaHatch implements IInWorldGrid
   }
 
   @Override
+  boolean visitStoredAspects(ObjLongConsumer<Holder<IAspect>> visitor) {
+    if (!direct) {
+      return super.visitStoredAspects(visitor);
+    }
+    if (!mutable() || compensationReserved != 0 || node == null || !node.isActive() || node.getGrid() == null) {
+      return false;
+    }
+    var contents = node.getGrid().getStorageService().getCachedInventory();
+    // Look up only registered essentia keys, independently of the number of item
+    // variants on the network.
+    level.registryAccess().registryOrThrow(IAspect.REGISTRY_KEY).holders().forEach(aspect -> {
+      long amount = contents.get(EssentiaKey.of(aspect));
+      if (amount > 0) {
+        visitor.accept(aspect, amount);
+      }
+    });
+    return true;
+  }
+
+  @Override
   public Object resourceAddress() {
     return direct ? inventory() : super.resourceAddress();
   }
@@ -156,6 +182,11 @@ public final class MeEssentiaHatch extends EssentiaHatch implements IInWorldGrid
       super.recoverContents();
       refundTarget = null;
     }
+  }
+
+  @Override
+  boolean transferPhial(ItemStack held, Player player, InteractionHand hand) {
+    return !direct && compensationReserved == 0 && super.transferPhial(held, player, hand);
   }
 
   @Override
@@ -265,7 +296,7 @@ public final class MeEssentiaHatch extends EssentiaHatch implements IInWorldGrid
         long moved = extracting ? inventory.extract(key, maximum, Actionable.MODULATE, source) : inventory
             .insert(key, maximum, Actionable.MODULATE, source);
         long delta = extracting ? moved : -moved;
-        if (moved < 0 || moved > maximum || stock.move(id, delta, false) != delta) {
+        if (moved < 0 || moved > maximum || moveLocalStock(id, delta, false) != delta) {
           throw new IllegalStateException("ME essentia reported an invalid transfer amount");
         }
         if (moved > 0) {

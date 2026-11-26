@@ -25,6 +25,7 @@ import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Map;
 import java.util.Optional;
+import java.util.Set;
 import net.minecraft.core.HolderLookup;
 import net.minecraft.resources.ResourceLocation;
 import net.minecraft.server.MinecraftServer;
@@ -56,17 +57,15 @@ public final class MachineRecipeService {
       Map<ResourceLocation, RecipeModifierTemplate> templates,
       MachineRecipeJson.Defaults defaults,
       long recipeAdapterScriptRevision,
-      RecipeScriptCallbacks.Snapshot itemCallbacks) {
+      RecipeScriptCallbacks.Snapshot itemCallbacks,
+      Map<ResourceLocation, ResourceLocation> nativeOwners,
+      Map<ResourceLocation, ResourceLocation> scriptOwners) {
   }
 
   private MachineRecipeService() {
   }
 
-  static void stage(RecipeManager manager, Map<ResourceLocation, MachineRecipe> expected, Map<ResourceLocation, JsonElement> sources, HolderLookup.Provider registries) {
-    stage(manager, expected, sources, registries, RecipeAdapterTags.from(registries));
-  }
-
-  static void stage(RecipeManager manager, Map<ResourceLocation, MachineRecipe> expected, Map<ResourceLocation, JsonElement> sources, HolderLookup.Provider registries, RecipeAdapterTags tags) {
+  static void stage(RecipeManager manager, Map<ResourceLocation, MachineRecipe> expected, Map<ResourceLocation, JsonElement> sources, HolderLookup.Provider registries, RecipeAdapterTags tags, RecipeDeclarationOwners nativeOwners, RecipeDeclarationOwners scriptOwners, Map<ResourceLocation, RecipeHolder<?>> ordinaryFallbacks, List<ResourceLocation> recipeOrder, long callbackGeneration, Set<ResourceLocation> acceptedScriptIds, Set<ResourceLocation> correctedMissingHolders) {
     var defaults = MachineRecipeJson.currentDefaults();
     var server = ServerLifecycleHooks.getCurrentServer();
     if (server != null) {
@@ -76,24 +75,36 @@ public final class MachineRecipeService {
     // authority, callback snapshots or contextual catalogs are carried over.
     var previous = server == null ? null : ACTIVE.get(server);
     var previousCatalogs = previous == null ? Map.<ResourceLocation, RecipeCatalog>of() : previous.prepared.catalogs();
-    var actual = new LinkedHashMap<ResourceLocation, MachineRecipe>();
-    for (var holder : manager.getAllRecipesFor(MachineRecipeRegistries.ITEM_TYPE.get())) {
-      if (!sources.containsKey(holder.id())) {
-        throw new IllegalArgumentException(
-            holder.id() + ": Machine recipes require a validated native resource or script declaration");
-      }
-      actual.put(holder.id(), holder.value());
-    }
-    if (!actual.keySet().equals(expected.keySet())) {
-      var missing = new LinkedHashSet<>(expected.keySet());
-      missing.removeAll(actual.keySet());
-      var unexpected = new LinkedHashSet<>(actual.keySet());
-      unexpected.removeAll(expected.keySet());
-      throw new IllegalArgumentException(
-          "Native machine recipe set is incomplete or contains an unvalidated recipe: missing " + missing + ", unvalidated " + unexpected);
-    }
+    var originalRecipes = manager.getRecipes();
+    // Machine copies still need to know about the skipped declaration when
+    // another source supplied a valid holder with the same recipe ID.
+    var skippedDeclarations = new LinkedHashSet<>(nativeOwners.skipped());
+    skippedDeclarations.addAll(scriptOwners.skipped());
+    var skippedIds = new LinkedHashSet<>(skippedDeclarations);
+    // Existing script holders are compared against their validated declarations
+    // below.
+    skippedIds.removeAll(acceptedScriptIds);
+    skippedIds.addAll(correctedMissingHolders);
+    var recipeCandidates = recipeCandidates(originalRecipes, expected, skippedIds, ordinaryFallbacks, recipeOrder);
+    var actual = validateNativeCandidates(recipeCandidates, expected, sources);
     var machines = StructureService.definitionsSnapshot();
-    var imports = RecipeAdapterImports.generate(manager, machines, registries, tags, sources);
+    var omittedMachines = new LinkedHashMap<ResourceLocation, Set<ResourceLocation>>();
+    var resolvedNative = nativeOwners
+        .resolve(machines.keySet(), previous == null ? Map.of() : previous.prepared.nativeOwners(), omittedMachines);
+    var resolvedScripts = scriptOwners
+        .resolve(machines.keySet(), previous == null ? Map.of() : previous.prepared.scriptOwners(), omittedMachines);
+    var unattributed = new LinkedHashSet<ResourceLocation>();
+    nativeOwners.skipped().stream().filter(id -> !resolvedNative.containsKey(id)).forEach(unattributed::add);
+    scriptOwners.skipped().stream().filter(id -> !resolvedScripts.containsKey(id)).forEach(unattributed::add);
+    var imports = RecipeAdapterImports.generate(
+        recipeCandidates,
+        machines,
+        registries,
+        tags,
+        sources,
+        skippedDeclarations,
+        omittedMachines,
+        unattributed);
     var declarations = new LinkedHashMap<>(expected);
     var originalSources = new LinkedHashMap<>(sources);
     for (var entry : imports.recipes().entrySet()) {
@@ -150,15 +161,17 @@ public final class MachineRecipeService {
     // A validated machine with no recipes still has a published catalog.
     machines.keySet().forEach(machine -> candidates.putIfAbsent(machine, List.of()));
     var catalogs = prepareCatalogs(candidates, effective, previousCatalogs);
-    boolean changed = !imports.recipes().isEmpty()
+    boolean changed = recipeCandidates != originalRecipes
+        || !imports.recipes().isEmpty()
         || effective.entrySet().stream().anyMatch(entry -> entry.getValue() != actual.get(entry.getKey()));
     if (!RecipeAdapterScriptSources.isCurrent(imports.scriptRevision())) {
       throw new IllegalStateException("Recipe adapter scripts changed before recipe publication");
     }
+    var itemCallbacks = RecipeScriptCallbacks.snapshot(callbackGeneration, acceptedScriptIds);
     if (changed) {
       var replacements = new ArrayList<RecipeHolder<?>>();
       var installed = new LinkedHashSet<ResourceLocation>();
-      for (var holder : manager.getRecipes()) {
+      for (var holder : recipeCandidates) {
         var replacement = effective.get(holder.id());
         replacements.add(replacement == null ? holder : new RecipeHolder<>(holder.id(), replacement));
         installed.add(holder.id());
@@ -180,11 +193,91 @@ public final class MachineRecipeService {
         Map.copyOf(templates),
         defaults,
         imports.scriptRevision(),
-        RecipeScriptCallbacks.snapshot());
+        itemCallbacks,
+        resolvedNative,
+        resolvedScripts);
     PREPARED.entrySet().removeIf(
         entry -> entry.getKey() != manager
             && ACTIVE.values().stream().noneMatch(active -> active.manager == entry.getKey()));
     PREPARED.put(manager, candidate);
+  }
+
+  /**
+   * The same candidate view feeds strict validation, adapter imports and
+   * publication.
+   */
+  private static Collection<RecipeHolder<?>> recipeCandidates(Collection<RecipeHolder<?>> originals, Map<ResourceLocation, MachineRecipe> expected, Set<ResourceLocation> skippedIds, Map<ResourceLocation, RecipeHolder<?>> ordinaryFallbacks, List<ResourceLocation> recipeOrder) {
+    if (skippedIds.isEmpty()) {
+      return originals;
+    }
+    // A skipped machine holder may still occupy the ID. Keep ordinary holders
+    // supplied by the manager.
+    var candidates = new LinkedHashMap<ResourceLocation, RecipeHolder<?>>();
+    for (var holder : originals) {
+      var id = holder.id();
+      if (skippedIds.contains(id) && holder.value() instanceof MachineRecipe) {
+        continue;
+      }
+      candidates.put(id, holder);
+    }
+    // Refill a shadowed ID only if it no longer has a valid holder.
+    for (var id : skippedIds) {
+      if (candidates.containsKey(id)) {
+        continue;
+      }
+      var nativeRecipe = expected.get(id);
+      if (nativeRecipe != null) {
+        candidates.put(id, new RecipeHolder<>(id, nativeRecipe));
+      } else {
+        var fallback = ordinaryFallbacks.get(id);
+        if (fallback != null) {
+          candidates.put(id, fallback);
+        }
+      }
+    }
+
+    if (ordinaryFallbacks.isEmpty()) {
+      return candidates.values();
+    }
+
+    // A failed decode has no holder to replace in place. Replay the JSON encounter
+    // order so
+    // a restored recipe keeps its priority over other recipes matching the same
+    // input.
+    var ordered = new ArrayList<RecipeHolder<?>>(candidates.size());
+    for (var id : recipeOrder) {
+      var holder = candidates.remove(id);
+      if (holder != null) {
+        ordered.add(holder);
+      }
+    }
+    ordered.addAll(candidates.values());
+    return ordered;
+  }
+
+  private static Map<ResourceLocation, MachineRecipe> validateNativeCandidates(Collection<RecipeHolder<?>> candidates, Map<ResourceLocation, MachineRecipe> expected, Map<ResourceLocation, JsonElement> sources) {
+    var actual = new LinkedHashMap<ResourceLocation, MachineRecipe>();
+    var machineType = MachineRecipeRegistries.ITEM_TYPE.get();
+    for (var holder : candidates) {
+      if (holder.value().getType() != machineType) {
+        continue;
+      }
+      if (!(holder.value() instanceof MachineRecipe machine) || !sources.containsKey(holder.id())) {
+        throw new IllegalArgumentException(
+            holder.id() + ": Machine recipes require a validated native resource or script declaration");
+      }
+      actual.put(holder.id(), machine);
+    }
+    if (!actual.keySet().equals(expected.keySet())) {
+      var missing = new LinkedHashSet<>(expected.keySet());
+      missing.removeAll(actual.keySet());
+      var unexpected = new LinkedHashSet<>(actual.keySet());
+      unexpected.removeAll(expected.keySet());
+      throw new IllegalArgumentException(
+          "Native machine recipe set is incomplete or contains an unvalidated recipe: missing " + missing + ", unvalidated " + unexpected);
+    }
+
+    return actual;
   }
 
   public static Optional<RecipeCatalog> catalogFor(MachineControllerBlockEntity controller) {

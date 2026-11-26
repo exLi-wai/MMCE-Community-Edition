@@ -289,10 +289,22 @@ final class MachinePartParser {
     }
   }
 
-  static void checkAlternativeBudget(Map<ResourceLocation, ? extends JsonElement> roots) {
-    if (roots.size() > 1024) {
-      throw error("$", "At most 1024 machine definitions per reload");
+  record DefinitionCost(int definitions, long parts, long alternatives) {
+    DefinitionCost plus(DefinitionCost other, String path) {
+      checkDefinitionCount(definitions + other.definitions, path);
+      checkPartCount(parts + other.parts, path);
+      if (alternatives + other.alternatives > ALTERNATIVE_RESOURCE_BUDGET) {
+        throw error(path, "Reload exceeds 4194304 block alternatives");
+      }
+      return new DefinitionCost(
+          definitions + other.definitions,
+          parts + other.parts,
+          alternatives + other.alternatives);
     }
+  }
+
+  static DefinitionCost checkAlternativeBudget(Map<ResourceLocation, ? extends JsonElement> roots) {
+    checkDefinitionCount(roots.size(), "$");
     var budget = new AlternativeBudget();
     long totalParts = 0;
     for (var entry : roots.entrySet()) {
@@ -304,9 +316,7 @@ final class MachinePartParser {
       declarations.addAll(StructureModifierDefinition.captureParts(root, path));
       declarations.addAll(DynamicPatternDefinition.captureParts(root, path));
       totalParts += declarations.size();
-      if (totalParts > 4_194_304L) {
-        throw error(path + ".parts", "Reload exceeds 4194304 total parts");
-      }
+      checkPartCount(totalParts, path);
       for (int index = 0; index < declarations.size(); index++) {
         String partPath = path + ".parts[" + index + "]";
         var part = object(declarations.get(index), partPath);
@@ -317,6 +327,19 @@ final class MachinePartParser {
             .has("properties") ? object(part.get("properties"), partPath + ".properties") : new JsonObject();
         budget.add(blockNames(part, partPath).size(), propertyOptions(properties, partPath + ".properties"), partPath);
       }
+    }
+    return new DefinitionCost(roots.size(), totalParts, budget.used);
+  }
+
+  private static void checkDefinitionCount(int count, String path) {
+    if (count > MachineDefinitionFiles.MAX_MACHINE_FILES) {
+      throw error(path, "At most " + MachineDefinitionFiles.MAX_MACHINE_FILES + " machine definitions per reload");
+    }
+  }
+
+  private static void checkPartCount(long count, String path) {
+    if (count > 4_194_304L) {
+      throw error(path + ".parts", "Reload exceeds 4194304 total parts");
     }
   }
 

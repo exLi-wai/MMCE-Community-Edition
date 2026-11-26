@@ -9,6 +9,7 @@ import dev.latvian.mods.kubejs.recipe.schema.RecipeNamespace;
 import java.util.LinkedHashMap;
 import java.util.Map;
 import net.minecraft.resources.ResourceLocation;
+import net.minecraft.world.item.crafting.RecipeManager;
 import org.jetbrains.annotations.ApiStatus;
 
 /**
@@ -19,9 +20,10 @@ final class KubeJSRecipeLoading {
   private KubeJSRecipeLoading() {
   }
 
-  static void beforeRecipeLoading(RecipesKubeEvent event, Map<ResourceLocation, JsonElement> recipes) {
+  static void beforeRecipeLoading(RecipesKubeEvent event, RecipeManager manager, Map<ResourceLocation, JsonElement> recipes) {
     hideMachineRecipeFunction(event);
-    MachineItemRecipeKubeJSSources.capture(recipes);
+    var replacements = (MachineItemRecipeKubeJSSources.Replacements) event;
+    MachineItemRecipeKubeJSSources.capture(manager, recipes, replacements::MMCECE$replacement);
   }
 
   private static void hideMachineRecipeFunction(RecipesKubeEvent event) {

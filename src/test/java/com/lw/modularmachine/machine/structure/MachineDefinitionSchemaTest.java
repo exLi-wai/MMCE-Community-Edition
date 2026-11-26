@@ -9,10 +9,12 @@ import com.lw.modularmachine.api.orientation.MachineOrientation;
 import com.lw.modularmachine.machine.orientation.OrientationPolicy;
 import com.lw.modularmachine.machine.orientation.PropertySpace;
 import com.lw.modularmachine.machine.orientation.StateOrientationAdapters;
-import java.io.ByteArrayInputStream;
+import java.nio.ByteBuffer;
+import java.nio.channels.FileChannel;
 import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.nio.file.Path;
+import java.nio.file.StandardOpenOption;
 import java.util.ArrayDeque;
 import java.util.List;
 import java.util.Map;
@@ -21,18 +23,20 @@ import java.util.Set;
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.CompletionException;
 import java.util.concurrent.Executor;
-import java.util.function.Predicate;
 import java.util.stream.Collectors;
-import java.util.stream.Stream;
 import net.minecraft.core.Direction;
+import net.minecraft.network.chat.Component;
 import net.minecraft.resources.ResourceLocation;
-import net.minecraft.server.packs.PackResources;
+import net.minecraft.server.packs.PackLocationInfo;
+import net.minecraft.server.packs.PackType;
+import net.minecraft.server.packs.PathPackResources;
+import net.minecraft.server.packs.repository.PackSource;
+import net.minecraft.server.packs.resources.MultiPackResourceManager;
 import net.minecraft.server.packs.resources.PreparableReloadListener;
-import net.minecraft.server.packs.resources.Resource;
 import net.minecraft.server.packs.resources.ResourceManager;
 import net.minecraft.util.profiling.InactiveProfiler;
-import org.junit.jupiter.api.Disabled;
 import org.junit.jupiter.api.Test;
+import org.junit.jupiter.api.io.TempDir;
 import static org.junit.jupiter.api.Assertions.*;
 
 /**
@@ -40,6 +44,9 @@ import static org.junit.jupiter.api.Assertions.*;
  * GameTests.
  */
 class MachineDefinitionSchemaTest {
+  @TempDir
+  Path temporaryDirectory;
+
   private static final ResourceLocation ID = id("schema_unit");
   private static final StateOrientationAdapters.RegistrySnapshot EMPTY = new StateOrientationAdapters.RegistrySnapshot(
       Map.of());
@@ -361,17 +368,82 @@ class MachineDefinitionSchemaTest {
   }
 
   @Test
-  @Disabled("machine definitions load from config/modularmachinery/machinery now; reload/barrier is covered by the reload GameTests")
-  void aReloadPublishesOnlyAfterTheBarrierAndTheWholeCandidateIsReady() {
+  void machineDirectoryRejectsMoreFilesThanStartupRegistrationLimit() throws Exception {
+    for (int index = 0; index <= MachineDefinitionFiles.MAX_MACHINE_FILES; index++) {
+      Files.createFile(temporaryDirectory.resolve("machine_" + index + ".json"));
+    }
+
+    var failure = assertThrows(
+        JsonParseException.class,
+        () -> MachineDefinitionFiles.readDefinitions(temporaryDirectory, null));
+    var startupFailure = assertThrows(
+        JsonParseException.class,
+        () -> MachineDefinitionFiles.startupMachineFiles(temporaryDirectory));
+
+    assertTrue(failure.getMessage().contains("At most " + MachineDefinitionFiles.MAX_MACHINE_FILES));
+    assertEquals(failure.getMessage(), startupFailure.getMessage());
+  }
+
+  @Test
+  void machineDirectoryRejectsTheSameAggregateOverflowAtStartupAndReload() throws Exception {
+    Path lastMachine = temporaryDirectory.resolve("zz_over_budget.json");
+    Files.writeString(lastMachine, "{}");
+    int fileCount = Math.toIntExact(MachineDefinitionFiles.MAX_TOTAL_BYTES / MachineDefinitionFiles.MAX_FILE_BYTES);
+    for (int index = fileCount - 1; index >= 0; index--) {
+      Path file = temporaryDirectory.resolve("machine_" + index + ".json");
+      try (var channel = FileChannel
+          .open(file, StandardOpenOption.CREATE_NEW, StandardOpenOption.WRITE, StandardOpenOption.SPARSE)) {
+        channel.write(ByteBuffer.wrap(new byte[1]), MachineDefinitionFiles.MAX_FILE_BYTES - 1);
+      }
+    }
+
+    var startup = assertThrows(
+        MachineDefinitionFiles.DirectorySizeLimitException.class,
+        () -> MachineDefinitionFiles.startupMachineFiles(temporaryDirectory));
+    var reload = assertThrows(
+        MachineDefinitionFiles.DirectorySizeLimitException.class,
+        () -> MachineDefinitionFiles.readDefinitions(temporaryDirectory, null));
+
+    assertTrue(startup.getMessage().startsWith(lastMachine.toString()));
+    assertEquals(startup.getMessage(), reload.getMessage());
+  }
+
+  @Test
+  void oversizedMachineIsSkippedAtStartupEvenWhenLargerThanTheDirectoryBudget() throws Exception {
+    Path oversized = temporaryDirectory.resolve("a_oversized.json");
+    try (var channel = FileChannel
+        .open(oversized, StandardOpenOption.CREATE_NEW, StandardOpenOption.WRITE, StandardOpenOption.SPARSE)) {
+      channel.write(ByteBuffer.wrap(new byte[1]), MachineDefinitionFiles.MAX_TOTAL_BYTES);
+    }
+    Path valid = temporaryDirectory.resolve("b_valid.json");
+    Files.writeString(valid, PORTS);
+
+    assertEquals(List.of(oversized, valid), MachineDefinitionFiles.startupMachineFiles(temporaryDirectory));
+    var failure = assertThrows(
+        JsonParseException.class,
+        () -> MachineDefinitionFiles.readMachine(oversized, MachineDefinitionFiles.MAX_TOTAL_BYTES));
+    assertArrayEquals(
+        PORTS.getBytes(StandardCharsets.UTF_8),
+        MachineDefinitionFiles.readMachine(valid, MachineDefinitionFiles.MAX_TOTAL_BYTES));
+    var reload = assertThrows(
+        JsonParseException.class,
+        () -> MachineDefinitionFiles.readDefinitions(temporaryDirectory, null));
+    assertEquals(failure.getMessage(), reload.getMessage());
+  }
+
+  @Test
+  void aReloadPublishesOnlyAfterTheBarrierAndTheWholeCandidateIsReady() throws Exception {
+    Files.writeString(temporaryDirectory.resolve("a.json"), PORTS);
+    Files.writeString(temporaryDirectory.resolve("b.json"), PORTS);
     var previous = StructureService.definitionsSnapshot();
     long epoch = StructureService.definitionEpoch();
     var background = new QueueExecutor();
     var game = new QueueExecutor();
     var barrier = new Barrier();
     try {
-      var task = new MachineDefinitionReloadListener().reload(
+      var task = new MachineDefinitionReloadListener(null, () -> temporaryDirectory).reload(
           barrier,
-          new MemoryResources(Map.of("a", PORTS, "b", PORTS)),
+          ResourceManager.Empty.INSTANCE,
           InactiveProfiler.INSTANCE,
           InactiveProfiler.INSTANCE,
           background,
@@ -392,35 +464,110 @@ class MachineDefinitionSchemaTest {
   }
 
   @Test
-  void malformedJsonCannotSilentlyDeleteThePreviousDefinitions() {
-    assertFailedReloadKeepsSnapshot(Map.of("valid", PORTS, "bad_json", "{\"parts\":"));
+  void malformedJsonCannotFallBackToAnUnownedSnapshot() throws Exception {
+    assertFailedReloadKeepsSnapshot(Map.of("valid", PORTS, "bad_json", "{\"parts\":"), "bad_json.json");
   }
 
   @Test
-  void oneInvalidDefinitionCannotPublishTheOtherValidDefinition() {
-    assertFailedReloadKeepsSnapshot(
-        Map.of("a_valid", PORTS, "z_invalid", "{\"parts\":[{\"offset\":[1,0,0],\"port\":\"not_a_port\"}]}"));
+  void invalidGameTestFixturesCannotDiscardTheConfigurationOrOtherFixtures() throws Exception {
+    var config = Files.createDirectory(temporaryDirectory.resolve("configuration"));
+    var pack = Files.createDirectory(temporaryDirectory.resolve("pack"));
+    var fixtures = Files.createDirectories(pack.resolve("data/mmcece/mmcece/machines"));
+    Files.writeString(config.resolve("test_local.json"), PORTS);
+    Files.writeString(fixtures.resolve("test_valid.json"), PORTS);
+    Files.writeString(fixtures.resolve("test_malformed.json"), "{");
+    Files.writeString(fixtures.resolve("test_reference.json"), """
+        {"parts":[{"offset":[1,0,0],"blocks":["energy_input"]}]}
+        """);
+    // Valid JSON and block references, invalid only when compiling the offset.
+    Files.writeString(fixtures.resolve("test_local.json"), """
+        {"parts":[{"offset":[0,0,0],"block":"energy_input"}]}
+        """);
+    var previous = StructureService.definitionsSnapshot();
+    String namespaces = System.setProperty("neoforge.enabledGameTestNamespaces", "mmcece");
+    try {
+      reloadFixturePack(config, pack).join();
+      var accepted = StructureService.definitionsSnapshot();
+      assertEquals(Set.of(id("test_local"), id("test_valid")), accepted.keySet());
+
+      Files.writeString(fixtures.resolve("test_local.json"), PORTS);
+      var duplicate = assertThrows(CompletionException.class, () -> reloadFixturePack(config, pack).join());
+      assertTrue(duplicate.getCause().getMessage().contains("Duplicate machine definition"));
+      assertSame(accepted, StructureService.definitionsSnapshot());
+
+      Files.delete(fixtures.resolve("test_local.json"));
+      Files.writeString(config.resolve("test_local.json"), "{");
+      assertThrows(CompletionException.class, () -> reloadFixturePack(config, pack).join());
+      assertSame(accepted, StructureService.definitionsSnapshot());
+    } finally {
+      if (namespaces == null) {
+        System.clearProperty("neoforge.enabledGameTestNamespaces");
+      } else {
+        System.setProperty("neoforge.enabledGameTestNamespaces", namespaces);
+      }
+      StructureService.replaceDefinitions(previous);
+    }
   }
 
-  private static void assertFailedReloadKeepsSnapshot(Map<String, String> files) {
-    var previous = StructureService.definitionsSnapshot();
-    long epoch = StructureService.definitionEpoch();
-    var background = new QueueExecutor();
-    var game = new QueueExecutor();
-    var barrier = new Barrier();
-    var task = new MachineDefinitionReloadListener().reload(
-        barrier,
-        new MemoryResources(files),
-        InactiveProfiler.INSTANCE,
-        InactiveProfiler.INSTANCE,
-        background,
-        game);
-    drain(background, game);
-    assertTrue(task.isCompletedExceptionally());
-    assertThrows(CompletionException.class, task::join);
-    assertFalse(barrier.reached);
-    assertSame(previous, StructureService.definitionsSnapshot());
-    assertEquals(epoch, StructureService.definitionEpoch());
+  private static CompletableFuture<Void> reloadFixturePack(Path config, Path pack) {
+    var location = new PackLocationInfo(
+        "fixtures",
+        Component.literal("fixtures"),
+        PackSource.BUILT_IN,
+        Optional.empty());
+    var source = new PathPackResources.PathResourcesSupplier(pack).openPrimary(location);
+    try (var resources = new MultiPackResourceManager(PackType.SERVER_DATA, List.of(source))) {
+      var barrier = new Barrier();
+      barrier.release.complete(null);
+      return new MachineDefinitionReloadListener(null, () -> config).reload(
+          barrier,
+          resources,
+          InactiveProfiler.INSTANCE,
+          InactiveProfiler.INSTANCE,
+          Runnable::run,
+          Runnable::run);
+    }
+  }
+
+  @Test
+  void oneInvalidDefinitionCannotPublishTheOtherValidDefinition() throws Exception {
+    assertFailedReloadKeepsSnapshot(
+        Map.of("a_valid", PORTS, "z_invalid", "{\"parts\":[{\"offset\":[0,0,0],\"block\":\"energy_input\"}]}"),
+        "mmcece:z_invalid: $.parts[0].offset");
+  }
+
+  private void assertFailedReloadKeepsSnapshot(Map<String, String> files, String message) throws Exception {
+    for (var entry : files.entrySet()) {
+      Files.writeString(temporaryDirectory.resolve(entry.getKey() + ".json"), entry.getValue());
+    }
+    var original = StructureService.definitionsSnapshot();
+    StructureService.replaceDefinitions(Map.of(ID, parse(json(PORTS))));
+    try {
+      var previous = StructureService.definitionsSnapshot();
+      long epoch = StructureService.definitionEpoch();
+      var background = new QueueExecutor();
+      var game = new QueueExecutor();
+      var barrier = new Barrier();
+      var task = new MachineDefinitionReloadListener(null, () -> temporaryDirectory).reload(
+          barrier,
+          ResourceManager.Empty.INSTANCE,
+          InactiveProfiler.INSTANCE,
+          InactiveProfiler.INSTANCE,
+          background,
+          game);
+      drain(background, game);
+      assertTrue(barrier.reached);
+      assertFalse(task.isDone());
+      barrier.release.complete(null);
+      drain(background, game);
+      var failure = assertThrows(CompletionException.class, task::join);
+      assertInstanceOf(JsonParseException.class, failure.getCause());
+      assertTrue(failure.getCause().getMessage().contains(message), failure.getCause().getMessage());
+      assertSame(previous, StructureService.definitionsSnapshot());
+      assertEquals(epoch, StructureService.definitionEpoch());
+    } finally {
+      StructureService.replaceDefinitions(original);
+    }
   }
 
   private static JsonObject json(String value) {
@@ -480,45 +627,4 @@ class MachineDefinitionSchemaTest {
     }
   }
 
-  private record MemoryResources(Map<String, String> files) implements ResourceManager {
-    @Override
-    public Set<String> getNamespaces() {
-      return Set.of("mmcece");
-    }
-
-    @Override
-    public Optional<Resource> getResource(ResourceLocation location) {
-      return Optional.empty();
-    }
-
-    @Override
-    public List<Resource> getResourceStack(ResourceLocation location) {
-      return List.of();
-    }
-
-    @Override
-    public Map<ResourceLocation, Resource> listResources(String path, Predicate<ResourceLocation> filter) {
-      return files
-          .entrySet().stream().collect(
-              Collectors.toMap(
-                  entry -> id("mmcece/machines/" + entry.getKey() + ".json"),
-                  // This fixture only opens the stream; no pack metadata/source is consulted.
-                  entry -> new Resource(
-                      null,
-                      () -> new ByteArrayInputStream(entry.getValue().getBytes(StandardCharsets.UTF_8)))))
-          .entrySet().stream()
-          .filter(entry -> entry.getKey().getPath().startsWith(path + "/") && filter.test(entry.getKey()))
-          .collect(Collectors.toMap(Map.Entry::getKey, Map.Entry::getValue));
-    }
-
-    @Override
-    public Map<ResourceLocation, List<Resource>> listResourceStacks(String path, Predicate<ResourceLocation> filter) {
-      return Map.of();
-    }
-
-    @Override
-    public Stream<PackResources> listPacks() {
-      return Stream.empty();
-    }
-  }
 }

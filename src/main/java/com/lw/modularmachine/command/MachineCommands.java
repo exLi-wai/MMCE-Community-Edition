@@ -158,14 +158,19 @@ public final class MachineCommands {
     }
     var server = source.getServer();
     source.sendSuccess(() -> Component.translatable("commands.mmcece.reload.started"), false);
-    server.reloadResources(server.getPackRepository().getSelectedIds())
-        .whenComplete((ignored, failure) -> server.execute(() -> {
-          if (failure == null) {
-            source.sendSuccess(() -> Component.translatable("commands.mmcece.reload.success"), false);
-          } else {
-            source.sendFailure(Component.translatable("commands.mmcece.reload.failed", failure.getMessage()));
-          }
-        }));
+    var request = new MachineReloadRequest(server.getPackRepository().getSelectedIds());
+    server.reloadResources(request).whenComplete((ignored, failure) -> {
+      if (failure != null) {
+        source.sendFailure(Component.translatable("commands.mmcece.reload.failed", failure.getMessage()));
+        return;
+      }
+      var rejection = request.definitionRejection();
+      if (rejection.isPresent()) {
+        source.sendFailure(Component.translatable("commands.mmcece.reload.definitions_rejected", rejection.get()));
+      } else {
+        source.sendSuccess(() -> Component.translatable("commands.mmcece.reload.success"), false);
+      }
+    });
     return 1;
   }
 }

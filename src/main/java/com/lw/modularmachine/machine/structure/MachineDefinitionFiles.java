@@ -8,9 +8,13 @@ import java.io.ByteArrayInputStream;
 import java.io.IOException;
 import java.io.InputStreamReader;
 import java.nio.charset.StandardCharsets;
+import java.nio.file.FileVisitResult;
 import java.nio.file.Files;
 import java.nio.file.LinkOption;
+import java.nio.file.NoSuchFileException;
 import java.nio.file.Path;
+import java.nio.file.SimpleFileVisitor;
+import java.nio.file.attribute.BasicFileAttributes;
 import java.security.MessageDigest;
 import java.security.NoSuchAlgorithmException;
 import java.util.Comparator;
@@ -18,18 +22,26 @@ import java.util.HexFormat;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.TreeMap;
 import net.minecraft.resources.ResourceLocation;
 import org.jetbrains.annotations.ApiStatus;
 import org.jetbrains.annotations.Nullable;
 
 /**
- * Internal shared disk discovery and variable interpretation for reload and
- * editing.
+ * Internal disk discovery, size limits and variable interpretation for startup,
+ * reload and editing.
  */
 @ApiStatus.Internal
 public final class MachineDefinitionFiles {
+  public static final int MAX_MACHINE_FILES = 1024;
   public static final long MAX_FILE_BYTES = 67_108_864L;
   public static final long MAX_TOTAL_BYTES = 1_073_741_824L;
+
+  public static final class DirectorySizeLimitException extends IllegalStateException {
+    private DirectorySizeLimitException(Path file) {
+      super(file + ": Machine definitions exceed the " + MAX_TOTAL_BYTES + "-byte directory size budget");
+    }
+  }
 
   public record Variables(Map<String, List<String>> values, String hash) {
     public Variables {
@@ -93,32 +105,24 @@ public final class MachineDefinitionFiles {
   public static DirectoryDefinitions readDefinitions(Path root, @Nullable Replacement replacement) throws IOException {
     var files = jsonFiles(root);
     var machines = files.stream().filter(file -> !variable(file)).toList();
-    if (machines.size() > 1024) {
-      throw new JsonParseException("At most 1024 machine definitions per reload");
-    }
-    if (replacement != null && !machines.contains(replacement.file())) {
-      throw new IOException("The selected machine file no longer exists: " + replacement.file());
-    }
+    validateMachineFiles(machines, replacement);
     var variables = readVariables(root, files);
     var roots = new LinkedHashMap<ResourceLocation, JsonElement>();
     var siblingHashes = new LinkedHashMap<Path, String>();
-    long total = 0;
+    long remainingBytes = MAX_TOTAL_BYTES;
     for (var file : machines) {
       var id = MachineDefinitionConfig.id(root.relativize(file));
       JsonObject json;
       if (replacement != null && file.equals(replacement.file())) {
-        total += replacement.encodedSize();
+        remainingBytes = claimDirectoryBytes(file, remainingBytes, replacement.encodedSize());
         json = replacement.root();
       } else {
-        var bytes = read(file, MAX_TOTAL_BYTES - total, LinkOption.NOFOLLOW_LINKS);
-        total += bytes.length;
+        var bytes = readMachine(file, remainingBytes);
+        remainingBytes -= bytes.length;
         json = parse(bytes, file.toString());
         if (replacement != null) {
           siblingHashes.put(file, hash(bytes));
         }
-      }
-      if (total > MAX_TOTAL_BYTES) {
-        throw new JsonParseException(file + ": Machine definition size limit exceeded");
       }
       variables.expandInPlace(json, file.toString());
       if (roots.putIfAbsent(id, json) != null) {
@@ -126,6 +130,91 @@ public final class MachineDefinitionFiles {
       }
     }
     return new DirectoryDefinitions(Map.copyOf(roots), Map.copyOf(siblingHashes), variables.hash());
+  }
+
+  /**
+   * Validates the directory budget before startup processes its ordered machine
+   * files.
+   */
+  public static List<Path> startupMachineFiles(Path root) throws IOException {
+    var sizes = new TreeMap<Path, Long>(Comparator.comparing(path -> root.relativize(path).toString()));
+    Files.walkFileTree(root, new SimpleFileVisitor<>() {
+      @Override
+      public FileVisitResult visitFile(Path file, BasicFileAttributes attributes) {
+        if (attributes.isRegularFile() && isMachineFile(file)) {
+          sizes.put(file, attributes.size());
+          checkMachineFileCount(sizes.size());
+        }
+        return FileVisitResult.CONTINUE;
+      }
+
+      @Override
+      public FileVisitResult visitFileFailed(Path file, IOException failure) throws IOException {
+        if (file.equals(root)) {
+          throw failure;
+        }
+        if (failure instanceof NoSuchFileException) {
+          return FileVisitResult.CONTINUE;
+        }
+        if (!isMachineFile(file)) {
+          throw failure;
+        }
+        // walkFileTree also reports directory-open failures here. Only retry a
+        // confirmed regular file.
+        try {
+          var attributes = Files.readAttributes(file, BasicFileAttributes.class, LinkOption.NOFOLLOW_LINKS);
+          if (attributes.isRegularFile()) {
+            return visitFile(file, attributes);
+          }
+        } catch (NoSuchFileException removed) {
+          return FileVisitResult.CONTINUE;
+        }
+        throw failure;
+      }
+    });
+
+    long remainingBytes = MAX_TOTAL_BYTES;
+    for (var entry : sizes.entrySet()) {
+      remainingBytes = claimMachineFile(entry.getKey(), remainingBytes, entry.getValue());
+    }
+
+    return List.copyOf(sizes.keySet());
+  }
+
+  private static boolean isMachineFile(Path file) {
+    return file.getFileName().toString().endsWith(".json") && !variable(file);
+  }
+
+  private static void checkMachineFileCount(int count) {
+    if (count > MAX_MACHINE_FILES) {
+      throw new JsonParseException("At most " + MAX_MACHINE_FILES + " machine definitions per directory");
+    }
+  }
+
+  private static void validateMachineFiles(List<Path> machines, @Nullable Replacement replacement) throws IOException {
+    checkMachineFileCount(machines.size());
+    if (replacement != null && !machines.contains(replacement.file())) {
+      throw new IOException("The selected machine file no longer exists: " + replacement.file());
+    }
+    long remainingBytes = MAX_TOTAL_BYTES;
+    for (var file : machines) {
+      long bytes = replacement != null && file.equals(replacement.file()) ? replacement.encodedSize() : Files
+          .size(file);
+      remainingBytes = claimMachineFile(file, remainingBytes, bytes);
+    }
+  }
+
+  private static long claimMachineFile(Path file, long remainingBytes, long bytes) {
+    // Oversized files are reported individually when read. Startup skips them.
+    return bytes > MAX_FILE_BYTES ? remainingBytes : claimDirectoryBytes(file, remainingBytes, bytes);
+  }
+
+  private static long claimDirectoryBytes(Path file, long remainingBytes, long bytes) {
+    if (bytes > remainingBytes) {
+      throw new DirectorySizeLimitException(file);
+    }
+
+    return remainingBytes - bytes;
   }
 
   public static List<Path> jsonFiles(Path root) throws IOException {
@@ -168,22 +257,35 @@ public final class MachineDefinitionFiles {
   }
 
   public static byte[] read(Path path, LinkOption... options) throws IOException {
-    return read(path, MAX_FILE_BYTES, options);
+    return read(path, Long.MAX_VALUE, options);
+  }
+
+  public static byte[] readMachine(Path path, long remainingBytes) throws IOException {
+    return read(path, remainingBytes, LinkOption.NOFOLLOW_LINKS);
   }
 
   private static byte[] read(Path path, long remainingBytes, LinkOption... options) throws IOException {
     long limit = Math.min(MAX_FILE_BYTES, remainingBytes);
-    if (Files.size(path) > limit) {
-      throw new JsonParseException(path + ": Machine definition size limit exceeded");
+    long size = Files.size(path);
+    if (size > limit) {
+      throw sizeLimitExceeded(path, size);
     }
     byte[] bytes;
     try (var input = Files.newInputStream(path, options)) {
       bytes = input.readNBytes(Math.toIntExact(limit + 1));
     }
     if (bytes.length > limit) {
-      throw new JsonParseException(path + ": Machine definition size limit exceeded");
+      throw sizeLimitExceeded(path, bytes.length);
     }
     return bytes;
+  }
+
+  private static RuntimeException sizeLimitExceeded(Path path, long size) {
+    if (size > MAX_FILE_BYTES) {
+      return new JsonParseException(path + ": Machine definition size limit exceeded");
+    }
+
+    return new DirectorySizeLimitException(path);
   }
 
   public static JsonObject parse(byte[] bytes, String source) {

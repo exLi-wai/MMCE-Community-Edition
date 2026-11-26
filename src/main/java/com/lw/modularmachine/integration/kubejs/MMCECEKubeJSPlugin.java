@@ -12,6 +12,7 @@ import dev.latvian.mods.kubejs.script.ScriptManager;
 import dev.latvian.mods.kubejs.script.BindingRegistry;
 import java.util.Map;
 import net.minecraft.resources.ResourceLocation;
+import net.minecraft.world.item.crafting.RecipeManager;
 
 /**
  * KubeJS plugin lifecycle and stable event identities; implementation lives in
@@ -53,7 +54,7 @@ public final class MMCECEKubeJSPlugin implements KubeJSPlugin {
 
   @Override
   public void beforeRecipeLoading(RecipesKubeEvent event, RecipeManagerKJS manager, Map<ResourceLocation, JsonElement> recipes) {
-    KubeJSRecipeLoading.beforeRecipeLoading(event, recipes);
+    KubeJSRecipeLoading.beforeRecipeLoading(event, (RecipeManager) manager, recipes);
   }
 
   @Override

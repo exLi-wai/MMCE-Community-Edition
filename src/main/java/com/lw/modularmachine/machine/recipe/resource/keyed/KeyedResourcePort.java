@@ -38,6 +38,11 @@ public interface KeyedResourcePort {
     return 0;
   }
 
+  /** Whether this port can receive a replenishment request for this key. */
+  default boolean canRequest(ResourceLocation key) {
+    return true;
+  }
+
   default long requestSupply(ResourceLocation key, long maximum) {
     return 0;
   }

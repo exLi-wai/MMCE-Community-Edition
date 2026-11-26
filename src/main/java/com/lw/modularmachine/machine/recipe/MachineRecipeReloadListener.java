@@ -5,6 +5,8 @@ import com.google.gson.JsonParseException;
 import com.google.gson.JsonParser;
 import com.lw.modularmachine.api.recipe.adapter.RecipeAdapterTags;
 import com.lw.modularmachine.machine.recipe.resource.RecipeResourceDefinitions;
+import com.mojang.logging.LogUtils;
+import com.mojang.serialization.DynamicOps;
 import java.io.BufferedInputStream;
 import java.io.BufferedReader;
 import java.io.ByteArrayInputStream;
@@ -14,6 +16,7 @@ import java.io.InputStreamReader;
 import java.nio.charset.StandardCharsets;
 import java.util.Arrays;
 import java.util.LinkedHashMap;
+import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Map;
 import java.util.Set;
@@ -28,14 +31,17 @@ import net.minecraft.server.packs.resources.ResourceManager;
 import net.minecraft.util.profiling.ProfilerFiller;
 import net.minecraft.world.item.Item;
 import net.minecraft.world.item.crafting.Recipe;
+import net.minecraft.world.item.crafting.RecipeHolder;
 import net.minecraft.world.item.crafting.RecipeManager;
 import net.neoforged.neoforge.resource.ContextAwareReloadListener;
+import org.slf4j.Logger;
 
 /**
  * Dedicated strict recipe/mmcece directory; native tags/conditions are resolved
  * after the reload barrier.
  */
 public final class MachineRecipeReloadListener extends ContextAwareReloadListener {
+  private static final Logger LOGGER = LogUtils.getLogger();
   public static final int MAX_FILES = 16_384;
   private static final int MAX_CACHED_FILE_BYTES = 128 * 1024;
   private static final int MAX_CACHED_TOTAL_BYTES = 32 * 1024 * 1024;
@@ -59,91 +65,207 @@ public final class MachineRecipeReloadListener extends ContextAwareReloadListene
   private record SourceSnapshot(Set<String> resourceFields, Map<ResourceLocation, CachedSource> files) {
   }
 
-  private record PreparedSources(Map<ResourceLocation, JsonElement> roots, SourceSnapshot snapshot) {
+  private record PreparedSources(
+      Map<ResourceLocation, JsonElement> roots,
+      Set<ResourceLocation> skippedIds,
+      Map<ResourceLocation, ResourceLocation> skippedMachines,
+      SourceSnapshot snapshot) {
   }
 
   @Override
   public CompletableFuture<Void> reload(PreparableReloadListener.PreparationBarrier barrier, ResourceManager resources, ProfilerFiller prepareProfiler, ProfilerFiller applyProfiler, Executor background, Executor game) {
     var previous = sourceCache.snapshot.get();
+    // Directory-wide failures reject the prospective manager before the barrier;
+    // the previous catalog only belongs to the previously installed manager.
     return CompletableFuture.supplyAsync(() -> read(resources, previous), background).thenCompose(barrier::wait)
         .thenAcceptAsync(prepared -> {
-          try {
-            var sources = new LinkedHashMap<>(prepared.roots());
-            for (var entry : RecipeScriptSources.snapshot().entrySet()) {
-              if (sources.putIfAbsent(entry.getKey(), entry.getValue()) != null) {
-                throw new JsonParseException(entry.getKey() + ": Duplicate native/KubeJS machine recipe ID");
+          var scripts = RecipeScriptSources.snapshot(target);
+          var nativeOwners = new RecipeDeclarationOwners(prepared.skippedIds(), prepared.skippedMachines());
+          var scriptOwners = new RecipeDeclarationOwners(scripts.skippedIds(), scripts.skippedMachines());
+          var decoded = new LinkedHashMap<ResourceLocation, MachineRecipe>();
+          var validatedSources = new LinkedHashMap<ResourceLocation, JsonElement>();
+          var acceptedScriptIds = new LinkedHashSet<ResourceLocation>();
+          var correctedMissingHolders = new LinkedHashSet<ResourceLocation>();
+          var conditionalOps = makeConditionalOps();
+          for (var entry : prepared.roots().entrySet()) {
+            var id = entry.getKey();
+            var root = entry.getValue();
+            if (scripts.removedNativeIds().contains(id)) {
+              nativeOwners.skip(id, MachineRecipeJson.declaredMachine(root));
+              continue;
+            }
+            var recipe = decodeMachineRecipe(id, root, conditionalOps);
+            if (recipe == null) {
+              nativeOwners.skip(id, MachineRecipeJson.declaredMachine(root));
+            } else {
+              nativeOwners.accept(id, recipe.machineId());
+              decoded.put(id, recipe);
+              validatedSources.put(id, root);
+            }
+          }
+          for (var entry : scripts.declarations().entrySet()) {
+            var id = entry.getKey();
+            var root = entry.getValue();
+            if (decoded.containsKey(id)) {
+              // Vanilla may have applied the script's holder at this ID.
+              scriptOwners.skip(id, MachineRecipeJson.declaredMachine(root));
+              LOGGER.warn("Skipping duplicate native/KubeJS machine recipe {}", id);
+              continue;
+            }
+            var recipe = decodeMachineRecipe(id, root, conditionalOps);
+            boolean missingHolder = target.byKey(id).isEmpty();
+            if (recipe == null || missingHolder && !scripts.correctedStackPrototypes().contains(id)) {
+              scriptOwners.skip(id, MachineRecipeJson.declaredMachine(root));
+            } else {
+              scriptOwners.accept(id, recipe.machineId());
+              decoded.put(id, recipe);
+              validatedSources.put(id, root);
+              acceptedScriptIds.add(id);
+              if (missingHolder) {
+                correctedMissingHolders.add(id);
               }
             }
-            var decoded = new LinkedHashMap<ResourceLocation, MachineRecipe>();
-            for (var entry : sources.entrySet()) {
-              var result = Recipe.CONDITIONAL_CODEC.parse(makeConditionalOps(), entry.getValue())
-                  .getOrThrow(message -> new JsonParseException(entry.getKey() + ": " + message));
-              result.ifPresent(value -> {
-                if (!(value.carrier() instanceof MachineRecipe machine)) {
-                  throw new JsonParseException(entry.getKey() + ": Expected machine recipe in reserved directory");
-                }
-                decoded.put(entry.getKey(), machine);
-              });
-            }
-            var itemTags = new LinkedHashMap<ResourceLocation, List<Item>>();
-            getContext().getAllTags(Registries.ITEM)
-                .forEach((id, holders) -> itemTags.put(id, holders.stream().map(holder -> holder.value()).toList()));
-            MachineRecipeService.stage(target, decoded, sources, getRegistryLookup(), new RecipeAdapterTags(itemTags));
-            sourceCache.snapshot.compareAndSet(previous, prepared.snapshot());
-          } finally {
-            RecipeScriptSources.clear();
           }
-        }, game);
+          var ordinaryFallbacks = new LinkedHashMap<ResourceLocation, RecipeHolder<?>>();
+          scripts.ordinaryFallbacks().forEach((id, root) -> {
+            if (!scriptOwners.skipped().contains(id) || decoded.containsKey(id)) {
+              return;
+            }
+            try {
+              var recipe = decodeRecipe(id, root, conditionalOps);
+              if (recipe != null && !(recipe instanceof MachineRecipe)) {
+                ordinaryFallbacks.put(id, new RecipeHolder<>(id, recipe));
+              }
+            } catch (RuntimeException invalid) {
+              LOGGER.warn("Skipping invalid original recipe shadowed by KubeJS {}", id, invalid);
+            }
+          });
+          var itemTags = new LinkedHashMap<ResourceLocation, List<Item>>();
+          getContext().getAllTags(Registries.ITEM)
+              .forEach((id, holders) -> itemTags.put(id, holders.stream().map(holder -> holder.value()).toList()));
+          // A manager without a validated catalog must not be installed as a success.
+          MachineRecipeService.stage(
+              target,
+              decoded,
+              validatedSources,
+              getRegistryLookup(),
+              new RecipeAdapterTags(itemTags),
+              nativeOwners,
+              scriptOwners,
+              ordinaryFallbacks,
+              scripts.recipeOrder(),
+              scripts.callbackGeneration(),
+              acceptedScriptIds,
+              correctedMissingHolders);
+          sourceCache.snapshot.compareAndSet(previous, prepared.snapshot());
+        }, game).whenComplete((ignored, failure) -> RecipeScriptSources.clear(target));
+  }
+
+  private static MachineRecipe decodeMachineRecipe(ResourceLocation id, JsonElement root, DynamicOps<JsonElement> ops) {
+    try {
+      var recipe = decodeRecipe(id, root, ops);
+      if (recipe == null) {
+        return null;
+      }
+      if (recipe instanceof MachineRecipe machine) {
+        return machine;
+      }
+      throw new JsonParseException(id + ": Expected machine recipe");
+    } catch (RuntimeException invalid) {
+      LOGGER.warn("Skipping invalid MMCE machine recipe {}", id, invalid);
+      return null;
+    }
+  }
+
+  private static Recipe<?> decodeRecipe(ResourceLocation id, JsonElement root, DynamicOps<JsonElement> ops) {
+    return Recipe.CONDITIONAL_CODEC.parse(ops, root).getOrThrow(message -> new JsonParseException(id + ": " + message))
+        .map(value -> value.carrier()).orElse(null);
   }
 
   private static PreparedSources read(ResourceManager resources, SourceSnapshot previous) {
     var selected = new FileToIdConverter("recipe/mmcece", ".json").listMatchingResources(resources);
     if (selected.size() > MAX_FILES) {
-      throw new JsonParseException("Too many native MMCE recipe files");
+      throw new JsonParseException("Too many native MMCE recipe files; at most " + MAX_FILES);
     }
     var nativeIds = new FileToIdConverter("recipe", ".json");
-    var fields = RecipeResourceDefinitions.Fields.names();
+    var fields = RecipeResourceDefinitions.fieldNames();
     var cached = fields.equals(previous.resourceFields()) ? previous.files() : Map.<ResourceLocation, CachedSource>of();
     var roots = new LinkedHashMap<ResourceLocation, JsonElement>();
+    var skippedIds = new LinkedHashSet<ResourceLocation>();
+    var skippedMachines = new LinkedHashMap<ResourceLocation, ResourceLocation>();
     var next = new LinkedHashMap<ResourceLocation, CachedSource>();
     int remainingBytes = MAX_CACHED_TOTAL_BYTES;
-    for (var entry : selected.entrySet().stream().sorted(Map.Entry.comparingByKey()).toList()) {
+    var entries = selected.entrySet().stream().sorted(Map.Entry.comparingByKey()).toList();
+    for (var entry : entries) {
       var id = nativeIds.fileToId(entry.getKey());
       try (var input = new BufferedInputStream(entry.getValue().open())) {
         int limit = Math.min(remainingBytes, MAX_CACHED_FILE_BYTES);
         if (limit == 0) {
-          roots.put(id, parse(input));
+          var root = parseIfValid(id, input, skippedMachines);
+          if (root != null) {
+            roots.put(id, root);
+          } else {
+            skippedIds.add(id);
+          }
           continue;
         }
         input.mark(limit + 1);
         var bytes = input.readNBytes(limit + 1);
         if (bytes.length > limit) {
           input.reset();
-          roots.put(id, parse(input));
+          var root = parseIfValid(id, input, skippedMachines);
+          if (root != null) {
+            roots.put(id, root);
+          } else {
+            skippedIds.add(id);
+          }
           continue;
         }
         var source = cached.get(id);
         if (source == null || !Arrays.equals(source.bytes(), bytes)) {
-          source = new CachedSource(bytes, parse(new ByteArrayInputStream(bytes)));
+          var root = parseIfValid(id, new ByteArrayInputStream(bytes), skippedMachines);
+          if (root == null) {
+            skippedIds.add(id);
+            continue;
+          }
+          source = new CachedSource(bytes, root);
         }
         next.put(id, source);
         remainingBytes -= bytes.length;
         // Loading and third-party codecs receive a copy of the cached tree.
         roots.put(id, source.root().deepCopy());
       } catch (IOException | RuntimeException invalid) {
-        throw new JsonParseException(id + ": Invalid native machine recipe", invalid);
+        LOGGER.warn("Skipping unreadable native machine recipe {}", id, invalid);
+        roots.remove(id);
+        next.remove(id);
+        skippedIds.add(id);
       }
     }
-    return new PreparedSources(Map.copyOf(roots), new SourceSnapshot(fields, Map.copyOf(next)));
+    return new PreparedSources(
+        Map.copyOf(roots),
+        Set.copyOf(skippedIds),
+        Map.copyOf(skippedMachines),
+        new SourceSnapshot(fields, Map.copyOf(next)));
   }
 
-  private static JsonElement parse(InputStream input) {
-    var reader = new BufferedReader(new InputStreamReader(input, StandardCharsets.UTF_8));
-    var root = JsonParser.parseReader(reader);
-    MachineRecipeJson.validate(root);
-    if (!root.getAsJsonObject().has("type")) {
-      throw new JsonParseException("$.type: Required native recipe type");
+  static JsonElement parseIfValid(ResourceLocation id, InputStream input, Map<ResourceLocation, ResourceLocation> skippedMachines) {
+    JsonElement root = null;
+    try {
+      var reader = new BufferedReader(new InputStreamReader(input, StandardCharsets.UTF_8));
+      root = JsonParser.parseReader(reader);
+      MachineRecipeJson.validate(root);
+      if (!root.getAsJsonObject().has("type")) {
+        throw new JsonParseException("$.type: Required native recipe type");
+      }
+
+      return root;
+    } catch (RuntimeException invalid) {
+      LOGGER.warn("Skipping invalid native machine recipe {}", id, invalid);
+      var machine = MachineRecipeJson.declaredMachine(root);
+      if (machine != null) {
+        skippedMachines.put(id, machine);
+      }
+      return null;
     }
-    return root;
   }
 }

@@ -1,9 +1,13 @@
 package com.lw.modularmachine.integration.thaumaturge;
 
 import com.lw.modularmachine.block.TickingRecipeHatchBlock;
+import com.leclowndu93150.thaumaturge.content.item.PhialItem;
 import net.minecraft.core.BlockPos;
+import net.minecraft.world.InteractionHand;
 import net.minecraft.world.InteractionResult;
+import net.minecraft.world.ItemInteractionResult;
 import net.minecraft.world.entity.player.Player;
+import net.minecraft.world.item.ItemStack;
 import net.minecraft.world.level.Level;
 import net.minecraft.world.level.block.entity.BlockEntityType;
 import net.minecraft.world.level.block.state.BlockState;
@@ -14,6 +18,21 @@ import org.jetbrains.annotations.ApiStatus;
 public final class EssentiaHatchBlock extends TickingRecipeHatchBlock {
   public EssentiaHatchBlock(Properties properties, BlockEntityType.BlockEntitySupplier<?> factory) {
     super(properties, factory);
+  }
+
+  @Override
+  protected ItemInteractionResult useItemOn(ItemStack stack, BlockState state, Level level, BlockPos position, Player player, InteractionHand hand, BlockHitResult hit) {
+    if (!(stack.getItem() instanceof PhialItem) || player.isSecondaryUseActive()) {
+      return ItemInteractionResult.PASS_TO_DEFAULT_BLOCK_INTERACTION;
+    }
+    if (player.isSpectator() || !player.mayBuild() || !level.mayInteract(player, position)) {
+      return ItemInteractionResult.FAIL;
+    }
+    if (level.isClientSide) {
+      return ItemInteractionResult.SUCCESS;
+    }
+    return level.getBlockEntity(position) instanceof EssentiaHatch hatch
+        && hatch.transferPhial(stack, player, hand) ? ItemInteractionResult.CONSUME : ItemInteractionResult.FAIL;
   }
 
   @Override

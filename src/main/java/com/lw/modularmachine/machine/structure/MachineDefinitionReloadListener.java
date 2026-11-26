@@ -14,14 +14,22 @@ import java.util.Arrays;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.TreeMap;
 import java.util.concurrent.CompletableFuture;
+import java.util.concurrent.CancellationException;
+import java.util.concurrent.CompletionException;
+import java.util.concurrent.ExecutionException;
 import java.util.concurrent.Executor;
+import java.util.function.Supplier;
 import net.minecraft.resources.FileToIdConverter;
 import net.minecraft.resources.ResourceLocation;
+import net.minecraft.server.MinecraftServer;
 import net.minecraft.server.packs.resources.PreparableReloadListener;
 import net.minecraft.server.packs.resources.ResourceManager;
 import net.minecraft.util.profiling.ProfilerFiller;
+import net.minecraft.world.item.crafting.RecipeManager;
 import net.neoforged.neoforge.resource.ContextAwareReloadListener;
+import net.neoforged.neoforge.server.ServerLifecycleHooks;
 import org.slf4j.Logger;
 
 /**
@@ -30,18 +38,30 @@ import org.slf4j.Logger;
  */
 public final class MachineDefinitionReloadListener extends ContextAwareReloadListener implements PreparableReloadListener {
   private static final Logger LOGGER = LogUtils.getLogger();
+  private final RecipeManager target;
+  private final Supplier<Path> configurationDirectory;
 
-  private record Input(
+  MachineDefinitionReloadListener(RecipeManager target) {
+    this(target, MachineDefinitionConfig::ensureDirectory);
+  }
+
+  MachineDefinitionReloadListener(RecipeManager target, Supplier<Path> configurationDirectory) {
+    this.target = target;
+    this.configurationDirectory = configurationDirectory;
+  }
+
+  private record Fixture<T>(JsonElement root, T descriptors) {
+  }
+
+  private record Inputs<T>(
       Map<ResourceLocation, JsonElement> roots,
-      List<StateOrientationAdapters.BlockReference> references,
-      MachineDefinitionScripts.Snapshot scripts) {
+      T descriptors,
+      Map<ResourceLocation, Fixture<T>> fixtures) {
   }
 
   private record Captured(
-      Map<ResourceLocation, JsonElement> roots,
-      StateOrientationAdapters.RegistrySnapshot registry,
-      MachineDefinitionDefaults defaults,
-      MachineDefinitionScripts.Snapshot scripts) {
+      Inputs<StateOrientationAdapters.RegistrySnapshot> inputs,
+      MachineDefinitionDefaults defaults) {
   }
 
   private record Candidate(
@@ -50,44 +70,56 @@ public final class MachineDefinitionReloadListener extends ContextAwareReloadLis
       MachineDefinitionScripts.Snapshot scripts) {
   }
 
+  private record Prepared(Candidate candidate, Throwable failure) {
+  }
+
   @Override
   public CompletableFuture<Void> reload(PreparationBarrier barrier, ResourceManager resources, ProfilerFiller prepareProfiler, ProfilerFiller applyProfiler, Executor backgroundExecutor, Executor gameExecutor) {
+    var server = ServerLifecycleHooks.getCurrentServer();
     var scripts = MachineDefinitionScripts.snapshot();
-    return CompletableFuture.supplyAsync(() -> {
-      var roots = readResources(resources);
-      MachineDefinitionScripts.applyInPlace(roots, scripts);
-      return roots;
-    }, backgroundExecutor)
-        .thenApplyAsync(
-            roots -> new Input(
-                roots,
-                MachineDefinitionScripts.compile(scripts, () -> MachineDefinitionParser.blockReferences(roots)),
-                scripts),
+    return CompletableFuture
+        .supplyAsync(
+            () -> MachineDefinitionScripts.compile(scripts, () -> readInputs(resources, scripts)),
             backgroundExecutor)
-        .thenCompose(
-            input -> CompletableFuture.supplyAsync(
-                () -> new Captured(
-                    input.roots(),
-                    StateOrientationAdapters.capture(input.references()),
-                    MachineDefinitionDefaults.capture(),
-                    input.scripts()),
-                gameExecutor))
+        .thenApplyAsync(MachineDefinitionReloadListener::capture, gameExecutor)
         .thenApplyAsync(
             captured -> new Candidate(
-                MachineDefinitionScripts.compile(
-                    captured.scripts(),
-                    () -> compileCandidate(captured.roots(), captured.registry(), captured.defaults())),
+                MachineDefinitionScripts.compile(scripts, () -> compile(captured)),
                 captured.defaults(),
-                captured.scripts()),
+                scripts),
             backgroundExecutor)
-        .thenCompose(barrier::wait).thenAcceptAsync(candidate -> {
-          if (!candidate.defaults().equals(MachineDefinitionDefaults.capture())
-              || !MachineDefinitionScripts.current(candidate.scripts())) {
-            throw new IllegalStateException(
-                "Machine defaults or script declarations changed during reload; reload again to publish a consistent generation");
-          }
-          StructureService.replaceDefinitions(candidate.definitions());
-        }, gameExecutor);
+        .handle((candidate, failure) -> new Prepared(candidate, unwrap(failure))).thenCompose(barrier::wait)
+        .thenAcceptAsync(prepared -> apply(server, prepared), gameExecutor);
+  }
+
+  private void apply(MinecraftServer server, Prepared prepared) {
+    if (server != ServerLifecycleHooks.getCurrentServer() || (server != null && server.isStopped())) {
+      throw new IllegalStateException("Server changed during machine definition reload");
+    }
+    var candidate = prepared.candidate();
+    var failure = prepared.failure();
+    if (failure == null
+        && (!candidate.defaults().equals(MachineDefinitionDefaults.capture())
+            || !MachineDefinitionScripts.current(candidate.scripts()))) {
+      failure = new IllegalStateException(
+          "Machine defaults or script declarations changed during reload; reload again to publish a consistent generation");
+    }
+    if (failure != null) {
+      if (failure instanceof Error || !StructureService.keepDefinitionsAfterRejection(server, target, failure)) {
+        throw new CompletionException(failure);
+      }
+      LOGGER.warn("Keeping the previous machine definition generation after reload rejected the candidate", failure);
+      return;
+    }
+    StructureService.replaceDefinitions(server, target, candidate.definitions());
+  }
+
+  private static Throwable unwrap(Throwable failure) {
+    var cause = failure;
+    while ((cause instanceof CompletionException || cause instanceof ExecutionException) && cause.getCause() != null) {
+      cause = cause.getCause();
+    }
+    return cause;
   }
 
   /**
@@ -128,26 +160,90 @@ public final class MachineDefinitionReloadListener extends ContextAwareReloadLis
    * A malformed file aborts the candidate instead of silently deleting its old
    * definition.
    */
-  private static Map<ResourceLocation, JsonElement> readResources(ResourceManager resources) {
-    var converter = new FileToIdConverter("mmcece/machines", ".json");
-    Map<ResourceLocation, JsonElement> result = new LinkedHashMap<>();
-    readGameTestFixtures(resources, converter, result);
-    Path root = MachineDefinitionConfig.ensureDirectory();
+  private Inputs<List<StateOrientationAdapters.BlockReference>> readInputs(ResourceManager resources, MachineDefinitionScripts.Snapshot scripts) {
+    Map<ResourceLocation, JsonElement> roots;
     try {
-      var config = MachineDefinitionFiles.readDefinitions(root, null);
-      config.roots().forEach((id, definition) -> put(result, id, definition, root.toString()));
-    } catch (IOException exception) {
-      throw new JsonParseException("Failed scanning machine definition directory " + root, exception);
+      roots = MachineDefinitionFiles.readDefinitions(configurationDirectory.get(), null).roots();
+    } catch (IOException | RuntimeException exception) {
+      throw new JsonParseException("Failed reading machine definitions: " + exception.getMessage(), exception);
     }
-    return Map.copyOf(result);
+    var fixtures = readGameTestFixtures(resources);
+    if (fixtures.isEmpty()) {
+      MachineDefinitionScripts.applyInPlace(roots, scripts);
+    } else {
+      var scriptRoots = new LinkedHashMap<>(fixtures);
+      scriptRoots.putAll(roots);
+      MachineDefinitionScripts.applyInPlace(scriptRoots, scripts);
+    }
+    var configuration = MachineDefinitionParser.collectReferences(roots);
+    var budget = configuration.cost();
+    var fixtureInputs = new LinkedHashMap<ResourceLocation, Fixture<List<StateOrientationAdapters.BlockReference>>>();
+    for (var entry : fixtures.entrySet()) {
+      var id = entry.getKey();
+      var root = entry.getValue();
+      try {
+        var collected = MachineDefinitionParser.collectReferences(Map.of(id, root));
+        budget = budget.plus(collected.cost(), id + ": $");
+        fixtureInputs.put(id, new Fixture<>(root, collected.references()));
+      } catch (RuntimeException invalid) {
+        skipFixture(id, invalid);
+      }
+    }
+    return new Inputs<>(roots, configuration.references(), fixtureInputs);
   }
 
-  private static void readGameTestFixtures(ResourceManager resources, FileToIdConverter converter, Map<ResourceLocation, JsonElement> result) {
+  private static Captured capture(Inputs<List<StateOrientationAdapters.BlockReference>> inputs) {
+    var registry = StateOrientationAdapters.capture(inputs.descriptors());
+    var fixtures = new LinkedHashMap<ResourceLocation, Fixture<StateOrientationAdapters.RegistrySnapshot>>();
+    // A bad fixture property must not invalidate a block descriptor shared by real
+    // machines.
+    inputs.fixtures().forEach((id, fixture) -> {
+      try {
+        fixtures.put(id, new Fixture<>(fixture.root(), StateOrientationAdapters.capture(fixture.descriptors())));
+      } catch (JsonParseException | IllegalArgumentException invalid) {
+        skipFixture(id, invalid);
+      }
+    });
+    return new Captured(new Inputs<>(inputs.roots(), registry, fixtures), MachineDefinitionDefaults.capture());
+  }
+
+  private static Map<ResourceLocation, MachineDefinition> compile(Captured captured) {
+    var inputs = captured.inputs();
+    var configuration = compileCandidate(inputs.roots(), inputs.descriptors(), captured.defaults());
+    if (inputs.fixtures().isEmpty()) {
+      return configuration;
+    }
+    var definitions = new LinkedHashMap<>(configuration);
+    inputs.fixtures().forEach((id, fixture) -> {
+      Map<ResourceLocation, MachineDefinition> compiled;
+      try {
+        compiled = compileCandidate(Map.of(id, fixture.root()), fixture.descriptors(), captured.defaults());
+      } catch (RuntimeException invalid) {
+        skipFixture(id, invalid);
+        return;
+      }
+      if (definitions.putIfAbsent(id, compiled.get(id)) != null) {
+        throw new JsonParseException(id + ": $: Duplicate machine definition from GameTest fixtures");
+      }
+    });
+    return Map.copyOf(definitions);
+  }
+
+  private static void skipFixture(ResourceLocation id, RuntimeException invalid) {
+    if (invalid instanceof CancellationException) {
+      throw invalid;
+    }
+    LOGGER.warn("Skipping invalid GameTest machine definition fixture {}", id, invalid);
+  }
+
+  private static Map<ResourceLocation, JsonElement> readGameTestFixtures(ResourceManager resources) {
     boolean gameTestEnabled = Arrays.stream(System.getProperty("neoforge.enabledGameTestNamespaces", "").split(","))
         .map(String::trim).anyMatch(ModularMachine.MODID::equals);
     if (!gameTestEnabled) {
-      return;
+      return Map.of();
     }
+    var converter = new FileToIdConverter("mmcece/machines", ".json");
+    Map<ResourceLocation, JsonElement> result = new TreeMap<>();
     var fixtures = converter.listMatchingResources(resources);
     for (var entry : fixtures.entrySet()) {
       ResourceLocation id = converter.fileToId(entry.getKey());
@@ -155,25 +251,18 @@ public final class MachineDefinitionReloadListener extends ContextAwareReloadLis
         continue;
       }
       try (var reader = entry.getValue().openAsReader()) {
-        if (result.containsKey(id)) {
-          continue;
-        }
         var fixture = JsonParser.parseReader(reader).getAsJsonObject();
         var conditions = fixture.remove("neoforge:conditions");
         if (conditions == null
             || ICondition.LIST_CODEC.parse(JsonOps.INSTANCE, conditions).getOrThrow().stream()
                 .allMatch(condition -> condition.test(ICondition.IContext.EMPTY))) {
-          put(result, id, fixture, entry.getKey().toString());
+          result.put(id, fixture);
         }
-      } catch (IOException | IllegalArgumentException | JsonParseException exception) {
-        throw new JsonParseException(id + ": $: Failed reading GameTest fixture " + entry.getKey(), exception);
+      } catch (IOException | RuntimeException exception) {
+        LOGGER.warn("Skipping invalid GameTest machine definition fixture {}", entry.getKey(), exception);
       }
     }
+    return result;
   }
 
-  private static void put(Map<ResourceLocation, JsonElement> target, ResourceLocation id, JsonElement value, String source) {
-    if (target.putIfAbsent(id, value) != null) {
-      throw new JsonParseException(id + ": $: Duplicate machine definition from " + source);
-    }
-  }
 }

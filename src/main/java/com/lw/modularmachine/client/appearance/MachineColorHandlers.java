@@ -136,19 +136,25 @@ public final class MachineColorHandlers {
     }
     Block block = Block.byItem(stack.getItem());
     if (block instanceof MachineControllerBlock controller && controller.dedicated() != null) {
-      return machineColor(controller.dedicated().machine());
+      return withOpaqueAlpha(machineColor(controller.dedicated().machine()));
     }
     if (block instanceof FactoryControllerBlock controller && controller.dedicated() != null) {
-      return machineColor(controller.dedicated().machine());
+      return withOpaqueAlpha(machineColor(controller.dedicated().machine()));
     }
     var data = stack.getOrDefault(DataComponents.BLOCK_ENTITY_DATA, CustomData.EMPTY).copyTag();
     if (data.contains("machine")) {
       var machine = ResourceLocation.tryParse(data.getString("machine"));
       if (machine != null && !machine.equals(ControllerPlacementData.UNBOUND_MACHINE)) {
-        return machineColor(machine);
+        return withOpaqueAlpha(machineColor(machine));
       }
     }
-    return data.contains(MachineColorable.COLOR_TAG) ? MachineColorable.load(data) : MachineConfig.defaultCasingColor();
+    int color = data.contains(MachineColorable.COLOR_TAG) ? MachineColorable.load(data) : MachineConfig
+        .defaultCasingColor();
+    return withOpaqueAlpha(color);
+  }
+
+  private static int withOpaqueAlpha(int color) {
+    return color | 0xFF000000;
   }
 
   private static int machineColor(ResourceLocation machine) {

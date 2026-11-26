@@ -1,7 +1,9 @@
 package com.lw.modularmachine.integration.thaumaturge;
 
 import com.leclowndu93150.thaumaturge.api.aspect.IAspect;
+import com.leclowndu93150.thaumaturge.content.essentia.item.ComponentEssentia;
 import com.leclowndu93150.thaumaturge.content.item.PhialItem;
+import com.leclowndu93150.thaumaturge.registry.TTSounds;
 import com.lw.modularmachine.api.component.MachineColorable;
 import com.lw.modularmachine.api.recipe.resource.RecipeResourceParticipant;
 import com.lw.modularmachine.block.TickingRecipeHatchBlock;
@@ -14,6 +16,7 @@ import com.lw.modularmachine.machine.recipe.search.RecipeSearchResource.Replenis
 import com.lw.modularmachine.util.thread.ServerThreadGuard;
 import java.util.LinkedHashMap;
 import java.util.Map;
+import java.util.function.ObjLongConsumer;
 import net.minecraft.core.BlockPos;
 import net.minecraft.core.Holder;
 import net.minecraft.core.HolderLookup;
@@ -21,7 +24,11 @@ import net.minecraft.nbt.CompoundTag;
 import net.minecraft.resources.ResourceKey;
 import net.minecraft.resources.ResourceLocation;
 import net.minecraft.server.level.ServerLevel;
+import net.minecraft.sounds.SoundSource;
 import net.minecraft.world.Containers;
+import net.minecraft.world.InteractionHand;
+import net.minecraft.world.entity.player.Player;
+import net.minecraft.world.item.ItemStack;
 import net.minecraft.world.level.block.entity.BlockEntityType;
 import net.minecraft.world.level.block.state.BlockState;
 import org.jetbrains.annotations.ApiStatus;
@@ -102,11 +109,16 @@ public abstract class EssentiaHatch extends MachineCasingBlockEntity implements 
 
   @Override
   public final long requestSpace() {
-    if (!input || !mutable()) {
-      return 0;
-    }
-    long free = unpromisedSpace();
-    return free > 0 && hasRequestSource() ? free : 0;
+    return input && mutable() ? unpromisedSpace() : 0;
+  }
+
+  @Override
+  public final boolean canRequest(ResourceLocation key) {
+    return input && mutable() && (externalOfferExpiry(key) >= level.getGameTime() || hasRequestSource());
+  }
+
+  protected long externalOfferExpiry(ResourceLocation key) {
+    return Long.MIN_VALUE;
   }
 
   protected abstract boolean hasRequestSource();
@@ -134,6 +146,13 @@ public abstract class EssentiaHatch extends MachineCasingBlockEntity implements 
     if (proof != null) {
       proof.observeExpiry(demands.get(key).expires(), level::getGameTime);
     }
+    long offerExpiry = externalOfferExpiry(key);
+    if (offerExpiry >= level.getGameTime()) {
+      if (proof != null) {
+        proof.observeExpiry(offerExpiry, level::getGameTime);
+      }
+      return pending;
+    }
     boolean connected = proof == null ? hasRequestSource() : observedRequestSource(proof);
     return connected ? pending : 0;
   }
@@ -147,14 +166,11 @@ public abstract class EssentiaHatch extends MachineCasingBlockEntity implements 
     if (demands.size() >= 64 && !demands.containsKey(key)) {
       return 0;
     }
-    var current = demands.get(key);
-    long promised = current == null ? 0 : Math.max(0, current.target() - stock.amount(key));
     long accepted = Math.min(additional, unpromisedSpace());
     if (accepted <= 0) {
       return 0;
     }
-    long target = stock.amount(key) + promised + accepted;
-    demands.put(key, new Demand(target, level.getGameTime() + 60));
+    demands.put(key, new Demand(deficit(key) + accepted, level.getGameTime() + 60));
     requestObservers.changed(key, publisher);
     return accepted;
   }
@@ -174,13 +190,36 @@ public abstract class EssentiaHatch extends MachineCasingBlockEntity implements 
 
   protected final int deficit(ResourceLocation key) {
     var demand = demands.get(key);
-    return demand == null || demand.expires() < level.getGameTime() ? 0 : (int) Math
-        .clamp(demand.target() - stock.amount(key), 0, stock.space());
+    if (demand == null || demand.expires() < level.getGameTime()) {
+      return 0;
+    }
+    return (int) Math.min(demand.remaining(), stock.space());
+  }
+
+  /**
+   * Only actual deliveries retire outstanding demand. Paying from the buffer
+   * cannot reopen it.
+   */
+  protected final long moveLocalStock(ResourceLocation key, long delta, boolean simulate) {
+    long moved = stock.move(key, delta, simulate);
+    if (!simulate && moved > 0 && input) {
+      var demand = demands.get(key);
+      if (demand != null) {
+        long remaining = demand.remaining() - moved;
+        if (remaining <= 0 || demand.expires() < level.getGameTime()) {
+          demands.remove(key);
+        } else {
+          demands.put(key, new Demand(remaining, demand.expires()));
+        }
+        requestObservers.changed(key, null);
+      }
+    }
+    return moved;
   }
 
   protected final void rotateDemand(ResourceLocation key) {
     var demand = demands.remove(key);
-    if (demand != null && stock.amount(key) < demand.target()) {
+    if (demand != null) {
       demands.put(key, demand);
     }
   }
@@ -221,6 +260,23 @@ public abstract class EssentiaHatch extends MachineCasingBlockEntity implements 
     return resolveAspect(level.registryAccess(), key);
   }
 
+  /**
+   * Server-thread view of committed contents. A false result means the inventory
+   * is unavailable.
+   */
+  boolean visitStoredAspects(ObjLongConsumer<Holder<IAspect>> visitor) {
+    if (!mutable()) {
+      return false;
+    }
+    for (var key : stock.keys()) {
+      var type = aspect(key);
+      if (type != null) {
+        visitor.accept(type, stock.amount(key));
+      }
+    }
+    return true;
+  }
+
   void dropContents() {
     for (var key : stock.keys()) {
       var aspect = aspect(key);
@@ -247,7 +303,77 @@ public abstract class EssentiaHatch extends MachineCasingBlockEntity implements 
     }
   }
 
-  private void clearDemands() {
+  boolean transferPhial(ItemStack held, Player player, InteractionHand hand) {
+    if (!mutable()) {
+      return false;
+    }
+    var result = held.copyWithCount(1);
+    var container = ComponentEssentia.phial(result);
+    var contents = container.getAspects();
+    ResourceLocation key;
+    int delta;
+    if (contents.isEmpty()) {
+      var keys = stock.keys();
+      if (keys.isEmpty()) {
+        return false;
+      }
+      key = keys.getFirst();
+      var aspect = aspect(key);
+      if (aspect == null) {
+        return false;
+      }
+      delta = -(int) Math.min(PhialItem.BASE_AMOUNT, stock.amount(key));
+      container.setAspects(contents.add(aspect, -delta));
+    } else {
+      if (!input || contents.size() != 1) {
+        return false;
+      }
+      var entry = contents.entries().getFirst();
+      key = identity(entry.aspect());
+      if (key == null) {
+        return false;
+      }
+      // Manual stocking may use free space and promises for this aspect only.
+      delta = (int) Math.min(entry.amount(), unpromisedSpace() + deficit(key));
+      if (delta <= 0) {
+        return false;
+      }
+      container.setAspects(contents.remove(entry.aspect(), delta));
+    }
+    transferring = true;
+    try {
+      if ((delta < 0 || !player.hasInfiniteMaterials()) && !exchangePhial(player, hand, held, result)) {
+        return false;
+      }
+      moveLocalStock(key, delta, false);
+      setChanged();
+      level.playSound(null, worldPosition, TTSounds.JAR.get(), SoundSource.BLOCKS, 0.25F, 1);
+    } finally {
+      transferring = false;
+    }
+    return true;
+  }
+
+  private static boolean exchangePhial(Player player, InteractionHand hand, ItemStack held, ItemStack result) {
+    if (held.getCount() == 1 && !player.hasInfiniteMaterials()) {
+      player.setItemInHand(hand, result);
+      return true;
+    }
+    // Inventory.add can discard overflow in creative. Reserve a real destination
+    // for this one bottle before consuming its source or settling the hatch.
+    var inventory = player.getInventory();
+    int slot = inventory.getSlotWithRemainingSpace(result);
+    if (slot < 0) {
+      slot = inventory.getFreeSlot();
+    }
+    if (slot < 0 || !inventory.add(slot, result)) {
+      return false;
+    }
+    held.consume(1, player);
+    return true;
+  }
+
+  protected void clearDemands() {
     demands.clear();
     requestObservers.invalidate();
   }
@@ -297,6 +423,6 @@ public abstract class EssentiaHatch extends MachineCasingBlockEntity implements 
     return tag;
   }
 
-  private record Demand(long target, long expires) {
+  private record Demand(long remaining, long expires) {
   }
 }

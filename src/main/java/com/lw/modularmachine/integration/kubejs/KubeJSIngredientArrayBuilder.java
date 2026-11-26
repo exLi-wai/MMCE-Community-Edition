@@ -81,11 +81,6 @@ public final class KubeJSIngredientArrayBuilder {
       modifiers = Map.copyOf(modifiers);
     }
 
-    void captureCallbacks() {
-      checkers.forEach(RecipeScriptCallbacks::checker);
-      modifiers.forEach(RecipeScriptCallbacks::modifier);
-    }
-
     void captureAdapterCallbacks() {
       checkers.forEach(RecipeScriptCallbacks::adapterChecker);
       modifiers.forEach(RecipeScriptCallbacks::adapterModifier);

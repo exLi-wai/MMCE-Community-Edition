@@ -1,11 +1,15 @@
 package com.lw.modularmachine.integration.thaumaturge;
 
+import com.leclowndu93150.thaumaturge.api.aspect.AspectList;
 import com.leclowndu93150.thaumaturge.api.aspect.IAspect;
+import com.leclowndu93150.thaumaturge.api.aspect.IAspectSource;
 import com.leclowndu93150.thaumaturge.api.essentia.EssentiaCapabilities;
 import com.leclowndu93150.thaumaturge.api.essentia.EssentiaPull;
 import com.leclowndu93150.thaumaturge.api.essentia.IEssentiaConduit;
-import com.lw.modularmachine.registry.MachineRegistries;
 import com.lw.modularmachine.config.MachineConfig;
+import com.lw.modularmachine.registry.MachineRegistries;
+import java.util.HashMap;
+import java.util.Map;
 import net.minecraft.core.BlockPos;
 import net.minecraft.core.Direction;
 import net.minecraft.core.Holder;
@@ -14,8 +18,12 @@ import net.minecraft.world.level.block.state.BlockState;
 import org.jetbrains.annotations.ApiStatus;
 
 @ApiStatus.Internal
-public final class PipeEssentiaHatch extends EssentiaHatch implements IEssentiaConduit {
+public final class PipeEssentiaHatch extends EssentiaHatch implements IEssentiaConduit, IAspectSource {
   private static final int SUCTION = 64;
+  // Transfusers retry an unsuccessful remote delivery after 200 ticks.
+  private static final int REMOTE_OFFER_TICKS = 240;
+  private static final int MAX_REMOTE_OFFERS = 64;
+  private final Map<ResourceLocation, Long> remoteOffers = new HashMap<>();
 
   public PipeEssentiaHatch(BlockPos position, BlockState state) {
     this(position, state, state.is(MachineRegistries.ESSENTIA_INPUT.get()));
@@ -39,6 +47,11 @@ public final class PipeEssentiaHatch extends EssentiaHatch implements IEssentiaC
       }
     }
     return false;
+  }
+
+  @Override
+  protected long externalOfferExpiry(ResourceLocation key) {
+    return remoteOffers.getOrDefault(key, Long.MIN_VALUE);
   }
 
   @Override
@@ -101,7 +114,7 @@ public final class PipeEssentiaHatch extends EssentiaHatch implements IEssentiaC
         transferring = true;
         try {
           int extracted = pipe.extract(aspect, maximum, direction.getOpposite(), false);
-          if (extracted < 0 || extracted > maximum || stock.move(key, extracted, false) != extracted) {
+          if (extracted < 0 || extracted > maximum || moveLocalStock(key, extracted, false) != extracted) {
             throw new IllegalStateException("Invalid essentia pipe transfer amount");
           }
           if (extracted > 0) {
@@ -122,11 +135,16 @@ public final class PipeEssentiaHatch extends EssentiaHatch implements IEssentiaC
     if (!input || !mutable() || key == null || amount <= 0) {
       return 0;
     }
-    int moved = (int) stock.move(key, Math.min(amount, deficit(key)), simulate);
+    int moved = (int) moveLocalStock(key, Math.min(amount, deficit(key)), simulate);
     if (!simulate && moved > 0) {
       setChanged();
     }
     return moved;
+  }
+
+  @Override
+  public int roomFor(Holder<IAspect> aspect, Direction side) {
+    return insert(aspect, Integer.MAX_VALUE, side, true);
   }
 
   @Override
@@ -178,5 +196,81 @@ public final class PipeEssentiaHatch extends EssentiaHatch implements IEssentiaC
   @Override
   public boolean connectsOn(Direction side) {
     return true;
+  }
+
+  @Override
+  public AspectList getAspects() {
+    var contents = AspectList.EMPTY;
+    if (mutable()) {
+      for (var key : stock.keys()) {
+        var aspect = aspect(key);
+        if (aspect != null) {
+          contents = contents.add(aspect, (int) stock.amount(key));
+        }
+      }
+    }
+    return contents;
+  }
+
+  @Override
+  public void setAspects(AspectList aspects) {
+    // Like Thaumaturge's essentia mirror, this view only allows transfers through
+    // fill and drain.
+  }
+
+  @Override
+  public boolean isBlocked() {
+    return !mutable();
+  }
+
+  @Override
+  public boolean accepts(Holder<IAspect> aspect) {
+    return input && mutable() && stock.space() > 0 && identity(aspect) != null;
+  }
+
+  @Override
+  public int fill(Holder<IAspect> aspect, int amount) {
+    if (amount <= 0 || !accepts(aspect)) {
+      return amount;
+    }
+    // A remote transfuser has no adjacent conduit to discover. Only a real delivery
+    // attempt identifies it as a possible source for this aspect.
+    var key = identity(aspect);
+    long now = level.getGameTime();
+    if (remoteOffers.size() >= MAX_REMOTE_OFFERS && !remoteOffers.containsKey(key)) {
+      remoteOffers.values().removeIf(expires -> expires < now);
+    }
+    if (remoteOffers.size() < MAX_REMOTE_OFFERS || remoteOffers.containsKey(key)) {
+      Long previous = remoteOffers.put(key, now + REMOTE_OFFER_TICKS);
+      if (previous == null || previous < now) {
+        invalidateRequestProofs();
+      }
+    }
+    return amount - insert(aspect, amount, null, false);
+  }
+
+  @Override
+  public boolean drain(Holder<IAspect> aspect, int amount) {
+    return amount > 0
+        && extract(aspect, amount, null, true) == amount
+        && extract(aspect, amount, null, false) == amount;
+  }
+
+  @Override
+  protected void clearDemands() {
+    super.clearDemands();
+    remoteOffers.clear();
+  }
+
+  @Override
+  public void setRemoved() {
+    remoteOffers.clear();
+    super.setRemoved();
+  }
+
+  @Override
+  public void onChunkUnloaded() {
+    remoteOffers.clear();
+    super.onChunkUnloaded();
   }
 }

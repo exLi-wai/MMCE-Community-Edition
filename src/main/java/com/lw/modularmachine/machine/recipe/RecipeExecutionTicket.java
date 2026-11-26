@@ -28,6 +28,7 @@ import net.minecraft.server.level.ServerLevel;
 import net.minecraft.world.level.block.Block;
 import net.minecraft.world.item.ItemStack;
 import org.jetbrains.annotations.ApiStatus;
+import java.util.function.Predicate;
 
 /**
  * Ephemeral server-thread resource ticket, not a serializable run or an
@@ -178,7 +179,7 @@ public final class RecipeExecutionTicket {
     return new RecipeExecutionTicket(this, required);
   }
 
-  RecipeExecutionTicket forOutputParts(java.util.function.Predicate<RecipePortSnapshot> include) {
+  RecipeExecutionTicket forOutputParts(Predicate<RecipePortSnapshot> include) {
     requireServerThread();
     var ports = selectedPorts.stream().filter(include).toList();
     var narrowed = new RecipeTicketProof(proof, ports, proof.capturedTick);

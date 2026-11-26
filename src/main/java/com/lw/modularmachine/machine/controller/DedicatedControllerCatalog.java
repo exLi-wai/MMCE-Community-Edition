@@ -8,10 +8,10 @@ import com.lw.modularmachine.ModularMachine;
 import com.lw.modularmachine.config.MachineStartupConfig;
 import com.lw.modularmachine.machine.appearance.ControllerAppearanceState;
 import com.lw.modularmachine.machine.structure.MachineDefinitionConfig;
+import com.lw.modularmachine.machine.structure.MachineDefinitionFiles;
 import java.io.IOException;
 import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
-import java.nio.file.LinkOption;
 import java.nio.file.Path;
 import java.nio.file.StandardOpenOption;
 import java.security.MessageDigest;
@@ -37,9 +37,6 @@ import net.neoforged.fml.loading.FMLPaths;
  */
 public final class DedicatedControllerCatalog {
 
-  private static final long MAX_FILE_BYTES = 67_108_864L;
-  private static final long MAX_TOTAL_BYTES = 1_073_741_824L;
-  private static final int MAX_MACHINE_FILES = 1024;
   private static final String CONTROLLER_OVERLAY = "mmcece:block/overlay/controllers/overlay_controller";
   private static final String FACTORY_CONTROLLER_OVERLAY = "mmcece:block/overlay/controllers/overlay_factory_controller";
 
@@ -132,63 +129,39 @@ public final class DedicatedControllerCatalog {
     var skipped = new ArrayList<String>();
 
     List<Path> files;
-    try (var paths = Files.walk(directory)) {
-      files = paths.filter(path -> Files.isRegularFile(path, LinkOption.NOFOLLOW_LINKS))
-          .filter(path -> path.toString().endsWith(".json") && !path.toString().endsWith(".var.json"))
-          .limit(MAX_MACHINE_FILES + 1L).toList();
+    try {
+      files = MachineDefinitionFiles.startupMachineFiles(directory);
     } catch (IOException failure) {
       throw new IllegalStateException("Cannot discover startup machines under " + directory, failure);
     }
-    if (files.size() > MAX_MACHINE_FILES) {
-      throw new IllegalStateException("At most " + MAX_MACHINE_FILES + " startup machines");
-    }
 
-    long total = 0;
+    long remainingBytes = MachineDefinitionFiles.MAX_TOTAL_BYTES;
     for (var file : files) {
       var relative = directory.relativize(file);
-      long size;
       try {
-        size = Files.size(file);
-      } catch (IOException io) {
-        skipped.add(relative + ": I/O " + io.getMessage());
-        ModularMachine.LOGGER.error("Failed to stat machine definition {}", relative, io);
-        continue;
-      }
-      if (size > MAX_FILE_BYTES) {
-        skipped.add(relative + ": file exceeds " + MAX_FILE_BYTES + " bytes");
-        ModularMachine.LOGGER.error("Skipping oversized machine definition {} ({} bytes)", relative, size);
-        continue;
-      }
-      try {
-        total = Math.addExact(total, size);
-      } catch (ArithmeticException overflow) {
-        throw new IllegalStateException("Total machine definition size overflowed", overflow);
-      }
-      if (total > MAX_TOTAL_BYTES) {
-        throw new IllegalStateException(
-            "Total machine definition size exceeded " + MAX_TOTAL_BYTES + " bytes; refusing to load");
-      }
-
-      try {
+        var bytes = MachineDefinitionFiles.readMachine(file, remainingBytes);
+        remainingBytes -= bytes.length;
         var id = MachineDefinitionConfig.id(relative);
-        var root = JsonParser.parseString(Files.readString(file, StandardCharsets.UTF_8)).getAsJsonObject();
+        var root = MachineDefinitionFiles.parse(bytes, relative.toString());
         String translation = text(root, "translation_key", "machine." + id.getNamespace() + "." + id.getPath());
         int color = color(root);
         var flags = MachineControllerRegistrationFlags.parse(root, relative.toString());
         if (machines
             .putIfAbsent(id, new Machine(id, translation, color, flags.hasFactory(), flags.factoryOnly())) != null) {
           skipped.add(relative + ": duplicate machine id " + id);
-          ModularMachine.LOGGER.error("Skipping duplicate machine definition {} (id {})", relative, id);
+          ModularMachine.LOGGER.warn("Skipping duplicate machine definition {} (id {})", relative, id);
         }
+      } catch (MachineDefinitionFiles.DirectorySizeLimitException tooLarge) {
+        throw tooLarge;
       } catch (JsonParseException | IllegalArgumentException invalid) {
         skipped.add(relative + ": " + invalid.getMessage());
-        ModularMachine.LOGGER.error("Skipping invalid machine definition {}: {}", relative, invalid.getMessage());
+        ModularMachine.LOGGER.warn("Skipping invalid machine definition {}: {}", relative, invalid.getMessage());
       } catch (IOException io) {
         skipped.add(relative + ": I/O " + io.getMessage());
-        ModularMachine.LOGGER.error("Failed to read machine definition {}", relative, io);
+        ModularMachine.LOGGER.warn("Failed to read machine definition {}", relative, io);
       } catch (RuntimeException unexpected) {
         skipped.add(relative + ": " + unexpected);
-        ModularMachine.LOGGER.error("Failed to load machine definition {}", relative, unexpected);
+        ModularMachine.LOGGER.warn("Failed to load machine definition {}", relative, unexpected);
       }
     }
 
@@ -280,7 +253,7 @@ public final class DedicatedControllerCatalog {
       } catch (RuntimeException invalid) {
         // 单条控制器条目失败 -> 跳过并继续
         skipped.add(invalid.getMessage());
-        ModularMachine.LOGGER.error("Skipping invalid controller entry: {}", invalid.getMessage());
+        ModularMachine.LOGGER.warn("Skipping invalid controller entry: {}", invalid.getMessage());
       }
     }
 
@@ -291,7 +264,7 @@ public final class DedicatedControllerCatalog {
       if (!roles.add(entry.factory() + ":" + entry.machine()) || !usedIds.add(entry.id())) {
         // 合并后的重复角色/ID：记录后跳过这一条，不再整体失败
         skipped.add("Duplicate controller role or ID: " + entry.id());
-        ModularMachine.LOGGER.error("Skipping duplicate controller role/ID {}", entry.id());
+        ModularMachine.LOGGER.warn("Skipping duplicate controller role/ID {}", entry.id());
         continue;
       }
     }

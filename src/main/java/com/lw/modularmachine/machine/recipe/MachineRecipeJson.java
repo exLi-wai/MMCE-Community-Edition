@@ -12,6 +12,8 @@ import com.google.gson.JsonObject;
 import com.google.gson.JsonParseException;
 import net.minecraft.nbt.CompoundTag;
 import net.minecraft.nbt.Tag;
+import net.minecraft.resources.ResourceLocation;
+import org.jetbrains.annotations.ApiStatus;
 import com.lw.modularmachine.api.smart.SmartNumberRequirement;
 import com.lw.modularmachine.api.recipe.RecipeExecutionOptions;
 import com.lw.modularmachine.api.recipe.RecipeScriptOptions;
@@ -88,6 +90,19 @@ public final class MachineRecipeJson {
       boolean parallelized,
       long randomSeed,
       RecipeSelectors selectors) {
+  }
+
+  /** Best-effort source attribution for declarations skipped during reload. */
+  @ApiStatus.Internal
+  public static ResourceLocation declaredMachine(JsonElement root) {
+    if (root == null || !root.isJsonObject()) {
+      return null;
+    }
+    try {
+      return ResourceLocation.parse(identifier(root.getAsJsonObject().get("machine"), "$.machine"));
+    } catch (JsonParseException invalid) {
+      return null;
+    }
   }
 
   public static Header validate(JsonElement root) {

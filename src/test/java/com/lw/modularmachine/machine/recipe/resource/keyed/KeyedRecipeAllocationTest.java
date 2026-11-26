@@ -63,6 +63,64 @@ class KeyedRecipeAllocationTest {
   }
 
   @Test
+  void reroutesFallbackToLeaveTheOnlyEligiblePortForAnotherAspect() {
+    var flexible = new Port(8, Map.of());
+    var airOnly = new Port(8, Map.of());
+    airOnly.blockedKey = FIRE;
+    var allocation = allocation(List.of(Map.entry(AIR, 8L), Map.entry(FIRE, 8L)), List.of(flexible, airOnly));
+
+    publish(allocation);
+
+    assertEquals(Map.of(FIRE, 8L), flexible.demands);
+    assertEquals(Map.of(AIR, 8L), airOnly.demands);
+  }
+
+  @Test
+  void reroutesConfirmedStockWhenTheOnlyFullAssignmentNeedsAnotherPort() {
+    var flexible = new Port(8, Map.of(AIR, 8L));
+    var airOnly = new Port(8, Map.of());
+    airOnly.blockedKey = FIRE;
+    var allocation = allocation(List.of(Map.entry(AIR, 8L), Map.entry(FIRE, 8L)), List.of(flexible, airOnly));
+
+    publish(allocation);
+
+    assertEquals(Map.of(FIRE, 8L), flexible.demands);
+    assertEquals(Map.of(AIR, 8L), airOnly.demands);
+  }
+
+  @Test
+  void reroutingTheSharedPortKeepsConfirmedSupplyEvenWhenAnEmptyPortComesFirst() {
+    var shared = new Port(8, Map.of(AIR, 8L));
+    var empty = new Port(8, Map.of());
+    empty.blockedKey = FIRE;
+    var stocked = new Port(8, Map.of(AIR, 8L));
+    stocked.blockedKey = FIRE;
+    var allocation = allocation(List.of(Map.entry(AIR, 8L), Map.entry(FIRE, 8L)), List.of(shared, empty, stocked));
+
+    publish(allocation);
+
+    assertTrue(empty.demands.isEmpty());
+    assertEquals(Map.of(AIR, 8L), stocked.demands);
+    assertEquals(Map.of(FIRE, 8L), shared.demands);
+  }
+
+  @Test
+  void refusesAnIncompletePlanAndRechecksTheRequestedKeyAtPublication() {
+    var port = new Port(16, Map.of());
+    var allocation = allocation(List.of(Map.entry(AIR, 8L), Map.entry(FIRE, 8L)), List.of(port));
+    var proof = verifyRequests(allocation);
+
+    port.blockedKey = AIR;
+
+    assertEquals(Status.PENDING, publishOne(allocation, proof).status());
+    assertFalse(allocation.requested());
+    assertEquals(Status.READY, publishOne(allocation, proof).status());
+    assertEquals(Map.of(FIRE, 8L), port.demands);
+    var next = allocation(List.of(Map.entry(AIR, 8L)), List.of(port));
+    assertEquals(Status.REJECTED, finishSliced(next));
+  }
+
+  @Test
   void fallbackForAnEarlierAspectDoesNotConsumeConfirmedCapacityForAnother() {
     var bus = new Port(8, Map.of(FIRE, 8L));
     var emptyPipe = new Port(8, Map.of());
@@ -86,6 +144,22 @@ class KeyedRecipeAllocationTest {
     assertEquals(Status.READY, finishSliced(allocation.recheck(new ReplenishmentProof())));
     assertEquals(Status.READY, allocation.advanceRequests(1, () -> true).status());
     assertEquals(Map.of(AIR, 8L), port.demands);
+  }
+
+  @Test
+  void publishesPureConfirmedSupplyBeforeACombinedConfirmedAndFallbackRequest() {
+    var mixed = new Port(8, Map.of(AIR, 1L));
+    var confirmed = new Port(4, Map.of(AIR, 4L));
+    var allocation = allocation(List.of(Map.entry(AIR, 8L)), List.of(mixed, confirmed));
+    assertEquals(Status.READY, finishSliced(allocation));
+    mixed.stock.move(AIR, 5, false);
+    var proof = new ReplenishmentProof();
+    assertEquals(Status.READY, finishSliced(allocation.recheck(proof)));
+
+    assertEquals(Status.PENDING, publishOne(allocation, proof).status());
+    assertEquals(Map.of(AIR, 3L), confirmed.demands);
+    assertEquals(Status.READY, publishOne(allocation, proof).status());
+    assertTrue(mixed.demands.isEmpty());
   }
 
   @Test
@@ -560,6 +634,7 @@ class KeyedRecipeAllocationTest {
     private final KeyedRequestObservers requestObservers = new KeyedRequestObservers();
     private boolean watchStock = true;
     private boolean connected = true;
+    private ResourceLocation blockedKey;
     private long gameTime;
     private long inputLimit = Long.MAX_VALUE;
     private long requested;
@@ -622,6 +697,11 @@ class KeyedRecipeAllocationTest {
     public long requestSpace() {
       return connected ? Math
           .max(0, stock.space() - demands.keySet().stream().mapToLong(this::outstandingRequest).sum()) : 0;
+    }
+
+    @Override
+    public boolean canRequest(ResourceLocation key) {
+      return !key.equals(blockedKey);
     }
 
     @Override

@@ -133,25 +133,25 @@ public final class MachineDefinitionParser {
    * literals on-thread.
    */
   public static List<StateOrientationAdapters.BlockReference> blockReferences(Map<ResourceLocation, ? extends JsonElement> roots) {
-    MachinePartParser.checkAlternativeBudget(roots);
+    return collectReferences(roots).references();
+  }
+
+  record ReferenceCollection(
+      List<StateOrientationAdapters.BlockReference> references,
+      MachinePartParser.DefinitionCost cost) {
+  }
+
+  static ReferenceCollection collectReferences(Map<ResourceLocation, ? extends JsonElement> roots) {
+    var cost = MachinePartParser.checkAlternativeBudget(roots);
     List<StateOrientationAdapters.BlockReference> result = new ArrayList<>();
-    if (roots.size() > 1024) {
-      throw error("$", "At most 1024 machine definitions per reload");
-    }
-    int totalParts = 0;
     for (var entry : roots.entrySet()) {
       String path = entry.getKey() + ": $";
       JsonObject root = object(entry.getValue(), path);
-      int schema = header(root, path);
       var declared = parts(root, path);
       var parts = new ArrayList<JsonElement>();
       declared.forEach(parts::add);
       parts.addAll(StructureModifierDefinition.captureParts(root, path));
       parts.addAll(DynamicPatternDefinition.captureParts(root, path));
-      totalParts += parts.size();
-      if (totalParts > 4_194_304) {
-        throw error(path + ".parts", "Reload exceeds 4194304 total parts");
-      }
       for (int index = 0; index < parts.size(); index++) {
         String partPath = path + ".parts[" + index + "]";
         JsonObject part = object(parts.get(index), partPath);
@@ -181,7 +181,7 @@ public final class MachineDefinitionParser {
         }
       }
     }
-    return List.copyOf(result);
+    return new ReferenceCollection(List.copyOf(result), cost);
   }
 
   private static OrientationPolicy orientationPolicy(JsonObject root, String path) {

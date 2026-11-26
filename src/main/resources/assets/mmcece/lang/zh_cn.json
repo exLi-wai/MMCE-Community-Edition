@@ -223,12 +223,15 @@
   "commands.mmcece.performance.budget": "结构检测：异步快照匹配；配方输出工作：%s/t",
   "commands.mmcece.performance.telemetry": "待处理工作：%s | 成功传输：%s | 绑定重建：%s | 保守检查：%s",
   "commands.mmcece.reload.failed": "MMCE 资源重载失败：%s",
+  "commands.mmcece.reload.definitions_rejected": "资源已重载。新机器定义被拒绝，已保留上一代定义：%s",
   "commands.mmcece.reload.started": "MMCE 资源重载已开始。",
   "commands.mmcece.reload.success": "MMCE 资源重载完成。",
 
   "config.jade.plugin_mmcece.controller_status": "显示 MMCE 机械控制器状态",
   "config.jade.plugin_mmcece.factory_status": "显示 MMCE 工厂控制器状态",
   "config.jade.plugin_mmcece.network_device_status": "显示 MMCE ME 设备状态",
+  "config.jade.plugin_mmcece.essentia_contents": "佩戴揭示护目镜时显示 MMCE 仓内源质",
+  "jade.mmcece.essentia.more": "另有 %s 种源质，可展开查看",
 
   "direction.mmcece.down": "下",
   "direction.mmcece.east": "东",

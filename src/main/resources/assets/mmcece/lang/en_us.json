@@ -223,12 +223,15 @@
   "commands.mmcece.performance.budget": "Structure: asynchronous snapshot matching; recipe output work: %s/t",
   "commands.mmcece.performance.telemetry": "pending work: %s | transfers: %s | binding rebuilds: %s | conservative checks: %s",
   "commands.mmcece.reload.failed": "MMCE resource reload failed: %s",
+  "commands.mmcece.reload.definitions_rejected": "Resources reloaded. Previous machine definitions were kept because the new definitions were rejected: %s",
   "commands.mmcece.reload.started": "MMCE resource reload started.",
   "commands.mmcece.reload.success": "MMCE resource reload completed.",
 
   "config.jade.plugin_mmcece.controller_status": "Show MMCE controller status",
   "config.jade.plugin_mmcece.factory_status": "Show MMCE factory controller status",
   "config.jade.plugin_mmcece.network_device_status": "Show MMCE ME device status",
+  "config.jade.plugin_mmcece.essentia_contents": "Show MMCE essentia with revealing goggles",
+  "jade.mmcece.essentia.more": "%s more aspects (expand for details)",
 
   "direction.mmcece.down": "Down",
   "direction.mmcece.east": "East",

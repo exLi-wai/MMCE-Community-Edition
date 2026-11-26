@@ -20,6 +20,7 @@ import com.lw.modularmachine.machine.smart.SmartInterfaceEventPublisher;
 import com.lw.modularmachine.machine.selection.RangedSelectionTask;
 import com.lw.modularmachine.util.thread.ServerThreadGuard;
 import com.mojang.logging.LogUtils;
+import java.lang.ref.WeakReference;
 import java.util.ArrayList;
 import java.util.HashMap;
 import java.util.HashSet;
@@ -27,20 +28,25 @@ import java.util.IdentityHashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.Objects;
+import java.util.Optional;
 import java.util.Set;
+import java.util.WeakHashMap;
 import net.minecraft.core.BlockPos;
 import net.minecraft.core.SectionPos;
 import net.minecraft.resources.ResourceLocation;
+import net.minecraft.server.MinecraftServer;
 import net.minecraft.server.level.ServerLevel;
 import net.minecraft.server.level.ServerPlayer;
 import net.minecraft.world.level.ChunkPos;
 import net.minecraft.world.level.Level;
 import net.minecraft.world.level.block.Block;
 import net.minecraft.world.level.block.state.BlockState;
+import net.minecraft.world.item.crafting.RecipeManager;
 import net.neoforged.bus.api.SubscribeEvent;
 import net.neoforged.neoforge.event.AddReloadListenerEvent;
 import net.neoforged.neoforge.event.level.ChunkEvent;
 import net.neoforged.neoforge.event.level.LevelEvent;
+import net.neoforged.neoforge.event.server.ServerAboutToStartEvent;
 import net.neoforged.neoforge.event.server.ServerStoppedEvent;
 import net.neoforged.neoforge.event.tick.LevelTickEvent;
 import net.neoforged.neoforge.gametest.GameTestHooks;
@@ -57,6 +63,9 @@ public final class StructureService {
   private static final Map<ServerLevel, StructureLevelState> LEVELS = new IdentityHashMap<>();
   private static final int INLINE_PREPARE_PARTS = 512;
   private static final StructureWorkScheduler WORK_SCHEDULER = new StructureWorkScheduler();
+  private static final Map<RecipeManager, String> REJECTED_RELOADS = new WeakHashMap<>();
+  private static MinecraftServer definitionOwner;
+  private static WeakReference<RecipeManager> startupManager = new WeakReference<>(null);
 
   private record Catalog(long epoch, Map<ResourceLocation, MachineDefinition> definitions) {
   }
@@ -109,10 +118,16 @@ public final class StructureService {
 
   public static synchronized void replaceDefinitions(Map<ResourceLocation, MachineDefinition> candidate) {
     var server = ServerLifecycleHooks.getCurrentServer();
-    if (server != null && !server.isSameThread()) {
-      throw new IllegalStateException("Definition apply outside server thread");
+    replaceDefinitions(server, null, candidate);
+  }
+
+  static synchronized void replaceDefinitions(MinecraftServer server, RecipeManager target, Map<ResourceLocation, MachineDefinition> candidate) {
+    if (server != null) {
+      ServerThreadGuard.require(server, "Definition apply");
     }
     var next = new Catalog(Math.incrementExact(catalog.epoch()), Map.copyOf(candidate));
+    definitionOwner = server;
+    startupManager = new WeakReference<>(server == null ? target : null);
     catalog = next;
     AsyncStructureWork.clearTemplates();
     // Epoch revocation is immediate; expensive rebuilding is deferred to the level
@@ -122,6 +137,21 @@ public final class StructureService {
         request(anchor.controller, true, true);
       }
     }
+  }
+
+  static synchronized boolean keepDefinitionsAfterRejection(MinecraftServer server, RecipeManager target, Throwable failure) {
+    if (server == null || definitionOwner != server) {
+      return false;
+    }
+    ServerThreadGuard.require(server, "Definition reload rejection");
+    REJECTED_RELOADS.put(target, Objects.toString(failure.getMessage(), failure.getClass().getSimpleName()));
+    return true;
+  }
+
+  /** The rejection belongs to the recipe manager prepared by this reload. */
+  @ApiStatus.Internal
+  public static synchronized Optional<String> definitionReloadRejection(RecipeManager manager) {
+    return Optional.ofNullable(REJECTED_RELOADS.get(manager));
   }
 
   public static void register(MachineControllerBlockEntity controller) {
@@ -840,7 +870,17 @@ public final class StructureService {
 
   @SubscribeEvent
   public static void addReloadListener(AddReloadListenerEvent event) {
-    event.addListener(new MachineDefinitionReloadListener());
+    event.addListener(new MachineDefinitionReloadListener(event.getServerResources().getRecipeManager()));
+  }
+
+  @SubscribeEvent
+  public static synchronized void onServerAboutToStart(ServerAboutToStartEvent event) {
+    var server = event.getServer();
+    // World loading completes the initial reload before a server instance exists.
+    if (startupManager.get() == server.getRecipeManager()) {
+      definitionOwner = server;
+    }
+    startupManager.clear();
   }
 
   @SubscribeEvent
@@ -869,11 +909,16 @@ public final class StructureService {
   }
 
   @SubscribeEvent
-  public static void onServerStopped(ServerStoppedEvent event) {
+  public static synchronized void onServerStopped(ServerStoppedEvent event) {
     RangedSelectionTask.stop();
     LEVELS.values().forEach(StructureLevelState::clear);
     LEVELS.clear();
     AsyncStructureWork.stop();
+    REJECTED_RELOADS.clear();
+    if (definitionOwner == event.getServer()) {
+      catalog = new Catalog(Math.incrementExact(catalog.epoch()), Map.of());
+      definitionOwner = null;
+    }
   }
 
   @SubscribeEvent

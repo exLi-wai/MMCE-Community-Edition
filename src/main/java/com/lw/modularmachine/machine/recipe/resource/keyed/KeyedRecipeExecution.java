@@ -265,7 +265,7 @@ public final class KeyedRecipeExecution {
     @Override
     public ResourceLocation nextRequestKey() {
       if (publication == null) {
-        publication = Iterators.peekingIterator(replenishment.requests().values().iterator());
+        publication = Iterators.peekingIterator(replenishment.requests().iterator());
       }
       return publication.peek().key();
     }
@@ -296,7 +296,7 @@ public final class KeyedRecipeExecution {
       var port = request.port();
       var hatch = port.hatch();
       long deficit = liveDeficits.getOrDefault(request.key(), 0L);
-      if (deficit == 0 || hatch.resourceAddress() != port.address()) {
+      if (deficit == 0 || hatch.resourceAddress() != port.address() || !hatch.canRequest(request.key())) {
         return;
       }
       long space = Math.min(deficit, hatch.requestSpace());

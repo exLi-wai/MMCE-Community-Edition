@@ -8,7 +8,8 @@
     "Ae2CraftingCpuMixin",
     "Ae2CraftingClusterMixin",
     "LevelChunkMixin",
-    "LevelBlockEntityChangeMixin"
+    "LevelBlockEntityChangeMixin",
+    "MinecraftServerReloadMixin"
   ],
   "client": [
     "EmiGhostPickerInputMixin",

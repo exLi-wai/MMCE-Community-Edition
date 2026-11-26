@@ -39,6 +39,7 @@ import dev.latvian.mods.kubejs.script.ScriptType;
 import dev.latvian.mods.kubejs.util.KubeResourceLocation;
 import dev.latvian.mods.rhino.Context;
 import java.util.ArrayList;
+import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Objects;
 import java.util.Optional;
@@ -1339,19 +1340,32 @@ public final class KubeJSRecipeBuilder {
       }
     }
 
-    private void captureCallbacks() {
-      lifecycleHandlers.forEach(RecipeScriptCallbacks::lifecycle);
-      preparationHandlers.forEach(RecipeScriptCallbacks::preparation);
-      ingredientArrayCallbacks.forEach(KubeJSIngredientArrayBuilder.GroupCallbacks::captureCallbacks);
+    private void captureCallbacks(JsonObject source) {
+      var checkers = new LinkedHashMap<ResourceLocation, RecipeItemCallbacks.Checker>();
+      var modifiers = new LinkedHashMap<ResourceLocation, RecipeItemCallbacks.Modifier>();
+      var inputModifiers = new LinkedHashMap<ResourceLocation, RecipeItemCallbacks.InputModifier>();
+      for (var group : ingredientArrayCallbacks) {
+        checkers.putAll(group.checkers());
+        modifiers.putAll(group.modifiers());
+      }
       for (var rows : List.of(inputs, outputs)) {
         for (var row : rows) {
           if (row.inlineChecker != null) {
-            RecipeScriptCallbacks.checker(row.checker, row.inlineChecker);
+            checkers.put(row.checker, row.inlineChecker);
           }
-          row.inlineModifiers.forEach(RecipeScriptCallbacks::modifier);
-          row.inlineInputModifiers.forEach(RecipeScriptCallbacks::inputModifier);
+          modifiers.putAll(row.inlineModifiers);
+          inputModifiers.putAll(row.inlineInputModifiers);
         }
       }
+      RecipeScriptCallbacks.capture(
+          id,
+          source,
+          new RecipeScriptCallbacks.Bindings(
+              checkers,
+              modifiers,
+              inputModifiers,
+              lifecycleHandlers,
+              preparationHandlers));
     }
 
     public void build(Context context) {
@@ -1364,7 +1378,12 @@ public final class KubeJSRecipeBuilder {
         throw new IllegalStateException("KubeJS rejected the native machine recipe declaration");
       }
       recipe.id(new KubeResourceLocation(id));
-      captureCallbacks();
+      try {
+        captureCallbacks(recipe.json);
+      } catch (RuntimeException failure) {
+        recipe.remove();
+        throw failure;
+      }
     }
 
     private JsonObject declarationJson() {
