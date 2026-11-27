@@ -60,7 +60,7 @@ final class RecipeStartOutputAdmission {
     if (budget < 0) {
       throw new IllegalArgumentException("Negative output admission budget");
     }
-    if (!refreshTicket()) {
+    if (!(factoryBatch ? plan.factoryPlanningCurrent() : refreshTicket())) {
       throw new UpgradeRecipeCheckHandlers.StaleException();
     }
 

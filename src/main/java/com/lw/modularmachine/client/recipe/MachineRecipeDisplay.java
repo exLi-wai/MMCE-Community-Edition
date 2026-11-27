@@ -1,5 +1,6 @@
 package com.lw.modularmachine.client.recipe;
 
+import com.lw.modularmachine.api.recipe.ItemAmount;
 import com.lw.modularmachine.machine.recipe.MachineRecipe;
 import com.lw.modularmachine.api.recipe.ChemicalRequirement;
 import com.lw.modularmachine.api.recipe.IngredientArrayData;
@@ -215,7 +216,7 @@ public final class MachineRecipeDisplay {
     }
   }
 
-  public static List<Component> itemTooltip(MachineRecipe.ItemAmount amount, boolean input) {
+  public static List<Component> itemTooltip(ItemAmount amount, boolean input) {
     var result = new ArrayList<Component>();
     result.add(
         amount.minimumAmount() == amount.amount() ? Component

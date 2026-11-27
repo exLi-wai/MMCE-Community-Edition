@@ -17,6 +17,7 @@ import com.lw.modularmachine.api.recipe.RecipeItemCallbacks;
 import com.lw.modularmachine.api.recipe.TriggeredResourceData;
 import com.lw.modularmachine.api.smart.SmartNumberRequirement;
 import com.lw.modularmachine.machine.recipe.ItemStackSnapshots;
+import com.lw.modularmachine.machine.recipe.RecipeDeclarationSnapshots;
 import com.lw.modularmachine.machine.recipe.ResourceSelector;
 import com.lw.modularmachine.machine.recipe.adapter.RecipeAdapterNativeResources;
 import com.mojang.serialization.JsonOps;
@@ -38,10 +39,8 @@ import net.minecraft.resources.ResourceLocation;
 import net.minecraft.world.item.ItemStack;
 import net.minecraft.world.item.component.CustomData;
 import net.neoforged.neoforge.fluids.FluidStack;
-import com.google.gson.JsonParser;
-import com.google.gson.JsonArray;
-import com.google.gson.JsonObject;
-import com.google.gson.JsonPrimitive;
+import com.lw.modularmachine.api.recipe.FluidRequirement;
+import com.lw.modularmachine.api.recipe.ItemAmount;
 import org.jetbrains.annotations.ApiStatus;
 
 /**
@@ -83,6 +82,26 @@ public final class KubeJSRecipeAdapterBuilder extends KubeJSResourceRecipeBuilde
     }
   }
 
+  /** Mutable only while the script is editing its own unregistered row. */
+  private static final class ItemRow {
+    final ItemStack prototype;
+    long amount, minimum, maximum;
+    double chance = 1;
+    String selector = "";
+    boolean fixed;
+    ItemStack preview = ItemStack.EMPTY;
+
+    ItemRow(ItemStack source, long amount, HolderLookup.Provider registries) {
+      prototype = ItemStackSnapshots.detached(source.copyWithCount(1), registries);
+      this.amount = amount;
+    }
+
+    ItemAmount freeze(HolderLookup.Provider registries) {
+      return new ItemAmount(prototype, amount, chance, selector, "exact", preview, fixed, minimum, maximum, false)
+          .capture(registries);
+    }
+  }
+
   private record TriggerTarget(TriggerPhase phase, int row) {
   }
 
@@ -105,20 +124,17 @@ public final class KubeJSRecipeAdapterBuilder extends KubeJSResourceRecipeBuilde
   private boolean prioritySpecified;
   private final List<RecipeModifier> modifiers = new ArrayList<>();
   private final List<SmartNumberRequirement> interfaceInputs = new ArrayList<>();
-  private final List<RecipeAdapterCustomization.FluidResource> fluidInputs = new ArrayList<>(),
-      fluidOutputs = new ArrayList<>();
-  private final List<RecipeAdapterCustomization.FluidResource> fluidPerTickInputs = new ArrayList<>(),
-      fluidPerTickOutputs = new ArrayList<>();
+  private final List<FluidRequirement> fluidInputs = new ArrayList<>(), fluidOutputs = new ArrayList<>();
+  private final List<FluidRequirement> fluidPerTickInputs = new ArrayList<>(), fluidPerTickOutputs = new ArrayList<>();
   private final List<ChemicalRequirement> chemicalInputs = new ArrayList<>(), chemicalOutputs = new ArrayList<>(),
       chemicalPerTick = new ArrayList<>(), chemicalPerTickOutputs = new ArrayList<>();
-  private final List<RecipeAdapterCustomization.ItemOutput> itemOutputs = new ArrayList<>();
-  private final List<JsonObject> itemInputs = new ArrayList<>();
+  private final List<ItemRow> itemOutputs = new ArrayList<>();
+  private final List<ItemRow> itemInputs = new ArrayList<>();
   private final Map<Integer, Integer> durableInputs = new LinkedHashMap<>();
   private final List<ItemPaymentData.Fuel> fuelInputs = new ArrayList<>();
   private final List<IngredientArrayData.Group> ingredientArrays = new ArrayList<>(),
       randomItemOutputs = new ArrayList<>();
   private final List<KubeJSIngredientArrayBuilder.GroupCallbacks> arrayCallbacks = new ArrayList<>();
-  private final Map<Integer, long[]> outputRanges = new LinkedHashMap<>();
   private Optional<Boolean> loadJei = Optional.empty();
   private final Map<RecipeAdapterCustomization.Phase, String> selectors = new EnumMap<>(
       RecipeAdapterCustomization.Phase.class);
@@ -133,7 +149,7 @@ public final class KubeJSRecipeAdapterBuilder extends KubeJSResourceRecipeBuilde
   private List<ChemicalRequirement> lastChemicals;
   private boolean built;
   private final Map<TriggerTarget, TriggerSettings> triggers = new LinkedHashMap<>();
-  private JsonArray capturedTriggers;
+  private List<RecipeAdapterCustomization.Trigger> capturedTriggers;
 
   public KubeJSRecipeAdapterBuilder setTriggerTime(Number ticks) {
     requireMutable();
@@ -171,7 +187,7 @@ public final class KubeJSRecipeAdapterBuilder extends KubeJSResourceRecipeBuilde
   }
 
   private int[] prepareTriggeredResources() {
-    var captured = new JsonArray();
+    var captured = new ArrayList<RecipeAdapterCustomization.Trigger>();
     var removals = new HashMap<TriggerPhase, Set<Integer>>();
     for (var entry : triggers.entrySet()) {
       if (entry.getValue().tick() == 0) {
@@ -186,79 +202,75 @@ public final class KubeJSRecipeAdapterBuilder extends KubeJSResourceRecipeBuilde
     for (int index = 0; index < outputRows.length; index++) {
       outputRows[index] = removedOutputs.contains(index) ? -1 : nextRow++;
     }
-    if (!removedOutputs.isEmpty() && !outputRanges.isEmpty()) {
-      var retainedRanges = new LinkedHashMap<Integer, long[]>();
-      outputRanges.forEach((row, range) -> retainedRanges.put(outputRows[row], range));
-      outputRanges.clear();
-      outputRanges.putAll(retainedRanges);
-    }
     removals.forEach(this::removeTriggeredRows);
     capturedTriggers = captured;
     return outputRows;
   }
 
-  private JsonObject captureTriggeredRow(TriggerTarget target, TriggerSettings timing) {
+  private RecipeAdapterCustomization.Trigger captureTriggeredRow(TriggerTarget target, TriggerSettings timing) {
     if (duration > 0 && timing.tick() > duration) {
       throw owner.reject("Trigger time exceeds the explicit adapter duration");
     }
-    var row = new JsonObject();
-    row.addProperty("resource", target.phase().resource);
-    row.addProperty("io", target.phase().io.serialized());
-    row.addProperty("tick", timing.tick());
-    row.addProperty("repeatable", timing.repeatable());
-    var source = triggerSource(target, row);
-    for (String field : List.of("amount", "chance", "selector", "parallel_unaffected", "match")) {
-      if (source.has(field)) {
-        row.add(field, source.get(field));
-      }
-    }
-    TriggeredResourceData.Row.CODEC.parse(registries().createSerializationContext(JsonOps.INSTANCE), row).getOrThrow();
-    return row;
-  }
-
-  private JsonObject triggerSource(TriggerTarget target, JsonObject row) {
     var phase = target.phase();
     int index = target.row();
-    JsonObject source;
-    if (phase == TriggerPhase.ITEM_INPUT) {
-      source = itemInputs.get(index).deepCopy();
-      if (source.has("min_amount") || durableInputs.containsKey(index)) {
-        throw owner.reject("Triggered inputs cannot combine random quantities or durability payment");
+    var io = phase.io;
+    boolean inherited = false;
+    TriggeredResourceData.Row row;
+    if (phase == TriggerPhase.ITEM_INPUT || phase == TriggerPhase.ITEM_OUTPUT) {
+      var item = (io == RecipeModifier.Io.INPUT ? itemInputs : itemOutputs).get(index);
+      if (item.maximum != 0 || io == RecipeModifier.Io.INPUT && durableInputs.containsKey(index)) {
+        throw owner.reject("Triggered items cannot combine random quantities or durability payment");
       }
-      row.add("item", source.remove("stack"));
-    } else if (phase == TriggerPhase.ITEM_OUTPUT) {
-      var output = itemOutputs.get(index);
-      if (output.encodedPreview().isPresent()) {
+      if (!item.preview.isEmpty()) {
         throw owner.reject("Triggered item rows cannot use an item preview");
       }
-      if (outputRanges.containsKey(index)) {
-        throw owner.reject("Triggered outputs cannot combine random quantities");
-      }
-      source = new JsonObject();
-      source.addProperty("amount", output.amount());
-      source.addProperty("chance", output.chance());
-      source.addProperty("selector", output.selector());
-      source.addProperty("parallel_unaffected", output.parallelUnaffected());
-      row.add("item", JsonParser.parseString(output.encodedStack()));
+      row = new TriggeredResourceData.Row(
+          "item",
+          io,
+          timing.tick(),
+          timing.repeatable(),
+          item.amount,
+          item.chance,
+          item.selector,
+          Optional.of(item.prototype),
+          Optional.empty(),
+          Optional.empty(),
+          item.fixed,
+          "exact");
     } else if (phase == TriggerPhase.FLUID_INPUT || phase == TriggerPhase.FLUID_OUTPUT) {
-      source = JsonParser
-          .parseString((phase == TriggerPhase.FLUID_INPUT ? fluidInputs : fluidOutputs).get(index).encoded())
-          .getAsJsonObject();
-      var fluid = source.deepCopy();
-      fluid.remove("chance");
-      fluid.remove("parallel_unaffected");
-      fluid.remove("selector");
-      fluid.addProperty("amount", 1);
-      row.add("fluid", fluid);
+      var fluid = (io == RecipeModifier.Io.INPUT ? fluidInputs : fluidOutputs).get(index);
+      var prototype = fluid.stack();
+      row = new TriggeredResourceData.Row(
+          "fluid",
+          io,
+          timing.tick(),
+          timing.repeatable(),
+          prototype.getAmount(),
+          fluid.chance(),
+          fluid.selector(),
+          Optional.empty(),
+          Optional.of(prototype),
+          Optional.empty(),
+          fluid.parallelUnaffected(),
+          "exact");
+      inherited = !fluid.selectorSpecified();
     } else {
-      source = ChemicalRequirement.CODEC
-          .encodeStart(
-              JsonOps.INSTANCE,
-              (phase == TriggerPhase.CHEMICAL_INPUT ? chemicalInputs : chemicalOutputs).get(index))
-          .getOrThrow().getAsJsonObject();
-      row.add("chemical", source.get("chemical"));
+      var chemical = (io == RecipeModifier.Io.INPUT ? chemicalInputs : chemicalOutputs).get(index);
+      row = new TriggeredResourceData.Row(
+          "chemical",
+          io,
+          timing.tick(),
+          timing.repeatable(),
+          chemical.amount(),
+          chemical.chance(),
+          chemical.selector(),
+          Optional.empty(),
+          Optional.empty(),
+          Optional.of(chemical.chemical()),
+          false,
+          "exact");
     }
-    return source;
+    return new RecipeAdapterCustomization.Trigger(row.capture(registries()), inherited);
   }
 
   private void removeTriggeredRows(TriggerPhase phase, Set<Integer> removed) {
@@ -283,12 +295,6 @@ public final class KubeJSRecipeAdapterBuilder extends KubeJSResourceRecipeBuilde
       case CHEMICAL_OUTPUT -> chemicalOutputs;
     };
     removed.stream().sorted(Comparator.reverseOrder()).forEach(index -> rows.remove((int) index));
-  }
-
-  private void addTriggeredResources(JsonObject additions) {
-    if (!capturedTriggers.isEmpty()) {
-      additions.add("triggered_resources", capturedTriggers.deepCopy());
-    }
   }
 
   KubeJSRecipeAdapterBuilder(KubeJSRecipeAdapterRegistration owner, ResourceLocation machine, ResourceLocation adapter, String id) {
@@ -344,9 +350,7 @@ public final class KubeJSRecipeAdapterBuilder extends KubeJSResourceRecipeBuilde
       throw owner.reject("consumeDurability requires the last appended item input");
     }
     int amount = (int) owner.integer(durability, "tool durability", 0, Integer.MAX_VALUE);
-    var prototype = ItemStack.SINGLE_ITEM_CODEC
-        .parse(registries().createSerializationContext(JsonOps.INSTANCE), itemInputs.getLast().get("stack"))
-        .getOrThrow();
+    var prototype = itemInputs.getLast().prototype;
     if (amount > 0 && !prototype.isDamageableItem()) {
       throw owner.reject("consumeDurability requires a damageable item");
     }
@@ -358,13 +362,10 @@ public final class KubeJSRecipeAdapterBuilder extends KubeJSResourceRecipeBuilde
     return this;
   }
 
-  private void addItemPayments(JsonObject additions) {
+  private ItemPaymentData itemPayments() {
     var tools = durableInputs.entrySet().stream()
         .map(entry -> new ItemPaymentData.Tool(entry.getKey(), entry.getValue())).toList();
-    var payments = new ItemPaymentData(tools, fuelInputs);
-    if (!payments.isEmpty()) {
-      additions.add("item_payments", ItemPaymentData.CODEC.encodeStart(JsonOps.INSTANCE, payments).getOrThrow());
-    }
+    return new ItemPaymentData(tools, fuelInputs);
   }
 
   public KubeJSRecipeAdapterBuilder addEnergyPerTickInput(Number amount) {
@@ -698,14 +699,7 @@ public final class KubeJSRecipeAdapterBuilder extends KubeJSResourceRecipeBuilde
     if (stack == null || stack.isEmpty() || itemInputs.size() >= RecipeAdapterCustomization.MAX_REQUIREMENTS) {
       throw owner.reject("Adapter item inputs require a nonempty stack and bounded row count");
     }
-    var row = new JsonObject();
-    row.add(
-        "stack",
-        ItemStack.SINGLE_ITEM_CODEC.encodeStart(
-            owner.registries().createSerializationContext(JsonOps.INSTANCE),
-            ItemStackSnapshots.detached(stack.copyWithCount(1), owner.registries())).getOrThrow());
-    row.addProperty("amount", amount);
-    itemInputs.add(row);
+    itemInputs.add(new ItemRow(stack, amount, owner.registries()));
     last = LastRequirement.ITEM_INPUT;
 
     return this;
@@ -791,16 +785,13 @@ public final class KubeJSRecipeAdapterBuilder extends KubeJSResourceRecipeBuilde
     if (min > max) {
       throw owner.reject("Minimum item amount exceeds maximum");
     }
-    if (last == LastRequirement.ITEM_INPUT) {
-      var row = itemInputs.getLast();
-      row.addProperty("amount", max);
-      row.addProperty("min_amount", min);
-      row.addProperty("max_amount", max);
-    } else if (last == LastRequirement.ITEM_OUTPUT) {
-      outputRanges.put(itemOutputs.size() - 1, new long[]{min, max});
-    } else {
+    if (last != LastRequirement.ITEM_INPUT && last != LastRequirement.ITEM_OUTPUT) {
       throw owner.reject("setMinMaxAmount requires an appended item row");
     }
+    var row = (last == LastRequirement.ITEM_INPUT ? itemInputs : itemOutputs).getLast();
+    row.amount = max;
+    row.minimum = min;
+    row.maximum = max;
 
     return this;
   }
@@ -826,11 +817,7 @@ public final class KubeJSRecipeAdapterBuilder extends KubeJSResourceRecipeBuilde
       throw owner.reject("Recipe adapter item output must not be empty");
     }
     try {
-      var registries = registries();
-      var prototype = ItemStackSnapshots.detached(stack.copyWithCount(1), registries);
-      var encoded = ItemStack.SINGLE_ITEM_CODEC
-          .encodeStart(registries.createSerializationContext(JsonOps.INSTANCE), prototype).getOrThrow();
-      add(itemOutputs, new RecipeAdapterCustomization.ItemOutput(encoded.toString(), amount, 1, ""), "item output");
+      add(itemOutputs, new ItemRow(stack, amount, registries()), "item output");
     } catch (RuntimeException invalid) {
       throw owner.reject("Invalid recipe adapter item output: " + invalid.getMessage());
     }
@@ -857,7 +844,7 @@ public final class KubeJSRecipeAdapterBuilder extends KubeJSResourceRecipeBuilde
       throw owner.reject("Adapter chance requires a value within 0..1");
     }
     if (last == LastRequirement.ITEM_INPUT) {
-      itemInputs.getLast().addProperty("chance", chance.doubleValue());
+      itemInputs.getLast().chance = chance.doubleValue();
     } else if (last == LastRequirement.FUEL) {
       var fuel = fuelInputs.getLast();
       fuelInputs.set(
@@ -868,16 +855,7 @@ public final class KubeJSRecipeAdapterBuilder extends KubeJSResourceRecipeBuilde
     } else if (last == LastRequirement.INGREDIENT_ARRAY) {
       KubeJSIngredientArrayBuilder.setLastGroupChance(ingredientArrays, chance.doubleValue());
     } else if (last == LastRequirement.ITEM_OUTPUT) {
-      var previous = itemOutputs.getLast();
-      itemOutputs.set(
-          itemOutputs.size() - 1,
-          new RecipeAdapterCustomization.ItemOutput(
-              previous.encodedStack(),
-              previous.amount(),
-              chance.doubleValue(),
-              previous.selector(),
-              previous.encodedPreview(),
-              previous.parallelUnaffected()));
+      itemOutputs.getLast().chance = chance.doubleValue();
     } else if (last == LastRequirement.CHEMICAL) {
       var previous = lastChemicals.getLast();
       lastChemicals.set(
@@ -887,7 +865,7 @@ public final class KubeJSRecipeAdapterBuilder extends KubeJSResourceRecipeBuilde
         || last == LastRequirement.FLUID_OUTPUT
         || last == LastRequirement.FLUID_PER_TICK
         || last == LastRequirement.FLUID_PER_TICK_OUTPUT) {
-      setLastFluidProperty("chance", new JsonPrimitive(chance.doubleValue()));
+      editLastFluid(row -> row.withAmountAndChance(row.stack().getAmount(), chance.doubleValue()));
     } else {
       throw owner.reject("Adapter chance requires the last single item output, chemical or fluid row");
     }
@@ -904,7 +882,7 @@ public final class KubeJSRecipeAdapterBuilder extends KubeJSResourceRecipeBuilde
     }
     switch (last) {
       case RANDOM_OUTPUT -> KubeJSIngredientArrayBuilder.setLastGroupSelector(randomItemOutputs, selector);
-      case ITEM_INPUT -> itemInputs.getLast().addProperty("selector", selector);
+      case ITEM_INPUT -> itemInputs.getLast().selector = selector;
       case FUEL -> {
         var fuel = fuelInputs.getLast();
         fuelInputs.set(
@@ -913,16 +891,7 @@ public final class KubeJSRecipeAdapterBuilder extends KubeJSResourceRecipeBuilde
       }
       case INGREDIENT_ARRAY -> KubeJSIngredientArrayBuilder.setLastGroupSelector(ingredientArrays, selector);
       case ITEM_OUTPUT -> {
-        var previous = itemOutputs.getLast();
-        itemOutputs.set(
-            itemOutputs.size() - 1,
-            new RecipeAdapterCustomization.ItemOutput(
-                previous.encodedStack(),
-                previous.amount(),
-                previous.chance(),
-                selector,
-                previous.encodedPreview(),
-                previous.parallelUnaffected()));
+        itemOutputs.getLast().selector = selector;
       }
       case CHEMICAL -> {
         var previous = lastChemicals.getLast();
@@ -931,7 +900,7 @@ public final class KubeJSRecipeAdapterBuilder extends KubeJSResourceRecipeBuilde
             new ChemicalRequirement(previous.chemical(), previous.amount(), selector, previous.chance()));
       }
       case FLUID_INPUT, FLUID_OUTPUT, FLUID_PER_TICK, FLUID_PER_TICK_OUTPUT ->
-        setLastFluidProperty("selector", new JsonPrimitive(selector));
+        editLastFluid(row -> new FluidRequirement(row.stack(), row.chance(), row.parallelUnaffected(), selector));
       case ENERGY -> {
         if (energyRequirements != 1) {
           throw owner.reject("Adapter energy tags require one energy requirement");
@@ -950,7 +919,7 @@ public final class KubeJSRecipeAdapterBuilder extends KubeJSResourceRecipeBuilde
     return this;
   }
 
-  private void setLastFluidProperty(String property, JsonPrimitive value) {
+  private void editLastFluid(java.util.function.UnaryOperator<FluidRequirement> edit) {
     var rows = switch (last) {
       case FLUID_INPUT -> fluidInputs;
       case FLUID_OUTPUT -> fluidOutputs;
@@ -958,9 +927,7 @@ public final class KubeJSRecipeAdapterBuilder extends KubeJSResourceRecipeBuilde
       case FLUID_PER_TICK_OUTPUT -> fluidPerTickOutputs;
       default -> throw owner.reject("No last fluid requirement");
     };
-    var encoded = JsonParser.parseString(rows.getLast().encoded()).getAsJsonObject();
-    encoded.add(property, value);
-    rows.set(rows.size() - 1, new RecipeAdapterCustomization.FluidResource(encoded.toString()));
+    rows.set(rows.size() - 1, edit.apply(rows.getLast()));
   }
 
   public KubeJSRecipeAdapterBuilder setFluidInputTag(String selector) {
@@ -1015,25 +982,21 @@ public final class KubeJSRecipeAdapterBuilder extends KubeJSResourceRecipeBuilde
     } else if (last == LastRequirement.INGREDIENT_ARRAY) {
       KubeJSIngredientArrayBuilder.setLastGroupParallelUnaffected(ingredientArrays, enabled);
     } else if (last == LastRequirement.ITEM_INPUT) {
-      itemInputs.getLast().addProperty("parallel_unaffected", enabled);
+      itemInputs.getLast().fixed = enabled;
     } else if (last == LastRequirement.FUEL) {
       var fuel = fuelInputs.getLast();
       fuelInputs.set(
           fuelInputs.size() - 1,
           new ItemPaymentData.Fuel(fuel.burnTime(), fuel.chance(), enabled, fuel.selector()));
     } else if (last == LastRequirement.ITEM_OUTPUT) {
-      var previous = itemOutputs.getLast();
-      itemOutputs.set(
-          itemOutputs.size() - 1,
-          new RecipeAdapterCustomization.ItemOutput(
-              previous.encodedStack(),
-              previous.amount(),
-              previous.chance(),
-              previous.selector(),
-              previous.encodedPreview(),
-              enabled));
+      itemOutputs.getLast().fixed = enabled;
     } else if (last == LastRequirement.FLUID_INPUT || last == LastRequirement.FLUID_OUTPUT) {
-      setLastFluidProperty("parallel_unaffected", new JsonPrimitive(enabled));
+      editLastFluid(
+          row -> row.selectorSpecified() ? new FluidRequirement(
+              row.stack(),
+              row.chance(),
+              enabled,
+              row.selector()) : new FluidRequirement(row.stack(), row.chance(), enabled));
     } else {
       throw owner
           .reject("Adapter parallel-unaffected applies only to the last single item or startup/output fluid row");
@@ -1124,20 +1087,7 @@ public final class KubeJSRecipeAdapterBuilder extends KubeJSResourceRecipeBuilde
       throw owner.reject("Adapter preview requires a last appended item output and a nonempty display stack");
     }
     try {
-      var previous = itemOutputs.getLast();
-      var registries = registries();
-      var copy = ItemStackSnapshots.detached(preview.copyWithCount(1), registries);
-      String encoded = ItemStack.SINGLE_ITEM_CODEC
-          .encodeStart(registries.createSerializationContext(JsonOps.INSTANCE), copy).getOrThrow().toString();
-      itemOutputs.set(
-          itemOutputs.size() - 1,
-          new RecipeAdapterCustomization.ItemOutput(
-              previous.encodedStack(),
-              previous.amount(),
-              previous.chance(),
-              previous.selector(),
-              Optional.of(encoded),
-              previous.parallelUnaffected()));
+      itemOutputs.getLast().preview = ItemStackSnapshots.detached(preview.copyWithCount(1), registries());
     } catch (RuntimeException invalid) {
       throw owner.reject("Invalid adapter preview stack: " + invalid.getMessage());
     }
@@ -1155,20 +1105,10 @@ public final class KubeJSRecipeAdapterBuilder extends KubeJSResourceRecipeBuilde
       throw owner.reject("Adapter preview NBT requires a last appended item output and compound data");
     }
     try {
-      var previous = itemOutputs.getLast();
-      var ops = registries().createSerializationContext(JsonOps.INSTANCE);
-      var stack = ItemStack.SINGLE_ITEM_CODEC.parse(ops, JsonParser.parseString(previous.encodedStack())).getOrThrow();
-      stack.set(DataComponents.CUSTOM_DATA, CustomData.of(data.copy()));
-      String encoded = ItemStack.SINGLE_ITEM_CODEC.encodeStart(ops, stack).getOrThrow().toString();
-      itemOutputs.set(
-          itemOutputs.size() - 1,
-          new RecipeAdapterCustomization.ItemOutput(
-              previous.encodedStack(),
-              previous.amount(),
-              previous.chance(),
-              previous.selector(),
-              Optional.of(encoded),
-              previous.parallelUnaffected()));
+      var row = itemOutputs.getLast();
+      var copy = ItemStackSnapshots.detached(row.prototype, registries());
+      copy.set(DataComponents.CUSTOM_DATA, CustomData.of(data.copy()));
+      row.preview = copy;
     } catch (RuntimeException invalid) {
       throw owner.reject("Invalid adapter preview NBT: " + invalid.getMessage());
     }
@@ -1352,7 +1292,7 @@ public final class KubeJSRecipeAdapterBuilder extends KubeJSResourceRecipeBuilde
     }
   }
 
-  private RecipeAdapterCustomization.FluidResource captureFluid(FluidStack fluid) {
+  private FluidRequirement captureFluid(FluidStack fluid) {
     if (fluid == null || fluid.isEmpty()) {
       throw owner.reject("Recipe adapter fluid requirement must not be empty");
     }
@@ -1364,7 +1304,7 @@ public final class KubeJSRecipeAdapterBuilder extends KubeJSResourceRecipeBuilde
         throw owner.reject("Lossy fluid components cannot be used in an adapter");
       }
 
-      return new RecipeAdapterCustomization.FluidResource(encoded.toString());
+      return new FluidRequirement(captured, 1);
     } catch (RuntimeException invalid) {
       throw owner.reject("Invalid recipe adapter fluid: " + invalid.getMessage());
     }
@@ -1441,6 +1381,8 @@ public final class KubeJSRecipeAdapterBuilder extends KubeJSResourceRecipeBuilde
     try {
       int[] retainedOutputRows = prepareTriggeredResources();
       var compiledCallbacks = callbacks.compile(machine, adapter, id, retainedOutputRows);
+      var groups = RecipeDeclarationSnapshots
+          .captureGroups(new IngredientArrayData(ingredientArrays, randomItemOutputs), registries());
       var customization = new RecipeAdapterCustomization(
           modifiers,
           interfaceInputs,
@@ -1450,7 +1392,7 @@ public final class KubeJSRecipeAdapterBuilder extends KubeJSResourceRecipeBuilde
           chemicalInputs,
           chemicalOutputs,
           chemicalPerTick,
-          itemOutputs,
+          itemOutputs.stream().map(row -> row.freeze(registries())).toList(),
           selectors,
           parallelized,
           failureAction,
@@ -1463,7 +1405,14 @@ public final class KubeJSRecipeAdapterBuilder extends KubeJSResourceRecipeBuilde
           chemicalPerTickOutputs,
           fluidPerTickInputs,
           fluidPerTickOutputs,
-          new RecipeAdapterCustomization.ResourceAdditions(resourceAdditions().toString(), captureAdapterResources()));
+          new RecipeAdapterCustomization.ResourceAdditions(
+              itemInputs.stream().map(row -> row.freeze(registries())).toList(),
+              groups,
+              itemPayments(),
+              capturedTriggers,
+              loadJei,
+              captureAdapterResources()));
+      customization.validateCaptureSize(registries());
       owner.register(
           machine,
           new RecipeAdapterImport(
@@ -1486,39 +1435,4 @@ public final class KubeJSRecipeAdapterBuilder extends KubeJSResourceRecipeBuilde
     }
   }
 
-  private JsonObject resourceAdditions() {
-    var result = new JsonObject();
-    var inputs = new JsonArray();
-    itemInputs.forEach(row -> inputs.add(row.deepCopy()));
-    if (!inputs.isEmpty()) {
-      result.add("inputs", inputs);
-    }
-    var ops = owner.registries().createSerializationContext(JsonOps.INSTANCE);
-    if (!ingredientArrays.isEmpty()) {
-      result.add(
-          "ingredient_arrays",
-          IngredientArrayData.Group.CODEC.listOf().encodeStart(ops, ingredientArrays).getOrThrow());
-    }
-    if (!randomItemOutputs.isEmpty()) {
-      result.add(
-          "random_item_outputs",
-          IngredientArrayData.Group.CODEC.listOf().encodeStart(ops, randomItemOutputs).getOrThrow());
-    }
-    if (!outputRanges.isEmpty()) {
-      var ranges = new JsonArray();
-      outputRanges.forEach((index, range) -> {
-        var row = new JsonObject();
-        row.addProperty("row", index);
-        row.addProperty("min", range[0]);
-        row.addProperty("max", range[1]);
-        ranges.add(row);
-      });
-      result.add("output_ranges", ranges);
-    }
-    loadJei.ifPresent(value -> result.addProperty("load_jei", value));
-    addItemPayments(result);
-    addTriggeredResources(result);
-
-    return result;
-  }
 }

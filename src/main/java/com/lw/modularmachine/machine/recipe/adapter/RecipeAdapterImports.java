@@ -1,16 +1,14 @@
 package com.lw.modularmachine.machine.recipe.adapter;
 
-import com.google.gson.JsonElement;
-import com.google.gson.JsonObject;
+import com.lw.modularmachine.api.recipe.MachineRecipeDeclaration;
 import com.lw.modularmachine.ModularMachine;
 import com.lw.modularmachine.api.recipe.adapter.RecipeAdapterContext;
 import com.lw.modularmachine.api.recipe.adapter.RecipeAdapterImport;
 import com.lw.modularmachine.api.recipe.adapter.RecipeAdapterTags;
 import com.lw.modularmachine.machine.recipe.MachineRecipe;
-import com.lw.modularmachine.machine.recipe.MachineRecipeJson;
+import com.lw.modularmachine.machine.recipe.MachineRecipeCompiler;
 import com.lw.modularmachine.machine.recipe.MachineRecipeReloadListener;
 import com.lw.modularmachine.machine.structure.MachineDefinition;
-import com.mojang.serialization.JsonOps;
 import java.util.ArrayList;
 import java.util.Collection;
 import java.util.LinkedHashMap;
@@ -32,7 +30,7 @@ import org.jetbrains.annotations.ApiStatus;
 public final class RecipeAdapterImports {
   public record Generated(
       Map<ResourceLocation, MachineRecipe> recipes,
-      Map<ResourceLocation, JsonElement> sources,
+      Map<ResourceLocation, MachineRecipeDeclaration> sources,
       long scriptRevision) {
     public Generated {
       recipes = Map.copyOf(recipes);
@@ -47,17 +45,17 @@ public final class RecipeAdapterImports {
     return generate(manager, machines, registries, tags, Map.of());
   }
 
-  public static Generated generate(RecipeManager manager, Map<ResourceLocation, MachineDefinition> machines, HolderLookup.Provider registries, RecipeAdapterTags tags, Map<ResourceLocation, JsonElement> originalSources) {
+  public static Generated generate(RecipeManager manager, Map<ResourceLocation, MachineDefinition> machines, HolderLookup.Provider registries, RecipeAdapterTags tags, Map<ResourceLocation, MachineRecipeDeclaration> originalSources) {
     return generate(manager.getRecipes(), machines, registries, tags, originalSources, Set.of(), Map.of());
   }
 
-  public static Generated generate(Collection<RecipeHolder<?>> candidates, Map<ResourceLocation, MachineDefinition> machines, HolderLookup.Provider registries, RecipeAdapterTags tags, Map<ResourceLocation, JsonElement> originalSources, Set<ResourceLocation> omittedIds, Map<ResourceLocation, Set<ResourceLocation>> omittedMachines) {
+  public static Generated generate(Collection<RecipeHolder<?>> candidates, Map<ResourceLocation, MachineDefinition> machines, HolderLookup.Provider registries, RecipeAdapterTags tags, Map<ResourceLocation, MachineRecipeDeclaration> originalSources, Set<ResourceLocation> omittedIds, Map<ResourceLocation, Set<ResourceLocation>> omittedMachines) {
     var unattributed = new LinkedHashSet<>(omittedIds);
     unattributed.removeAll(omittedMachines.keySet());
     return generate(candidates, machines, registries, tags, originalSources, omittedIds, omittedMachines, unattributed);
   }
 
-  public static Generated generate(Collection<RecipeHolder<?>> candidates, Map<ResourceLocation, MachineDefinition> machines, HolderLookup.Provider registries, RecipeAdapterTags tags, Map<ResourceLocation, JsonElement> originalSources, Set<ResourceLocation> omittedIds, Map<ResourceLocation, Set<ResourceLocation>> omittedMachines, Set<ResourceLocation> unattributed) {
+  public static Generated generate(Collection<RecipeHolder<?>> candidates, Map<ResourceLocation, MachineDefinition> machines, HolderLookup.Provider registries, RecipeAdapterTags tags, Map<ResourceLocation, MachineRecipeDeclaration> originalSources, Set<ResourceLocation> omittedIds, Map<ResourceLocation, Set<ResourceLocation>> omittedMachines, Set<ResourceLocation> unattributed) {
     RecipeAdapterRegistry.freeze();
     var scripts = RecipeAdapterScriptSources.snapshot();
     for (var machine : scripts.imports().keySet()) {
@@ -100,8 +98,8 @@ public final class RecipeAdapterImports {
     private final Set<ResourceLocation> omittedIds;
     private final Map<ResourceLocation, RecipeHolder<?>> originalsById = new LinkedHashMap<>();
     private final Map<ResourceLocation, MachineRecipe> recipes = new LinkedHashMap<>();
-    private final Map<ResourceLocation, JsonElement> declarations = new LinkedHashMap<>();
-    private final Map<ResourceLocation, Map<ResourceLocation, JsonElement>> machineSources = new LinkedHashMap<>();
+    private final Map<ResourceLocation, MachineRecipeDeclaration> declarations = new LinkedHashMap<>();
+    private final Map<ResourceLocation, Map<ResourceLocation, MachineRecipeDeclaration>> machineSources = new LinkedHashMap<>();
     private final Map<ResourceLocation, Set<ResourceLocation>> omittedMachineSources = new LinkedHashMap<>();
     private final Map<ResourceLocation, Set<ResourceLocation>> explicitlySelected = new LinkedHashMap<>();
     private final Set<ResourceLocation> neededByCopyAll = new LinkedHashSet<>();
@@ -116,7 +114,7 @@ public final class RecipeAdapterImports {
       machines.forEach(machine -> machineSources.put(machine, new LinkedHashMap<>()));
     }
 
-    private void captureMachineSources(Map<ResourceLocation, List<RecipeAdapterImport>> imports, Map<ResourceLocation, JsonElement> originalSources) {
+    private void captureMachineSources(Map<ResourceLocation, List<RecipeAdapterImport>> imports, Map<ResourceLocation, MachineRecipeDeclaration> originalSources) {
       var copiedMachines = imports.values().stream().flatMap(List::stream).map(RecipeAdapterImport::adapter)
           .filter(adapter -> !RecipeAdapterRegistry.known(adapter)).collect(Collectors.toSet());
       for (var source : originalRecipes) {
@@ -129,7 +127,7 @@ public final class RecipeAdapterImports {
               source.id() + ": Machine recipe copies require an original validated declaration");
         }
         if (original != null) {
-          machineSources.get(recipe.machineId()).put(source.id(), original.deepCopy());
+          machineSources.get(recipe.machineId()).put(source.id(), original);
         }
       }
     }
@@ -200,17 +198,18 @@ public final class RecipeAdapterImports {
           }
         }
       }
+      var additions = new RecipeAdapterCustomizations(settings.customization());
       for (var sourceId : selectedIds) {
         var source = sourceDeclarations.get(sourceId);
         if (source == null && omittedSources.contains(sourceId)) {
           omitMachineCopy(context, sourceId);
           continue;
         }
-        if (source == null || !source.isJsonObject()) {
+        if (source == null) {
           throw new IllegalArgumentException(machine.id() + ": Missing machine recipe adapter source " + sourceId);
         }
         var id = context.importedId(sourceId, "");
-        var declaration = MachineRecipeCopies.copy(source.getAsJsonObject(), machine.id(), settings, registries);
+        var declaration = MachineRecipeCopies.copy(source, machine.id(), settings, additions);
         addGenerated(id, declaration, machine.id());
       }
     }
@@ -253,10 +252,11 @@ public final class RecipeAdapterImports {
       if (builders == null) {
         throw new IllegalArgumentException(machine.id() + ": Recipe adapter returned a null declaration list");
       }
+      var additions = new RecipeAdapterCustomizations(settings.customization());
       for (var builder : builders) {
         var id = builder.id();
-        var declaration = RecipeAdapterCustomizations
-            .apply(builder.toJson(registries), settings.customization(), registries);
+        var original = builder.build(registries);
+        var declaration = additions.apply(original, original.machineId(), original.priority(), original.duration(), 0);
         addGenerated(id, declaration, machine.id());
       }
     }
@@ -277,7 +277,7 @@ public final class RecipeAdapterImports {
       return selected;
     }
 
-    private void addGenerated(ResourceLocation id, JsonObject declaration, ResourceLocation machine) {
+    private void addGenerated(ResourceLocation id, MachineRecipeDeclaration declaration, ResourceLocation machine) {
       if (!id.getPath().startsWith("mmcece/adapted/") || originalsById.containsKey(id) || recipes.containsKey(id)) {
         throw new IllegalArgumentException(
             id + ": Recipe adapter ID is outside its directory or collides with an existing recipe");
@@ -285,15 +285,14 @@ public final class RecipeAdapterImports {
       if (recipes.size() >= MachineRecipeReloadListener.MAX_FILES) {
         throw new IllegalArgumentException("Too many generated machine recipes");
       }
-      MachineRecipeJson.validate(declaration);
-      var recipe = MachineRecipe.CODEC.codec()
-          .parse(registries.createSerializationContext(JsonOps.INSTANCE), declaration).getOrThrow();
+      var source = MachineRecipeCompiler.capture(declaration, registries);
+      var recipe = MachineRecipeCompiler.compile(source);
       if (!recipe.machineId().equals(machine)) {
         throw new IllegalArgumentException(id + ": Recipe adapter changed the target machine");
       }
       recipes.put(id, recipe);
-      declarations.put(id, declaration.deepCopy());
-      machineSources.get(machine).put(id, declaration.deepCopy());
+      declarations.put(id, source);
+      machineSources.get(machine).put(id, source);
     }
   }
 }

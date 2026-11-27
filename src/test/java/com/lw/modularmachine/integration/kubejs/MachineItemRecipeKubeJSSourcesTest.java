@@ -200,6 +200,20 @@ class MachineItemRecipeKubeJSSourcesTest {
   }
 
   @Test
+  void aMachineAdditionRetainsItsOrdinaryFallbackByIdentity() {
+    var old = ResourceLocation.parse("example:ordinary");
+    var untouched = ResourceLocation.parse("example:other");
+    var original = JsonParser.parseString("{\"type\":\"minecraft:smelting\"}");
+    var machine = JsonParser.parseString(RECIPE);
+    var winners = MachineItemRecipeKubeJSSources.machineReplacements(
+        Map.of(old, original, untouched, original),
+        Map.of(old, machine, untouched, original.deepCopy()));
+    assertEquals(Set.of(old), winners.keySet());
+    assertSame(original, winners.get(old).surviving());
+    assertSame(machine, winners.get(old).added());
+  }
+
+  @Test
   void invalidReplacementsFallBackOnlyToTheSurvivingEditedRecipesAtTheirFinalIds() {
     var editedId = ResourceLocation.withDefaultNamespace("edited");
     var removedId = ResourceLocation.withDefaultNamespace("removed");

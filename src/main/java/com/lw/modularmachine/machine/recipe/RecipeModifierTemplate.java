@@ -1,11 +1,9 @@
 package com.lw.modularmachine.machine.recipe;
 
 import com.lw.modularmachine.api.recipe.RecipeModifier;
-import com.google.gson.JsonObject;
-import com.mojang.serialization.JsonOps;
+import com.lw.modularmachine.api.recipe.MachineRecipeDeclaration;
 import java.util.ArrayList;
 import java.util.List;
-import net.minecraft.core.HolderLookup;
 import com.lw.modularmachine.api.recipe.RecipeFailureAction;
 
 /**
@@ -13,37 +11,22 @@ import com.lw.modularmachine.api.recipe.RecipeFailureAction;
  * persistence/network boundaries.
  */
 final class RecipeModifierTemplate {
-  private final JsonObject source;
+  private final MachineRecipeDeclaration source;
   private final List<RecipeModifier> machineRules;
   private final RecipeFailureAction machineFailureAction;
 
-  RecipeModifierTemplate(JsonObject source, List<RecipeModifier> machineRules) {
-    this(source, machineRules, null);
-  }
-
-  RecipeModifierTemplate(JsonObject source, List<RecipeModifier> machineRules, RecipeFailureAction machineFailureAction) {
-    this.source = source.deepCopy();
+  RecipeModifierTemplate(MachineRecipeDeclaration source, List<RecipeModifier> machineRules, RecipeFailureAction machineFailureAction) {
+    this.source = source;
     this.machineRules = List.copyOf(machineRules);
     this.machineFailureAction = machineFailureAction;
   }
 
-  MachineRecipe resolve(List<RecipeModifier> upgradeRules, HolderLookup.Provider registries) {
-    return resolve(upgradeRules, registries, false);
-  }
-
-  MachineRecipe resolve(List<RecipeModifier> upgradeRules, HolderLookup.Provider registries, boolean durationMultiplier) {
-    return resolve(upgradeRules, registries, durationMultiplier, MachineRecipeJson.currentDefaults());
-  }
-
-  MachineRecipe resolve(List<RecipeModifier> upgradeRules, HolderLookup.Provider registries, boolean durationMultiplier, MachineRecipeJson.Defaults defaults) {
+  MachineRecipe resolve(List<RecipeModifier> upgradeRules, boolean durationMultiplier, MachineRecipeCompiler.Defaults defaults) {
     var inherited = new ArrayList<>(machineRules);
     inherited.addAll(upgradeRules);
-    var effectiveDefaults = machineFailureAction == null ? defaults : new MachineRecipeJson.Defaults(
+    var effectiveDefaults = machineFailureAction == null ? defaults : new MachineRecipeCompiler.Defaults(
         defaults.parallelized(),
         machineFailureAction);
-    var effective = MachineRecipeJson.normalize(source, inherited, durationMultiplier, effectiveDefaults);
-
-    return MachineRecipe.CODEC.codec().parse(registries.createSerializationContext(JsonOps.INSTANCE), effective)
-        .getOrThrow();
+    return MachineRecipeCompiler.compile(source, inherited, durationMultiplier, effectiveDefaults);
   }
 }

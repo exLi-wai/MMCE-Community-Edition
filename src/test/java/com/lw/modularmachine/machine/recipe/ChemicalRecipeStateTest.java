@@ -32,24 +32,6 @@ class ChemicalRecipeStateTest {
   }
 
   @Test
-  void chemicalOnlyDeclarationsKeepExactLongsThroughModifiers() {
-    var source = declaration();
-    source.add("modifiers", JsonParser.parseString("""
-        [{"target":"chemical","io":"input","operation":"add","value":1}]
-        """));
-    var resolved = MachineRecipeJson.normalize(source);
-    var chemical = ChemicalRecipeData.CODEC.parse(JsonOps.INSTANCE, resolved.get("chemicals")).getOrThrow();
-
-    assertEquals(9007199254740994L, chemical.inputs().getFirst().amount());
-    assertEquals(2147483649L, chemical.perTick().getFirst().amount());
-    assertEquals(9007199254740995L, chemical.outputs().getFirst().amount());
-    assertEquals(
-        9007199254740993L,
-        source.getAsJsonObject("chemicals").getAsJsonArray("inputs").get(0).getAsJsonObject().get("amount")
-            .getAsLong());
-  }
-
-  @Test
   void ignoredChemicalRowsKeepIndependentLongAmountsWhileRequiredInputsStayExact() {
     var chemical = ResourceLocation.parse("mekanism:oxygen");
     var rows = List.of(

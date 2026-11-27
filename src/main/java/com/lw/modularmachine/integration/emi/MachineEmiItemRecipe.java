@@ -1,5 +1,6 @@
 package com.lw.modularmachine.integration.emi;
 
+import com.lw.modularmachine.api.recipe.ItemAmount;
 import com.lw.modularmachine.client.recipe.MachineRecipeDisplay;
 import com.lw.modularmachine.client.recipe.MachineRecipeLayout;
 import com.lw.modularmachine.api.recipe.ChemicalRequirement;
@@ -155,7 +156,7 @@ final class MachineEmiItemRecipe extends BasicEmiRecipe {
     return List.copyOf(result);
   }
 
-  private static EmiStack item(MachineRecipe.ItemAmount amount) {
+  private static EmiStack item(ItemAmount amount) {
     return EmiStack.of(amount.ingredientStack(), amount.amount()).setChance((float) amount.chance());
   }
 

@@ -1,5 +1,6 @@
 package com.lw.modularmachine.machine.recipe;
 
+import com.lw.modularmachine.api.recipe.ItemAmount;
 import com.lw.modularmachine.api.upgrade.UpgradeSnapshot;
 import com.lw.modularmachine.blockentity.FactoryControllerBlockEntity;
 import com.lw.modularmachine.blockentity.MachineControllerBlockEntity;
@@ -431,8 +432,8 @@ public final class PatternProductionService {
     if (!(ticket.owner() instanceof MachineControllerBlockEntity) || source == null || source.container() == null) {
       return limit;
     }
-    boolean fixed = recipe.inputs().stream().anyMatch(MachineRecipe.ItemAmount::parallelUnaffected)
-        || recipe.outputs().stream().anyMatch(MachineRecipe.ItemAmount::parallelUnaffected)
+    boolean fixed = recipe.inputs().stream().anyMatch(ItemAmount::parallelUnaffected)
+        || recipe.outputs().stream().anyMatch(ItemAmount::parallelUnaffected)
         || recipe.fluidInputRequirements().stream().anyMatch(value -> value.parallelUnaffected())
         || recipe.fluidOutputRequirements().stream().anyMatch(value -> value.parallelUnaffected());
 
@@ -473,7 +474,7 @@ public final class PatternProductionService {
           || !recipe.triggeredResources().rows().isEmpty()
           || recipe.inputs().stream().anyMatch(row -> row.minimumAmount() != row.amount())
           || recipe.outputs().stream().anyMatch(row -> row.minimumAmount() != row.amount())
-          || recipe.outputs().stream().anyMatch(MachineRecipe.ItemAmount::ignoreOutputCheck)
+          || recipe.outputs().stream().anyMatch(ItemAmount::ignoreOutputCheck)
           || recipe.fluidOutputRequirements().stream().anyMatch(value -> value.ignoreOutputCheck())
           || recipe.chemicals().outputs().stream().anyMatch(value -> value.ignoreOutputCheck())
           || recipe.fluidInputRequirements().stream().anyMatch(value -> value.chance() != 1)

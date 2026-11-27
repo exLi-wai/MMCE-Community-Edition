@@ -540,17 +540,27 @@ public final class RecipeExecutionTicket {
 
   @ApiStatus.Internal
   public boolean dependenciesCurrent() {
+    return dependenciesCurrent(true);
+  }
+
+  // Detached batch preparation may resume on unchanged revisions. Commit still
+  // compares contents.
+  boolean planningRevisionsCurrent() {
+    return dependenciesCurrent(false);
+  }
+
+  private boolean dependenciesCurrent(boolean compareContents) {
     ServerThreadGuard.require(proof.level, "Recipe resource access");
     return (recipePorts != null
         || patternSource != null
         || proof.patternSources.stream().allMatch(PatternInputSource::current))
-        && proof.matchesDependencies(patternSource, recipePorts == null ? proof.ports : selectedPorts);
+        && proof.matchesDependencies(patternSource, recipePorts == null ? proof.ports : selectedPorts, compareContents);
   }
 
   /** The detached search may continue while unrelated inventories change. */
   public boolean searchContextCurrent() {
     requireServerThread();
-    return proof.matchesDependencies(patternSource, List.of());
+    return proof.matchesDependencies(patternSource, List.of(), false);
   }
 
 }

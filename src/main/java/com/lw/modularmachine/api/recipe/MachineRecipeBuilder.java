@@ -1,39 +1,38 @@
 package com.lw.modularmachine.api.recipe;
 
-import com.google.gson.JsonArray;
-import com.google.gson.JsonElement;
 import com.google.gson.JsonObject;
-import com.lw.modularmachine.machine.recipe.MachineRecipe;
+import com.lw.modularmachine.machine.recipe.MachineRecipeCompiler;
 import com.lw.modularmachine.machine.recipe.MachineRecipeJson;
-import com.lw.modularmachine.machine.recipe.ResourceSelector;
+import com.lw.modularmachine.machine.recipe.resource.ItemRecipeData;
+import com.lw.modularmachine.machine.recipe.resource.FluidRecipeData;
+import com.lw.modularmachine.machine.recipe.resource.EnergyRecipeData;
 import com.lw.modularmachine.machine.recipe.resource.RecipeResourceBuilderDeclarations;
 import com.lw.modularmachine.machine.recipe.resource.RecipeResourceDefinitions;
 import com.lw.modularmachine.api.recipe.resource.RecipeResourceType;
 import com.lw.modularmachine.api.recipe.resource.RecipeResources;
 import com.lw.modularmachine.api.smart.SmartNumberRequirement;
-import com.mojang.serialization.Codec;
-import com.mojang.serialization.JsonOps;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.LinkedHashMap;
 import java.util.Map;
 import java.util.Objects;
+import java.util.function.Supplier;
 import net.minecraft.core.HolderLookup;
 import net.minecraft.resources.ResourceLocation;
 import net.minecraft.world.item.ItemStack;
 import net.neoforged.neoforge.fluids.FluidStack;
 import java.util.Optional;
 
-/** Builds a validated machine-recipe data-pack resource. */
+/**
+ * Builds original machine-recipe declarations for Java registration, adapters
+ * and data generation.
+ */
 public final class MachineRecipeBuilder {
-  private record ItemRow(ItemStack stack, long amount, double chance, String selector, String match) {
-  }
-
   private final ResourceLocation id;
   private final ResourceLocation machine;
   private final int duration;
-  private final List<ItemRow> inputs = new ArrayList<>();
-  private final List<ItemRow> outputs = new ArrayList<>();
+  private final List<ItemAmount> inputs = new ArrayList<>();
+  private final List<ItemAmount> outputs = new ArrayList<>();
   private final List<FluidRequirement> fluidInputs = new ArrayList<>();
   private final List<FluidRequirement> fluidOutputs = new ArrayList<>();
   private final List<ChemicalRequirement> chemicalInputs = new ArrayList<>();
@@ -55,9 +54,6 @@ public final class MachineRecipeBuilder {
   private MachineRecipeBuilder(ResourceLocation id, ResourceLocation machine, int duration) {
     this.id = Objects.requireNonNull(id, "id");
     this.machine = Objects.requireNonNull(machine, "machine");
-    if (!id.getPath().startsWith("mmcece/")) {
-      throw new IllegalArgumentException("Machine recipe IDs must use data/<namespace>/recipe/mmcece/");
-    }
     if (duration < 1) {
       throw new IllegalArgumentException("Recipe duration must be positive");
     }
@@ -221,7 +217,7 @@ public final class MachineRecipeBuilder {
     if (!inputs.isEmpty() && inputs.getFirst().match().equals("item")) {
       throw new IllegalArgumentException("Item-only matching requires a single item input row");
     }
-    inputs.add(itemRow(stack, amount, chance, selector));
+    inputs.add(itemRow(stack, amount, chance, selector, "exact"));
     return this;
   }
 
@@ -230,8 +226,7 @@ public final class MachineRecipeBuilder {
     if (!inputs.isEmpty()) {
       throw new IllegalArgumentException("Item-only matching requires a single item input row");
     }
-    var row = itemRow(stack, amount, 1, "");
-    inputs.add(new ItemRow(row.stack(), row.amount(), row.chance(), row.selector(), "item"));
+    inputs.add(itemRow(stack, amount, 1, "", "item"));
 
     return this;
   }
@@ -241,7 +236,7 @@ public final class MachineRecipeBuilder {
   }
 
   public MachineRecipeBuilder itemOutput(ItemStack stack, long amount, double chance, String selector) {
-    outputs.add(itemRow(stack, amount, chance, selector));
+    outputs.add(itemRow(stack, amount, chance, selector, "exact"));
     return this;
   }
 
@@ -347,80 +342,75 @@ public final class MachineRecipeBuilder {
   }
 
   /**
-   * Encodes and validates the recipe through the same native codec used by JSON
-   * and KubeJS resources. The returned object is a fresh, mutable JSON tree and
-   * is not registered into a running RecipeManager.
+   * Captures the original, unmodified definition for registration or adapter
+   * import.
    */
-  public JsonObject toJson(HolderLookup.Provider registries) {
+  public MachineRecipeDeclaration build(HolderLookup.Provider registries) {
     Objects.requireNonNull(registries, "registries");
-    var json = new JsonObject();
-    json.addProperty("type", MachineRecipeJson.TYPE);
-    json.addProperty("machine", machine.toString());
-    json.addProperty("priority", priority);
-    json.addProperty("duration", duration);
-    if (energyPerTick > 0) {
-      json.addProperty("energy_per_tick", energyPerTick);
-    }
-    if (energyOutputPerTick > 0) {
-      json.addProperty("energy_output_per_tick", energyOutputPerTick);
-    }
-    if (!executionOptions.threadName().isEmpty()) {
-      json.addProperty("thread_name", executionOptions.threadName());
-    }
-    if (executionOptions.maxThreads() > 0) {
-      json.addProperty("max_threads", executionOptions.maxThreads());
-    }
-    if (!fluidPerTickInputs.isEmpty()) {
-      json.add("fluid_per_tick_inputs", encode(FluidRequirement.CODEC.listOf(), fluidPerTickInputs, registries));
-    }
-    if (!fluidPerTickOutputs.isEmpty()) {
-      json.add("fluid_per_tick_outputs", encode(FluidRequirement.CODEC.listOf(), fluidPerTickOutputs, registries));
-    }
-    addFluids(json, "fluid_inputs", fluidInputs, registries);
-    addFluids(json, "fluid_outputs", fluidOutputs, registries);
-    var chemicals = new ChemicalRecipeData(chemicalInputs, chemicalOutputs, chemicalPerTick, chemicalPerTickOutputs);
-    if (!chemicals.isEmpty()) {
-      json.add("chemicals", encode(ChemicalRecipeData.CODEC, chemicals, registries));
-    }
-    if (failureAction != null) {
-      json.addProperty("failure_action", failureAction.serialized());
-    }
-    if (parallelized != null) {
-      json.addProperty("parallelized", parallelized);
-    }
-    if (randomSeed > 0) {
-      json.addProperty("random_seed", randomSeed);
-    }
-    addItems(json, "inputs", inputs, registries);
-    addItems(json, "outputs", outputs, registries);
-    if (!interfaceInputs.isEmpty()) {
-      json.add("interface_inputs", encode(Codec.list(SmartNumberRequirement.CODEC), interfaceInputs, registries));
-    }
-    if (!selectors.equals(RecipeSelectors.NONE)) {
-      json.add("selectors", encode(RecipeSelectors.CODEC, selectors, registries));
-    }
-    if (!modifiers.isEmpty()) {
-      json.add("modifiers", encode(Codec.list(RecipeModifier.CODEC), modifiers, registries));
-    }
-    for (var entry : resourceDeclarations.values()) {
-      RecipeResourceBuilderDeclarations.apply(json, entry, registries);
-    }
-
-    MachineRecipeJson.validate(json);
-    MachineRecipe.CODEC.codec().parse(registries.createSerializationContext(JsonOps.INSTANCE), json).getOrThrow();
-
-    return json;
+    var resources = new LinkedHashMap<ResourceLocation, RecipeResources.Entry<?>>();
+    putResource(resources, RecipeResourceDefinitions.ITEM, () -> new ItemRecipeData(inputs, outputs));
+    putResource(
+        resources,
+        RecipeResourceDefinitions.FLUID,
+        () -> new FluidRecipeData(fluidInputs, fluidOutputs, fluidPerTickInputs, fluidPerTickOutputs));
+    putResource(
+        resources,
+        RecipeResourceDefinitions.ENERGY,
+        () -> new EnergyRecipeData(energyPerTick, energyOutputPerTick));
+    putResource(
+        resources,
+        RecipeResourceDefinitions.CHEMICAL,
+        () -> new ChemicalRecipeData(chemicalInputs, chemicalOutputs, chemicalPerTick, chemicalPerTickOutputs));
+    resources.putAll(resourceDeclarations);
+    var declaration = new MachineRecipeDeclaration(
+        machine,
+        priority,
+        duration,
+        new RecipeResources(List.copyOf(resources.values())),
+        Optional.ofNullable(failureAction),
+        Optional.ofNullable(parallelized),
+        randomSeed,
+        interfaceInputs,
+        selectors,
+        executionOptions,
+        RecipeScriptOptions.NONE,
+        IngredientArrayData.NONE,
+        TriggeredResourceData.NONE,
+        modifiers,
+        false);
+    return MachineRecipeCompiler.capture(declaration, registries);
   }
 
-  private static ItemRow itemRow(ItemStack stack, long amount, double chance, String selector) {
-    Objects.requireNonNull(stack, "stack");
-    if (stack.isEmpty() || stack.getCount() != 1) {
-      throw new IllegalArgumentException("Use a nonempty single-item prototype and pass its amount separately");
+  /**
+   * Exports a validated data-pack resource with its original modifiers and
+   * optional defaults.
+   */
+  public JsonObject toJson(HolderLookup.Provider registries) {
+    if (!id.getPath().startsWith("mmcece/")) {
+      throw new IllegalArgumentException("Machine recipe data-pack IDs must use data/<namespace>/recipe/mmcece/");
     }
-    if (amount <= 0 || !Double.isFinite(chance) || chance < 0 || chance > 1) {
-      throw new IllegalArgumentException("Invalid item amount or chance");
-    }
-    return new ItemRow(stack.copy(), amount, chance, ResourceSelector.require(selector), "exact");
+    var declaration = build(registries);
+    MachineRecipeCompiler.compile(declaration);
+    return MachineRecipeJson.encode(declaration, registries);
+  }
+
+  private <D> void putResource(Map<ResourceLocation, RecipeResources.Entry<?>> resources, RecipeResourceType<D> type, Supplier<D> fallback) {
+    var replacement = resourceDeclarations.get(type.id());
+    resources.put(type.id(), replacement != null ? replacement : new RecipeResources.Entry<>(type, fallback.get()));
+  }
+
+  private static ItemAmount itemRow(ItemStack stack, long amount, double chance, String selector, String match) {
+    return new ItemAmount(
+        Objects.requireNonNull(stack, "stack"),
+        amount,
+        chance,
+        selector,
+        match,
+        ItemStack.EMPTY,
+        false,
+        0,
+        0,
+        false);
   }
 
   private static FluidStack requireFluid(FluidStack fluid) {
@@ -431,33 +421,4 @@ public final class MachineRecipeBuilder {
     return fluid.copy();
   }
 
-  private static void addItems(JsonObject target, String field, List<ItemRow> rows, HolderLookup.Provider registries) {
-    var entries = new JsonArray();
-    for (var row : rows) {
-      var entry = new JsonObject();
-      entry.add("stack", encode(ItemStack.SINGLE_ITEM_CODEC, row.stack(), registries));
-      entry.addProperty("amount", row.amount());
-      if (row.chance() != 1) {
-        entry.addProperty("chance", row.chance());
-      }
-      if (!row.selector().isEmpty()) {
-        entry.addProperty("selector", row.selector());
-      }
-      if (!row.match().equals("exact")) {
-        entry.addProperty("match", row.match());
-      }
-      entries.add(entry);
-    }
-    target.add(field, entries);
-  }
-
-  private static void addFluids(JsonObject target, String field, List<FluidRequirement> fluids, HolderLookup.Provider registries) {
-    if (!fluids.isEmpty()) {
-      target.add(field, encode(Codec.list(FluidRequirement.CODEC), fluids, registries));
-    }
-  }
-
-  private static <T> JsonElement encode(Codec<T> codec, T value, HolderLookup.Provider registries) {
-    return codec.encodeStart(registries.createSerializationContext(JsonOps.INSTANCE), value).getOrThrow();
-  }
 }

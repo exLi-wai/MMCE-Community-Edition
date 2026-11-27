@@ -7,6 +7,7 @@ import org.jetbrains.annotations.ApiStatus;
 import com.lw.modularmachine.machine.recipe.ItemResourceKey;
 import com.lw.modularmachine.machine.recipe.ItemSlotRef;
 import com.lw.modularmachine.machine.recipe.RecipeExecutionTicket;
+import com.lw.modularmachine.machine.recipe.RecipeItemInputAllocation;
 import com.lw.modularmachine.machine.recipe.search.index.RequiredInputQuery;
 import com.lw.modularmachine.machine.recipe.search.index.fluid.FluidRecipeIndex;
 import com.lw.modularmachine.machine.PortKind;
@@ -29,6 +30,8 @@ import java.util.Iterator;
 public final class RecipeSearchResources {
   private final RecipeCatalog catalog;
   final RecipeSearch.LockedRestart restart;
+  final RecipeItemInputAllocation.MatchingSlots matchingSlots;
+  private final Set<ItemResourceKey> targetInputKeys;
   private Map<RecipePortSnapshot, PortInputs> items;
   private Map<RecipePortSnapshot, StoredFluid> fluids;
   private Map<RecipePortSnapshot, ChemicalResourceKey> chemicals;
@@ -38,12 +41,16 @@ public final class RecipeSearchResources {
   private List<ResourceSnapshot.OutputSlot<ItemResourceKey>> outputSpaces;
 
   RecipeSearchResources(RecipeCatalog catalog) {
-    this(catalog, null);
+    this(catalog, null, null);
   }
 
-  RecipeSearchResources(RecipeCatalog catalog, RecipeSearch.LockedRestart restart) {
+  RecipeSearchResources(RecipeCatalog catalog, RecipeCatalog.CandidateFilter filter, RecipeSearch.LockedRestart restart) {
     this.catalog = Objects.requireNonNull(catalog, "catalog");
     this.restart = restart;
+    var target = filter != null && filter.allowedIds != null && filter.allowedIds.size() == 1 ? catalog
+        .searchEntry(filter.allowedIds.iterator().next()) : null;
+    matchingSlots = target == null ? null : new RecipeItemInputAllocation.MatchingSlots();
+    targetInputKeys = target == null || target.transformsInputs() ? null : target.inputs().input.keySet();
   }
 
   /**
@@ -52,8 +59,6 @@ public final class RecipeSearchResources {
    */
   final class GroupItems {
     private final RecipeExecutionTicket ticket;
-    private final List<List<ItemSlot>> inputs = new ArrayList<>();
-    private final List<ItemSlot> lockedSlots;
     private final Map<ItemResourceKey, Long> counts = new HashMap<>();
     private int portIndex;
     private int slotIndex;
@@ -61,10 +66,6 @@ public final class RecipeSearchResources {
 
     GroupItems(RecipeExecutionTicket ticket) {
       this.ticket = ticket;
-      lockedSlots = restart == null ? null : new ArrayList<>();
-      if (lockedSlots != null) {
-        inputs.add(lockedSlots);
-      }
     }
 
     int advance(int budget) {
@@ -90,7 +91,12 @@ public final class RecipeSearchResources {
             if (key != null) {
               long count = port.itemAmount(slot);
               var alias = inputAlias(key);
-              input.slots.add(new ItemSlot(new ItemSlotRef(port.partId(), slot), key, count));
+              if (matchingSlots != null
+                  && (targetInputKeys == null
+                      || targetInputKeys.contains(key)
+                      || alias != null && targetInputKeys.contains(alias))) {
+                matchingSlots.add(port, slot, key);
+              }
               input.counts.merge(key, count, Math::addExact);
               if (alias != null) {
                 input.counts.merge(alias, count, Math::addExact);
@@ -99,7 +105,6 @@ public final class RecipeSearchResources {
             continue;
           }
           if (portCounts == null) {
-            inputs.add(input.slots);
             portCounts = input.counts.entrySet().iterator();
           }
           if (portCounts.hasNext()) {
@@ -139,8 +144,8 @@ public final class RecipeSearchResources {
         var key = port.matchingItemKey(slot, restart.singleInput);
         if (key != null) {
           long amount = port.itemAmount(slot);
-          lockedSlots.add(new ItemSlot(new ItemSlotRef(port.partId(), slot), key, amount));
           counts.merge(restart.singleInput, amount, Math::addExact);
+          matchingSlots.add(port, slot, key);
         }
         return;
       }
@@ -149,19 +154,21 @@ public final class RecipeSearchResources {
         return;
       }
       var declared = restart.itemKeys();
-      // Static item-only matching is a single input row, handled above.
-      // Ingredient groups and input modifiers need every physical key.
-      if (declared != null && !declared.contains(key)) {
+      var alias = inputAlias(key);
+      if (declared != null && alias != null && !declared.contains(alias)) {
+        alias = null;
+      }
+      boolean exact = declared == null || declared.contains(key);
+      if (!exact && alias == null) {
         return;
       }
+      matchingSlots.add(port, slot, key);
       long amount = port.itemAmount(slot);
-      lockedSlots.add(new ItemSlot(new ItemSlotRef(port.partId(), slot), key, amount));
-      counts.merge(key, amount, Math::addExact);
-      if (declared == null) {
-        var alias = inputAlias(key);
-        if (alias != null) {
-          counts.merge(alias, amount, Math::addExact);
-        }
+      if (exact) {
+        counts.merge(key, amount, Math::addExact);
+      }
+      if (alias != null) {
+        counts.merge(alias, amount, Math::addExact);
       }
     }
 
@@ -173,17 +180,12 @@ public final class RecipeSearchResources {
       return catalog.hasDynamicInputRecipes() || catalog.itemInputAliases().contains(alias) ? alias : null;
     }
 
-    List<List<ItemSlot>> inputs() {
-      return inputs;
-    }
-
     ResourceSnapshot<ItemResourceKey> snapshot() {
       return new ResourceSnapshot<>(ticket.structureRevision(), counts, outputSpaces);
     }
   }
 
   private static final class PortInputs {
-    private final List<ItemSlot> slots = new ArrayList<>();
     private final Map<ItemResourceKey, Long> counts = new HashMap<>();
     private int next;
   }
@@ -235,9 +237,6 @@ public final class RecipeSearchResources {
     }
 
     return Set.copyOf(keys);
-  }
-
-  record ItemSlot(ItemSlotRef ref, ItemResourceKey key, long count) {
   }
 
   private static final class StoredFluid {

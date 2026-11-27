@@ -107,7 +107,7 @@ public final class RecipeIngredientArrayResolution {
           "item_callbacks",
           RecipeScriptOptions.ItemCallbacks.CODEC.listOf().encodeStart(ops, callbacks).getOrThrow());
     }
-    MachineRecipeJson.validate(result);
+    MachineRecipeJson.validate(result, true);
 
     return result;
   }
@@ -183,25 +183,32 @@ public final class RecipeIngredientArrayResolution {
   /**
    * Captures the exact complete input slices, including zero-chance candidates.
    */
-  public static List<RecipeItemCallbackService.InputItem> checkerSlices(MachineRecipe recipe, RecipeExecutionTicket ticket, int instances) {
+  public static Optional<List<RecipeItemCallbackService.InputItem>> checkerSlices(MachineRecipe recipe, RecipeExecutionTicket ticket, int instances) {
     if (instances < 1) {
       throw new IllegalArgumentException("Invalid ingredient checker instance count");
     }
-    var result = new ArrayList<RecipeItemCallbackService.InputItem>();
-    if (!RecipeItemPreparation.collectOrdinarySlices(recipe, ticket, instances, true, result)) {
-      return List.of();
+    var allocation = RecipeItemInputAllocation
+        .capture(recipe, ticket, instances, ticket.owner() instanceof MachineControllerBlockEntity);
+    return allocation.flatMap(value -> checkerSlices(recipe, ticket, instances, value));
+  }
+
+  public static Optional<List<RecipeItemCallbackService.InputItem>> checkerSlices(MachineRecipe recipe, RecipeExecutionTicket ticket, int instances, RecipeItemInputAllocation allocation) {
+    if (!allocation.matchesInstances(instances)) {
+      return Optional.empty();
     }
+    var result = new ArrayList<RecipeItemCallbackService.InputItem>();
+    allocation.appendCheckerSlices(result);
     if (recipe.itemPayments().isEmpty()) {
-      return List.copyOf(result);
+      return Optional.of(List.copyOf(result));
     }
 
     var tools = RecipeItemPayments
         .toolSlices(ticket, recipe, instances, ticket.owner() instanceof MachineControllerBlockEntity);
     if (tools.isEmpty()) {
-      return List.of();
+      return Optional.empty();
     }
     result.addAll(tools.orElseThrow());
-    return List.copyOf(result);
+    return Optional.of(List.copyOf(result));
   }
 
   /** Structural checks do not need item/fluid registry codecs. */

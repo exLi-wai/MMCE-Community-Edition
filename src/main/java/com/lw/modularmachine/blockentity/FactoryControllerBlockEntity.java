@@ -62,7 +62,6 @@ import com.lw.modularmachine.menu.FactoryControllerMenu;
 import com.lw.modularmachine.registry.MachineRegistries;
 import com.lw.modularmachine.machine.controller.ControllerBlueprintInventory;
 import com.lw.modularmachine.util.thread.ServerThreadGuard;
-import java.util.Collections;
 import java.util.List;
 import java.util.Objects;
 import java.util.Optional;
@@ -357,8 +356,7 @@ public final class FactoryControllerBlockEntity extends BlockEntity implements M
     }
     @Override
     public FactoryParallelStarter.Result startParallel(String threadId, RecipeStartPlan plan, int count, int workBudget) {
-      return FactoryParallelStarter
-          .commit(FactoryControllerBlockEntity.this, threadId, Collections.nCopies(count, plan), workBudget);
+      return FactoryParallelStarter.commit(FactoryControllerBlockEntity.this, threadId, plan, count, workBudget);
     }
   }
 

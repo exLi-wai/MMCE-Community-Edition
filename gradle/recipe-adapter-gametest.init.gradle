@@ -1,24 +1,30 @@
-// One isolated namespace for the confirmed vanilla smelting load regression.
+// Default smelting/adapter checks, or a separate real recipe reload with -PtypedRecipeReload.
 allprojects {
     afterEvaluate {
         if (extensions.findByName('neoForge') != null) {
+            def typedReload = providers.gradleProperty('typedRecipeReload').isPresent()
+            def adapterResources = providers.gradleProperty('typedAdapterResources').isPresent()
             configurations.named('localRuntime') {
                 withDependencies { dependencies ->
                     dependencies.removeAll { dependency ->
-                        dependency.group == 'curse.maven' && dependency.name in ['thaumaturge-1628024', 'apptt-1718689']
+                        dependency.group == 'curse.maven' && (dependency.name == 'apptt-1718689' || (!adapterResources && dependency.name == 'thaumaturge-1628024'))
                     }
                 }
             }
+            def namespace = typedReload ? 'mmcece_typed_reload' : adapterResources ? 'mmcece_kubejs_adapter_resources' : 'mmcece_adapter'
+            def scriptName = typedReload ? 'typed_recipe_reload.js' : adapterResources ? 'typed_adapter_resources.js' : 'recipe_adapter_crt.js'
+            def gameDir = project.file(typedReload ? 'build/gametest-typed-recipe-reload'
+                : adapterResources ? 'build/gametest-typed-adapter-resource-probes' : 'build/gametest-adapter-smelting')
             neoForge.runs.named('gameTestServer') {
-                gameDirectory = project.file('build/gametest-adapter-smelting')
-                systemProperty 'neoforge.enabledGameTestNamespaces', 'mmcece_adapter'
-                systemProperty 'mmcece.adapter.kubejsSmoke', 'true'
+                gameDirectory = gameDir
+                systemProperty 'neoforge.enabledGameTestNamespaces', namespace
+                systemProperty(typedReload ? 'mmcece.test.typedReload' : adapterResources ? 'mmcece.adapter.legacyScriptSmoke' : 'mmcece.adapter.kubejsSmoke', 'true')
                 logLevel = org.slf4j.event.Level.INFO
             }
             project.apply from: project.file('gradle/recipe-gametest-fixtures.gradle')
             def script = tasks.register('prepareRecipeAdapterCrtScript', Copy) {
-                from project.file('src/gameTest/scripts/recipe_adapter_crt.js')
-                into project.file('build/gametest-adapter-smelting/kubejs/server_scripts')
+                from project.file('src/gameTest/scripts/' + scriptName)
+                into new File(gameDir, 'kubejs/server_scripts')
                 rename 'recipe_adapter_crt[.]js', 'test_recipe_adapter_crt.js'
             }
             tasks.named('runGameTestServer') {

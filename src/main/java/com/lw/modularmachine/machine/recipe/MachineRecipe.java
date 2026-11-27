@@ -6,6 +6,8 @@ import com.lw.modularmachine.machine.recipe.resource.RecipeResourceDefinitions;
 import net.minecraft.nbt.NbtOps;
 import com.lw.modularmachine.api.recipe.RecipeSelectors;
 import com.lw.modularmachine.api.recipe.RecipeFailureAction;
+import com.lw.modularmachine.api.recipe.MachineRecipeDeclaration;
+import com.lw.modularmachine.api.recipe.ItemAmount;
 import com.lw.modularmachine.api.recipe.ChemicalRecipeData;
 import com.lw.modularmachine.api.recipe.FluidRequirement;
 import com.lw.modularmachine.api.recipe.RecipeExecutionOptions;
@@ -17,7 +19,6 @@ import com.lw.modularmachine.api.smart.SmartNumberRequirement;
 import com.mojang.serialization.Codec;
 import com.mojang.serialization.DataResult;
 import com.mojang.serialization.DynamicOps;
-import com.mojang.serialization.JsonOps;
 import com.mojang.serialization.MapCodec;
 import com.mojang.serialization.MapLike;
 import com.mojang.serialization.RecordBuilder;
@@ -29,7 +30,6 @@ import java.util.Objects;
 import java.util.stream.Stream;
 import net.minecraft.core.HolderLookup;
 import net.minecraft.core.registries.BuiltInRegistries;
-import net.minecraft.nbt.ByteTag;
 import net.minecraft.network.RegistryFriendlyByteBuf;
 import net.minecraft.network.codec.StreamCodec;
 import net.minecraft.resources.ResourceLocation;
@@ -75,142 +75,6 @@ public final class MachineRecipe implements Recipe<RecipeInput> {
       Objects.requireNonNull(scriptOptions, "scriptOptions");
     }
   }
-  public static final class ItemAmount {
-    public static final Codec<ItemAmount> CODEC = RecordCodecBuilder.create(
-        instance -> instance
-            .group(
-                ItemStack.SINGLE_ITEM_CODEC.fieldOf("stack").forGetter((ItemAmount value) -> value.prototype),
-                Codec.LONG.fieldOf("amount").forGetter(ItemAmount::amount),
-                Codec.DOUBLE.optionalFieldOf("chance", 1.0D).forGetter(ItemAmount::chance),
-                Codec.STRING.optionalFieldOf("selector", "").forGetter(ItemAmount::selector),
-                Codec.STRING.optionalFieldOf("match", "exact").forGetter(ItemAmount::match),
-                ItemStack.SINGLE_ITEM_CODEC.optionalFieldOf("preview_stack", ItemStack.EMPTY)
-                    .forGetter(value -> value.preview),
-                Codec.BOOL.optionalFieldOf("parallel_unaffected", false).forGetter(ItemAmount::parallelUnaffected),
-                Codec.LONG.optionalFieldOf("min_amount", 0L).forGetter(value -> value.minAmount),
-                Codec.LONG.optionalFieldOf("max_amount", 0L).forGetter(value -> value.maxAmount),
-                Codec.BOOL.optionalFieldOf("ignore_output_check", false).forGetter(ItemAmount::ignoreOutputCheck))
-            .apply(instance, ItemAmount::new));
-    private final ItemStack prototype;
-    private final long amount;
-    private final double chance;
-    private final String selector;
-    private final String match;
-    private final ItemStack preview;
-    private final boolean parallelUnaffected;
-    private final long minAmount;
-    private final long maxAmount;
-    private final boolean ignoreOutputCheck;
-
-    private ItemAmount(ItemStack prototype, long amount, double chance, String selector, String match, ItemStack preview, boolean parallelUnaffected, long minAmount, long maxAmount, boolean ignoreOutputCheck) {
-      if (prototype.isEmpty()
-          || prototype.getCount() != 1
-          || amount <= 0
-          || !Double.isFinite(chance)
-          || chance < 0
-          || chance > 1
-          || !("exact".equals(match) || "item".equals(match))
-          || !preview.isEmpty() && preview.getCount() != 1
-          || minAmount < 0
-          || maxAmount < minAmount
-          || maxAmount > 0 && amount != maxAmount) {
-        throw new IllegalArgumentException("Expected one prototype and positive long amount");
-      }
-      this.prototype = prototype.copy();
-      this.amount = amount;
-      this.chance = chance;
-      this.selector = ResourceSelector.require(selector);
-      this.match = match;
-      this.preview = preview.copy();
-      this.parallelUnaffected = parallelUnaffected;
-      this.minAmount = minAmount;
-      this.maxAmount = maxAmount;
-      this.ignoreOutputCheck = ignoreOutputCheck;
-    }
-
-    public String match() {
-      return match;
-    }
-
-    public boolean ignoresComponents() {
-      return match.equals("item");
-    }
-
-    public String selector() {
-      return selector;
-    }
-
-    public long amount() {
-      return amount;
-    }
-
-    public long minimumAmount() {
-      return maxAmount == 0 ? amount : minAmount;
-    }
-
-    public double chance() {
-      return chance;
-    }
-
-    public boolean parallelUnaffected() {
-      return parallelUnaffected;
-    }
-
-    public boolean ignoreOutputCheck() {
-      return ignoreOutputCheck;
-    }
-
-    public ItemStack prototype(HolderLookup.Provider registries) {
-      return ItemStackSnapshots.detached(prototype, registries);
-    }
-
-    /**
-     * Client display copy; it is not an execution prototype or mutable recipe
-     * state.
-     */
-    public ItemStack displayStack() {
-      return preview.isEmpty() ? prototype.copy() : preview.copy();
-    }
-
-    public ItemStack ingredientStack() {
-      return prototype.copy();
-    }
-
-    @Override
-    public boolean equals(Object other) {
-      return this == other
-          || other instanceof ItemAmount value
-              && amount == value.amount
-              && chance == value.chance
-              && parallelUnaffected == value.parallelUnaffected
-              && ignoreOutputCheck == value.ignoreOutputCheck
-              && minAmount == value.minAmount
-              && maxAmount == value.maxAmount
-              && selector.equals(value.selector)
-              && match.equals(value.match)
-              && ItemStack.matches(prototype, value.prototype)
-              && ItemStack.matches(preview, value.preview);
-    }
-
-    @Override
-    public int hashCode() {
-      return Objects.hash(
-          prototype.getItem(),
-          prototype.getComponents(),
-          amount,
-          chance == 0 ? 0.0D : chance,
-          selector,
-          match,
-          preview.getItem(),
-          preview.getComponents(),
-          preview.getCount(),
-          parallelUnaffected,
-          ignoreOutputCheck,
-          minAmount,
-          maxAmount);
-    }
-  }
-
   private static final MapCodec<MachineRecipe> BASE = RecordCodecBuilder.mapCodec(
       instance -> instance.group(
           ResourceLocation.CODEC.fieldOf("machine").forGetter(MachineRecipe::machineId),
@@ -233,27 +97,7 @@ public final class MachineRecipe implements Recipe<RecipeInput> {
     @Override
     public <T> DataResult<MachineRecipe> decode(DynamicOps<T> ops, MapLike<T> input) {
       try {
-        var mapped = ops.createMap(input.entries());
-        var source = ops.convertTo(JsonOps.INSTANCE, mapped);
-        if (mapped instanceof CompoundTag tag) {
-          MachineRecipeJson.restoreRowBooleans(source.getAsJsonObject(), tag);
-        }
-        if (input.get("parallelized") instanceof ByteTag flag && flag.getAsByte() >= 0 && flag.getAsByte() <= 1) {
-          var resolved = source.getAsJsonObject().deepCopy();
-          resolved.addProperty("parallelized", flag.getAsByte() == 1);
-          source = resolved;
-        }
-        if (source.isJsonObject() && source.getAsJsonObject().has(MachineRecipeJson.KUBEJS_CHANGED_MARKER)) {
-          var cleaned = source.getAsJsonObject().deepCopy();
-          cleaned.remove(MachineRecipeJson.KUBEJS_CHANGED_MARKER);
-          source = cleaned;
-        }
-        var effective = MachineRecipeJson.normalize(source);
-        if (effective == source) {
-          return BASE.decode(ops, input);
-        }
-
-        return BASE.codec().parse(ops, JsonOps.INSTANCE.convertTo(ops, effective));
+        return DataResult.success(MachineRecipeCompiler.compile(MachineRecipeJson.decode(ops, input)));
       } catch (RuntimeException invalid) {
         return DataResult.error(() -> "Invalid machine recipe: " + invalid.getMessage());
       }
@@ -276,6 +120,37 @@ public final class MachineRecipe implements Recipe<RecipeInput> {
   private final List<SmartNumberRequirement> interfaceInputs;
   private final RecipeSelectors selectors;
   private final List<RecipeResourceRequirements.RequiredPort> requiredPorts;
+
+  static MachineRecipe effective(MachineRecipeDeclaration declaration, int duration, RecipeResources resources, RecipeFailureAction failureAction, boolean parallelized, IngredientArrayData groups, TriggeredResourceData triggers) {
+    return new MachineRecipe(
+        declaration.machineId(),
+        declaration.priority(),
+        duration,
+        resources,
+        failureAction.serialized(),
+        parallelized,
+        declaration.randomSeed(),
+        declaration.interfaceInputs(),
+        declaration.selectors(),
+        new Extras(declaration.executionOptions(), declaration.scriptOptions(), groups, triggers));
+  }
+
+  MachineRecipe withResourceData(RecipeResources resources, IngredientArrayData groups, TriggeredResourceData triggers) {
+    if (resources == resourceData && groups == extras.ingredientArrays() && triggers == extras.triggeredResources()) {
+      return this;
+    }
+    return new MachineRecipe(
+        machineId,
+        priority,
+        duration,
+        resources,
+        failureAction.serialized(),
+        parallelized,
+        randomSeed,
+        interfaceInputs,
+        selectors,
+        new Extras(extras.executionOptions(), extras.scriptOptions(), groups, triggers));
+  }
 
   private MachineRecipe(ResourceLocation machineId, int priority, int duration, RecipeResources resourceData, String failureAction, boolean parallelized, long randomSeed, List<SmartNumberRequirement> interfaceInputs, RecipeSelectors selectors, Extras extras) {
     if (duration <= 0) {
@@ -309,16 +184,10 @@ public final class MachineRecipe implements Recipe<RecipeInput> {
         || chemicals().perTickOutputs().stream().anyMatch(ChemicalRequirement::ignoreOutputCheck)) {
       throw new IllegalArgumentException("Ignored output capacity is supported only by completion output rows");
     }
-    if (resourceData.entries().stream()
-        .noneMatch(entry -> entry.type() != RecipeResourceDefinitions.ENVIRONMENT && entry.hasInputs())
-        && extras.ingredientArrays().inputs().stream().noneMatch(group -> !group.optional())
-        && extras.triggeredResources().rows().stream().noneMatch(row -> row.io() == RecipeModifier.Io.INPUT)
-        || !resourceData.hasOutputs()
-            && extras.ingredientArrays().randomOutputs().isEmpty()
-            && extras.triggeredResources().rows().stream().noneMatch(row -> row.io() == RecipeModifier.Io.OUTPUT)) {
-      throw new IllegalArgumentException("A machine recipe requires resource input and output");
-    }
-    if (inputs().size() != 1 && inputs().stream().anyMatch(ItemAmount::ignoresComponents)
+    validateResourceIo(resourceData, extras.ingredientArrays(), extras.triggeredResources());
+    var inputs = inputs();
+    if (IntStream.range(1, inputs.size())
+        .anyMatch(row -> inputs.get(row).ignoresComponents() && !itemPayments().allowsItemOnlyMatch(row, inputs.size()))
         || outputs().stream().anyMatch(ItemAmount::ignoresComponents)) {
       throw new IllegalArgumentException("Item-only matching requires one item input and exact outputs");
     }
@@ -327,6 +196,18 @@ public final class MachineRecipe implements Recipe<RecipeInput> {
 
   public List<RecipeResourceRequirements.RequiredPort> requiredPorts() {
     return requiredPorts;
+  }
+
+  private static void validateResourceIo(RecipeResources resources, IngredientArrayData groups, TriggeredResourceData triggers) {
+    if (resources.entries().stream()
+        .noneMatch(entry -> entry.type() != RecipeResourceDefinitions.ENVIRONMENT && entry.hasInputs())
+        && groups.inputs().stream().noneMatch(group -> !group.optional())
+        && triggers.rows().stream().noneMatch(row -> row.io() == RecipeModifier.Io.INPUT)
+        || !resources.hasOutputs()
+            && groups.randomOutputs().isEmpty()
+            && triggers.rows().stream().noneMatch(row -> row.io() == RecipeModifier.Io.OUTPUT)) {
+      throw new IllegalArgumentException("A machine recipe requires resource input and output");
+    }
   }
 
   public RecipeResources resourceData() {
@@ -343,8 +224,8 @@ public final class MachineRecipe implements Recipe<RecipeInput> {
     }
     var totals = new HashMap<StackIdentity, Long>();
     for (var value : values) {
-      if (!value.ignoreOutputCheck) {
-        totals.merge(new StackIdentity(value.prototype, value.selector), value.amount, Math::addExact);
+      if (!value.ignoreOutputCheck()) {
+        totals.merge(new StackIdentity(value.ingredientStack(), value.selector()), value.amount(), Math::addExact);
       }
     }
   }
@@ -484,24 +365,24 @@ public final class MachineRecipe implements Recipe<RecipeInput> {
             .map(
                 value -> new RecipeCandidate.Input<>(
                     inputKey(value, registries),
-                    value.amount,
-                    value.chance,
-                    value.parallelUnaffected,
+                    value.amount(),
+                    value.chance(),
+                    value.parallelUnaffected(),
                     value.minimumAmount()))
             .toList(),
-        outputs().stream().filter(value -> value.chance == 1.0D)
+        outputs().stream().filter(value -> value.chance() == 1.0D)
             .map(
                 value -> new RecipeCandidate.Output<>(
-                    ItemResourceKey.of(value.prototype, registries).withSelector(value.selector),
-                    value.amount,
-                    value.parallelUnaffected,
-                    value.ignoreOutputCheck))
+                    ItemResourceKey.of(value.ingredientStack(), registries).withSelector(value.selector()),
+                    value.amount(),
+                    value.parallelUnaffected(),
+                    value.ignoreOutputCheck()))
             .toList(),
         interfaceInputs);
   }
 
   private static ItemResourceKey inputKey(ItemAmount value, HolderLookup.Provider registries) {
-    var key = ItemResourceKey.of(value.prototype, registries).withSelector(value.selector);
+    var key = ItemResourceKey.of(value.ingredientStack(), registries).withSelector(value.selector());
 
     return value.ignoresComponents() ? key.ignoringComponents() : key;
   }
@@ -537,7 +418,7 @@ public final class MachineRecipe implements Recipe<RecipeInput> {
       return false;
     }
     return Stream.concat(inputs().stream(), outputs().stream())
-        .allMatch(row -> stableItem(row.prototype) && stableItem(row.preview))
+        .allMatch(row -> stableItem(row.ingredientStack()) && stableItem(row.previewStack()))
         && Stream.of(fluidInputRequirements(), fluidOutputRequirements(), fluidPerTickInputs(), fluidPerTickOutputs())
             .flatMap(List::stream).allMatch(row -> row.stack().getComponentsPatch().isEmpty());
   }
@@ -596,7 +477,7 @@ public final class MachineRecipe implements Recipe<RecipeInput> {
       return ItemStack.EMPTY;
     }
     var result = outputs().getFirst().prototype(registries);
-    result.setCount((int) Math.min(outputs().getFirst().amount, result.getMaxStackSize()));
+    result.setCount((int) Math.min(outputs().getFirst().amount(), result.getMaxStackSize()));
     return result;
   }
 

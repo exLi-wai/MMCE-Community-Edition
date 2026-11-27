@@ -158,8 +158,7 @@ public final class RecipeScriptCallbacks {
     var preparation = new ArrayList<RecipePreparationHandlers.Handler>();
     if (callbackGeneration != RecipeScriptSources.NO_CALLBACK_GENERATION) {
       for (var declaration : INLINE) {
-        // KubeJS merges duplicate IDs in parallel and publishes the winning recipe's
-        // JSON object.
+        // Register only the exact declaration selected by the KubeJS recipe event.
         if (acceptedRecipes.contains(declaration.id())
             && selectedDeclaration.apply(declaration.id()) == declaration.source()) {
           var bindings = declaration.bindings();

@@ -410,7 +410,61 @@ public final class RecipeResourceRegressionGameTests {
         .getBlockEntity(ticket.owner().structurePosition().offset(-1, 0, 1));
   }
 
-  private static RecipeExecutionTicket build(GameTestHelper helper, boolean factory) {
+  public static void assertMixedIronCheckerSlices(GameTestHelper helper, MachineControllerBlockEntity controller, JsonObject declaration) {
+    var json = declaration.deepCopy();
+    json.addProperty("machine", MACHINE.toString());
+    json.add("item_callbacks", JsonParser.parseString("""
+        [{"io":"input","row":0,"checker":"test:ordinary_iron"}]
+        """));
+    json.getAsJsonArray("ingredient_arrays").get(0).getAsJsonObject().getAsJsonArray("alternatives").get(0)
+        .getAsJsonObject().addProperty("checker", "test:group_iron");
+    var registries = helper.getLevel().registryAccess();
+    var source = MachineRecipeCompiler.compile(MachineRecipeJson.decode(json, registries));
+    var selected = List.of(new RecipeIngredientArrayResolution.Selection(0, java.util.Optional.empty()));
+    var resolved = MachineRecipeJson.compileResolved(
+        RecipeIngredientArrayResolution.resolve(source, selected, registries),
+        registries.createSerializationContext(JsonOps.INSTANCE));
+    var slices = RecipeIngredientArrayResolution
+        .checkerSlices(resolved, RecipeExecutionTicket.capture(controller).orElseThrow(), 1).orElseThrow();
+    helper.assertValueEqual(slices.size(), 2, "One physical slice per checker");
+    for (var slice : slices) {
+      if (slice.row() == 0) {
+        helper.assertValueEqual(slice.amount(), 2L, "Direct row amount");
+        helper.assertValueEqual(slice.item().getHoverName().getString(), "spare", "Direct row physical variant");
+      } else {
+        helper.assertValueEqual(slice.row(), 1, "Selected group checker row");
+        helper.assertValueEqual(slice.amount(), 1L, "Exact selected slice amount");
+        helper.assertFalse(slice.item().has(DataComponents.CUSTOM_NAME), "Exact selected slice components");
+      }
+    }
+  }
+
+  public static void assertOptionalDiamondToolPayments(GameTestHelper helper, MachineRecipe withoutDiamond, MachineRecipe withDiamond) {
+    var ticket = build(helper, false);
+    var inventory = input(helper, ticket).inventory();
+    var pickaxe = new ItemStack(Items.IRON_PICKAXE);
+    pickaxe.setDamageValue(7);
+    inventory.setStackInSlot(0, pickaxe);
+    ticket = RecipeExecutionTicket.capture(ticket.owner()).orElseThrow();
+    helper.assertFalse(RecipeItemPayments.available(ticket, withDiamond, 1, true), "Selected diamond is required");
+    for (var recipe : List.of(withoutDiamond, withDiamond)) {
+      if (recipe == withDiamond) {
+        inventory.setStackInSlot(1, new ItemStack(Items.DIAMOND));
+        ticket = RecipeExecutionTicket.capture(ticket.owner()).orElseThrow();
+      }
+      var changes = new HashMap<String, NonNullList<ItemStack>>();
+      helper.assertTrue(RecipeItemPayments.apply(ticket, recipe, 1, true, 42, changes), "Tool payment");
+      var paid = changes.values().iterator().next().getFirst();
+      helper.assertTrue(paid.is(Items.IRON_PICKAXE) && paid.getDamageValue() == 10, "Three durability paid");
+      var demands = recipe.compile(ResourceLocation.parse("test:tool"), helper.getLevel().registryAccess()).inputs();
+      helper.assertValueEqual(demands.size(), recipe == withDiamond ? 1 : 0, "Ordinary item deductions");
+      if (recipe == withDiamond) {
+        helper.assertTrue(demands.getFirst().key().stack(1).is(Items.DIAMOND), "Only diamond is consumed as an item");
+      }
+    }
+  }
+
+  public static RecipeExecutionTicket build(GameTestHelper helper, boolean factory) {
     var level = helper.getLevel();
     var origin = helper.absolutePos(new BlockPos(7, 5, 7));
     level.setBlockAndUpdate(

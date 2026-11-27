@@ -171,8 +171,7 @@ public final class RecipeItemCallbackService {
               result.add("item_callbacks", retained);
             }
           }
-          MachineRecipeJson.validate(result);
-          definition = MachineRecipe.CODEC.codec().parse(ops, result).getOrThrow();
+          definition = MachineRecipeJson.compileResolved(result, ops);
           complete = capturedEpoch == epoch;
           rejected = !complete;
         }
@@ -382,8 +381,7 @@ public final class RecipeItemCallbackService {
       // A paid run stores prepared values. Functions and row IDs are used only
       // by the unstarted candidate and may never execute again on restore.
       result.remove("item_callbacks");
-      MachineRecipeJson.validate(result);
-      var definition = MachineRecipe.CODEC.codec().parse(ops, result).getOrThrow();
+      var definition = MachineRecipeJson.compileResolved(result, ops);
 
       return capturedEpoch == epoch ? Optional.of(new Prepared(definition, capturedEpoch)) : Optional.empty();
     } catch (RuntimeException invalid) {

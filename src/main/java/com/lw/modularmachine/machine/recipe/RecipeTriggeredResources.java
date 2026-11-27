@@ -109,6 +109,26 @@ public final class RecipeTriggeredResources {
     }
   }
 
+  static void validate(TriggeredResourceData data, int duration, FluidRecipeData fluids, ChemicalRecipeData chemicals) {
+    var counts = new HashMap<Position, Integer>();
+    for (var row : data.rows()) {
+      if (row.tick() > duration) {
+        throw new IllegalArgumentException("Trigger position outside recipe duration");
+      }
+      int ordinary = switch (row.resource()) {
+        case "fluid" ->
+          row.io() == RecipeModifier.Io.INPUT ? fluids.perTickInputs().size() : fluids.perTickOutputs().size();
+        case "chemical" ->
+          row.io() == RecipeModifier.Io.INPUT ? chemicals.perTick().size() : chemicals.perTickOutputs().size();
+        default -> 0;
+      };
+      int count = counts.merge(new Position(row.resource(), row.io(), row.tick()), 1, Integer::sum);
+      if (ordinary + count > MachineRecipeJson.MAX_DEMANDS) {
+        throw new IllegalArgumentException("Too many combined trigger and per-tick rows at one progress position");
+      }
+    }
+  }
+
   /**
    * Structural validation also serves NBT reads before registry-backed codecs.
    */
@@ -174,32 +194,6 @@ public final class RecipeTriggeredResources {
     return root.has("triggered_resources")
         && root.getAsJsonArray("triggered_resources").asList().stream()
             .anyMatch(value -> value.getAsJsonObject().get("io").getAsString().equals(io.serialized()));
-  }
-
-  static void modify(JsonObject root, RecipeModifiers modifiers, int originalDuration, int duration) {
-    if (!root.has("triggered_resources")) {
-      return;
-    }
-    for (var value : root.getAsJsonArray("triggered_resources")) {
-      var row = value.getAsJsonObject();
-      var target = switch (row.get("resource").getAsString()) {
-        case "item" -> RecipeModifier.Target.ITEM;
-        case "fluid" -> RecipeModifier.Target.FLUID;
-        case "chemical" -> RecipeModifier.Target.CHEMICAL;
-        default -> throw new IllegalArgumentException("Unsupported trigger resource");
-      };
-      var io = RecipeModifier.Io.parse(row.get("io").getAsString());
-      row.addProperty(
-          "amount",
-          modifiers.amount(
-              target,
-              io,
-              row.get("amount").getAsLong(),
-              1,
-              target == RecipeModifier.Target.FLUID ? Integer.MAX_VALUE : Long.MAX_VALUE));
-      row.addProperty("chance", modifiers.chance(target, io, row.has("chance") ? row.get("chance").getAsDouble() : 1));
-      row.addProperty("tick", scaledTick(row.get("tick").getAsInt(), originalDuration, duration));
-    }
   }
 
   static void upgrade(CompoundTag definition, int originalDuration, int duration) {

@@ -34,6 +34,7 @@ import net.minecraft.world.item.crafting.Recipe;
 import net.minecraft.world.item.crafting.RecipeHolder;
 import net.minecraft.world.item.crafting.RecipeManager;
 import net.neoforged.neoforge.resource.ContextAwareReloadListener;
+import net.neoforged.neoforge.common.conditions.ICondition;
 import org.slf4j.Logger;
 
 /**
@@ -82,10 +83,9 @@ public final class MachineRecipeReloadListener extends ContextAwareReloadListene
           var scripts = RecipeScriptSources.snapshot(target);
           var nativeOwners = new RecipeDeclarationOwners(prepared.skippedIds(), prepared.skippedMachines());
           var scriptOwners = new RecipeDeclarationOwners(scripts.skippedIds(), scripts.skippedMachines());
-          var decoded = new LinkedHashMap<ResourceLocation, MachineRecipe>();
-          var validatedSources = new LinkedHashMap<ResourceLocation, JsonElement>();
+          var decoded = new LinkedHashMap<ResourceLocation, MachineRecipeService.DeclaredRecipe>();
           var acceptedScriptIds = new LinkedHashSet<ResourceLocation>();
-          var correctedMissingHolders = new LinkedHashSet<ResourceLocation>();
+          var suppliedHolders = new LinkedHashSet<ResourceLocation>();
           var conditionalOps = makeConditionalOps();
           for (var entry : prepared.roots().entrySet()) {
             var id = entry.getKey();
@@ -98,9 +98,8 @@ public final class MachineRecipeReloadListener extends ContextAwareReloadListene
             if (recipe == null) {
               nativeOwners.skip(id, MachineRecipeJson.declaredMachine(root));
             } else {
-              nativeOwners.accept(id, recipe.machineId());
+              nativeOwners.accept(id, recipe.source().machineId());
               decoded.put(id, recipe);
-              validatedSources.put(id, root);
             }
           }
           for (var entry : scripts.declarations().entrySet()) {
@@ -117,12 +116,11 @@ public final class MachineRecipeReloadListener extends ContextAwareReloadListene
             if (recipe == null || missingHolder && !scripts.correctedStackPrototypes().contains(id)) {
               scriptOwners.skip(id, MachineRecipeJson.declaredMachine(root));
             } else {
-              scriptOwners.accept(id, recipe.machineId());
+              scriptOwners.accept(id, recipe.source().machineId());
               decoded.put(id, recipe);
-              validatedSources.put(id, root);
               acceptedScriptIds.add(id);
               if (missingHolder) {
-                correctedMissingHolders.add(id);
+                suppliedHolders.add(id);
               }
             }
           }
@@ -147,7 +145,6 @@ public final class MachineRecipeReloadListener extends ContextAwareReloadListene
           MachineRecipeService.stage(
               target,
               decoded,
-              validatedSources,
               getRegistryLookup(),
               new RecipeAdapterTags(itemTags),
               nativeOwners,
@@ -156,21 +153,18 @@ public final class MachineRecipeReloadListener extends ContextAwareReloadListene
               scripts.recipeOrder(),
               scripts.callbackGeneration(),
               acceptedScriptIds,
-              correctedMissingHolders);
+              suppliedHolders);
           sourceCache.snapshot.compareAndSet(previous, prepared.snapshot());
         }, game).whenComplete((ignored, failure) -> RecipeScriptSources.clear(target));
   }
 
-  private static MachineRecipe decodeMachineRecipe(ResourceLocation id, JsonElement root, DynamicOps<JsonElement> ops) {
+  private MachineRecipeService.DeclaredRecipe decodeMachineRecipe(ResourceLocation id, JsonElement root, DynamicOps<JsonElement> ops) {
     try {
-      var recipe = decodeRecipe(id, root, ops);
-      if (recipe == null) {
+      if (!ICondition.conditionsMatched(ops, root)) {
         return null;
       }
-      if (recipe instanceof MachineRecipe machine) {
-        return machine;
-      }
-      throw new JsonParseException(id + ": Expected machine recipe");
+      var declaration = MachineRecipeJson.decode(root.getAsJsonObject(), ops);
+      return MachineRecipeService.DeclaredRecipe.compile(declaration);
     } catch (RuntimeException invalid) {
       LOGGER.warn("Skipping invalid MMCE machine recipe {}", id, invalid);
       return null;

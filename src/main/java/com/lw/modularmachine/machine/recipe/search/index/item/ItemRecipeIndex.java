@@ -23,9 +23,6 @@ public final class ItemRecipeIndex {
     for (var candidate : recipes.candidates()) {
       for (var input : candidate.inputs()) {
         if (input.key().ignoresComponents()) {
-          if (candidate.inputs().size() != 1) {
-            throw new IllegalArgumentException("Item-only matching requires a single item input row");
-          }
           collected.add(input.key());
         }
       }

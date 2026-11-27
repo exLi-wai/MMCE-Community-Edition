@@ -133,7 +133,16 @@ public final class AtomicRecipeStarter {
     if (startupResult.status() != UpgradeStartCosts.Status.READY || !startup.payable()) {
       return startupResult.status() == UpgradeStartCosts.Status.ERROR ? Result.FAILED : Result.STALE;
     }
-    var effectivePlan = plan.scaled(instances);
+    budget -= startupResult.workUsed();
+    var inputs = plan.scaled(instances, budget);
+    if (!inputs.complete()) {
+      return Result.BUSY;
+    }
+    budget -= inputs.workUsed();
+    var effectivePlan = inputs.plan();
+    if (effectivePlan == null) {
+      return Result.STALE;
+    }
     var ports = indexPorts(effectivePlan.source());
     if (itemPortsBusy(effectivePlan.source())) {
       return Result.BUSY;
@@ -158,7 +167,7 @@ public final class AtomicRecipeStarter {
           || RecipeResourceRequirements.missing(checked.orElseThrow(), nativeRecipe.orElseThrow()).isPresent()) {
         return Result.STALE;
       }
-      int resourceBudget = budget - startupResult.workUsed();
+      int resourceBudget = budget;
       var outputCheck = plan
           .prepareStartOutputs(nativeRecipe.orElseThrow(), checked.orElseThrow(), instances, resourceBudget, false);
       if (outputCheck.status() == RecipeResourcePlanning.Status.PENDING) {
@@ -179,8 +188,13 @@ public final class AtomicRecipeStarter {
         return Result.STALE;
       }
       additionalResourcePhase.enlist(additionalResources);
-      var inputCheck = RecipeItemPreparation
-          .checkInputs(nativeRecipe.orElseThrow(), checked.orElseThrow(), Optional.empty(), instances, run);
+      var inputCheck = RecipeItemPreparation.checkInputs(
+          nativeRecipe.orElseThrow(),
+          checked.orElseThrow(),
+          Optional.empty(),
+          instances,
+          run,
+          effectivePlan.inputAllocation());
       if (inputCheck != RecipeItemCallbackService.InputCheck.ALLOWED) {
         if (!plan.factoryAdmissionCurrent(controller, "main") || !startup.current() || !plan.catalog().isCurrent()) {
           return Result.STALE;

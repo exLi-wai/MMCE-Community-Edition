@@ -44,20 +44,22 @@ public abstract class KubeJSResourceRecipeBuilder<B extends KubeJSResourceRecipe
   void requireResourceOverride(ResourceLocation id) {
   }
 
-  final void applyResourceDeclarations(JsonObject target) {
-    for (var entry : resourceDeclarations.values()) {
-      RecipeResourceBuilderDeclarations.apply(target, entry, resourceRegistries());
+  /**
+   * Explicit resource declarations replace any dedicated rows owned by the same
+   * descriptor.
+   */
+  final RecipeResources resources(RecipeResources.Entry<?>... ordinary) {
+    var merged = new LinkedHashMap<ResourceLocation, RecipeResources.Entry<?>>();
+    for (var entry : ordinary) {
+      merged.put(entry.type().id(), entry);
     }
+    merged.putAll(resourceDeclarations);
+    return new RecipeResources(List.copyOf(merged.values()));
   }
 
   final Map<ResourceLocation, NativeResource> captureAdapterResources() {
     var captured = new LinkedHashMap<ResourceLocation, NativeResource>();
-    resourceDeclarations.forEach(
-        (id, entry) -> captured.put(
-            id,
-            new NativeResource(
-                RecipeResourceBuilderDeclarations.encode(entry, resourceRegistries()).toString(),
-                overrides.contains(id))));
+    resourceDeclarations.forEach((id, entry) -> captured.put(id, new NativeResource(entry, overrides.contains(id))));
     return captured;
   }
 

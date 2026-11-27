@@ -159,7 +159,7 @@ final class FrozenRecipeRunCodec {
     var declaration = NbtOps.INSTANCE.convertTo(JsonOps.INSTANCE, definition).getAsJsonObject();
     MachineRecipeJson.restoreRowBooleans(declaration, definition);
     declaration.addProperty("parallelized", definition.getBoolean("parallelized"));
-    var header = MachineRecipeJson.validate(declaration);
+    var header = MachineRecipeJson.validate(declaration, true);
     RecipeSelectors selectors = header.selectors();
     ChemicalRecipeData chemicals = declaration.has("chemicals") ? ChemicalRecipeData.CODEC
         .parse(JsonOps.INSTANCE, declaration.get("chemicals")).getOrThrow() : ChemicalRecipeData.NONE;

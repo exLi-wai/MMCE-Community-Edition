@@ -22,8 +22,7 @@ final class KubeJSRecipeLoading {
 
   static void beforeRecipeLoading(RecipesKubeEvent event, RecipeManager manager, Map<ResourceLocation, JsonElement> recipes) {
     hideMachineRecipeFunction(event);
-    var replacements = (MachineItemRecipeKubeJSSources.Replacements) event;
-    MachineItemRecipeKubeJSSources.capture(manager, recipes, replacements::MMCECE$replacement);
+    ((MachineItemRecipeKubeJSSources.RecipeEvent) event).MMCECE$registration().begin(manager, recipes);
   }
 
   private static void hideMachineRecipeFunction(RecipesKubeEvent event) {
@@ -34,7 +33,7 @@ final class KubeJSRecipeLoading {
     }
     // KubeJSRecipesEventMixin filters the script-facing flat map. Omit the
     // namespace function too, while preserving the schema namespace and internal
-    // type lookup for native JSON parsing and RecipeBuilder.build().
+    // type lookup for native JSON parsing and typed script additions.
     var visibleNamespace = new RecipeNamespace(namespace.storage, namespace.name);
     var functions = new LinkedHashMap<String, RecipeTypeFunction>();
     for (var entry : namespace.entrySet()) {

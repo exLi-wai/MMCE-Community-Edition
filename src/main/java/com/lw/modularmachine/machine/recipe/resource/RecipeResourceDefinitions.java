@@ -59,6 +59,7 @@ public final class RecipeResourceDefinitions {
       "controller_command_actions");
   private static final Map<ResourceLocation, RecipeResourceType<?>> REGISTERED = new LinkedHashMap<>();
   private static final Map<ResourceLocation, Set<String>> FIELDS_BY_TYPE = new HashMap<>();
+  private static final Set<RecipeResourceType<?>> BUILTINS;
   private static List<RecipeResourceType<?>> frozen;
 
   public static final RecipeResourceType<ItemRecipeData> ITEM = new RecipeResourceType<>(
@@ -214,6 +215,11 @@ public final class RecipeResourceDefinitions {
     register(ESSENTIA);
     register(STARLIGHT);
     register(CONSTELLATION);
+    BUILTINS = Set.copyOf(REGISTERED.values());
+  }
+
+  public static boolean isBuiltin(RecipeResourceType<?> type) {
+    return BUILTINS.contains(type);
   }
 
   public static final MapCodec<RecipeResources> CODEC = new MapCodec<>() {

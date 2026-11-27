@@ -1,5 +1,6 @@
 package com.lw.modularmachine.client;
 
+import com.lw.modularmachine.api.recipe.ItemAmount;
 import com.lw.modularmachine.api.client.gui.DraggablePanel;
 import com.lw.modularmachine.api.component.ChemicalStackData;
 import com.lw.modularmachine.api.recipe.ChemicalRequirement;
@@ -282,7 +283,7 @@ public final class FactoryControllerScreen extends AbstractContainerScreen<Facto
                 .toList()));
   }
 
-  private static Component resourceNames(List<MachineRecipe.ItemAmount> items, List<ChemicalRequirement> chemicals) {
+  private static Component resourceNames(List<ItemAmount> items, List<ChemicalRequirement> chemicals) {
     var names = Stream.concat(
         items.stream().map(item -> item.displayStack().getHoverName()),
         chemicals.stream().map(FactoryControllerScreen::chemicalName)).toList();

@@ -8,6 +8,11 @@ import com.mojang.serialization.MapLike;
 import com.mojang.serialization.RecordBuilder;
 import java.util.Objects;
 import java.util.stream.Stream;
+import net.minecraft.core.HolderLookup;
+import net.minecraft.core.component.DataComponentPatch;
+import net.minecraft.nbt.NbtOps;
+import net.minecraft.nbt.Tag;
+import net.minecraft.resources.RegistryOps;
 import net.neoforged.neoforge.fluids.FluidStack;
 import com.lw.modularmachine.machine.recipe.ResourceSelector;
 
@@ -32,7 +37,7 @@ public final class FluidRequirement {
                       ignored -> Codec.STRING.optionalFieldOf("selector").decode(ops, input).map(
                           selector -> selector.map(value -> new FluidRequirement(stack, chance, fixed, value))
                               .orElseGet(() -> new FluidRequirement(stack, chance, fixed))
-                              .withIgnoreOutputCheck(ignored))))));
+                              .withIgnoreOutputCheck(ignored).capture(ops))))));
     }
 
     @Override
@@ -58,7 +63,15 @@ public final class FluidRequirement {
     }
   };
   public static final Codec<FluidRequirement> CODEC = MAP_CODEC.codec();
+  private record Components(DynamicOps<Tag> ops, Tag encoded) {
+    private FluidStack copy(FluidStack prototype) {
+      var patch = DataComponentPatch.CODEC.parse(ops, encoded.copy()).getOrThrow();
+      return new FluidStack(prototype.getFluidHolder(), prototype.getAmount(), patch);
+    }
+  }
+
   private final FluidStack stack;
+  private final Components components;
   private final double chance;
   private final boolean parallelUnaffected;
   private final String selector;
@@ -70,19 +83,20 @@ public final class FluidRequirement {
   }
 
   public FluidRequirement(FluidStack stack, double chance, boolean parallelUnaffected) {
-    this(stack, chance, parallelUnaffected, "", false, false);
+    this(stack, chance, parallelUnaffected, "", false, false, null);
   }
 
   public FluidRequirement(FluidStack stack, double chance, boolean parallelUnaffected, String selector) {
-    this(stack, chance, parallelUnaffected, selector, true, false);
+    this(stack, chance, parallelUnaffected, selector, true, false, null);
   }
 
-  private FluidRequirement(FluidStack stack, double chance, boolean parallelUnaffected, String selector, boolean selectorSpecified, boolean ignoreOutputCheck) {
+  private FluidRequirement(FluidStack stack, double chance, boolean parallelUnaffected, String selector, boolean selectorSpecified, boolean ignoreOutputCheck, Components components) {
     Objects.requireNonNull(stack, "stack");
     if (stack.isEmpty() || !Double.isFinite(chance) || chance < 0 || chance > 1) {
       throw new IllegalArgumentException("Fluid requirements need a positive quantity and probability within 0..1");
     }
     this.stack = stack.copy();
+    this.components = components;
     this.chance = chance;
     this.parallelUnaffected = parallelUnaffected;
     this.selector = ResourceSelector.require(selector);
@@ -90,8 +104,42 @@ public final class FluidRequirement {
     this.ignoreOutputCheck = ignoreOutputCheck;
   }
 
+  public FluidRequirement capture(HolderLookup.Provider registries) {
+    return needsCapture() ? capture(registries.createSerializationContext(NbtOps.INSTANCE)) : this;
+  }
+
+  public FluidRequirement capture(DynamicOps<?> sourceOps) {
+    if (!needsCapture()) {
+      return this;
+    }
+    DynamicOps<Tag> ops = sourceOps instanceof RegistryOps<?> registryOps ? registryOps
+        .withParent(NbtOps.INSTANCE) : NbtOps.INSTANCE;
+    var encoded = DataComponentPatch.CODEC.encodeStart(ops, stack.getComponentsPatch()).getOrThrow();
+    var captured = new Components(ops, encoded.copy());
+    var detached = captured.copy(stack);
+    if (!FluidStack.matches(stack, detached)) {
+      throw new IllegalArgumentException("Lossy fluid components cannot be used in a recipe requirement");
+    }
+    return new FluidRequirement(
+        detached,
+        chance,
+        parallelUnaffected,
+        selector,
+        selectorSpecified,
+        ignoreOutputCheck,
+        captured);
+  }
+
+  private boolean needsCapture() {
+    return components == null && !stack.isComponentsPatchEmpty();
+  }
+
   public FluidStack stack() {
-    return stack.copy();
+    return components == null ? stack.copy() : components.copy(stack);
+  }
+
+  int amount() {
+    return stack.getAmount();
   }
 
   public double chance() {
@@ -107,7 +155,22 @@ public final class FluidRequirement {
   }
 
   public FluidRequirement withIgnoreOutputCheck(boolean value) {
-    return new FluidRequirement(stack, chance, parallelUnaffected, selector, selectorSpecified, value);
+    return new FluidRequirement(stack, chance, parallelUnaffected, selector, selectorSpecified, value, components);
+  }
+
+  public FluidRequirement withAmountAndChance(int amount, double probability) {
+    return new FluidRequirement(
+        stack.copyWithAmount(amount),
+        probability,
+        parallelUnaffected,
+        selector,
+        selectorSpecified,
+        ignoreOutputCheck,
+        components);
+  }
+
+  public boolean selectorSpecified() {
+    return selectorSpecified;
   }
 
   public String selector() {

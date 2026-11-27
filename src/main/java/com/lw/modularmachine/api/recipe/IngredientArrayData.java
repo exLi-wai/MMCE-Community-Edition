@@ -7,6 +7,8 @@ import com.mojang.serialization.codecs.RecordCodecBuilder;
 import java.util.List;
 import java.util.Objects;
 import java.util.Optional;
+import net.minecraft.core.HolderLookup;
+import net.minecraft.nbt.NbtOps;
 import net.minecraft.resources.ResourceLocation;
 import net.minecraft.world.item.ItemStack;
 import net.neoforged.neoforge.fluids.FluidStack;
@@ -105,8 +107,7 @@ public record IngredientArrayData(List<Group> inputs, List<Group> randomOutputs)
 
   public record Choice(
       String resource,
-      Optional<ItemStack> item,
-      Optional<FluidStack> fluid,
+      RecipeStackPrototype prototype,
       Optional<ResourceLocation> chemical,
       long amount,
       double chance,
@@ -115,24 +116,35 @@ public record IngredientArrayData(List<Group> inputs, List<Group> randomOutputs)
       long minAmount,
       long maxAmount,
       String match) {
-    public static final Codec<Choice> CODEC = RecordCodecBuilder
-        .create(
-            instance -> instance
-                .group(
-                    Codec.STRING.fieldOf("resource").forGetter(Choice::resource),
-                    Codec.lazyInitialized(() -> ItemStack.SINGLE_ITEM_CODEC).optionalFieldOf("item")
-                        .forGetter(Choice::item),
-                    Codec.lazyInitialized(() -> FluidStack.CODEC).optionalFieldOf("fluid").forGetter(Choice::fluid),
-                    ResourceLocation.CODEC.optionalFieldOf("chemical").forGetter(Choice::chemical),
-                    Codec.LONG.fieldOf("amount").forGetter(Choice::amount),
-                    Codec.DOUBLE.optionalFieldOf("chance", 1.0D).forGetter(Choice::chance),
-                    ResourceLocation.CODEC.optionalFieldOf("checker").forGetter(Choice::checker),
-                    ResourceLocation.CODEC.listOf().optionalFieldOf("modifiers", List.of())
-                        .forGetter(Choice::modifiers),
-                    Codec.LONG.optionalFieldOf("min_amount", 0L).forGetter(Choice::minAmount),
-                    Codec.LONG.optionalFieldOf("max_amount", 0L).forGetter(Choice::maxAmount),
-                    Codec.STRING.optionalFieldOf("match", "exact").forGetter(Choice::match))
-                .apply(instance, Choice::new));
+    public static final Codec<Choice> CODEC = RecordCodecBuilder.create(
+        instance -> instance
+            .group(
+                Codec.STRING.fieldOf("resource").forGetter(Choice::resource),
+                Codec.lazyInitialized(() -> ItemStack.SINGLE_ITEM_CODEC).optionalFieldOf("item")
+                    .forGetter(Choice::item),
+                Codec.lazyInitialized(() -> FluidStack.CODEC).optionalFieldOf("fluid").forGetter(Choice::fluid),
+                ResourceLocation.CODEC.optionalFieldOf("chemical").forGetter(Choice::chemical),
+                Codec.LONG.fieldOf("amount").forGetter(Choice::amount),
+                Codec.DOUBLE.optionalFieldOf("chance", 1.0D).forGetter(Choice::chance),
+                ResourceLocation.CODEC.optionalFieldOf("checker").forGetter(Choice::checker),
+                ResourceLocation.CODEC.listOf().optionalFieldOf("modifiers", List.of()).forGetter(Choice::modifiers),
+                Codec.LONG.optionalFieldOf("min_amount").forGetter(choice -> Optional.of(choice.minAmount())),
+                Codec.LONG.optionalFieldOf("max_amount").forGetter(choice -> Optional.of(choice.maxAmount())),
+                Codec.STRING.optionalFieldOf("match", "exact").forGetter(Choice::match),
+                RecipeStackPrototype.COMPONENT_OPS.forGetter(ignored -> NbtOps.INSTANCE))
+            .apply(
+                instance,
+                (resource, item, fluid, chemical, amount, chance, checker, modifiers, minimum, maximum, match, ops) -> new Choice(
+                    resource,
+                    RecipeStackPrototype.of(item, fluid).capture(ops),
+                    chemical,
+                    amount,
+                    chance,
+                    checker,
+                    modifiers,
+                    minimum.orElse(0L),
+                    maximum.orElse(0L),
+                    match)));
 
     public Choice(String resource, Optional<ItemStack> item, Optional<FluidStack> fluid, Optional<ResourceLocation> chemical, long amount, double chance, Optional<ResourceLocation> checker, List<ResourceLocation> modifiers) {
       this(resource, item, fluid, chemical, amount, chance, checker, modifiers, 0, 0, "exact");
@@ -142,10 +154,14 @@ public record IngredientArrayData(List<Group> inputs, List<Group> randomOutputs)
       this(resource, item, fluid, chemical, amount, chance, checker, modifiers, minAmount, maxAmount, "exact");
     }
 
+    public Choice(String resource, Optional<ItemStack> item, Optional<FluidStack> fluid, Optional<ResourceLocation> chemical, long amount, double chance, Optional<ResourceLocation> checker, List<ResourceLocation> modifiers, long minAmount, long maxAmount, String match) {
+      this(resource, RecipeStackPrototype.of(item, fluid), chemical, amount, chance, checker, modifiers, minAmount,
+          maxAmount, match);
+    }
+
     public Choice {
       Objects.requireNonNull(resource, "resource");
-      item = Objects.requireNonNull(item, "item").map(ItemStack::copy);
-      fluid = Objects.requireNonNull(fluid, "fluid").map(FluidStack::copy);
+      Objects.requireNonNull(prototype, "prototype");
       Objects.requireNonNull(chemical, "chemical");
       Objects.requireNonNull(checker, "checker");
       Objects.requireNonNull(match, "match");
@@ -154,7 +170,7 @@ public record IngredientArrayData(List<Group> inputs, List<Group> randomOutputs)
         minAmount = amount;
         maxAmount = amount;
       }
-      if (!validPrototype(resource, item, fluid, chemical, amount)
+      if (!validPrototype(resource, prototype, chemical, amount)
           || !validAmountRange(resource, amount, minAmount, maxAmount)
           || !(match.equals("exact") || resource.equals("item") && match.equals("item"))
           || !validChance(chance)
@@ -163,19 +179,11 @@ public record IngredientArrayData(List<Group> inputs, List<Group> randomOutputs)
       }
     }
 
-    private static boolean validPrototype(String resource, Optional<ItemStack> item, Optional<FluidStack> fluid, Optional<ResourceLocation> chemical, long amount) {
+    private static boolean validPrototype(String resource, RecipeStackPrototype prototype, Optional<ResourceLocation> chemical, long amount) {
       return switch (resource) {
-        case "item" -> item.isPresent()
-            && !item.orElseThrow().isEmpty()
-            && item.orElseThrow().getCount() == 1
-            && fluid.isEmpty()
-            && chemical.isEmpty();
-        case "fluid" -> fluid.isPresent()
-            && !fluid.orElseThrow().isEmpty()
-            && item.isEmpty()
-            && chemical.isEmpty()
-            && amount <= Integer.MAX_VALUE;
-        case "chemical" -> chemical.isPresent() && item.isEmpty() && fluid.isEmpty();
+        case "item" -> prototype.hasItem() && chemical.isEmpty();
+        case "fluid" -> prototype.hasFluid() && chemical.isEmpty() && amount <= Integer.MAX_VALUE;
+        case "chemical" -> chemical.isPresent() && !prototype.hasItem() && !prototype.hasFluid();
         default -> false;
       };
     }
@@ -194,14 +202,27 @@ public record IngredientArrayData(List<Group> inputs, List<Group> randomOutputs)
           && (resource.equals("item") || checker.isEmpty() && modifiers.isEmpty());
     }
 
-    @Override
-    public Optional<ItemStack> item() {
-      return item.map(ItemStack::copy);
+    public Choice capture(HolderLookup.Provider registries) {
+      var captured = prototype.capture(registries);
+      return captured == prototype ? this : new Choice(
+          resource,
+          captured,
+          chemical,
+          amount,
+          chance,
+          checker,
+          modifiers,
+          minAmount,
+          maxAmount,
+          match);
     }
 
-    @Override
+    public Optional<ItemStack> item() {
+      return prototype.item();
+    }
+
     public Optional<FluidStack> fluid() {
-      return fluid.map(FluidStack::copy);
+      return prototype.fluid();
     }
 
     @Override
@@ -218,32 +239,13 @@ public record IngredientArrayData(List<Group> inputs, List<Group> randomOutputs)
           && checker.equals(value.checker)
           && modifiers.equals(value.modifiers)
           && match.equals(value.match)
-          && item.isPresent() == value.item.isPresent()
-          && fluid.isPresent() == value.fluid.isPresent()
-          && (item.isEmpty() || ItemStack.matches(item.orElseThrow(), value.item.orElseThrow()))
-          && (fluid.isEmpty() || FluidStack.matches(fluid.orElseThrow(), value.fluid.orElseThrow()));
+          && prototype.equals(value.prototype);
     }
 
     @Override
     public int hashCode() {
-      var stack = item.orElse(ItemStack.EMPTY);
-      var liquid = fluid.orElse(FluidStack.EMPTY);
-      return Objects.hash(
-          resource,
-          amount,
-          minAmount,
-          maxAmount,
-          chance,
-          chemical,
-          checker,
-          modifiers,
-          match,
-          stack.getItem(),
-          stack.getComponents(),
-          stack.getCount(),
-          liquid.getFluid(),
-          liquid.getComponents(),
-          liquid.getAmount());
+      return Objects
+          .hash(resource, amount, minAmount, maxAmount, chance, chemical, checker, modifiers, match, prototype);
     }
   }
 

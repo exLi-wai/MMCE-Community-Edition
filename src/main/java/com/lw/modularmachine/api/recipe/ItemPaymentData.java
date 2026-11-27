@@ -39,6 +39,13 @@ public record ItemPaymentData(List<Tool> tools, List<Fuel> fuels) {
     return tools.stream().anyMatch(tool -> tool.row() == row);
   }
 
+  /**
+   * Tools have their own durability proof and never enter ordinary item matching.
+   */
+  public boolean allowsItemOnlyMatch(int row, int inputCount) {
+    return inputCount == 1 || isTool(row);
+  }
+
   public record Tool(int row, int durability) {
     public static final Codec<Tool> CODEC = RecordCodecBuilder.create(
         instance -> instance

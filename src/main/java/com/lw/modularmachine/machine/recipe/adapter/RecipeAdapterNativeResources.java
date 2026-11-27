@@ -1,7 +1,5 @@
 package com.lw.modularmachine.machine.recipe.adapter;
 
-import com.google.gson.JsonObject;
-import com.google.gson.JsonParser;
 import com.lw.modularmachine.api.recipe.BufferedAmountRecipeData;
 import com.lw.modularmachine.api.recipe.CompressedAirRecipeData;
 import com.lw.modularmachine.api.recipe.ConstellationRecipeData;
@@ -15,14 +13,12 @@ import com.lw.modularmachine.api.recipe.adapter.RecipeAdapterCustomization.Nativ
 import com.lw.modularmachine.api.recipe.resource.RecipeResources;
 import com.lw.modularmachine.machine.recipe.resource.RecipeResourceBuilderDeclarations;
 import com.lw.modularmachine.machine.recipe.resource.RecipeResourceDefinitions;
-import com.mojang.serialization.JsonOps;
 import java.util.ArrayList;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.Optional;
 import java.util.Set;
-import net.minecraft.core.HolderLookup;
 import net.minecraft.resources.ResourceLocation;
 import org.jetbrains.annotations.ApiStatus;
 
@@ -43,31 +39,17 @@ public final class RecipeAdapterNativeResources {
     }
   }
 
-  static void apply(JsonObject target, Map<ResourceLocation, NativeResource> declarations, HolderLookup.Provider registries) {
-    for (var declaration : declarations.entrySet()) {
-      requireCustomizable(declaration.getKey());
-      var addition = RecipeResourceBuilderDeclarations.decode(
-          declaration.getKey(),
-          JsonParser.parseString(declaration.getValue().encoded()).getAsJsonObject(),
-          registries);
-      var result = declaration.getValue().replace() ? addition : merge(target, addition, registries);
-      RecipeResourceBuilderDeclarations.apply(target, result, registries);
-    }
+  static RecipeResources.Entry<?> apply(RecipeResources original, NativeResource resource) {
+    requireCustomizable(resource.entry().type().id());
+    return resource.replace() ? resource.entry() : merge(original, resource.entry());
   }
 
-  private static <D> RecipeResources.Entry<D> merge(JsonObject target, RecipeResources.Entry<D> addition, HolderLookup.Provider registries) {
+  private static <D> RecipeResources.Entry<D> merge(RecipeResources original, RecipeResources.Entry<D> addition) {
     var type = addition.type();
-    var original = new JsonObject();
-    for (String field : RecipeResourceDefinitions.fields(type)) {
-      if (target.has(field)) {
-        original.add(field, target.get(field));
-      }
-    }
-    if (original.size() == 0) {
+    D source = original.get(type);
+    if (type.isEmpty(source)) {
       return addition;
     }
-    var ops = registries.createSerializationContext(JsonOps.INSTANCE);
-    D source = type.nativeCodec().codec().parse(ops, original).getOrThrow();
     D combined = type.dataClass().cast(mergeData(type.id(), source, addition.data()));
     return RecipeResourceBuilderDeclarations.capture(type, combined);
   }

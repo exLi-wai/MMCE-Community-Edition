@@ -1,12 +1,19 @@
 package com.lw.modularmachine.machine.recipe;
 
 import com.lw.modularmachine.api.recipe.RecipeModifier;
+import com.lw.modularmachine.api.recipe.MachineRecipeDeclaration;
+import com.lw.modularmachine.api.recipe.IngredientArrayData;
+import com.lw.modularmachine.api.recipe.TriggeredResourceData;
+import com.mojang.serialization.DynamicOps;
+import com.mojang.serialization.MapLike;
+import net.minecraft.core.HolderLookup;
+import net.minecraft.nbt.ByteTag;
+import java.util.Optional;
 import com.lw.modularmachine.api.recipe.RecipeSelectors;
 import com.lw.modularmachine.api.recipe.RecipeFailureAction;
 import com.lw.modularmachine.api.recipe.ChemicalRecipeData;
 import com.lw.modularmachine.machine.recipe.resource.RecipeResourceDefinitions;
 import com.mojang.serialization.JsonOps;
-import com.lw.modularmachine.config.MachineConfig;
 import com.google.gson.JsonElement;
 import com.google.gson.JsonObject;
 import com.google.gson.JsonParseException;
@@ -17,7 +24,6 @@ import org.jetbrains.annotations.ApiStatus;
 import com.lw.modularmachine.api.smart.SmartNumberRequirement;
 import com.lw.modularmachine.api.recipe.RecipeExecutionOptions;
 import com.lw.modularmachine.api.recipe.RecipeScriptOptions;
-import java.util.ArrayList;
 import java.util.List;
 import java.util.Set;
 import java.util.HashSet;
@@ -77,6 +83,114 @@ public final class MachineRecipeJson {
     return Set.copyOf(fields);
   }
 
+  public static MachineRecipeDeclaration decode(JsonObject root, HolderLookup.Provider registries) {
+    return decode(root, registries.createSerializationContext(JsonOps.INSTANCE));
+  }
+
+  public static MachineRecipeDeclaration decode(JsonObject root, DynamicOps<JsonElement> ops) {
+    return decode(root, ops, ops.getMap(root).getOrThrow());
+  }
+
+  static <T> MachineRecipeDeclaration decode(DynamicOps<T> ops, MapLike<T> input) {
+    var mapped = ops.createMap(input.entries());
+    var source = ops.convertTo(JsonOps.INSTANCE, mapped).getAsJsonObject();
+    if (mapped instanceof CompoundTag tag) {
+      restoreRowBooleans(source, tag);
+      if (input.get("parallelized") instanceof ByteTag flag && flag.getAsByte() >= 0 && flag.getAsByte() <= 1) {
+        source.addProperty("parallelized", flag.getAsByte() == 1);
+      }
+    }
+    if (source.has(KUBEJS_CHANGED_MARKER)) {
+      source = source.deepCopy();
+      source.remove(KUBEJS_CHANGED_MARKER);
+    }
+    return decode(source, ops, input);
+  }
+
+  private static <T> MachineRecipeDeclaration decode(JsonObject source, DynamicOps<T> ops, MapLike<T> input) {
+    return decode(source, ops, input, false);
+  }
+
+  /**
+   * Group selections append exact rows after an already validated direct input.
+   */
+  @ApiStatus.Internal
+  public static MachineRecipe compileResolved(JsonObject source, DynamicOps<JsonElement> ops) {
+    var declaration = decode(source, ops, ops.getMap(source).getOrThrow(), true);
+    return MachineRecipeCompiler
+        .compileResolved(declaration, List.of(), false, MachineRecipeCompiler.currentDefaults());
+  }
+
+  private static <T> MachineRecipeDeclaration decode(JsonObject source, DynamicOps<T> ops, MapLike<T> input, boolean resolved) {
+    // Install descriptor field ownership before the lightweight shape check on
+    // first decode.
+    RecipeResourceDefinitions.snapshot();
+    var header = validate(source, resolved);
+    return new MachineRecipeDeclaration(
+        ResourceLocation.parse(header.machine()),
+        header.priority(),
+        header.duration(),
+        RecipeResourceDefinitions.CODEC.decode(ops, input).getOrThrow(),
+        source.has("failure_action") ? Optional.of(RecipeFailureAction.parse(header.failureAction())) : Optional
+            .empty(),
+        source.has("parallelized") ? Optional.of(header.parallelized()) : Optional.empty(),
+        header.randomSeed(),
+        source.has("interface_inputs") ? SmartNumberRequirement
+            .parse(source.get("interface_inputs"), "$.interface_inputs") : List.of(),
+        header.selectors(),
+        RecipeExecutionOptions.MAP_CODEC.decode(ops, input).getOrThrow(),
+        RecipeScriptOptions.CODEC.decode(ops, input).getOrThrow(),
+        IngredientArrayData.MAP_CODEC.decode(ops, input).getOrThrow(),
+        TriggeredResourceData.MAP_CODEC.decode(ops, input).getOrThrow(),
+        source.has("modifiers") ? RecipeModifiers.parse(source.get("modifiers"), "$.modifiers") : List.of(),
+        source.has("fluid_per_tick"),
+        source.has("selectors") ? source.getAsJsonObject("selectors").keySet() : Set.of());
+  }
+
+  /**
+   * Explicit data-pack export, preserving omitted defaults and original values.
+   */
+  public static JsonObject encode(MachineRecipeDeclaration source, HolderLookup.Provider registries) {
+    var ops = registries.createSerializationContext(JsonOps.INSTANCE);
+    var fields = ops.mapBuilder();
+    fields = RecipeResourceDefinitions.CODEC.encode(source.resources(), ops, fields);
+    fields = RecipeExecutionOptions.MAP_CODEC.encode(source.executionOptions(), ops, fields);
+    fields = RecipeScriptOptions.CODEC.encode(source.scriptOptions(), ops, fields);
+    fields = IngredientArrayData.MAP_CODEC.encode(source.ingredientArrays(), ops, fields);
+    fields = TriggeredResourceData.MAP_CODEC.encode(source.triggeredResources(), ops, fields);
+    var result = fields.build(ops.empty()).getOrThrow().getAsJsonObject();
+    result.addProperty("type", TYPE);
+    result.addProperty("machine", source.machineId().toString());
+    result.addProperty("priority", source.priority());
+    result.addProperty("duration", source.duration());
+    source.parallelized().ifPresent(value -> result.addProperty("parallelized", value));
+    source.failureAction().ifPresent(value -> result.addProperty("failure_action", value.serialized()));
+    if (source.randomSeed() != 0) {
+      result.addProperty("random_seed", source.randomSeed());
+    }
+    if (!source.interfaceInputs().isEmpty()) {
+      result.add(
+          "interface_inputs",
+          SmartNumberRequirement.CODEC.listOf().encodeStart(ops, source.interfaceInputs()).getOrThrow());
+    }
+    if (!source.modifiers().isEmpty()) {
+      result.add("modifiers", RecipeModifier.CODEC.listOf().encodeStart(ops, source.modifiers()).getOrThrow());
+    }
+    if (!source.declaredSelectorFields().isEmpty()) {
+      var selectors = RecipeSelectors.CODEC.encodeStart(ops, source.selectors()).getOrThrow().getAsJsonObject();
+      for (var field : source.declaredSelectorFields()) {
+        if (!selectors.has(field)) {
+          selectors.addProperty(field, "");
+        }
+      }
+      result.add("selectors", selectors);
+    }
+    if (source.legacyFluidPerTick()) {
+      result.add("fluid_per_tick", result.remove("fluid_per_tick_inputs").getAsJsonArray().get(0));
+    }
+    return result;
+  }
+
   public record Header(
       String machine,
       int priority,
@@ -106,6 +220,10 @@ public final class MachineRecipeJson {
   }
 
   public static Header validate(JsonElement root) {
+    return validate(root, false);
+  }
+
+  static Header validate(JsonElement root, boolean resolved) {
     var object = object(root, "$");
     fields(object, fields(), "$");
     if (object.has("type") && !TYPE.equals(string(object.get("type"), "$.type"))) {
@@ -175,18 +293,16 @@ public final class MachineRecipeJson {
     if (randomSeed < 0) {
       throw error("$.random_seed", "Random seeds require a non-negative schema 2 long");
     }
-    if (object.has("modifiers")) {
-      RecipeModifiers.parse(object.get("modifiers"), "$.modifiers");
-    }
-    demands(object.get("inputs"), "$.inputs", true);
-    demands(object.get("outputs"), "$.outputs", false);
+    List<RecipeModifier> modifiers = object.has("modifiers") ? RecipeModifiers
+        .parse(object.get("modifiers"), "$.modifiers") : List.of();
+    var payments = object.has("item_payments") ? ItemPaymentData.CODEC
+        .parse(JsonOps.INSTANCE, object.get("item_payments")).getOrThrow() : ItemPaymentData.NONE;
+    demands(object.get("inputs"), "$.inputs", true, payments, resolved);
+    demands(object.get("outputs"), "$.outputs", false, ItemPaymentData.NONE, false);
     validateScriptOptions(object);
-    if (object.has("item_payments")) {
-      var payments = ItemPaymentData.CODEC.parse(JsonOps.INSTANCE, object.get("item_payments")).getOrThrow();
-      for (var tool : payments.tools()) {
-        if (tool.row() >= object.getAsJsonArray("inputs").size()) {
-          throw error("$.item_payments.tools", "Tool payment refers to a missing input row");
-        }
+    for (var tool : payments.tools()) {
+      if (tool.row() >= object.getAsJsonArray("inputs").size()) {
+        throw error("$.item_payments.tools", "Tool payment refers to a missing input row");
       }
     }
     if (object.has("ingredient_arrays")) {
@@ -197,6 +313,8 @@ public final class MachineRecipeJson {
     }
     RecipeTriggeredResources.validate(object, (int) duration);
     var chemicals = validateChemicals(object);
+    // Energy modifiers can supply an otherwise missing side. Compilation checks the
+    // effective resources.
     if (!RecipeResourceDefinitions.Fields.hasExtensions(object.keySet())
         && (object.getAsJsonArray("inputs").isEmpty()
             && (!object.has("ingredient_arrays")
@@ -212,6 +330,7 @@ public final class MachineRecipeJson {
             && energyPerTick == 0
             && chemicals.inputs().isEmpty()
             && chemicals.perTick().isEmpty()
+            && !modifiesEnergy(modifiers, RecipeModifier.Io.INPUT)
             || object.getAsJsonArray("outputs").isEmpty()
                 && (!object.has("random_item_outputs") || object.getAsJsonArray("random_item_outputs").isEmpty())
                 && !RecipeTriggeredResources.has(object, RecipeModifier.Io.OUTPUT)
@@ -219,7 +338,8 @@ public final class MachineRecipeJson {
                 && !object.has("fluid_per_tick_outputs")
                 && chemicals.outputs().isEmpty()
                 && chemicals.perTickOutputs().isEmpty()
-                && energyOutputPerTick == 0)) {
+                && energyOutputPerTick == 0
+                && !modifiesEnergy(modifiers, RecipeModifier.Io.OUTPUT))) {
       throw error("$", "A machine recipe requires resource input and output");
     }
     if (object.has("interface_inputs")) {
@@ -245,242 +365,8 @@ public final class MachineRecipeJson {
         selectors);
   }
 
-  /**
-   * Resolve once before native decoding; effective recipes never retain
-   * executable modifiers.
-   */
-  public static JsonObject normalize(JsonElement root) {
-    return normalize(root, List.of());
-  }
-
-  /**
-   * Merge declaration sources before evaluation; never feed a previously
-   * normalized value back in.
-   */
-  public static JsonObject normalize(JsonElement root, List<RecipeModifier> inheritedRules) {
-    return normalize(root, inheritedRules, false);
-  }
-
-  /**
-   * Internal contextual energy policy; frozen effective declarations never apply
-   * it again.
-   */
-  static JsonObject normalize(JsonElement root, List<RecipeModifier> inheritedRules, boolean durationMultiplier) {
-    return normalize(root, inheritedRules, durationMultiplier, currentDefaults());
-  }
-
-  /** Internal immutable defaults captured for one candidate compilation. */
-  record Defaults(boolean parallelized, RecipeFailureAction failureAction) {
-  }
-
-  static Defaults currentDefaults() {
-    return new Defaults(MachineConfig.recipeParallelDefault(), MachineConfig.defaultFailureAction());
-  }
-
-  static JsonObject normalize(JsonElement root, List<RecipeModifier> inheritedRules, boolean durationMultiplier, Defaults defaults) {
-    validate(root);
-    var source = root.getAsJsonObject();
-    if (!source.has("parallelized") || !source.has("failure_action")) {
-      source = source.deepCopy();
-      if (!source.has("parallelized")) {
-        source.addProperty("parallelized", defaults.parallelized());
-      }
-      if (!source.has("failure_action")) {
-        source.addProperty("failure_action", defaults.failureAction().serialized());
-      }
-    }
-    if (!source.has("modifiers") && inheritedRules.isEmpty()) {
-      return source;
-    }
-    var rules = new ArrayList<RecipeModifier>();
-    if (source.has("modifiers")) {
-      rules.addAll(RecipeModifiers.parse(source.get("modifiers"), "$.modifiers"));
-    }
-    rules.addAll(inheritedRules);
-    final RecipeModifiers modifiers;
-    try {
-      modifiers = new RecipeModifiers(rules);
-    } catch (RuntimeException invalid) {
-      throw new JsonParseException("$.modifiers: " + invalid.getMessage(), invalid);
-    }
-    var result = source.deepCopy();
-    result.remove("modifiers");
-    try {
-      int originalDuration = (int) integer(source.get("duration"), "$.duration");
-      int duration = modifiers.duration(originalDuration);
-      result.addProperty("duration", duration);
-      long baseEnergy = source.has("energy_per_tick") ? integer(source.get("energy_per_tick"), "$.energy_per_tick") : 0;
-      long energy = modifiers.amount(
-          RecipeModifier.Target.ENERGY,
-          RecipeModifier.Io.INPUT,
-          baseEnergy,
-          0,
-          Long.MAX_VALUE,
-          durationMultiplier ? originalDuration : 1,
-          durationMultiplier ? duration : 1);
-      if (energy > 0 || source.has("energy_per_tick")) {
-        result.addProperty("energy_per_tick", energy);
-      }
-      long baseOutputEnergy = source.has(
-          "energy_output_per_tick") ? integer(source.get("energy_output_per_tick"), "$.energy_output_per_tick") : 0;
-      long outputEnergy = modifiers
-          .amount(RecipeModifier.Target.ENERGY, RecipeModifier.Io.OUTPUT, baseOutputEnergy, 0, Long.MAX_VALUE);
-      if (outputEnergy > 0 || source.has("energy_output_per_tick")) {
-        result.addProperty("energy_output_per_tick", outputEnergy);
-      }
-      modifyItems(result, "inputs", RecipeModifier.Io.INPUT, modifiers);
-      modifyItems(result, "outputs", RecipeModifier.Io.OUTPUT, modifiers);
-      if (result.has("item_payments")) {
-        var payments = result.getAsJsonObject("item_payments");
-        if (payments.has("fuels")) {
-          for (var element : payments.getAsJsonArray("fuels")) {
-            var fuel = element.getAsJsonObject();
-            fuel.addProperty(
-                "burn_time",
-                modifiers.amount(
-                    RecipeModifier.Target.ITEM,
-                    RecipeModifier.Io.INPUT,
-                    integer(fuel.get("burn_time"), "$.item_payments.fuels.burn_time"),
-                    1,
-                    Long.MAX_VALUE));
-            fuel.addProperty(
-                "chance",
-                modifiers.chance(
-                    RecipeModifier.Target.ITEM,
-                    RecipeModifier.Io.INPUT,
-                    fuel.has("chance") ? decimal(fuel.get("chance"), "$.item_payments.fuels.chance") : 1));
-          }
-        }
-      }
-      modifyIngredientArrays(result, modifiers);
-      RecipeTriggeredResources.modify(result, modifiers, originalDuration, duration);
-      modifyFluids(result, "fluid_inputs", RecipeModifier.Io.INPUT, modifiers);
-      modifyFluids(result, "fluid_outputs", RecipeModifier.Io.OUTPUT, modifiers);
-      modifyFluids(result, "fluid_per_tick_inputs", RecipeModifier.Io.INPUT, modifiers);
-      modifyFluids(result, "fluid_per_tick_outputs", RecipeModifier.Io.OUTPUT, modifiers);
-      if (result.has("chemicals")) {
-        var chemicals = result.getAsJsonObject("chemicals");
-        modifyChemicals(chemicals, "inputs", RecipeModifier.Io.INPUT, modifiers);
-        modifyChemicals(chemicals, "outputs", RecipeModifier.Io.OUTPUT, modifiers);
-        modifyChemicals(chemicals, "per_tick", RecipeModifier.Io.INPUT, modifiers);
-        modifyChemicals(chemicals, "per_tick_outputs", RecipeModifier.Io.OUTPUT, modifiers);
-      }
-      if (result.has("fluid_per_tick")) {
-        var fluid = result.getAsJsonObject("fluid_per_tick");
-        long amount = modifiers.amount(
-            RecipeModifier.Target.FLUID,
-            RecipeModifier.Io.INPUT,
-            integer(fluid.get("amount"), "$.fluid_per_tick.amount"),
-            0,
-            Integer.MAX_VALUE);
-        if (amount == 0) {
-          result.remove("fluid_per_tick");
-        } else {
-          fluid.addProperty("amount", amount);
-        }
-      }
-    } catch (RuntimeException invalid) {
-      throw new JsonParseException("$.modifiers: " + invalid.getMessage(), invalid);
-    }
-    validate(result);
-
-    return result;
-  }
-
-  private static void modifyItems(JsonObject root, String field, RecipeModifier.Io io, RecipeModifiers modifiers) {
-    var entries = root.getAsJsonArray(field);
-    for (int index = 0; index < entries.size(); index++) {
-      var entry = entries.get(index).getAsJsonObject();
-      String path = "$." + field + "[" + index + "]";
-      entry.addProperty(
-          "amount",
-          modifiers.amount(
-              RecipeModifier.Target.ITEM,
-              io,
-              integer(entry.get("amount"), path + ".amount"),
-              1,
-              Long.MAX_VALUE));
-      double chance = entry.has("chance") ? decimal(entry.get("chance"), path + ".chance") : 1.0D;
-      entry.addProperty("chance", modifiers.chance(RecipeModifier.Target.ITEM, io, chance));
-      if (entry.has("max_amount")) {
-        long minimum = modifiers.amount(
-            RecipeModifier.Target.ITEM,
-            io,
-            integer(entry.get("min_amount"), path + ".min_amount"),
-            0,
-            Long.MAX_VALUE);
-        entry.addProperty("min_amount", Math.min(minimum, entry.get("amount").getAsLong()));
-        entry.addProperty("max_amount", entry.get("amount").getAsLong());
-      }
-    }
-  }
-
-  private static void modifyIngredientArrays(JsonObject root, RecipeModifiers modifiers) {
-    modifyIngredientGroups(root, "ingredient_arrays", RecipeModifier.Io.INPUT, modifiers);
-    modifyIngredientGroups(root, "random_item_outputs", RecipeModifier.Io.OUTPUT, modifiers);
-  }
-
-  private static void modifyIngredientGroups(JsonObject root, String field, RecipeModifier.Io io, RecipeModifiers modifiers) {
-    if (!root.has(field)) {
-      return;
-    }
-    for (var element : root.getAsJsonArray(field)) {
-      var group = element.getAsJsonObject();
-      double groupChance = group.has("chance") ? decimal(group.get("chance"), "$.ingredient_arrays.chance") : 1;
-      for (var alternative : group.getAsJsonArray("alternatives")) {
-        var choice = alternative.getAsJsonObject();
-        var target = RecipeModifier.Target.parse(choice.get("resource").getAsString());
-        choice.addProperty(
-            "amount",
-            modifiers.amount(
-                target,
-                io,
-                integer(choice.get("amount"), "$.ingredient_arrays.alternatives.amount"),
-                1,
-                target == RecipeModifier.Target.FLUID ? Integer.MAX_VALUE : Long.MAX_VALUE));
-        if (choice.has("min_amount")) {
-          choice.addProperty(
-              "min_amount",
-              modifiers.amount(
-                  target,
-                  io,
-                  integer(choice.get("min_amount"), "$.ingredient_arrays.alternatives.min_amount"),
-                  0,
-                  target == RecipeModifier.Target.FLUID ? Integer.MAX_VALUE : Long.MAX_VALUE));
-        }
-        if (choice.has("max_amount")) {
-          choice.addProperty("max_amount", choice.get("amount").getAsLong());
-        }
-        if (io == RecipeModifier.Io.INPUT) {
-          double chance = choice
-              .has("chance") ? decimal(choice.get("chance"), "$.ingredient_arrays.alternatives.chance") : 1;
-          choice.addProperty("chance", modifiers.chance(target, io, groupChance * chance));
-        }
-      }
-      group.addProperty(
-          "chance",
-          io == RecipeModifier.Io.INPUT ? 1 : modifiers.chance(RecipeModifier.Target.ITEM, io, groupChance));
-    }
-  }
-
-  private static void modifyFluids(JsonObject root, String field, RecipeModifier.Io io, RecipeModifiers modifiers) {
-    if (!root.has(field)) {
-      return;
-    }
-    var entries = root.getAsJsonArray(field);
-    for (int index = 0; index < entries.size(); index++) {
-      var entry = entries.get(index).getAsJsonObject();
-      entry.addProperty(
-          "amount",
-          modifiers.amount(
-              RecipeModifier.Target.FLUID,
-              io,
-              integer(entry.get("amount"), "$." + field + "[" + index + "].amount"),
-              1,
-              Integer.MAX_VALUE));
-      double chance = entry.has("chance") ? decimal(entry.get("chance"), "$." + field + "[" + index + "].chance") : 1;
-      entry.addProperty("chance", modifiers.chance(RecipeModifier.Target.FLUID, io, chance));
-    }
+  private static boolean modifiesEnergy(List<RecipeModifier> modifiers, RecipeModifier.Io io) {
+    return modifiers.stream().anyMatch(rule -> rule.target() == RecipeModifier.Target.ENERGY && rule.io() == io);
   }
 
   private static void validateFluidList(JsonObject root, String field, String schemaError) {
@@ -560,29 +446,7 @@ public final class MachineRecipeJson {
     }
   }
 
-  private static void modifyChemicals(JsonObject root, String field, RecipeModifier.Io io, RecipeModifiers modifiers) {
-    if (!root.has(field)) {
-      return;
-    }
-    var entries = root.getAsJsonArray(field);
-    for (int index = 0; index < entries.size(); index++) {
-      var entry = entries.get(index).getAsJsonObject();
-      entry.addProperty(
-          "amount",
-          modifiers.amount(
-              RecipeModifier.Target.CHEMICAL,
-              io,
-              integer(entry.get("amount"), "$.chemicals." + field + "[" + index + "].amount"),
-              1,
-              Long.MAX_VALUE));
-      entry.addProperty(
-          "chance",
-          modifiers
-              .chance(RecipeModifier.Target.CHEMICAL, io, entry.has("chance") ? entry.get("chance").getAsDouble() : 1));
-    }
-  }
-
-  private static void demands(JsonElement element, String path, boolean input) {
+  private static void demands(JsonElement element, String path, boolean input, ItemPaymentData payments, boolean resolved) {
     if (element == null || !element.isJsonArray()) {
       throw error(path, "Expected array");
     }
@@ -613,7 +477,7 @@ public final class MachineRecipeJson {
       if (!match.equals("exact") && !match.equals("item")) {
         throw error(at + ".match", "Expected exact or item");
       }
-      if (match.equals("item") && (!input || array.size() != 1)) {
+      if (match.equals("item") && (!input || !payments.allowsItemOnlyMatch(i, array.size()) && !(resolved && i == 0))) {
         throw error(at + ".match", "Item-only matching requires a single item input row");
       }
       if (demand.has("selector")) {
@@ -759,6 +623,25 @@ public final class MachineRecipeJson {
 
   /** Native NBT booleans are bytes; restore only declared row flag fields. */
   static void restoreRowBooleans(JsonObject json, CompoundTag source) {
+    for (String field : List.of("ingredient_arrays", "random_item_outputs")) {
+      if (json.has(field)) {
+        var rows = source.getList(field, Tag.TAG_COMPOUND);
+        var encoded = json.getAsJsonArray(field);
+        for (int index = 0; index < rows.size() && index < encoded.size(); index++) {
+          var row = rows.getCompound(index);
+          var group = encoded.get(index).getAsJsonObject();
+          restoreBoolean(group, row, "optional");
+          restoreBoolean(group, row, "parallel_unaffected");
+          if (group.has("recipe_modifiers")) {
+            var modifiers = row.getList("recipe_modifiers", Tag.TAG_COMPOUND);
+            var rules = group.getAsJsonArray("recipe_modifiers");
+            for (int rule = 0; rule < modifiers.size() && rule < rules.size(); rule++) {
+              restoreBoolean(rules.get(rule).getAsJsonObject(), modifiers.getCompound(rule), "affect_chance");
+            }
+          }
+        }
+      }
+    }
     if (source.contains("load_jei")) {
       if (!source.contains("load_jei", Tag.TAG_BYTE)
           || source.getByte("load_jei") < 0

@@ -2,9 +2,13 @@ package com.lw.modularmachine.machine.recipe.resource;
 
 import com.lw.modularmachine.api.recipe.FluidRequirement;
 import com.lw.modularmachine.machine.recipe.MachineRecipeJson;
+import com.mojang.serialization.DataResult;
+import com.mojang.serialization.DynamicOps;
 import com.mojang.serialization.MapCodec;
 import com.mojang.serialization.codecs.RecordCodecBuilder;
 import java.util.List;
+import net.minecraft.nbt.NbtOps;
+import net.minecraft.util.ExtraCodecs;
 import net.neoforged.neoforge.fluids.FluidStack;
 import org.jetbrains.annotations.ApiStatus;
 
@@ -28,7 +32,9 @@ public record FluidRecipeData(
               .forGetter(FluidRecipeData::perTickInputs),
           FluidRequirement.CODEC.listOf().optionalFieldOf("fluid_per_tick_outputs", List.of())
               .forGetter(FluidRecipeData::perTickOutputs),
-          FluidStack.CODEC.optionalFieldOf("fluid_per_tick", FluidStack.EMPTY).forGetter(value -> FluidStack.EMPTY))
+          FluidStack.CODEC.optionalFieldOf("fluid_per_tick", FluidStack.EMPTY).forGetter(value -> FluidStack.EMPTY),
+          ExtraCodecs.<DynamicOps<?>>retrieveContext(ops -> DataResult.success(ops))
+              .forGetter(ignored -> NbtOps.INSTANCE))
           .apply(instance, FluidRecipeData::decoded));
 
   public FluidRecipeData(List<FluidRequirement> inputs, List<FluidRequirement> outputs, FluidStack perTick) {
@@ -47,12 +53,12 @@ public record FluidRecipeData(
     return perTickInputs.isEmpty() ? FluidStack.EMPTY : perTickInputs.getFirst().stack();
   }
 
-  private static FluidRecipeData decoded(List<FluidRequirement> inputs, List<FluidRequirement> outputs, List<FluidRequirement> perTickInputs, List<FluidRequirement> perTickOutputs, FluidStack legacy) {
+  private static FluidRecipeData decoded(List<FluidRequirement> inputs, List<FluidRequirement> outputs, List<FluidRequirement> perTickInputs, List<FluidRequirement> perTickOutputs, FluidStack legacy, DynamicOps<?> ops) {
     if (!legacy.isEmpty()) {
       if (!perTickInputs.isEmpty()) {
         throw new IllegalArgumentException("Use either fluid_per_tick or fluid_per_tick_inputs");
       }
-      perTickInputs = List.of(new FluidRequirement(legacy, 1));
+      perTickInputs = List.of(new FluidRequirement(legacy, 1).capture(ops));
     }
 
     return new FluidRecipeData(inputs, outputs, perTickInputs, perTickOutputs);

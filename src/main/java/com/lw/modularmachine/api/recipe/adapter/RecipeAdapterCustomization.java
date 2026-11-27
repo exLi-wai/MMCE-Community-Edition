@@ -1,7 +1,19 @@
 package com.lw.modularmachine.api.recipe.adapter;
 
-import com.google.gson.JsonObject;
-import com.google.gson.JsonParser;
+import com.google.gson.JsonElement;
+import com.mojang.serialization.JsonOps;
+import com.mojang.serialization.DynamicOps;
+import com.mojang.serialization.Codec;
+import java.util.ArrayList;
+import java.util.function.ToIntFunction;
+import net.minecraft.world.item.ItemStack;
+import net.minecraft.core.HolderLookup;
+import com.lw.modularmachine.api.recipe.FluidRequirement;
+import com.lw.modularmachine.api.recipe.IngredientArrayData;
+import com.lw.modularmachine.api.recipe.TriggeredResourceData;
+import com.lw.modularmachine.api.recipe.resource.RecipeResources;
+import com.lw.modularmachine.api.recipe.ItemAmount;
+import com.lw.modularmachine.machine.recipe.resource.RecipeResourceBuilderDeclarations;
 import com.lw.modularmachine.api.recipe.ChemicalRequirement;
 import com.lw.modularmachine.api.recipe.RecipeFailureAction;
 import com.lw.modularmachine.api.recipe.RecipeModifier;
@@ -13,10 +25,8 @@ import java.util.List;
 import java.util.Map;
 import java.util.Objects;
 import java.util.Optional;
-import java.util.Set;
 import net.minecraft.resources.ResourceLocation;
 import com.lw.modularmachine.api.recipe.ItemPaymentData;
-import com.mojang.serialization.JsonOps;
 
 /**
  * Closed, immutable additions to each original declaration produced by an
@@ -25,13 +35,13 @@ import com.mojang.serialization.JsonOps;
 public record RecipeAdapterCustomization(
     List<RecipeModifier> modifiers,
     List<SmartNumberRequirement> interfaceInputs,
-    List<FluidResource> fluidInputs,
-    List<FluidResource> fluidOutputs,
-    Optional<FluidResource> fluidPerTick,
+    List<FluidRequirement> fluidInputs,
+    List<FluidRequirement> fluidOutputs,
+    Optional<FluidRequirement> fluidPerTick,
     List<ChemicalRequirement> chemicalInputs,
     List<ChemicalRequirement> chemicalOutputs,
     List<ChemicalRequirement> chemicalPerTick,
-    List<ItemOutput> itemOutputs,
+    List<ItemAmount> itemOutputs,
     Map<Phase, String> selectors,
     Optional<Boolean> parallelized,
     Optional<RecipeFailureAction> failureAction,
@@ -42,11 +52,10 @@ public record RecipeAdapterCustomization(
     List<CallbackBinding> itemCallbacks,
     List<ItemParallelism> itemParallelism,
     List<ChemicalRequirement> chemicalPerTickOutputs,
-    List<FluidResource> fluidPerTickInputs,
-    List<FluidResource> fluidPerTickOutputs,
+    List<FluidRequirement> fluidPerTickInputs,
+    List<FluidRequirement> fluidPerTickOutputs,
     ResourceAdditions resourceAdditions) {
   public static final int MAX_REQUIREMENTS = 256;
-  private static final int MAX_RESOURCE_JSON = 65536;
   public static final RecipeAdapterCustomization NONE = new RecipeAdapterCustomization(
       List.of(),
       List.of(),
@@ -70,20 +79,20 @@ public record RecipeAdapterCustomization(
       List.of(),
       List.of());
 
-  public RecipeAdapterCustomization(List<RecipeModifier> modifiers, List<SmartNumberRequirement> interfaceInputs, List<FluidResource> fluidInputs, List<FluidResource> fluidOutputs, Optional<FluidResource> fluidPerTick, List<ChemicalRequirement> chemicalInputs, List<ChemicalRequirement> chemicalOutputs, List<ChemicalRequirement> chemicalPerTick, List<ItemOutput> itemOutputs, Map<Phase, String> selectors, Optional<Boolean> parallelized, Optional<RecipeFailureAction> failureAction, long energyOutputPerTick, Optional<String> threadName, Optional<Integer> maxThreads, List<String> tooltips, List<CallbackBinding> itemCallbacks, List<ItemParallelism> itemParallelism, List<ChemicalRequirement> chemicalPerTickOutputs, List<FluidResource> fluidPerTickInputs, List<FluidResource> fluidPerTickOutputs) {
+  public RecipeAdapterCustomization(List<RecipeModifier> modifiers, List<SmartNumberRequirement> interfaceInputs, List<FluidRequirement> fluidInputs, List<FluidRequirement> fluidOutputs, Optional<FluidRequirement> fluidPerTick, List<ChemicalRequirement> chemicalInputs, List<ChemicalRequirement> chemicalOutputs, List<ChemicalRequirement> chemicalPerTick, List<ItemAmount> itemOutputs, Map<Phase, String> selectors, Optional<Boolean> parallelized, Optional<RecipeFailureAction> failureAction, long energyOutputPerTick, Optional<String> threadName, Optional<Integer> maxThreads, List<String> tooltips, List<CallbackBinding> itemCallbacks, List<ItemParallelism> itemParallelism, List<ChemicalRequirement> chemicalPerTickOutputs, List<FluidRequirement> fluidPerTickInputs, List<FluidRequirement> fluidPerTickOutputs) {
     this(modifiers, interfaceInputs, fluidInputs, fluidOutputs, fluidPerTick, chemicalInputs, chemicalOutputs,
         chemicalPerTick, itemOutputs, selectors, parallelized, failureAction, energyOutputPerTick, threadName,
         maxThreads, tooltips, itemCallbacks, itemParallelism, chemicalPerTickOutputs, fluidPerTickInputs,
         fluidPerTickOutputs, ResourceAdditions.NONE);
   }
 
-  public RecipeAdapterCustomization(List<RecipeModifier> modifiers, List<SmartNumberRequirement> interfaceInputs, List<FluidResource> fluidInputs, List<FluidResource> fluidOutputs, Optional<FluidResource> fluidPerTick, List<ChemicalRequirement> chemicalInputs, List<ChemicalRequirement> chemicalOutputs, List<ChemicalRequirement> chemicalPerTick, List<ItemOutput> itemOutputs, Map<Phase, String> selectors, Optional<Boolean> parallelized, Optional<RecipeFailureAction> failureAction, long energyOutputPerTick, Optional<String> threadName, Optional<Integer> maxThreads, List<String> tooltips, List<CallbackBinding> itemCallbacks, List<ItemParallelism> itemParallelism) {
+  public RecipeAdapterCustomization(List<RecipeModifier> modifiers, List<SmartNumberRequirement> interfaceInputs, List<FluidRequirement> fluidInputs, List<FluidRequirement> fluidOutputs, Optional<FluidRequirement> fluidPerTick, List<ChemicalRequirement> chemicalInputs, List<ChemicalRequirement> chemicalOutputs, List<ChemicalRequirement> chemicalPerTick, List<ItemAmount> itemOutputs, Map<Phase, String> selectors, Optional<Boolean> parallelized, Optional<RecipeFailureAction> failureAction, long energyOutputPerTick, Optional<String> threadName, Optional<Integer> maxThreads, List<String> tooltips, List<CallbackBinding> itemCallbacks, List<ItemParallelism> itemParallelism) {
     this(modifiers, interfaceInputs, fluidInputs, fluidOutputs, fluidPerTick, chemicalInputs, chemicalOutputs,
         chemicalPerTick, itemOutputs, selectors, parallelized, failureAction, energyOutputPerTick, threadName,
         maxThreads, tooltips, itemCallbacks, itemParallelism, List.of(), List.of(), List.of());
   }
 
-  public RecipeAdapterCustomization(List<RecipeModifier> modifiers, List<SmartNumberRequirement> interfaceInputs, List<FluidResource> fluidInputs, List<FluidResource> fluidOutputs, Optional<FluidResource> fluidPerTick, List<ChemicalRequirement> chemicalInputs, List<ChemicalRequirement> chemicalOutputs, List<ChemicalRequirement> chemicalPerTick, List<ItemOutput> itemOutputs, Map<Phase, String> selectors, Optional<Boolean> parallelized, Optional<RecipeFailureAction> failureAction) {
+  public RecipeAdapterCustomization(List<RecipeModifier> modifiers, List<SmartNumberRequirement> interfaceInputs, List<FluidRequirement> fluidInputs, List<FluidRequirement> fluidOutputs, Optional<FluidRequirement> fluidPerTick, List<ChemicalRequirement> chemicalInputs, List<ChemicalRequirement> chemicalOutputs, List<ChemicalRequirement> chemicalPerTick, List<ItemAmount> itemOutputs, Map<Phase, String> selectors, Optional<Boolean> parallelized, Optional<RecipeFailureAction> failureAction) {
     this(modifiers, interfaceInputs, fluidInputs, fluidOutputs, fluidPerTick, chemicalInputs, chemicalOutputs,
         chemicalPerTick, itemOutputs, selectors, parallelized, failureAction, 0, Optional.empty(), Optional.empty(),
         List.of(), List.of(), List.of());
@@ -118,6 +127,88 @@ public record RecipeAdapterCustomization(
     }
   }
 
+  /**
+   * Check the bounded component snapshots once when completing a script import.
+   * Only the individual descriptor or row codecs are consulted; these sizes are
+   * independent of the imported recipe count.
+   */
+  public void validateCaptureSize(HolderLookup.Provider registries) {
+    var ops = registries.createSerializationContext(JsonOps.INSTANCE);
+    for (var rows : List
+        .of(fluidInputs, fluidOutputs, fluidPerTickInputs, fluidPerTickOutputs, fluidPerTick.stream().toList())) {
+      for (var row : rows) {
+        requireSize(encodedSize(FluidRequirement.CODEC, ops, row));
+      }
+    }
+    var ranges = new ArrayList<String>();
+    for (int index = 0; index < itemOutputs.size(); index++) {
+      var row = itemOutputs.get(index);
+      requireSize(encodedSize(ItemStack.SINGLE_ITEM_CODEC, ops, row.ingredientStack()));
+      if (!row.previewStack().isEmpty()) {
+        requireSize(encodedSize(ItemStack.SINGLE_ITEM_CODEC, ops, row.previewStack()));
+      }
+      if (row.maxAmount() > 0) {
+        ranges.add("{\"row\":" + index + ",\"min\":" + row.minAmount() + ",\"max\":" + row.maxAmount() + "}");
+      }
+    }
+    var extra = resourceAdditions;
+    var size = new CaptureSize();
+    size.array("inputs", extra.inputs(), row -> encodedSize(ItemAmount.CODEC, ops, row));
+    size.array(
+        "ingredient_arrays",
+        extra.groups().inputs(),
+        row -> encodedSize(IngredientArrayData.Group.CODEC, ops, row));
+    size.array(
+        "random_item_outputs",
+        extra.groups().randomOutputs(),
+        row -> encodedSize(IngredientArrayData.Group.CODEC, ops, row));
+    size.array(
+        "triggered_resources",
+        extra.triggers(),
+        trigger -> encodedSize(TriggeredResourceData.Row.CODEC, ops, trigger.row()));
+    size.array("output_ranges", ranges, String::length);
+    extra.loadJei().ifPresent(value -> size.field("load_jei", Boolean.toString(value).length()));
+    if (!extra.payments().isEmpty()) {
+      size.field("item_payments", encodedSize(ItemPaymentData.CODEC, ops, extra.payments()));
+    }
+    for (var nativeResource : extra.nativeResources().entrySet()) {
+      var fields = RecipeResourceBuilderDeclarations.encode(nativeResource.getValue().entry(), registries);
+      size.add(nativeResource.getKey().toString().length() + fields.toString().length());
+    }
+  }
+
+  private static final class CaptureSize {
+    private long length = 2;
+    private boolean hasFields;
+
+    void add(long count) {
+      length += count;
+      requireSize(length);
+    }
+
+    void field(String name, long valueLength) {
+      add(name.length() + 3 + valueLength + (hasFields ? 1 : 0));
+      hasFields = true;
+    }
+
+    <T> void array(String name, List<T> values, ToIntFunction<T> measure) {
+      if (!values.isEmpty()) {
+        field(name, values.size() + 1L);
+        values.forEach(value -> add(measure.applyAsInt(value)));
+      }
+    }
+  }
+
+  private static <T> int encodedSize(Codec<T> codec, DynamicOps<JsonElement> ops, T value) {
+    return codec.encodeStart(ops, value).getOrThrow().toString().length();
+  }
+
+  private static void requireSize(long size) {
+    if (size > 65_536) {
+      throw new IllegalArgumentException("Adapter resource component data is too large");
+    }
+  }
+
   public enum Phase {
     FLUID_INPUT("fluid_input"),
     FLUID_OUTPUT("fluid_output"),
@@ -136,143 +227,56 @@ public record RecipeAdapterCustomization(
     }
   }
 
-  /**
-   * Closed additional native declarations captured using the registration's
-   * registry view.
-   */
-  public record ResourceAdditions(String encoded, Map<ResourceLocation, NativeResource> nativeResources) {
-    public static final ResourceAdditions NONE = new ResourceAdditions("{}");
-
-    public ResourceAdditions(String encoded) {
-      this(encoded, Map.of());
-    }
+  public record ResourceAdditions(
+      List<ItemAmount> inputs,
+      IngredientArrayData groups,
+      ItemPaymentData payments,
+      List<Trigger> triggers,
+      Optional<Boolean> loadJei,
+      Map<ResourceLocation, NativeResource> nativeResources) {
+    public static final ResourceAdditions NONE = new ResourceAdditions(
+        List.of(),
+        IngredientArrayData.NONE,
+        ItemPaymentData.NONE,
+        List.of(),
+        Optional.empty(),
+        Map.of());
 
     public ResourceAdditions {
+      inputs = bounded(inputs);
+      triggers = bounded(triggers);
+      Objects.requireNonNull(groups);
+      Objects.requireNonNull(payments);
+      Objects.requireNonNull(loadJei);
       nativeResources = Map.copyOf(nativeResources);
       if (nativeResources.size() > MAX_REQUIREMENTS) {
         throw new IllegalArgumentException("Too many adapter native resources");
       }
-      var declaration = resource(
-          encoded,
-          Set.of(
-              "inputs",
-              "ingredient_arrays",
-              "random_item_outputs",
-              "load_jei",
-              "item_payments",
-              "output_ranges",
-              "triggered_resources"));
-      if (declaration.has("item_payments")) {
-        ItemPaymentData.CODEC.parse(JsonOps.INSTANCE, declaration.get("item_payments")).getOrThrow();
-      }
-      for (String field : List.of("inputs", "ingredient_arrays", "random_item_outputs", "triggered_resources")) {
-        if (declaration.has(field)
-            && (!declaration.get(field).isJsonArray() || declaration.getAsJsonArray(field).size() > MAX_REQUIREMENTS)) {
-          throw new IllegalArgumentException("Adapter resource additions require bounded arrays");
+      nativeResources.forEach((id, value) -> {
+        if (!id.equals(value.entry().type().id())) {
+          throw new IllegalArgumentException("Adapter resource identity differs: " + id);
         }
-      }
-      if (declaration.has("load_jei")
-          && (!declaration.get("load_jei").isJsonPrimitive()
-              || !declaration.getAsJsonPrimitive("load_jei").isBoolean())) {
-        throw new IllegalArgumentException("Adapter visibility requires a boolean");
-      }
-      encoded = declaration.toString();
-      long size = encoded.length();
-      for (var entry : nativeResources.entrySet()) {
-        size += (long) entry.getKey().toString().length() + entry.getValue().encoded().length();
-      }
-      if (size > MAX_RESOURCE_JSON) {
-        throw new IllegalArgumentException("Adapter resource additions are too large");
-      }
-    }
-  }
-
-  public record NativeResource(String encoded, boolean replace) {
-    public NativeResource {
-      Objects.requireNonNull(encoded, "native resource declaration");
-      if (encoded.length() > MAX_RESOURCE_JSON) {
-        throw new IllegalArgumentException("Adapter native resource data is too large");
-      }
-      var declaration = JsonParser.parseString(encoded).getAsJsonObject();
-      if (declaration.size() == 0) {
-        throw new IllegalArgumentException("Adapter native resource declaration cannot be empty");
-      }
-      encoded = declaration.toString();
-    }
-  }
-
-  /**
-   * Registry-codec JSON captured at registration; no mutable FluidStack is
-   * retained.
-   */
-  public record FluidResource(String encoded) {
-    public FluidResource {
-      var object = resource(encoded, Set.of("id", "amount", "components", "chance", "parallel_unaffected", "selector"));
-      if (object.has("selector")) {
-        ResourceSelector.require(object.get("selector").getAsString());
-      }
-      identifier(object, "id");
-      var amount = object.get("amount");
-      if (amount == null || !amount.isJsonPrimitive() || !amount.getAsJsonPrimitive().isNumber()) {
-        throw new IllegalArgumentException("An adapter fluid requires a positive integer amount");
-      }
-      int quantity = amount.getAsBigDecimal().intValueExact();
-      if (quantity < 1) {
-        throw new IllegalArgumentException("An adapter fluid requires a positive integer amount");
-      }
-      if (object.has("chance")) {
-        var chance = object.get("chance");
-        if (!chance.isJsonPrimitive()
-            || !chance.getAsJsonPrimitive().isNumber()
-            || !Double.isFinite(chance.getAsDouble())
-            || chance.getAsDouble() < 0
-            || chance.getAsDouble() > 1) {
-          throw new IllegalArgumentException("Adapter fluid chance must be within 0..1");
-        }
-      }
-      if (object.has("parallel_unaffected")
-          && (!object.get("parallel_unaffected").isJsonPrimitive()
-              || !object.get("parallel_unaffected").getAsJsonPrimitive().isBoolean())) {
-        throw new IllegalArgumentException("Adapter fluid parallel flag requires a boolean");
-      }
-      encoded = object.toString();
-    }
-  }
-
-  /**
-   * A single-item prototype and a separate long quantity, with immutable
-   * component data.
-   */
-  public record ItemOutput(
-      String encodedStack,
-      long amount,
-      double chance,
-      String selector,
-      Optional<String> encodedPreview,
-      boolean parallelUnaffected) {
-    public ItemOutput(String encodedStack, long amount, double chance, String selector) {
-      this(encodedStack, amount, chance, selector, Optional.empty(), false);
-    }
-
-    public ItemOutput(String encodedStack, long amount, double chance, String selector, Optional<String> encodedPreview) {
-      this(encodedStack, amount, chance, selector, encodedPreview, false);
-    }
-
-    public ItemOutput {
-      var object = resource(encodedStack, Set.of("id", "components"));
-      identifier(object, "id");
-      if (amount < 1 || !Double.isFinite(chance) || chance < 0 || chance > 1) {
-        throw new IllegalArgumentException("Invalid adapter item output amount or chance");
-      }
-      ResourceSelector.require(selector);
-      Objects.requireNonNull(encodedPreview, "encodedPreview");
-      encodedPreview = encodedPreview.map(encoded -> {
-        var preview = resource(encoded, Set.of("id", "components"));
-        identifier(preview, "id");
-
-        return preview.toString();
       });
-      encodedStack = object.toString();
+    }
+  }
+
+  /** Appended fluid triggers may inherit their target recipe's phase selector. */
+  public record Trigger(TriggeredResourceData.Row row, boolean inheritsSelector) {
+    public Trigger {
+      Objects.requireNonNull(row);
+      if (inheritsSelector && !row.resource().equals("fluid")) {
+        throw new IllegalArgumentException("Only triggered fluid rows inherit the phase selector");
+      }
+    }
+  }
+
+  public record NativeResource(RecipeResources.Entry<?> entry, boolean replace) {
+    public NativeResource {
+      Objects.requireNonNull(entry);
+      requireResource(entry);
+    }
+    private static <D> void requireResource(RecipeResources.Entry<D> entry) {
+      RecipeResourceBuilderDeclarations.capture(entry.type(), entry.data());
     }
   }
 
@@ -311,42 +315,13 @@ public record RecipeAdapterCustomization(
     return copy;
   }
 
-  private static List<FluidResource> tickFluids(List<FluidResource> values) {
+  private static List<FluidRequirement> tickFluids(List<FluidRequirement> values) {
     var checked = bounded(values);
     for (var value : checked) {
-      var declaration = JsonParser.parseString(value.encoded()).getAsJsonObject();
-      if (declaration.has("parallel_unaffected") && declaration.get("parallel_unaffected").getAsBoolean()) {
+      if (value.parallelUnaffected()) {
         throw new IllegalArgumentException("Per-tick fluid quantities always scale with instances");
       }
     }
-
     return checked;
-  }
-
-  private static JsonObject resource(String encoded, Set<String> fields) {
-    Objects.requireNonNull(encoded, "encoded resource");
-    if (encoded.length() > MAX_RESOURCE_JSON) {
-      throw new IllegalArgumentException("Adapter resource component data is too large");
-    }
-    var element = JsonParser.parseString(encoded);
-    if (!element.isJsonObject() || !fields.containsAll(element.getAsJsonObject().keySet())) {
-      throw new IllegalArgumentException("Adapter resource contains unsupported fields");
-    }
-    var object = element.getAsJsonObject();
-    if (object.has("components") && !object.get("components").isJsonObject()) {
-      throw new IllegalArgumentException("Adapter resource components require an object");
-    }
-
-    return object;
-  }
-
-  private static void identifier(JsonObject object, String field) {
-    var value = object.get(field);
-    if (value == null
-        || !value.isJsonPrimitive()
-        || !value.getAsJsonPrimitive().isString()
-        || ResourceLocation.tryParse(value.getAsString()) == null) {
-      throw new IllegalArgumentException("Adapter resource requires a valid " + field);
-    }
   }
 }

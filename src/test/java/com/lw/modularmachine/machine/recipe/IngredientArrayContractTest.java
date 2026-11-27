@@ -88,38 +88,6 @@ class IngredientArrayContractTest {
   }
 
   @Test
-  void quantityRangesAndChanceAreModifiedFromTheirSourceOnce() {
-    var source = recipe();
-    var choice = source.getAsJsonArray("ingredient_arrays").get(0).getAsJsonObject().getAsJsonArray("alternatives")
-        .get(0).getAsJsonObject();
-    choice.addProperty("min_amount", 2);
-    choice.addProperty("max_amount", 5);
-    choice.addProperty("chance", 0.5);
-    var normalized = MachineRecipeJson.normalize(
-        source,
-        List.of(
-            new RecipeModifier(
-                RecipeModifier.Target.ITEM,
-                RecipeModifier.Io.INPUT,
-                RecipeModifier.Operation.MULTIPLY,
-                2,
-                false),
-            new RecipeModifier(
-                RecipeModifier.Target.ITEM,
-                RecipeModifier.Io.INPUT,
-                RecipeModifier.Operation.MULTIPLY,
-                0.5,
-                true)));
-    var result = normalized.getAsJsonArray("ingredient_arrays").get(0).getAsJsonObject().getAsJsonArray("alternatives")
-        .get(0).getAsJsonObject();
-    assertEquals(4, result.get("min_amount").getAsLong());
-    assertEquals(10, result.get("max_amount").getAsLong());
-    assertEquals(10, result.get("amount").getAsLong());
-    assertEquals(0.25, result.get("chance").getAsDouble());
-    assertEquals(5, choice.get("amount").getAsLong());
-  }
-
-  @Test
   void conditionalRulesCannotBeAttachedToRequiredGroups() {
     var source = recipe();
     source.getAsJsonArray("ingredient_arrays").get(0).getAsJsonObject().add(

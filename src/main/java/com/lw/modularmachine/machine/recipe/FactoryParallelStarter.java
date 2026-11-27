@@ -9,6 +9,7 @@ import com.lw.modularmachine.config.MachineConfig;
 import com.lw.modularmachine.machine.factory.FactoryParallelBatch;
 import com.lw.modularmachine.api.upgrade.UpgradeSnapshot;
 import java.util.ArrayList;
+import java.util.Collections;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
@@ -41,10 +42,19 @@ public final class FactoryParallelStarter {
   }
 
   public static Result commit(FactoryControllerBlockEntity factory, String threadId, List<RecipeStartPlan> plans, int workBudget) {
+    return commit(factory, threadId, plans, workBudget, false);
+  }
+
+  public static Result commit(FactoryControllerBlockEntity factory, String threadId, RecipeStartPlan plan, int count, int workBudget) {
+    return commit(factory, threadId, Collections.nCopies(count, plan), workBudget, true);
+  }
+
+  private static Result commit(FactoryControllerBlockEntity factory, String threadId, List<RecipeStartPlan> plans, int workBudget, boolean repeated) {
     if (workBudget < 0) {
       throw new IllegalArgumentException("Negative factory start budget");
     }
-    var admission = admit(factory, threadId, plans, plans.size(), plans.size(), plans.size());
+    var uniquePlans = repeated && !plans.isEmpty() ? List.of(plans.getFirst()) : plans.stream().distinct().toList();
+    var admission = planAdmission(factory, threadId, plans, uniquePlans, plans.size(), plans.size(), plans.size());
     if (admission.result() != Result.ADMITTED) {
       return admission.result();
     }
@@ -60,9 +70,26 @@ public final class FactoryParallelStarter {
       if (nativeRecipe.isEmpty()) {
         return Result.UNSUPPORTED;
       }
-      var uniquePlans = plans.stream().distinct().toList();
-      int checkBudget = workBudget;
+      var first = plans.getFirst();
+      if (RecipeItemPreparation.transformsOutputs(nativeRecipe.orElseThrow())) {
+        first.withOutputPreparationContext(threadId);
+      }
+      // The input cursor reads the captured ticket. Revalidate live contents after it
+      // finishes.
+      var batch = repeated ? first.independentInputs(plans.size(), workBudget) : RecipeStartPlan
+          .combineInputs(plans, workBudget);
+      if (!batch.complete()) {
+        return Result.CHECK_PENDING;
+      }
+      var allocated = batch.plan();
+      if (allocated == null) {
+        return Result.STALE;
+      }
+      int checkBudget = workBudget - batch.workUsed();
       for (var plan : uniquePlans) {
+        if (plan.factoryChecksCurrent(factory, threadId)) {
+          continue;
+        }
         var checked = plan.advanceFactoryChecks(factory, threadId, checkBudget);
         checkBudget -= checked.workUsed();
         switch (checked.status()) {
@@ -82,16 +109,8 @@ public final class FactoryParallelStarter {
           }
         }
       }
-      var ticket = plans.get(0).checkedTicket().orElse(null);
-      if (ticket == null || !RecipeCommitGuard.validate(ticket)) {
-        return Result.STALE;
-      }
-      if (RecipeResourceRequirements.missing(ticket, nativeRecipe.orElseThrow()).isPresent()) {
-        return Result.STALE;
-      }
       if (RecipeItemPreparation.transformsOutputs(nativeRecipe.orElseThrow())
           && !plans.getFirst().hasPreparedOutputRuns(plans.size())) {
-        plans.getFirst().withOutputPreparationContext(threadId);
         int preparedOutputs = plans.getFirst().prepareParallel(nativeRecipe.orElseThrow(), plans.size(), checkBudget);
         checkBudget = plans.getFirst().parallelBudgetRemaining();
         if (preparedOutputs < 0) {
@@ -101,22 +120,13 @@ public final class FactoryParallelStarter {
           return Result.CHECK_REJECTED;
         }
       }
-      var outputCheck = plans.getFirst()
-          .prepareStartOutputs(nativeRecipe.orElseThrow(), ticket, plans.size(), checkBudget, true);
+      var outputCheck = first
+          .prepareStartOutputs(nativeRecipe.orElseThrow(), first.source(), plans.size(), checkBudget, true);
       checkBudget -= outputCheck.workUsed();
       if (outputCheck.status() == RecipeResourcePlanning.Status.PENDING) {
         return Result.CHECK_PENDING;
       }
       if (outputCheck.status() != RecipeResourcePlanning.Status.READY) {
-        return Result.STALE;
-      }
-      var ports = indexPorts(ticket);
-      var replacements = new HashMap<String, NonNullList<ItemStack>>();
-      var fluidRequirements = nativeRecipe.orElseThrow().fluidInputRequirements();
-      if (!sameStartScope(uniquePlans, plans.getFirst(), ticket)) {
-        return Result.STALE;
-      }
-      if (!prepareItemDeductions(plans, resources, ports, replacements)) {
         return Result.STALE;
       }
       var upgrades = factory.scheduler().requireChannel(threadId).upgradeSnapshot();
@@ -141,6 +151,12 @@ public final class FactoryParallelStarter {
         case READY -> {
         }
       }
+      var ticket = first.checkedTicket().orElse(null);
+      if (ticket == null
+          || !sameStartScope(uniquePlans, first, ticket)
+          || RecipeResourceRequirements.missing(ticket, nativeRecipe.orElseThrow()).isPresent()) {
+        return Result.STALE;
+      }
       var runs = prepareRuns(factory, threadId, plans, nativeRecipe.orElseThrow(), ticket, upgrades);
       var paidStart = plans.getFirst().preparePaidResources(ticket, runs, checkBudget - prepared.workUsed());
       if (paidStart.status() == RecipeResourcePlanning.Status.PENDING) {
@@ -151,6 +167,10 @@ public final class FactoryParallelStarter {
         return Result.STALE;
       }
       resources.enlistAdditional(additionalResources);
+      var replacements = new HashMap<String, NonNullList<ItemStack>>();
+      if (!prepareItemDeductions(allocated, resources, indexPorts(ticket), replacements)) {
+        return Result.STALE;
+      }
       if (!RecipeItemPayments.apply(
           ticket,
           nativeRecipe.orElseThrow(),
@@ -163,8 +183,13 @@ public final class FactoryParallelStarter {
       if (uniquePlans.stream().anyMatch(plan -> !plan.factoryAdmissionCurrent(factory, threadId))) {
         return Result.STALE;
       }
-      var inputCheck = RecipeItemPreparation
-          .checkInputs(nativeRecipe.orElseThrow(), ticket, Optional.of(threadId), plans.size(), runs.getFirst());
+      var inputCheck = RecipeItemPreparation.checkInputs(
+          nativeRecipe.orElseThrow(),
+          ticket,
+          Optional.of(threadId),
+          plans.size(),
+          runs.getFirst(),
+          allocated.inputAllocation());
       if (runs.stream().anyMatch(run -> !run.preparedItemCallbacksCurrent())
           || !plans.getFirst().preparedOutputsCurrent(plans.size())
           || uniquePlans.stream()
@@ -183,6 +208,7 @@ public final class FactoryParallelStarter {
           .recipeThreadAllowed(threadId, runs.getFirst().recipeId(), nativeRecipe.orElseThrow().executionOptions())) {
         return Result.STALE;
       }
+      var fluidRequirements = nativeRecipe.orElseThrow().fluidInputRequirements();
       var fluidDebits = StartupFluidAllocation
           .plan(ticket, fluidRequirements, nativeRecipe.orElseThrow().selectors().fluidInput(), row -> plans.size());
       if (fluidDebits == null) {
@@ -273,6 +299,9 @@ public final class FactoryParallelStarter {
 
   private static boolean sameStartScope(List<RecipeStartPlan> uniquePlans, RecipeStartPlan first, RecipeExecutionTicket ticket) {
     for (var plan : uniquePlans) {
+      if (plan == first) {
+        continue; // The caller already obtained its checked ticket.
+      }
       if (!plan.validateForStart()
           || plan.source().inputGroup() != ticket.inputGroup()
           || !RecipeStartPlan.samePatternScope(plan.source(), ticket)
@@ -288,8 +317,7 @@ public final class FactoryParallelStarter {
   /**
    * Prepares item replacements and pattern claims without acquiring resources.
    */
-  private static boolean prepareItemDeductions(List<RecipeStartPlan> plans, FactoryStartupResources resources, Map<String, RecipePortSnapshot> ports, Map<String, NonNullList<ItemStack>> replacements) {
-    var allocated = RecipeStartPlan.combineInputs(plans);
+  private static boolean prepareItemDeductions(RecipeStartPlan allocated, FactoryStartupResources resources, Map<String, RecipePortSnapshot> ports, Map<String, NonNullList<ItemStack>> replacements) {
     for (var deduction : allocated.deductions()) {
       var target = resources.prepareDeduction(deduction, ports, replacements);
       if (!target.accepted()) {
@@ -349,6 +377,15 @@ public final class FactoryParallelStarter {
   }
 
   public static Admission admit(FactoryControllerBlockEntity factory, String threadId, List<RecipeStartPlan> plans, int inputCapacity, int outputCapacity, int startBudget) {
+    var uniquePlans = plans.stream().distinct().toList();
+    var admission = planAdmission(factory, threadId, plans, uniquePlans, inputCapacity, outputCapacity, startBudget);
+    if (admission.result() == Result.ADMITTED && uniquePlans.stream().anyMatch(plan -> !plan.validateForStart())) {
+      return new Admission(Result.STALE, null);
+    }
+    return admission;
+  }
+
+  private static Admission planAdmission(FactoryControllerBlockEntity factory, String threadId, List<RecipeStartPlan> plans, List<RecipeStartPlan> uniquePlans, int inputCapacity, int outputCapacity, int startBudget) {
     Objects.requireNonNull(factory, "factory");
     Objects.requireNonNull(plans, "plans");
     var thread = threadId == null ? null : factory.scheduler().channel(threadId);
@@ -378,11 +415,11 @@ public final class FactoryParallelStarter {
       return new Admission(Result.LIMIT_REACHED, null);
     }
     var recipeId = first.recipe().id();
-    for (var plan : plans.stream().distinct().toList()) {
+    for (var plan : uniquePlans) {
       if (plan == null || !recipeId.equals(plan.recipe().id())) {
         return new Admission(Result.MIXED_RECIPES, null);
       }
-      if (!plan.validateForStart()) {
+      if (plan.source().owner() != factory || !plan.factoryPlanningCurrent()) {
         return new Admission(Result.STALE, null);
       }
       if (RecipeResourceRequirements.missing(plan.source(), definition).isPresent()) {

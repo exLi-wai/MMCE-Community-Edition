@@ -1,5 +1,6 @@
 package com.lw.modularmachine.client.recipe;
 
+import com.lw.modularmachine.api.recipe.ItemAmount;
 import com.lw.modularmachine.machine.recipe.MachineRecipe;
 import it.unimi.dsi.fastutil.ints.IntArrayList;
 import it.unimi.dsi.fastutil.ints.IntList;
@@ -48,7 +49,7 @@ public final class MachineRecipeLayout {
   public record Part(Kind kind, boolean input, int index, int x, int y) {
   }
   record ItemDisplay(ItemStack stack, long amount) {
-    ItemDisplay(MachineRecipe.ItemAmount amount) {
+    ItemDisplay(ItemAmount amount) {
       this(amount.displayStack(), amount.amount());
     }
   }

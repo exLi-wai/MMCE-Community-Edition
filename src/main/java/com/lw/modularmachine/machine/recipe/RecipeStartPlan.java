@@ -18,6 +18,8 @@ import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.Optional;
+import java.util.Set;
+import java.util.function.IntToLongFunction;
 import net.minecraft.resources.ResourceLocation;
 import net.minecraft.util.RandomSource;
 import org.jetbrains.annotations.ApiStatus;
@@ -47,8 +49,15 @@ public final class RecipeStartPlan {
   private RecipeStartOutputAdmission startOutputAdmission;
   private RecipeResourceExecutionRegistry.PaidStartPlanning paidStartPlanning;
   private MachineRecipe inputPreparedDefinition;
+  private RecipeItemInputAllocation inputAllocation;
+  private Map<ItemResourceKey, Long> searchInputCounts;
+  // Bound by ordinary inputs, then tightened when a larger tool/fuel probe fails.
+  private int inputCapacity = -1;
+  private int provenPaymentLimit;
+  private int outputCapacity = -1;
   private RecipeCandidate<ItemResourceKey> originalCandidate;
   private long inputPreparedEpoch = -1;
+  private BatchInputPreparation batchInputs;
   private String outputPreparationThread;
   private PreparedRecipeOutputs outputPreparation;
   private int parallelBudgetRemaining;
@@ -60,7 +69,7 @@ public final class RecipeStartPlan {
     this.source = source;
     this.catalog = catalog;
     this.recipe = recipe;
-    this.deductions = List.copyOf(deductions);
+    this.deductions = RecipeItemInputAllocation.freezeDeductions(deductions);
     this.placements = List.copyOf(placements);
     if (inputChanceSeed < 0) {
       throw new IllegalArgumentException("Negative input chance seed");
@@ -87,6 +96,7 @@ public final class RecipeStartPlan {
       parallelUpgrades = null;
       outputPreparation = null;
       paidStartPlanning = null;
+      batchInputs = null;
     }
     outputPreparationThread = thread;
     return this;
@@ -95,6 +105,13 @@ public final class RecipeStartPlan {
   /** Internal read-only admission assembled by the resource search. */
   public static RecipeStartPlan prepared(RecipeExecutionTicket source, RecipeCatalog catalog, RecipeCandidate<ItemResourceKey> recipe, List<Deduction> deductions, List<Placement> placements, long inputChanceSeed, UpgradeRecipeCheckHandlers.Scope factoryScope) {
     return new RecipeStartPlan(source, catalog, recipe, deductions, placements, inputChanceSeed, factoryScope);
+  }
+
+  /** The search has tallied every relevant input key for this ticket's group. */
+  public static RecipeStartPlan prepared(RecipeExecutionTicket source, RecipeCatalog catalog, RecipeCandidate<ItemResourceKey> recipe, List<Deduction> deductions, List<Placement> placements, long inputChanceSeed, UpgradeRecipeCheckHandlers.Scope factoryScope, ResourceSnapshot<ItemResourceKey> snapshot) {
+    var plan = prepared(source, catalog, recipe, deductions, placements, inputChanceSeed, factoryScope);
+    plan.searchInputCounts = snapshot.inputs();
+    return plan;
   }
 
   /**
@@ -116,6 +133,9 @@ public final class RecipeStartPlan {
     inputPreparedDefinition = definition;
     originalCandidate = original;
     inputPreparedEpoch = epoch;
+    provenPaymentLimit = 0;
+    inputCapacity = -1;
+    outputCapacity = -1;
     return this;
   }
 
@@ -125,6 +145,15 @@ public final class RecipeStartPlan {
 
   public boolean inputPreparationCurrent() {
     return inputPreparedEpoch < 0 || RecipeItemCallbackService.isCurrent(inputPreparedEpoch);
+  }
+
+  public RecipeStartPlan withInputAllocation(RecipeItemInputAllocation allocation) {
+    inputAllocation = allocation;
+    return this;
+  }
+
+  public RecipeItemInputAllocation inputAllocation() {
+    return inputAllocation;
   }
 
   Optional<MachineRecipe> preparedInputDefinition() {
@@ -137,28 +166,91 @@ public final class RecipeStartPlan {
   }
 
   public static <K> Map<K, Long> sampledInputs(RecipeCandidate<K> recipe, long seed, int instances) {
-    if (instances < 1) {
-      throw new IllegalArgumentException("Invalid input chance instances");
-    }
-    if (recipe.inputs().isEmpty()) {
-      return Map.of();
-    }
+    var sampled = sampledInputRows(recipe, seed, instances);
+    return sampledByKey(recipe, sampled);
+  }
+
+  private static <K> Map<K, Long> sampledByKey(RecipeCandidate<K> recipe, long[] sampled) {
     var result = new HashMap<K, Long>();
-    for (int instance = 0; instance < instances; instance++) {
-      var random = RandomSource.create(inputChanceSeedForInstance(seed, instance));
-      for (var input : recipe.inputs()) {
-        if (input.parallelUnaffected() && instance != 0) {
-          continue;
-        }
-        if (input.chance() >= 1.0D || input.chance() > 0.0D && random.nextDouble() < input.chance()) {
-          long quantity = RecipeItemAmounts.sample(input.minimumCount(), input.count(), random);
-          if (quantity > 0) {
-            result.merge(input.key(), quantity, Math::addExact);
-          }
-        }
+    for (int row = 0; row < sampled.length; row++) {
+      if (sampled[row] > 0) {
+        result.merge(recipe.inputs().get(row).key(), sampled[row], Math::addExact);
       }
     }
     return Map.copyOf(result);
+  }
+
+  public static long[] sampledInputRows(RecipeCandidate<?> recipe, long seed, int instances) {
+    var sampling = beginInputSampling(recipe, seed, instances);
+    while (!sampling.complete()) {
+      sampling.advance(Integer.MAX_VALUE);
+    }
+    return sampling.amounts();
+  }
+
+  public static InputSampling beginInputSampling(RecipeCandidate<?> recipe, long seed, int instances) {
+    return new InputSampling(recipe, instances, true, index -> inputChanceSeedForInstance(seed, index));
+  }
+
+  /**
+   * Each step samples at most one row and retains the generator within an
+   * instance.
+   */
+  public static final class InputSampling {
+    private final RecipeCandidate<?> recipe;
+    private final int instances;
+    private final boolean aggregate;
+    private final IntToLongFunction instanceSeed;
+    private final long[] amounts;
+    private int instance;
+    private int row;
+    private RandomSource random;
+
+    private InputSampling(RecipeCandidate<?> recipe, int instances, boolean aggregate, IntToLongFunction instanceSeed) {
+      if (instances < 1) {
+        throw new IllegalArgumentException("Invalid input chance instances");
+      }
+      this.recipe = recipe;
+      this.instances = instances;
+      this.aggregate = aggregate;
+      this.instanceSeed = instanceSeed;
+      amounts = new long[recipe.inputs().size()];
+    }
+
+    public boolean complete() {
+      return instance == instances || amounts.length == 0;
+    }
+
+    public long[] amounts() {
+      if (!complete()) {
+        throw new IllegalStateException("Input sampling is in progress");
+      }
+      return amounts;
+    }
+
+    public int advance(int budget) {
+      if (budget < 0) {
+        throw new IllegalArgumentException("Negative input sampling budget");
+      }
+      int used = 0;
+      while (!complete() && used < budget) {
+        if (row == 0) {
+          random = RandomSource.create(instanceSeed.applyAsLong(instance));
+        }
+        var input = recipe.inputs().get(row);
+        boolean payable = !aggregate || instance == 0 || !input.parallelUnaffected();
+        if (payable && (input.chance() >= 1.0D || input.chance() > 0.0D && random.nextDouble() < input.chance())) {
+          long quantity = RecipeItemAmounts.sample(input.minimumCount(), input.count(), random);
+          amounts[row] = Math.addExact(amounts[row], quantity);
+        }
+        used++;
+        if (++row == amounts.length) {
+          row = 0;
+          instance++;
+        }
+      }
+      return used;
+    }
   }
 
   static long inputChanceSeedForInstance(long seed, int instance) {
@@ -224,6 +316,10 @@ public final class RecipeStartPlan {
   }
 
   public boolean factoryAdmissionCurrent(UpgradeBusOwner factory, String threadId) {
+    return factoryChecksCurrent(factory, threadId) && source.dependenciesCurrent();
+  }
+
+  boolean factoryChecksCurrent(UpgradeBusOwner factory, String threadId) {
     source.requireServerThread();
 
     return source.owner() == factory
@@ -233,7 +329,6 @@ public final class RecipeStartPlan {
         && postChecks.current()
         && postChecks.complete()
         && !postChecks.rejected()
-        && source.dependenciesCurrent()
         && catalog.isCurrent()
         && inputPreparationCurrent()
         && modifierContextCurrent(factory, threadId);
@@ -284,38 +379,124 @@ public final class RecipeStartPlan {
     return placements;
   }
 
-  RecipeStartPlan scaled(int instances) {
-    if (instances < 1) {
-      throw new IllegalArgumentException("Invalid parallel instances");
+  record BatchInputs(boolean complete, RecipeStartPlan plan, int workUsed) {
+  }
+
+  BatchInputs scaled(int instances, int budget) {
+    if (budget < 0) {
+      throw new IllegalArgumentException("Negative input preparation budget");
     }
     if (instances == 1) {
-      return this;
+      return new BatchInputs(true, this, 0);
     }
-    var needed = new HashMap<>(sampledInputs(recipe, inputChanceSeed, instances));
-    var scaledDeductions = new ArrayList<Deduction>();
-    for (var port : source.ports()) {
-      if (port.kind() != PortKind.ITEM_INPUT) {
-        continue;
-      }
-      for (int slot = 0; slot < port.itemSlotCount(); slot++) {
-        var key = port.itemKey(slot);
-        if (key == null) {
-          continue;
-        }
-        var expected = inputKey(recipe, key);
-        long take = Math.min(port.itemAmount(slot), needed.getOrDefault(expected, 0L));
-        if (take > 0) {
-          scaledDeductions.add(new Deduction(new ItemSlotRef(port.partId(), slot), key, take));
-          needed.put(expected, needed.get(expected) - take);
-        }
-      }
+    return advanceBatch(instances, true, null, budget);
+  }
+
+  BatchInputs independentInputs(int instances, int budget) {
+    return advanceBatch(instances, false, null, budget);
+  }
+
+  static BatchInputs combineInputs(List<RecipeStartPlan> plans, int budget) {
+    if (plans == null || plans.isEmpty()) {
+      throw new IllegalArgumentException("No parallel recipe plans");
     }
-    if (needed.values().stream().anyMatch(amount -> amount != 0)) {
-      throw new IllegalStateException("Parallel input allocation exceeds physical resources");
+    var snapshot = List.copyOf(plans);
+    return snapshot.getFirst().advanceBatch(snapshot.size(), false, snapshot, budget);
+  }
+
+  private BatchInputs advanceBatch(int instances, boolean aggregate, List<RecipeStartPlan> plans, int budget) {
+    source.requireServerThread();
+    if (instances < 1 || budget < 0) {
+      throw new IllegalArgumentException("Invalid batch count or budget");
+    }
+    if (batchInputs == null || !batchInputs.matches(instances, aggregate, plans)) {
+      batchInputs = new BatchInputPreparation(instances, aggregate, plans);
+    }
+    return batchInputs.advance(budget);
+  }
+
+  private final class BatchInputPreparation {
+    private final int count;
+    private final boolean aggregate;
+    private final List<RecipeStartPlan> members;
+    private final InputSampling sampling;
+    private RecipeItemInputAllocation.Cursor reservation;
+    private RecipeItemInputAllocation.DeductionCursor debits;
+    private int validated;
+    private boolean complete;
+    private RecipeStartPlan result;
+
+    BatchInputPreparation(int count, boolean aggregate, List<RecipeStartPlan> members) {
+      this.count = count;
+      this.aggregate = aggregate;
+      this.members = members;
+      validated = members == null ? count : 0;
+      sampling = new InputSampling(recipe, count, aggregate, index -> {
+        long seed = members == null ? inputChanceSeed : members.get(index).inputChanceSeed;
+        return inputChanceSeedForInstance(seed, index);
+      });
     }
 
-    return copyInputPreparationTo(
-        new RecipeStartPlan(source, catalog, recipe, scaledDeductions, placements, inputChanceSeed, factoryScope));
+    boolean matches(int instances, boolean aggregated, List<RecipeStartPlan> plans) {
+      return count == instances && aggregate == aggregated && Objects.equals(members, plans);
+    }
+
+    BatchInputs advance(int budget) {
+      int used = 0;
+      while (validated < count && used < budget) {
+        var member = members.get(validated++);
+        if (member.source.owner() != source.owner()
+            || !samePatternScope(member.source, source)
+            || member.source.inputGroup() != source.inputGroup()
+            || member.catalog != catalog
+            || !member.recipe.equals(recipe)
+            || member.inputPreparedEpoch != inputPreparedEpoch) {
+          throw new IllegalArgumentException("Parallel plans do not share one recipe owner");
+        }
+        used++;
+      }
+      if (validated < count || complete) {
+        return new BatchInputs(complete, result, used);
+      }
+      used += sampling.advance(budget - used);
+      if (sampling.complete() && used < budget) {
+        if (reservation == null) {
+          var definition = preparedInputDefinition().orElseGet(() -> catalog.definition(recipe.id()));
+          reservation = RecipeItemInputAllocation
+              .beginBatch(recipe, definition, source, count, aggregate, inputAllocation);
+        }
+        used += reservation.advance(budget - used);
+        if (reservation.complete()) {
+          var allocation = reservation.allocation().orElse(null);
+          if (allocation == null) {
+            complete = true;
+          } else {
+            if (debits == null) {
+              debits = allocation.beginDeductions(sampling.amounts());
+            }
+            used += debits.advance(budget - used);
+            if (debits.complete()) {
+              result = copyInputPreparationTo(
+                  new RecipeStartPlan(
+                      source,
+                      catalog,
+                      recipe,
+                      debits.deductions(),
+                      placements,
+                      inputChanceSeed,
+                      factoryScope))
+                  .withInputAllocation(allocation);
+              complete = true;
+            }
+          }
+          if (complete) {
+            reservation = null;
+            debits = null;
+          }
+        }
+      }
+      return new BatchInputs(complete, result, used);
+    }
   }
 
   private RecipeStartPlan copyInputPreparationTo(RecipeStartPlan target) {
@@ -330,58 +511,6 @@ public final class RecipeStartPlan {
   static boolean samePatternScope(RecipeExecutionTicket left, RecipeExecutionTicket right) {
     return left.patternSource() == null ? right.patternSource() == null : left.patternSource()
         .sameScope(right.patternSource());
-  }
-
-  static RecipeStartPlan combineInputs(List<RecipeStartPlan> plans) {
-    if (plans == null || plans.isEmpty()) {
-      throw new IllegalArgumentException("No parallel recipe plans");
-    }
-    var first = plans.getFirst();
-    var needed = new HashMap<ItemResourceKey, Long>();
-    for (int index = 0; index < plans.size(); index++) {
-      var plan = plans.get(index);
-      if (plan.source.owner() != first.source.owner()
-          || !samePatternScope(plan.source, first.source)
-          || plan.source.inputGroup() != first.source.inputGroup()
-          || plan.catalog != first.catalog
-          || !plan.recipe.equals(first.recipe)
-          || plan.inputPreparedEpoch != first.inputPreparedEpoch) {
-        throw new IllegalArgumentException("Parallel plans do not share one recipe owner");
-      }
-      sampledInputs(plan.recipe, inputChanceSeedForInstance(plan.inputChanceSeed, index), 1)
-          .forEach((key, amount) -> needed.merge(key, amount, Math::addExact));
-    }
-    var combined = new ArrayList<Deduction>();
-    for (var port : first.source.ports()) {
-      if (port.kind() != PortKind.ITEM_INPUT) {
-        continue;
-      }
-      for (int slot = 0; slot < port.itemSlotCount(); slot++) {
-        var key = port.itemKey(slot);
-        if (key == null) {
-          continue;
-        }
-        var expected = inputKey(first.recipe, key);
-        long amount = Math.min(needed.getOrDefault(expected, 0L), port.itemAmount(slot));
-        if (amount > 0) {
-          combined.add(new Deduction(new ItemSlotRef(port.partId(), slot), key, amount));
-          needed.put(expected, needed.get(expected) - amount);
-        }
-      }
-    }
-    if (needed.values().stream().anyMatch(amount -> amount != 0)) {
-      throw new IllegalStateException("Parallel input chance allocation exceeds physical resources");
-    }
-
-    return first.copyInputPreparationTo(
-        new RecipeStartPlan(
-            first.source,
-            first.catalog,
-            first.recipe,
-            combined,
-            first.placements,
-            first.inputChanceSeed,
-            first.factoryScope));
   }
 
   public int prepareParallel(MachineRecipe definition, int limit, int budget) {
@@ -491,24 +620,50 @@ public final class RecipeStartPlan {
     if (limit == 0) {
       return 0;
     }
-    var available = new HashMap<ItemResourceKey, Long>();
+    boolean aggregate = source.owner() instanceof MachineControllerBlockEntity;
+    if (inputCapacity < 0) {
+      inputCapacity = ordinaryInputLimit(aggregate);
+      searchInputCounts = null;
+    }
+    int upper = Math.min(limit, inputCapacity);
+    if (upper <= provenPaymentLimit) {
+      return upper;
+    }
+    var definition = preparedInputDefinition().orElseGet(() -> catalog.definition(recipe.id()));
+    provenPaymentLimit = RecipeItemPayments.limit(source, definition, upper, aggregate);
+    if (provenPaymentLimit < upper) {
+      inputCapacity = provenPaymentLimit;
+    }
+    return provenPaymentLimit;
+  }
+
+  private int ordinaryInputLimit(boolean aggregate) {
     var required = new HashMap<ItemResourceKey, Long>();
     var fixed = new HashMap<ItemResourceKey, Long>();
-    boolean aggregate = source.owner() instanceof MachineControllerBlockEntity;
+    var aliases = new HashSet<ItemResourceKey>();
     for (var input : recipe.inputs()) {
       (aggregate && input.parallelUnaffected() ? fixed : required).merge(input.key(), input.count(), Math::addExact);
-    }
-    for (var port : source.ports()) {
-      if (port.kind() == PortKind.ITEM_INPUT) {
-        for (int slot = 0; slot < port.itemSlotCount(); slot++) {
-          var key = port.itemKey(slot);
-          if (key != null) {
-            available.merge(inputKey(recipe, key), port.itemAmount(slot), Math::addExact);
-          }
-        }
+      if (recipe.inputs().size() > 1 && input.key().ignoresComponents()) {
+        aliases.add(input.key());
       }
     }
-    long result = source.patternSource() == null ? limit : Math.min(limit, source.patternSource().startLimit());
+    if (!aliases.isEmpty()) {
+      // The whole item pool must cover its exact rows as well as the item-only row.
+      try {
+        for (var input : recipe.inputs()) {
+          if (!input.key().ignoresComponents()) {
+            var alias = input.key().ignoringComponents();
+            if (aliases.contains(alias)) {
+              (aggregate && input.parallelUnaffected() ? fixed : required).merge(alias, input.count(), Math::addExact);
+            }
+          }
+        }
+      } catch (ArithmeticException exceedsPool) {
+        return 0;
+      }
+    }
+    var available = searchInputCounts == null ? countInputSlots(aliases) : searchInputCounts;
+    long result = source.patternSource() == null ? Integer.MAX_VALUE : source.patternSource().startLimit();
     for (var entry : fixed.entrySet()) {
       if (available.getOrDefault(entry.getKey(), 0L) < entry.getValue()) {
         return 0;
@@ -521,8 +676,28 @@ public final class RecipeStartPlan {
               .getValue());
     }
 
-    var definition = preparedInputDefinition().orElseGet(() -> catalog.definition(recipe.id()));
-    return RecipeItemPayments.limit(source, definition, (int) result, aggregate);
+    return (int) result;
+  }
+
+  private Map<ItemResourceKey, Long> countInputSlots(Set<ItemResourceKey> aliases) {
+    var available = new HashMap<ItemResourceKey, Long>();
+    for (var port : source.ports()) {
+      if (port.kind() == PortKind.ITEM_INPUT) {
+        for (int slot = 0; slot < port.itemSlotCount(); slot++) {
+          var key = port.itemKey(slot);
+          if (key != null) {
+            available.merge(inputKey(recipe, key), port.itemAmount(slot), Math::addExact);
+            if (!aliases.isEmpty()) {
+              var alias = key.ignoringComponents();
+              if (aliases.contains(alias)) {
+                available.merge(alias, port.itemAmount(slot), Math::addExact);
+              }
+            }
+          }
+        }
+      }
+    }
+    return available;
   }
 
   /** Lookup identity only; deductions must keep the exact physical slot key. */
@@ -535,6 +710,14 @@ public final class RecipeStartPlan {
   }
 
   public int maxRepeatableOutputs() {
+    source.requireServerThread();
+    if (outputCapacity < 0) {
+      outputCapacity = calculateOutputCapacity();
+    }
+    return outputCapacity;
+  }
+
+  private int calculateOutputCapacity() {
     var definition = preparedInputDefinition().orElseGet(() -> catalog.definition(recipe.id()));
     if (RecipeItemPreparation.transformsOutputs(definition)) {
       return Integer.MAX_VALUE;
@@ -583,6 +766,17 @@ public final class RecipeStartPlan {
 
   public boolean resourcesCurrent() {
     return source.dependenciesCurrent();
+  }
+
+  /**
+   * Cheap invalidation while preparing a batch. Full live contents are checked
+   * before startup.
+   */
+  public boolean factoryPlanningCurrent() {
+    return catalog.isCurrent()
+        && inputPreparationCurrent()
+        && preparationCurrent()
+        && source.planningRevisionsCurrent();
   }
 
   Optional<RecipeExecutionTicket> checkedTicket() {

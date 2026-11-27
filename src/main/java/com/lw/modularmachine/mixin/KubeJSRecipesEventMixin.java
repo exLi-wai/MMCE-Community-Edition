@@ -20,20 +20,20 @@ import org.spongepowered.asm.mixin.injection.callback.CallbackInfoReturnable;
  * Bridges KubeJS recipe visibility and its final merge of script additions.
  */
 @Mixin(value = RecipesKubeEvent.class, remap = false)
-public abstract class KubeJSRecipesEventMixin implements MachineItemRecipeKubeJSSources.Replacements {
+public abstract class KubeJSRecipesEventMixin implements MachineItemRecipeKubeJSSources.RecipeEvent {
   @Unique
-  private Map<ResourceLocation, MachineItemRecipeKubeJSSources.Replacement> MMCECE$replacements = Map.of();
+  private final MachineItemRecipeKubeJSSources.Registration MMCECE$registration = new MachineItemRecipeKubeJSSources.Registration();
 
   @Override
-  public MachineItemRecipeKubeJSSources.Replacement MMCECE$replacement(ResourceLocation id) {
-    return MMCECE$replacements.get(id);
+  public MachineItemRecipeKubeJSSources.Registration MMCECE$registration() {
+    return MMCECE$registration;
   }
 
   // KubeJS writes the edited originals first, then overlays the resolved
   // additions.
   @WrapOperation(method = "applyChanges", at = @At(value = "INVOKE", target = "Ljava/util/Map;putAll(Ljava/util/Map;)V", ordinal = 1))
   private void MMCECE$captureShadowedRecipes(Map<ResourceLocation, JsonElement> surviving, Map<ResourceLocation, JsonElement> additions, Operation<Void> putAll) {
-    MMCECE$replacements = MachineItemRecipeKubeJSSources.machineReplacements(surviving, additions);
+    MMCECE$registration.finish(surviving, additions);
     putAll.call(surviving, additions);
   }
 

@@ -1,0 +1,12 @@
+MMCECERecipeAdapterEvents.register(event => {
+  event.create('mmcece:test_missing_resource_ports', 'minecraft:furnace')
+    .setImportId('typed_resource_probe')
+    .setSourceRecipes(['minecraft:iron_ingot_from_smelting_iron_ore'])
+    .addManaInput(100)
+    .addAuraInput(100)
+    .addWillInput(1)
+    .addVisInput(1)
+    .addEmberInput(1.25)
+    .addChemicalInput('mekanism:oxygen', 1000)
+    .build()
+})

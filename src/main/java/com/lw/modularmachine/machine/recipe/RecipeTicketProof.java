@@ -90,7 +90,7 @@ final class RecipeTicketProof {
     }
   }
 
-  boolean matchesDependencies(PatternInputSource patternSource, List<RecipePortSnapshot> contents) {
+  boolean matchesDependencies(PatternInputSource patternSource, List<RecipePortSnapshot> contents, boolean compareContents) {
     if (patternSource != null && !patternSource.current()) {
       return false;
     }
@@ -127,16 +127,18 @@ final class RecipeTicketProof {
         return false;
       }
     }
-    for (var port : contents) {
-      if (!port.matches(level)) {
-        return false;
+    if (compareContents) {
+      for (var port : contents) {
+        if (!port.matches(level)) {
+          return false;
+        }
       }
     }
     // A component comparator may reenter. Recheck plain identity/version fences
     // after all content
     // reads.
     for (var port : contents) {
-      if (!port.sameLiveStamp(level)) {
+      if (!port.sameLiveStamp(level) || !port.patternInput() && port.identity().resourceTransactionInProgress()) {
         return false;
       }
     }

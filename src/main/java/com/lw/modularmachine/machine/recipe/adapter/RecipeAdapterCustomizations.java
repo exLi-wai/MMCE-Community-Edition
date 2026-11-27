@@ -1,306 +1,283 @@
 package com.lw.modularmachine.machine.recipe.adapter;
 
-import com.google.gson.JsonArray;
-import com.google.gson.JsonElement;
-import com.google.gson.JsonObject;
-import com.google.gson.JsonParser;
-import com.lw.modularmachine.api.recipe.ChemicalRequirement;
+import com.lw.modularmachine.api.recipe.ChemicalRecipeData;
+import com.lw.modularmachine.api.recipe.FluidRequirement;
+import com.lw.modularmachine.api.recipe.IngredientArrayData;
+import com.lw.modularmachine.api.recipe.ItemPaymentData;
+import com.lw.modularmachine.api.recipe.MachineRecipeDeclaration;
+import com.lw.modularmachine.api.recipe.RecipeExecutionOptions;
 import com.lw.modularmachine.api.recipe.RecipeModifier;
 import com.lw.modularmachine.api.recipe.RecipeScriptOptions;
+import com.lw.modularmachine.api.recipe.RecipeSelectors;
+import com.lw.modularmachine.api.recipe.TriggeredResourceData;
 import com.lw.modularmachine.api.recipe.adapter.RecipeAdapterCustomization;
-import com.lw.modularmachine.api.smart.SmartNumberRequirement;
-import com.mojang.serialization.Codec;
-import com.mojang.serialization.JsonOps;
-import java.util.List;
+import com.lw.modularmachine.api.recipe.adapter.RecipeAdapterCustomization.Phase;
+import com.lw.modularmachine.api.recipe.resource.RecipeResources;
+import com.lw.modularmachine.api.recipe.ItemAmount;
+import com.lw.modularmachine.machine.recipe.resource.EnergyRecipeData;
+import com.lw.modularmachine.machine.recipe.resource.FluidRecipeData;
+import com.lw.modularmachine.machine.recipe.resource.ItemRecipeData;
+import com.lw.modularmachine.machine.recipe.resource.RecipeResourceDefinitions;
 import java.util.ArrayList;
+import java.util.EnumMap;
+import java.util.HashSet;
 import java.util.LinkedHashMap;
+import java.util.List;
 import java.util.Optional;
-import net.minecraft.core.HolderLookup;
-import org.jetbrains.annotations.ApiStatus;
 import net.minecraft.resources.ResourceLocation;
+import net.neoforged.neoforge.fluids.FluidStack;
+import org.jetbrains.annotations.ApiStatus;
 
 /**
- * Internal merge into an adapter's original resource before native validation
- * and normalization.
+ * Applies machine-local customizations to original, unscaled resource
+ * declarations.
  */
 @ApiStatus.Internal
 final class RecipeAdapterCustomizations {
-  private RecipeAdapterCustomizations() {
+  private final RecipeAdapterCustomization settings;
+  RecipeAdapterCustomizations(RecipeAdapterCustomization settings) {
+    this.settings = settings;
   }
 
-  static JsonObject apply(JsonObject original, RecipeAdapterCustomization customization, HolderLookup.Provider registries) {
-    if (customization.equals(RecipeAdapterCustomization.NONE)) {
-      return original;
+  private static TriggeredResourceData.Row resolve(RecipeAdapterCustomization.Trigger trigger, RecipeSelectors selectors) {
+    var row = trigger.row();
+    if (!trigger.inheritsSelector()) {
+      return row;
     }
-    var result = original.deepCopy();
-    if (!result.has("inputs")) {
-      result.add("inputs", new JsonArray());
+    var selector = row.io() == RecipeModifier.Io.INPUT ? selectors.fluidInput() : selectors.fluidOutput();
+    return new TriggeredResourceData.Row(
+        row.resource(),
+        row.io(),
+        row.tick(),
+        row.repeatable(),
+        row.amount(),
+        row.chance(),
+        selector,
+        row.prototype(),
+        row.chemical(),
+        row.parallelUnaffected(),
+        row.match());
+  }
+
+  MachineRecipeDeclaration apply(MachineRecipeDeclaration source, ResourceLocation machine, int priority, int duration, long addedEnergy) {
+    if (settings.equals(RecipeAdapterCustomization.NONE)
+        && source.machineId().equals(machine)
+        && priority == source.priority()
+        && duration == source.duration()
+        && addedEnergy == 0) {
+      return source;
     }
-    if (!result.has("outputs")) {
-      result.add("outputs", new JsonArray());
-    }
-    var additions = JsonParser.parseString(customization.resourceAdditions().encoded()).getAsJsonObject();
-    int originalInputRows = result.getAsJsonArray("inputs").size();
-    if (additions.has("item_payments")) {
-      var payments = result.has("item_payments") ? result.getAsJsonObject("item_payments") : new JsonObject();
-      var addedPayments = additions.getAsJsonObject("item_payments").deepCopy();
-      if (addedPayments.has("tools")) {
-        for (var element : addedPayments.getAsJsonArray("tools")) {
-          var tool = element.getAsJsonObject();
-          tool.addProperty("row", Math.addExact(originalInputRows, tool.get("row").getAsInt()));
-        }
-        append(payments, "tools", addedPayments.getAsJsonArray("tools"));
-      }
-      if (addedPayments.has("fuels")) {
-        append(payments, "fuels", addedPayments.getAsJsonArray("fuels"));
-      }
-      result.add("item_payments", payments);
-    }
-    for (String field : List.of("inputs", "ingredient_arrays", "random_item_outputs")) {
-      if (additions.has(field)) {
-        append(result, field, additions.getAsJsonArray(field));
-      }
-    }
-    if (additions.has("load_jei")) {
-      result.add("load_jei", additions.get("load_jei"));
-    }
-    int originalOutputRows = result.getAsJsonArray("outputs").size();
-    for (var parallel : customization.itemParallelism()) {
-      var rows = result.getAsJsonArray(parallel.io() == RecipeModifier.Io.INPUT ? "inputs" : "outputs");
-      if (parallel.row() >= rows.size()) {
+    var extra = settings.resourceAdditions();
+    var original = source.resources();
+    var sourceItems = original.get(RecipeResourceDefinitions.ITEM);
+    var inputs = append(sourceItems.inputs(), extra.inputs());
+    var outputs = new ArrayList<>(sourceItems.outputs());
+    for (var edit : settings.itemParallelism()) {
+      var rows = edit.io() == RecipeModifier.Io.INPUT ? inputs : outputs;
+      if (edit.row() >= rows.size()) {
         throw new IllegalArgumentException("Adapter parallel flag refers to a missing source item row");
       }
-      rows.get(parallel.row()).getAsJsonObject().addProperty("parallel_unaffected", parallel.unaffected());
+      var row = rows.get(edit.row());
+      rows.set(edit.row(), row.withParallelUnaffected(edit.unaffected()));
     }
-    if (customization.energyOutputPerTick() > 0) {
-      long originalEnergy = result.has("energy_output_per_tick") ? result.get("energy_output_per_tick").getAsLong() : 0;
-      result.addProperty("energy_output_per_tick", Math.addExact(originalEnergy, customization.energyOutputPerTick()));
+    outputs.addAll(settings.itemOutputs());
+    var tools = new ArrayList<>(sourceItems.payments().tools());
+    extra.payments().tools().forEach(
+        tool -> tools
+            .add(new ItemPaymentData.Tool(Math.addExact(sourceItems.inputs().size(), tool.row()), tool.durability())));
+    var inputGroups = append(source.ingredientArrays().inputs(), extra.groups().inputs());
+    var callbacks = itemCallbacks(source.scriptOptions(), sourceItems.outputs().size());
+    if (!extra.inputs().isEmpty()
+        && inputs.size() > 1
+        && inputs.getFirst().ignoresComponents()
+        && tools.stream().noneMatch(tool -> tool.row() == 0)) {
+      convertItemOnlyInput(inputs, inputGroups, callbacks, tools);
     }
-    append(result, "modifiers", encode(RecipeModifier.CODEC, customization.modifiers()));
-    append(result, "interface_inputs", encode(SmartNumberRequirement.CODEC, customization.interfaceInputs()));
-    append(result, "fluid_inputs", fluids(customization.fluidInputs()));
-    append(result, "fluid_outputs", fluids(customization.fluidOutputs()));
-    customization.fluidPerTick().ifPresent(fluid -> addFluidPerTick(result, fluid));
-    if (result.has("fluid_per_tick") && !customization.fluidPerTickInputs().isEmpty()) {
-      var prior = new JsonArray();
-      prior.add(result.remove("fluid_per_tick"));
-      append(result, "fluid_per_tick_inputs", prior);
-    }
-    append(result, "fluid_per_tick_inputs", fluids(customization.fluidPerTickInputs()));
-    append(result, "fluid_per_tick_outputs", fluids(customization.fluidPerTickOutputs()));
-    if (!customization.chemicalInputs().isEmpty()
-        || !customization.chemicalOutputs().isEmpty()
-        || !customization.chemicalPerTick().isEmpty()
-        || !customization.chemicalPerTickOutputs().isEmpty()) {
-      var chemicals = result.has("chemicals") ? result.getAsJsonObject("chemicals") : new JsonObject();
-      append(chemicals, "inputs", encode(ChemicalRequirement.CODEC, customization.chemicalInputs()));
-      append(chemicals, "outputs", encode(ChemicalRequirement.CODEC, customization.chemicalOutputs()));
-      append(chemicals, "per_tick", encode(ChemicalRequirement.CODEC, customization.chemicalPerTick()));
-      append(chemicals, "per_tick_outputs", encode(ChemicalRequirement.CODEC, customization.chemicalPerTickOutputs()));
-      result.add("chemicals", chemicals);
-    }
-    var outputs = new JsonArray();
-    for (var output : customization.itemOutputs()) {
-      var row = new JsonObject();
-      row.add("stack", JsonParser.parseString(output.encodedStack()));
-      row.addProperty("amount", output.amount());
-      if (output.chance() != 1) {
-        row.addProperty("chance", output.chance());
-      }
-      if (!output.selector().isEmpty()) {
-        row.addProperty("selector", output.selector());
-      }
-      if (output.parallelUnaffected()) {
-        row.addProperty("parallel_unaffected", true);
-      }
-      output.encodedPreview().ifPresent(preview -> row.add("preview_stack", JsonParser.parseString(preview)));
-      outputs.add(row);
-    }
-    append(result, "outputs", outputs);
-    if (additions.has("output_ranges")) {
-      for (var range : additions.getAsJsonArray("output_ranges")) {
-        var value = range.getAsJsonObject();
-        int index = Math.addExact(originalOutputRows, value.get("row").getAsInt());
-        var row = result.getAsJsonArray("outputs").get(index).getAsJsonObject();
-        row.add("min_amount", value.get("min"));
-        row.add("max_amount", value.get("max"));
-        row.add("amount", value.get("max"));
-      }
-    }
-    if (!customization.selectors().isEmpty()) {
-      var selectors = result.has("selectors") ? result.getAsJsonObject("selectors") : new JsonObject();
-      customization.selectors().forEach((phase, selector) -> {
-        if (selectors.has(phase.field()) && !selectors.get(phase.field()).getAsString().equals(selector)) {
-          throw new IllegalArgumentException("Adapter customization conflicts with the source phase selector");
-        }
-        selectors.addProperty(phase.field(), selector);
-      });
-      result.add("selectors", selectors);
-    }
-    if (additions.has("triggered_resources")) {
-      var triggers = additions.getAsJsonArray("triggered_resources");
-      var selectors = result.getAsJsonObject("selectors");
-      if (selectors != null) {
-        for (var element : triggers) {
-          var row = element.getAsJsonObject();
-          if (row.get("resource").getAsString().equals("fluid") && !row.has("selector")) {
-            var selector = selectors.get("fluid_" + row.get("io").getAsString());
-            if (selector != null) {
-              row.add("selector", selector);
-            }
-          }
-        }
-      }
-      append(result, "triggered_resources", triggers);
-    }
-    customization.parallelized().ifPresent(value -> result.addProperty("parallelized", value));
-    customization.failureAction().ifPresent(value -> result.addProperty("failure_action", value.serialized()));
-    customization.threadName().ifPresent(value -> result.addProperty("thread_name", value));
-    customization.maxThreads().ifPresent(value -> result.addProperty("max_threads", value));
-    addScriptOptions(result, customization, originalOutputRows);
-    resolveItemOnlySource(result);
-    var nativeResources = customization.resourceAdditions().nativeResources();
-    if (!nativeResources.isEmpty()) {
-      RecipeAdapterNativeResources.apply(result, nativeResources, registries);
-    }
+    var items = new ItemRecipeData(
+        inputs,
+        outputs,
+        new ItemPaymentData(tools, append(sourceItems.payments().fuels(), extra.payments().fuels())));
+    var ingredients = new IngredientArrayData(
+        inputGroups,
+        append(source.ingredientArrays().randomOutputs(), extra.groups().randomOutputs()));
+    var previousScript = source.scriptOptions();
+    var script = new RecipeScriptOptions(
+        append(previousScript.tooltips(), settings.tooltips()),
+        callbacks,
+        extra.loadJei().orElse(previousScript.loadJei()));
+    script.validateRows(inputs.size(), outputs.size());
 
-    return result;
+    var selectors = selectors(source);
+    var phases = new HashSet<>(source.declaredSelectorFields());
+    settings.selectors().keySet().forEach(phase -> phases.add(phase.field()));
+    var triggered = new ArrayList<>(source.triggeredResources().rows());
+    extra.triggers().forEach(trigger -> triggered.add(resolve(trigger, selectors)));
+    var fluid = original.get(RecipeResourceDefinitions.FLUID);
+    var effectiveTicks = new ArrayList<>(fluid.perTickInputs());
+    boolean legacy = source.legacyFluidPerTick();
+    if (settings.fluidPerTick().isPresent()) {
+      var addition = settings.fluidPerTick().orElseThrow();
+      if (addition.chance() != 1
+          || addition.parallelUnaffected()
+          || addition.selectorSpecified()
+          || addition.ignoreOutputCheck()) {
+        throw new IllegalArgumentException("Legacy per-tick fluid must use an unmodified fluid stack");
+      }
+      if (legacy) {
+        var previous = effectiveTicks.getFirst().stack();
+        var next = addition.stack();
+        if (!FluidStack.isSameFluidSameComponents(previous, next)) {
+          throw new IllegalArgumentException("Adapter cannot add a different fluid-per-tick resource");
+        }
+        next.setAmount(Math.addExact(previous.getAmount(), next.getAmount()));
+        effectiveTicks.set(0, new FluidRequirement(next, 1));
+      } else {
+        if (!effectiveTicks.isEmpty() && settings.fluidPerTickInputs().isEmpty()) {
+          throw new IllegalArgumentException("Use either fluid_per_tick or fluid_per_tick_inputs");
+        }
+        effectiveTicks.add(addition);
+        legacy = true;
+      }
+    }
+    effectiveTicks.addAll(settings.fluidPerTickInputs());
+    legacy &= settings.fluidPerTickInputs().isEmpty();
+    var liquids = new FluidRecipeData(
+        append(fluid.inputs(), settings.fluidInputs()),
+        append(fluid.outputs(), settings.fluidOutputs()),
+        effectiveTicks,
+        append(fluid.perTickOutputs(), settings.fluidPerTickOutputs()));
+    var chemical = original.get(RecipeResourceDefinitions.CHEMICAL);
+    var chemicals = new ChemicalRecipeData(
+        append(chemical.inputs(), settings.chemicalInputs()),
+        append(chemical.outputs(), settings.chemicalOutputs()),
+        append(chemical.perTick(), settings.chemicalPerTick()),
+        append(chemical.perTickOutputs(), settings.chemicalPerTickOutputs()));
+    var energy = original.get(RecipeResourceDefinitions.ENERGY);
+    var costs = new EnergyRecipeData(
+        Math.addExact(energy.inputPerTick(), addedEnergy),
+        Math.addExact(energy.outputPerTick(), settings.energyOutputPerTick()));
+    var entries = new LinkedHashMap<ResourceLocation, RecipeResources.Entry<?>>();
+    original.entries().forEach(entry -> entries.put(entry.type().id(), entry));
+    for (var entry : List.of(
+        new RecipeResources.Entry<>(RecipeResourceDefinitions.ITEM, items),
+        new RecipeResources.Entry<>(RecipeResourceDefinitions.FLUID, liquids),
+        new RecipeResources.Entry<>(RecipeResourceDefinitions.CHEMICAL, chemicals),
+        new RecipeResources.Entry<>(RecipeResourceDefinitions.ENERGY, costs))) {
+      entries.put(entry.type().id(), entry);
+    }
+    for (var addition : extra.nativeResources().values()) {
+      var entry = RecipeAdapterNativeResources.apply(original, addition);
+      entries.put(entry.type().id(), entry);
+    }
+    var execution = source.executionOptions();
+    return new MachineRecipeDeclaration(
+        machine,
+        priority,
+        duration,
+        new RecipeResources(List.copyOf(entries.values())),
+        settings.failureAction().or(source::failureAction),
+        settings.parallelized().or(source::parallelized),
+        source.randomSeed(),
+        append(source.interfaceInputs(), settings.interfaceInputs()),
+        selectors,
+        new RecipeExecutionOptions(
+            settings.threadName().orElse(execution.threadName()),
+            settings.maxThreads().orElse(execution.maxThreads())),
+        script,
+        ingredients,
+        new TriggeredResourceData(triggered),
+        append(source.modifiers(), settings.modifiers()),
+        legacy,
+        phases);
   }
 
-  private static void resolveItemOnlySource(JsonObject result) {
-    var inputs = result.getAsJsonArray("inputs");
-    if (inputs.isEmpty() || inputs.size() == 1 && !result.has("ingredient_arrays")) {
-      return;
-    }
-    var source = inputs.get(0).getAsJsonObject();
-    if (!source.has("match") || !source.get("match").getAsString().equals("item")) {
-      return;
-    }
-    var choice = new JsonObject();
-    choice.addProperty("resource", "item");
-    choice.add("item", source.get("stack"));
-    choice.addProperty("match", "item");
-    for (String field : List.of("amount", "chance", "min_amount", "max_amount")) {
-      if (source.has(field)) {
-        choice.add(field, source.get(field));
+  private RecipeSelectors selectors(MachineRecipeDeclaration source) {
+    var previous = source.selectors();
+    var values = new EnumMap<Phase, String>(Phase.class);
+    values.put(Phase.FLUID_INPUT, previous.fluidInput());
+    values.put(Phase.FLUID_OUTPUT, previous.fluidOutput());
+    values.put(Phase.FLUID_PER_TICK, previous.fluidPerTick());
+    values.put(Phase.ENERGY_INPUT, previous.energyInput());
+    values.put(Phase.ENERGY_OUTPUT, previous.energyOutput());
+    settings.selectors().forEach((phase, next) -> {
+      if (source.declaredSelectorFields().contains(phase.field()) && !values.get(phase).equals(next)) {
+        throw new IllegalArgumentException("Adapter customization conflicts with the source phase selector");
       }
-    }
-    if (result.has("item_callbacks")) {
-      var retained = new JsonArray();
-      for (var element : result.getAsJsonArray("item_callbacks")) {
-        var binding = element.getAsJsonObject();
-        if (binding.get("io").getAsString().equals("input")) {
-          int index = binding.get("row").getAsInt();
-          if (index == 0) {
-            for (String field : List.of("checker", "modifiers")) {
-              if (binding.has(field)) {
-                choice.add(field, binding.get(field));
-              }
-            }
-            continue;
-          }
-          binding.addProperty("row", index - 1);
-        }
-        retained.add(binding);
-      }
-      result.add("item_callbacks", retained);
-    }
-    if (result.has("item_payments") && result.getAsJsonObject("item_payments").has("tools")) {
-      for (var element : result.getAsJsonObject("item_payments").getAsJsonArray("tools")) {
-        var tool = element.getAsJsonObject();
-        int row = tool.get("row").getAsInt();
-        if (row == 0) {
-          throw new IllegalArgumentException("An item-only source cannot be a durability payment");
-        }
-        tool.addProperty("row", row - 1);
-      }
-    }
-    var alternatives = new JsonArray();
-    alternatives.add(choice);
-    var group = new JsonObject();
-    group.add("alternatives", alternatives);
-    for (String field : List.of("selector", "parallel_unaffected")) {
-      if (source.has(field)) {
-        group.add(field, source.get(field));
-      }
-    }
-    var groups = new JsonArray();
-    groups.add(group);
-    append(result, "ingredient_arrays", groups);
-    inputs.remove(0);
+      values.put(phase, next);
+    });
+    return new RecipeSelectors(
+        values.get(Phase.FLUID_INPUT),
+        values.get(Phase.FLUID_OUTPUT),
+        values.get(Phase.ENERGY_INPUT),
+        values.get(Phase.FLUID_PER_TICK),
+        values.get(Phase.ENERGY_OUTPUT));
   }
 
-  private static void addScriptOptions(JsonObject result, RecipeAdapterCustomization customization, int originalOutputRows) {
-    var previous = RecipeScriptOptions.CODEC.codec().parse(JsonOps.INSTANCE, result).getOrThrow();
-    var tooltips = new ArrayList<>(previous.tooltips());
-    tooltips.addAll(customization.tooltips());
-    var bindings = new LinkedHashMap<String, RecipeScriptOptions.ItemCallbacks>();
-    previous.itemCallbacks().forEach(binding -> bindings.put(binding.io().serialized() + ":" + binding.row(), binding));
-    for (var addition : customization.itemCallbacks()) {
+  private List<RecipeScriptOptions.ItemCallbacks> itemCallbacks(RecipeScriptOptions source, int originalOutputRows) {
+    record Row(RecipeModifier.Io io, int index) {
+    }
+    var bindings = new LinkedHashMap<Row, RecipeScriptOptions.ItemCallbacks>();
+    source.itemCallbacks().forEach(binding -> bindings.put(new Row(binding.io(), binding.row()), binding));
+    for (var addition : settings.itemCallbacks()) {
       var callback = addition.callback();
-      int row = addition.addedOutput() ? Math.addExact(originalOutputRows, callback.row()) : callback.row();
-      var next = new RecipeScriptOptions.ItemCallbacks(callback.io(), row, callback.checker(), callback.modifiers());
-      String key = next.io().serialized() + ":" + row;
-      var old = bindings.get(key);
-      if (old != null) {
-        Optional<ResourceLocation> checker = old.checker();
-        if (next.checker().isPresent()) {
-          if (checker.isPresent() && !checker.equals(next.checker())) {
-            throw new IllegalArgumentException("Adapter customization conflicts with a source item checker");
-          }
-          checker = next.checker();
+      int index = addition.addedOutput() ? Math.addExact(originalOutputRows, callback.row()) : callback.row();
+      var key = new Row(callback.io(), index);
+      var previous = bindings.get(key);
+      var checker = callback.checker();
+      var modifiers = callback.modifiers();
+      if (previous != null) {
+        if (previous.checker().isPresent() && checker.isPresent() && !previous.checker().equals(checker)) {
+          throw new IllegalArgumentException("Adapter customization conflicts with a source item checker");
         }
-        var modifiers = new ArrayList<>(old.modifiers());
-        modifiers.addAll(next.modifiers());
-        next = new RecipeScriptOptions.ItemCallbacks(next.io(), row, checker, modifiers);
+        checker = checker.or(previous::checker);
+        modifiers = append(previous.modifiers(), modifiers);
       }
-      bindings.put(key, next);
+      bindings.put(key, new RecipeScriptOptions.ItemCallbacks(callback.io(), index, checker, modifiers));
     }
-    var options = new RecipeScriptOptions(tooltips, List.copyOf(bindings.values()), previous.loadJei());
-    options.validateRows(result.getAsJsonArray("inputs").size(), result.getAsJsonArray("outputs").size());
-    var encoded = RecipeScriptOptions.CODEC.codec().encodeStart(JsonOps.INSTANCE, options).getOrThrow()
-        .getAsJsonObject();
-    encoded.entrySet().forEach(entry -> result.add(entry.getKey(), entry.getValue()));
+    return new ArrayList<>(bindings.values());
   }
 
-  private static void addFluidPerTick(JsonObject result, RecipeAdapterCustomization.FluidResource addition) {
-    var fluid = JsonParser.parseString(addition.encoded()).getAsJsonObject();
-    if (result.has("fluid_per_tick")) {
-      var previous = result.getAsJsonObject("fluid_per_tick");
-      var previousKey = previous.deepCopy();
-      var nextKey = fluid.deepCopy();
-      previousKey.remove("amount");
-      nextKey.remove("amount");
-      if (!previousKey.equals(nextKey)) {
-        throw new IllegalArgumentException("Adapter cannot add a different fluid-per-tick resource");
+  private static void convertItemOnlyInput(List<ItemAmount> inputs, List<IngredientArrayData.Group> groups, List<RecipeScriptOptions.ItemCallbacks> callbacks, List<ItemPaymentData.Tool> tools) {
+    var row = inputs.removeFirst();
+    Optional<ResourceLocation> checker = Optional.empty();
+    List<ResourceLocation> modifiers = List.of();
+    for (var it = callbacks.listIterator(); it.hasNext();) {
+      var callback = it.next();
+      if (callback.io() != RecipeModifier.Io.INPUT) {
+        continue;
       }
-      fluid.addProperty("amount", Math.addExact(previous.get("amount").getAsInt(), fluid.get("amount").getAsInt()));
+      if (callback.row() == 0) {
+        checker = callback.checker();
+        modifiers = callback.modifiers();
+        it.remove();
+      } else {
+        it.set(
+            new RecipeScriptOptions.ItemCallbacks(
+                callback.io(),
+                callback.row() - 1,
+                callback.checker(),
+                callback.modifiers()));
+      }
     }
-    result.add("fluid_per_tick", fluid);
+    tools.replaceAll(tool -> new ItemPaymentData.Tool(tool.row() - 1, tool.durability()));
+    var choice = new IngredientArrayData.Choice(
+        "item",
+        Optional.of(row.ingredientStack()),
+        Optional.empty(),
+        Optional.empty(),
+        row.amount(),
+        row.chance(),
+        checker,
+        modifiers,
+        row.minAmount(),
+        row.maxAmount(),
+        row.match());
+    groups.add(new IngredientArrayData.Group(List.of(choice), 1, row.parallelUnaffected(), row.selector()));
   }
 
-  private static JsonArray fluids(List<RecipeAdapterCustomization.FluidResource> resources) {
-    var rows = new JsonArray();
-    resources.forEach(resource -> rows.add(JsonParser.parseString(resource.encoded())));
-
-    return rows;
-  }
-
-  private static <T> JsonArray encode(Codec<T> codec, List<T> values) {
-    var rows = new JsonArray();
-    values.forEach(value -> rows.add(codec.encodeStart(JsonOps.INSTANCE, value).getOrThrow()));
-
-    return rows;
-  }
-
-  private static void append(JsonObject result, String field, JsonArray additions) {
-    if (additions.isEmpty()) {
-      return;
-    }
-    var rows = result.has(field) ? result.getAsJsonArray(field) : new JsonArray();
-    for (JsonElement addition : additions) {
-      rows.add(addition);
-    }
-    result.add(field, rows);
+  private static <T> ArrayList<T> append(List<T> original, List<T> additions) {
+    var result = new ArrayList<>(original);
+    result.addAll(additions);
+    return result;
   }
 }

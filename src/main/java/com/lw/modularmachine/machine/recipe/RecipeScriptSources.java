@@ -50,7 +50,11 @@ public final class RecipeScriptSources {
     }
   }
 
-  private record Capture(LongFunction<Snapshot> source, long callbackGeneration) {
+  private record Capture(LongFunction<Snapshot> source, long callbackGeneration, Runnable release) {
+    void close() {
+      release.run();
+      RecipeScriptCallbacks.end(callbackGeneration);
+    }
   }
 
   private static final Map<RecipeManager, Capture> CAPTURED = new IdentityHashMap<>();
@@ -62,10 +66,15 @@ public final class RecipeScriptSources {
    * Called by the platform recipe hook; no snapshot is taken before its recipe
    * event.
    */
-  public static synchronized void capture(RecipeManager manager, Function<ResourceLocation, JsonElement> selectedDeclaration, LongFunction<Snapshot> source) {
+  public static synchronized void capture(RecipeManager manager, Function<ResourceLocation, JsonElement> selectedDeclaration, LongFunction<Snapshot> source, Runnable release) {
     Objects.requireNonNull(manager, "manager");
     Objects.requireNonNull(source, "source");
-    CAPTURED.put(manager, new Capture(source, RecipeScriptCallbacks.begin(selectedDeclaration)));
+    var previous = CAPTURED.put(
+        manager,
+        new Capture(source, RecipeScriptCallbacks.begin(selectedDeclaration), Objects.requireNonNull(release)));
+    if (previous != null) {
+      previous.close();
+    }
   }
 
   public static Snapshot snapshot(RecipeManager manager) {
@@ -82,12 +91,12 @@ public final class RecipeScriptSources {
   public static synchronized void clear(RecipeManager manager) {
     var current = CAPTURED.remove(manager);
     if (current != null) {
-      RecipeScriptCallbacks.end(current.callbackGeneration());
+      current.close();
     }
   }
 
   public static synchronized void clear() {
-    CAPTURED.values().forEach(current -> RecipeScriptCallbacks.end(current.callbackGeneration()));
+    CAPTURED.values().forEach(Capture::close);
     CAPTURED.clear();
   }
 }

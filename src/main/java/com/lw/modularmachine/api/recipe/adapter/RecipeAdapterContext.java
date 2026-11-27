@@ -1,6 +1,7 @@
 package com.lw.modularmachine.api.recipe.adapter;
 
 import com.lw.modularmachine.api.recipe.MachineRecipeBuilder;
+import com.lw.modularmachine.machine.recipe.RecipeDeclarationSnapshots;
 import java.nio.ByteBuffer;
 import java.nio.charset.StandardCharsets;
 import java.security.MessageDigest;
@@ -26,7 +27,7 @@ public record RecipeAdapterContext(
     Objects.requireNonNull(machine, "machine");
     Objects.requireNonNull(settings, "settings");
     Objects.requireNonNull(registries, "registries");
-    sources = List.copyOf(sources);
+    sources = RecipeDeclarationSnapshots.adapterSources(sources, registries);
     Objects.requireNonNull(tags, "tags");
   }
 
@@ -35,6 +36,12 @@ public record RecipeAdapterContext(
    */
   public RecipeAdapterContext(ResourceLocation machine, RecipeAdapterImport settings, HolderLookup.Provider registries, List<RecipeHolder<?>> sources) {
     this(machine, settings, registries, sources, RecipeAdapterTags.from(registries));
+  }
+
+  /** Each adapter read owns the mutable components in its customization. */
+  @Override
+  public RecipeAdapterImport settings() {
+    return RecipeDeclarationSnapshots.adapterSettings(settings, registries);
   }
 
   /**

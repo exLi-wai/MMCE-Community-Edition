@@ -1,6 +1,6 @@
 package com.lw.modularmachine.machine.recipe.resource;
 
-import com.lw.modularmachine.machine.recipe.MachineRecipe;
+import com.lw.modularmachine.api.recipe.ItemAmount;
 import com.lw.modularmachine.machine.recipe.MachineRecipeJson;
 import com.lw.modularmachine.api.recipe.ItemPaymentData;
 import com.mojang.serialization.MapCodec;
@@ -13,15 +13,12 @@ import org.jetbrains.annotations.ApiStatus;
  * accessors.
  */
 @ApiStatus.Internal
-public record ItemRecipeData(
-    List<MachineRecipe.ItemAmount> inputs,
-    List<MachineRecipe.ItemAmount> outputs,
-    ItemPaymentData payments) {
+public record ItemRecipeData(List<ItemAmount> inputs, List<ItemAmount> outputs, ItemPaymentData payments) {
   public static final ItemRecipeData NONE = new ItemRecipeData(List.of(), List.of());
   public static final MapCodec<ItemRecipeData> CODEC = RecordCodecBuilder.mapCodec(
       instance -> instance.group(
-          MachineRecipe.ItemAmount.CODEC.listOf().fieldOf("inputs").forGetter(ItemRecipeData::inputs),
-          MachineRecipe.ItemAmount.CODEC.listOf().fieldOf("outputs").forGetter(ItemRecipeData::outputs),
+          ItemAmount.CODEC.listOf().fieldOf("inputs").forGetter(ItemRecipeData::inputs),
+          ItemAmount.CODEC.listOf().fieldOf("outputs").forGetter(ItemRecipeData::outputs),
           ItemPaymentData.CODEC.optionalFieldOf("item_payments", ItemPaymentData.NONE)
               .forGetter(ItemRecipeData::payments))
           .apply(instance, ItemRecipeData::new));
@@ -39,7 +36,7 @@ public record ItemRecipeData(
     }
   }
 
-  public ItemRecipeData(List<MachineRecipe.ItemAmount> inputs, List<MachineRecipe.ItemAmount> outputs) {
+  public ItemRecipeData(List<ItemAmount> inputs, List<ItemAmount> outputs) {
     this(inputs, outputs, ItemPaymentData.NONE);
   }
 }

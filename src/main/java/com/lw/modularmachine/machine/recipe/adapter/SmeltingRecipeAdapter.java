@@ -27,9 +27,10 @@ public final class SmeltingRecipeAdapter implements MachineRecipeAdapter {
   @Override
   public List<MachineRecipeBuilder> adapt(RecipeAdapterContext context) {
     var result = new ArrayList<MachineRecipeBuilder>();
+    boolean allRecipes = context.settings().allRecipes();
     for (var source : context.sources()) {
       if (source.value().getType() != RecipeType.SMELTING) {
-        if (!context.settings().allRecipes()) {
+        if (!allRecipes) {
           throw new IllegalArgumentException(source.id() + ": Source is not a furnace smelting recipe");
         }
         continue;

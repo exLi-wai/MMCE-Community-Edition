@@ -3,6 +3,7 @@ package com.lw.modularmachine.machine.recipe.search;
 import com.lw.modularmachine.api.recipe.resource.RecipeResourcePlanning;
 import com.lw.modularmachine.machine.recipe.PatternProductionService;
 import com.lw.modularmachine.machine.recipe.RecipeStartPlan;
+import com.lw.modularmachine.machine.recipe.RecipeItemInputAllocation;
 import com.lw.modularmachine.machine.recipe.ItemResourceKey;
 import com.lw.modularmachine.machine.recipe.MachineRecipeService;
 import com.lw.modularmachine.machine.recipe.RecipeExecutionTicket;
@@ -87,6 +88,7 @@ public final class RecipeSearch {
   private final UpgradeBusOwner factory;
   private final String factoryThread;
   private RecipeStartPlan pendingFactoryPlan;
+  private SelectedInputs selectedInputs;
   private final PendingInputsQueue pendingInputs;
   private PendingCheck pendingCheck;
   private ResourcePlanningSequence pendingVerification;
@@ -182,7 +184,8 @@ public final class RecipeSearch {
   private record PendingInputs(
       RecipeCandidate<ItemResourceKey> candidate,
       MachineRecipe definition,
-      RecipeExecutionTicket ticket) {
+      RecipeExecutionTicket ticket,
+      RecipeItemInputAllocation allocation) {
   }
 
   private record PendingKey(String recipeId, RecipeExecutionTicket ticket) {
@@ -213,7 +216,7 @@ public final class RecipeSearch {
   private RecipeSearch(RecipeExecutionTicket ticket, RecipeCatalog catalog, RecipeCatalog.CandidateFilter filter, String factoryThread, List<RecipeExecutionTicket> groups) {
     this.ticket = ticket;
     this.catalog = catalog;
-    resources = new RecipeSearchResources(catalog);
+    resources = new RecipeSearchResources(catalog, filter, null);
     this.filter = filter;
     this.factoryThread = startThread(ticket, factoryThread);
     this.groups = groups;
@@ -406,7 +409,8 @@ public final class RecipeSearch {
               preparationSnapshot,
               resourceSearches.forRecipe(original.id()),
               factoryThread,
-              catalog);
+              catalog,
+              preparationLimits.getOrDefault(original.id(), Integer.MAX_VALUE));
         }
         ingredientPreparation.advance(budget - used);
         used += ingredientPreparation.workUsed();
@@ -419,6 +423,7 @@ public final class RecipeSearch {
           var candidate = RecipeItemCallbackService
               .compilePrepared(nativeRecipe, catalog.searchEntry(original.id()).id(), ticket.level().registryAccess());
           recordPreparedCandidate(original, candidate, nativeRecipe);
+          preparationLimits.merge(original.id(), ingredientPreparation.preparedParallelLimit(), Math::min);
           preparedDefinitions
               .put(original.id(), new PreparedInputs(nativeRecipe, original, candidate, ingredientPreparation.epoch()));
         }
@@ -530,7 +535,7 @@ public final class RecipeSearch {
         catalog,
         filter,
         factoryThread,
-        new RecipeSearchResources(catalog, restart),
+        new RecipeSearchResources(catalog, filter, restart),
         new PendingInputsQueue()) : new RecipeSearch(ticket, catalog, filter, factoryThread, groups);
     return catalog.isCurrent() ? Optional.of(search) : Optional.empty();
   }
@@ -775,10 +780,14 @@ public final class RecipeSearch {
     var recipeId = catalog.searchEntry(pending.candidate().id()).id();
     var thread = current.owner() instanceof FactoryControllerBlockEntity ? Optional.of(factoryThread) : Optional
         .<String>empty();
+    var slices = RecipeIngredientArrayResolution.checkerSlices(definition, current, 1, pending.allocation());
+    if (slices.isEmpty()) {
+      return false;
+    }
     var check = RecipeItemCallbackService.checkInputs(
         definition.scriptOptions(),
         RecipeItemPreparation.context(current, recipeId, thread, 1),
-        RecipeIngredientArrayResolution.checkerSlices(definition, current, 1),
+        slices.orElseThrow(),
         current.level().registryAccess(),
         itemCallbackEpoch);
     return check == RecipeItemCallbackService.InputCheck.ALLOWED && current.dependenciesCurrent();
@@ -846,6 +855,7 @@ public final class RecipeSearch {
       }
       if (checkedInputs.status() == RecipeResourcePlanning.Status.REJECTED) {
         resourceInputs = null;
+        selectedInputs = null;
         session.rejectSelected();
         continue;
       }
@@ -866,25 +876,40 @@ public final class RecipeSearch {
       if (planned.status() == RecipeResourcePlanning.Status.REJECTED) {
         resourceInputs = null;
         resourcePlans = null;
+        selectedInputs = null;
         session.rejectSelected();
         continue;
       }
       if (pendingFactoryPlan == null) {
-        long inputChanceSeed = RecipeStartPlan.newInputChanceSeed();
-        var needed = new HashMap<>(RecipeStartPlan.sampledInputs(generic.candidate(), inputChanceSeed, 1));
-        var deductions = new ArrayList<RecipeStartPlan.Deduction>();
-        for (var port : groupItems.inputs()) {
-          for (var slot : port) {
-            var expected = RecipeStartPlan.inputKey(generic.candidate(), slot.key());
-            long amount = Math.min(needed.getOrDefault(expected, 0L), slot.count());
-            if (amount > 0) {
-              deductions.add(new RecipeStartPlan.Deduction(slot.ref(), slot.key(), amount));
-              needed.put(expected, needed.get(expected) - amount);
-            }
-          }
+        var candidate = prepared == null ? catalog.recipes().candidate(generic.candidate().id())
+            .orElseThrow() : prepared.effective();
+        if (used >= budget) {
+          return new Result(RecipePlanner.Status.BUDGET_EXHAUSTED, Optional.empty(), used);
         }
-        if (needed.values().stream().anyMatch(count -> count != 0)) {
-          throw new IllegalStateException("Input slot accounting differs from exact-key plan");
+        if (selectedInputs == null) {
+          selectedInputs = new SelectedInputs(
+              catalog.ticketForRecipe(ticket, candidate, definition),
+              candidate,
+              definition,
+              resources.matchingSlots);
+          used++;
+          inputPreparationWork++;
+        }
+        int work = selectedInputs.advance(budget - used);
+        used += work;
+        inputPreparationWork += work;
+        if (!selectedInputs.complete() || used == budget) {
+          return new Result(RecipePlanner.Status.BUDGET_EXHAUSTED, Optional.empty(), used);
+        }
+        used++;
+        inputPreparationWork++;
+        var payment = selectedInputs;
+        selectedInputs = null;
+        if (payment.reservations.allocation().isEmpty()) {
+          resourceInputs = null;
+          resourcePlans = null;
+          session.rejectSelected();
+          continue;
         }
         var placements = generic.insertions().stream()
             .map(
@@ -894,11 +919,17 @@ public final class RecipeSearch {
                     insertion.key(),
                     Math.toIntExact(insertion.count())))
             .toList();
-        var candidate = prepared == null ? catalog.recipes().candidate(generic.candidate().id())
-            .orElseThrow() : prepared.effective();
-        var recipeTicket = catalog.ticketForRecipe(ticket, candidate, definition);
         pendingFactoryPlan = RecipeStartPlan
-            .prepared(recipeTicket, catalog, candidate, deductions, placements, inputChanceSeed, factoryScope)
+            .prepared(
+                payment.ticket,
+                catalog,
+                candidate,
+                payment.debits.deductions(),
+                placements,
+                payment.seed,
+                factoryScope,
+                preparationSnapshot)
+            .withInputAllocation(payment.reservations.allocation().orElseThrow())
             .withOutputPreparationContext(factoryThread)
             .withPreparationLimit(preparationLimits.getOrDefault(generic.candidate().id(), Integer.MAX_VALUE));
         if (prepared != null) {
@@ -934,7 +965,12 @@ public final class RecipeSearch {
         }
       }
       if (resourceInputs.waiting()) {
-        pendingInputs.add(new PendingInputs(generic.candidate(), definition, ticket));
+        pendingInputs.add(
+            new PendingInputs(
+                generic.candidate(),
+                definition,
+                ticket,
+                RecipeItemPreparation.hasInputChecker(definition) ? pendingFactoryPlan.inputAllocation() : null));
         resourceInputs = null;
         pendingFactoryPlan = null;
         resourcePlans = null;
@@ -944,6 +980,40 @@ public final class RecipeSearch {
       selected = pendingFactoryPlan;
 
       return new Result(RecipePlanner.Status.SELECTED, Optional.of(selected), used);
+    }
+  }
+
+  private static final class SelectedInputs {
+    private final RecipeExecutionTicket ticket;
+    private final long seed = RecipeStartPlan.newInputChanceSeed();
+    private final RecipeItemInputAllocation.Cursor reservations;
+    private final RecipeStartPlan.InputSampling sampling;
+    private RecipeItemInputAllocation.DeductionCursor debits;
+
+    private SelectedInputs(RecipeExecutionTicket ticket, RecipeCandidate<ItemResourceKey> candidate, MachineRecipe definition, RecipeItemInputAllocation.MatchingSlots matchingSlots) {
+      this.ticket = ticket;
+      reservations = RecipeItemInputAllocation.beginSelected(candidate, definition, ticket, matchingSlots);
+      sampling = RecipeStartPlan.beginInputSampling(candidate, seed, 1);
+    }
+
+    private int advance(int budget) {
+      int used = reservations.advance(budget);
+      if (used == budget || !reservations.complete() || reservations.allocation().isEmpty()) {
+        return used;
+      }
+      used += sampling.advance(budget - used);
+      if (used == budget || !sampling.complete()) {
+        return used;
+      }
+      if (debits == null) {
+        debits = reservations.allocation().orElseThrow().beginDeductions(sampling.amounts());
+        used++;
+      }
+      return used + debits.advance(budget - used);
+    }
+
+    private boolean complete() {
+      return reservations.complete() && reservations.allocation().isEmpty() || debits != null && debits.complete();
     }
   }
 
@@ -1053,7 +1123,9 @@ public final class RecipeSearch {
   }
 
   public boolean dependenciesCurrent() {
-    return (selected == null ? ticket.searchContextCurrent() : selected.resourcesCurrent())
+    boolean current = selected == null ? ticket.searchContextCurrent() : factoryThread != null ? selected
+        .factoryPlanningCurrent() : selected.resourcesCurrent();
+    return current
         && catalog.isCurrent()
         && RecipeItemCallbackService.isCurrent(itemCallbackEpoch)
         && (factoryScope == null || factoryScope.current())

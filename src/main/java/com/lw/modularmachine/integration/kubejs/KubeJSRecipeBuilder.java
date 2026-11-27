@@ -1,5 +1,6 @@
 package com.lw.modularmachine.integration.kubejs;
 
+import com.lw.modularmachine.api.recipe.ItemAmount;
 import com.lw.modularmachine.machine.recipe.RecipeDeclaredObservers;
 import com.lw.modularmachine.machine.recipe.RecipePreparationHandlers;
 import com.lw.modularmachine.api.recipe.RecipePreparationEvents;
@@ -7,9 +8,7 @@ import com.lw.modularmachine.integration.kubejs.KubeJSRecipeRows.ItemRow;
 import com.lw.modularmachine.integration.kubejs.KubeJSRecipeRows.FluidRow;
 import com.lw.modularmachine.integration.kubejs.KubeJSRecipeRows.ChemicalRow;
 import com.lw.modularmachine.machine.recipe.RecipeScriptCallbacks;
-import com.google.gson.JsonArray;
 import com.google.gson.JsonElement;
-import com.google.gson.JsonObject;
 import com.lw.modularmachine.ModularMachine;
 import com.lw.modularmachine.api.recipe.RecipeFailureAction;
 import com.lw.modularmachine.api.recipe.ChemicalRecipeData;
@@ -17,6 +16,13 @@ import com.lw.modularmachine.api.recipe.ChemicalRequirement;
 import com.lw.modularmachine.api.recipe.IngredientArrayData;
 import com.lw.modularmachine.api.recipe.TriggeredResourceData;
 import com.lw.modularmachine.api.recipe.ItemPaymentData;
+import com.lw.modularmachine.api.recipe.MachineRecipeDeclaration;
+import com.lw.modularmachine.api.recipe.resource.RecipeResources;
+import com.lw.modularmachine.machine.recipe.MachineRecipeCompiler;
+import com.lw.modularmachine.machine.recipe.resource.EnergyRecipeData;
+import com.lw.modularmachine.machine.recipe.resource.FluidRecipeData;
+import com.lw.modularmachine.machine.recipe.resource.ItemRecipeData;
+import com.lw.modularmachine.machine.recipe.resource.RecipeResourceDefinitions;
 import com.lw.modularmachine.api.recipe.RecipeModifier;
 import com.lw.modularmachine.api.recipe.RecipeSelectors;
 import com.lw.modularmachine.api.recipe.FluidRequirement;
@@ -26,7 +32,6 @@ import com.lw.modularmachine.api.recipe.RecipeItemCallbacks;
 import com.lw.modularmachine.api.recipe.RecipeLifecycleEvents;
 import com.lw.modularmachine.api.smart.SmartNumberRequirement;
 import com.lw.modularmachine.machine.recipe.ItemStackSnapshots;
-import com.lw.modularmachine.machine.recipe.MachineRecipe;
 import com.lw.modularmachine.machine.recipe.MachineRecipeJson;
 import com.lw.modularmachine.machine.recipe.ResourceSelector;
 import com.lw.modularmachine.machine.recipe.RecipeModifiers;
@@ -36,7 +41,6 @@ import com.mojang.serialization.JsonOps;
 import dev.latvian.mods.kubejs.recipe.RecipesKubeEvent;
 import dev.latvian.mods.kubejs.script.KubeJSContext;
 import dev.latvian.mods.kubejs.script.ScriptType;
-import dev.latvian.mods.kubejs.util.KubeResourceLocation;
 import dev.latvian.mods.rhino.Context;
 import java.util.ArrayList;
 import java.util.LinkedHashMap;
@@ -1340,7 +1344,7 @@ public final class KubeJSRecipeBuilder {
       }
     }
 
-    private void captureCallbacks(JsonObject source) {
+    private RecipeScriptCallbacks.Bindings callbacks() {
       var checkers = new LinkedHashMap<ResourceLocation, RecipeItemCallbacks.Checker>();
       var modifiers = new LinkedHashMap<ResourceLocation, RecipeItemCallbacks.Modifier>();
       var inputModifiers = new LinkedHashMap<ResourceLocation, RecipeItemCallbacks.InputModifier>();
@@ -1357,47 +1361,26 @@ public final class KubeJSRecipeBuilder {
           inputModifiers.putAll(row.inlineInputModifiers);
         }
       }
-      RecipeScriptCallbacks.capture(
-          id,
-          source,
-          new RecipeScriptCallbacks.Bindings(
-              checkers,
-              modifiers,
-              inputModifiers,
-              lifecycleHandlers,
-              preparationHandlers));
+      return new RecipeScriptCallbacks.Bindings(
+          checkers,
+          modifiers,
+          inputModifiers,
+          lifecycleHandlers,
+          preparationHandlers);
     }
 
     public void build(Context context) {
       requireMutable();
       requireServerScript(context);
-      var json = declarationJson();
+      var declaration = MachineRecipeCompiler.capture(declaration(), event.registries.access());
+      MachineRecipeCompiler.compile(declaration);
+      var bindings = callbacks();
       built = true;
-      var recipe = event.custom(context, json);
-      if (recipe == null || recipe.creationError) {
-        throw new IllegalStateException("KubeJS rejected the native machine recipe declaration");
-      }
-      recipe.id(new KubeResourceLocation(id));
-      try {
-        captureCallbacks(recipe.json);
-      } catch (RuntimeException failure) {
-        recipe.remove();
-        throw failure;
-      }
+      var registration = ((MachineItemRecipeKubeJSSources.RecipeEvent) event).MMCECE$registration();
+      registration.submit(context, event, id, declaration, bindings);
     }
 
-    private JsonObject declarationJson() {
-      var json = new JsonObject();
-      json.addProperty("type", MachineRecipeJson.TYPE);
-      json.addProperty("machine", machine.toString());
-      json.addProperty("duration", duration);
-      json.addProperty("priority", priority);
-      json.add("inputs", itemRows(inputs));
-      json.add("outputs", itemRows(outputs));
-      var triggers = triggeredRows();
-      if (!triggers.isEmpty()) {
-        json.add("triggered_resources", encode(TriggeredResourceData.CODEC, triggers));
-      }
+    private MachineRecipeDeclaration declaration() {
       var tools = new ArrayList<ItemPaymentData.Tool>();
       int visibleToolRow = 0;
       for (int row = 0; row < inputs.size(); row++) {
@@ -1412,119 +1395,65 @@ public final class KubeJSRecipeBuilder {
         }
         visibleToolRow++;
       }
-      var payments = new ItemPaymentData(tools, fuelInputs);
-      if (!payments.isEmpty()) {
-        json.add("item_payments", encode(ItemPaymentData.CODEC, payments));
-      }
-      if (!ingredientArrays.isEmpty()) {
-        json.add("ingredient_arrays", encode(IngredientArrayData.CODEC, new IngredientArrayData(ingredientArrays)));
-      }
-      if (!randomItemOutputs.isEmpty()) {
-        json.add("random_item_outputs", encode(IngredientArrayData.Group.CODEC.listOf(), randomItemOutputs));
-      }
-      if (energyPerTick > 0) {
-        json.addProperty("energy_per_tick", energyPerTick);
-      }
-      if (energyOutputPerTick > 0) {
-        json.addProperty("energy_output_per_tick", energyOutputPerTick);
-      }
-      var execution = encode(RecipeExecutionOptions.CODEC, new RecipeExecutionOptions(threadName, maxThreads))
-          .getAsJsonObject();
-      execution.entrySet().forEach(entry -> json.add(entry.getKey(), entry.getValue()));
-      var script = encode(RecipeScriptOptions.CODEC.codec(), scriptOptions()).getAsJsonObject();
-      script.entrySet().forEach(entry -> json.add(entry.getKey(), entry.getValue()));
-      var selectors = new RecipeSelectors(
-          fluidInputSelector,
-          fluidOutputSelector,
-          energySelector,
-          fluidPerTickSelector,
-          energyOutputSelector);
-      if (!selectors.equals(RecipeSelectors.NONE)) {
-        json.add("selectors", encode(RecipeSelectors.CODEC, selectors));
-      }
-      if (parallelized != null) {
-        json.addProperty("parallelized", parallelized);
-      }
-      if (failureAction != null) {
-        json.addProperty("failure_action", failureAction.serialized());
-      }
-      if (randomSeed > 0) {
-        json.addProperty("random_seed", randomSeed);
-      }
-      if (!interfaceInputs.isEmpty()) {
-        json.add("interface_inputs", encode(SmartNumberRequirement.CODEC.listOf(), interfaceInputs));
-      }
-      if (!modifiers.isEmpty()) {
-        json.add("modifiers", encode(RecipeModifier.CODEC.listOf(), modifiers));
-      }
-      if (!fluidPerTickInputs.isEmpty()) {
-        json.add(
-            "fluid_per_tick_inputs",
-            encode(FluidRequirement.CODEC.listOf(), fluidPerTickInputs.stream().map(FluidRow::requirement).toList()));
-      }
-      if (!fluidPerTickOutputs.isEmpty()) {
-        json.add(
-            "fluid_per_tick_outputs",
-            encode(FluidRequirement.CODEC.listOf(), fluidPerTickOutputs.stream().map(FluidRow::requirement).toList()));
-      }
-      addUntimedFluids(json, "fluid_inputs", fluidInputs);
-      addUntimedFluids(json, "fluid_outputs", fluidOutputs);
+      var items = new ItemRecipeData(itemRows(inputs), itemRows(outputs), new ItemPaymentData(tools, fuelInputs));
+      var fluids = new FluidRecipeData(
+          ordinaryFluids(fluidInputs),
+          ordinaryFluids(fluidOutputs),
+          fluidPerTickInputs.stream().map(FluidRow::requirement).toList(),
+          fluidPerTickOutputs.stream().map(FluidRow::requirement).toList());
       var chemicals = new ChemicalRecipeData(
           chemicalInputs.stream().filter(row -> row.triggerTime == 0).map(ChemicalRow::requirement).toList(),
           chemicalOutputs.stream().filter(row -> row.triggerTime == 0).map(ChemicalRow::requirement).toList(),
           chemicalPerTick.stream().map(ChemicalRow::requirement).toList(),
           chemicalPerTickOutputs.stream().map(ChemicalRow::requirement).toList());
-      if (!chemicals.isEmpty()) {
-        json.add("chemicals", encode(ChemicalRecipeData.CODEC, chemicals));
-      }
-      applyResourceDeclarations(json);
-      MachineRecipeJson.validate(json);
-      MachineRecipe.CODEC.codec().parse(event.registries.access().createSerializationContext(JsonOps.INSTANCE), json)
-          .getOrThrow();
-      return json;
+      return new MachineRecipeDeclaration(
+          machine,
+          priority,
+          duration,
+          resources(
+              new RecipeResources.Entry<>(RecipeResourceDefinitions.ITEM, items),
+              new RecipeResources.Entry<>(RecipeResourceDefinitions.FLUID, fluids),
+              new RecipeResources.Entry<>(
+                  RecipeResourceDefinitions.ENERGY,
+                  new EnergyRecipeData(energyPerTick, energyOutputPerTick)),
+              new RecipeResources.Entry<>(RecipeResourceDefinitions.CHEMICAL, chemicals)),
+          Optional.ofNullable(failureAction),
+          Optional.ofNullable(parallelized),
+          randomSeed,
+          interfaceInputs,
+          new RecipeSelectors(
+              fluidInputSelector,
+              fluidOutputSelector,
+              energySelector,
+              fluidPerTickSelector,
+              energyOutputSelector),
+          new RecipeExecutionOptions(threadName, maxThreads),
+          scriptOptions(),
+          new IngredientArrayData(ingredientArrays, randomItemOutputs),
+          triggeredRows(),
+          modifiers,
+          false);
     }
 
-    private JsonArray itemRows(List<ItemRow> rows) {
-      var array = new JsonArray();
-      for (var row : rows) {
-        if (row.triggerTime > 0) {
-          continue;
-        }
-        var json = new JsonObject();
-        json.add("stack", encode(ItemStack.SINGLE_ITEM_CODEC, row.prototype));
-        if (row.preview != null) {
-          json.add("preview_stack", encode(ItemStack.SINGLE_ITEM_CODEC, row.preview));
-        }
-        json.addProperty("amount", row.amount);
-        if (row.maxAmount > 0) {
-          json.addProperty("min_amount", row.minAmount);
-          json.addProperty("max_amount", row.maxAmount);
-        }
-        if (row.chance != 1) {
-          json.addProperty("chance", row.chance);
-        }
-        if (row.parallelUnaffected) {
-          json.addProperty("parallel_unaffected", true);
-        }
-        if (row.ignoreOutputCheck) {
-          json.addProperty("ignore_output_check", true);
-        }
-        if (!row.selector.isEmpty()) {
-          json.addProperty("selector", row.selector);
-        }
-        if (!row.match.equals("exact")) {
-          json.addProperty("match", row.match);
-        }
-        array.add(json);
-      }
-      return array;
+    private static List<ItemAmount> itemRows(List<ItemRow> rows) {
+      return rows.stream().filter(row -> row.triggerTime == 0)
+          .map(
+              row -> new ItemAmount(
+                  row.prototype,
+                  row.amount,
+                  row.chance,
+                  row.selector,
+                  row.match,
+                  Objects.requireNonNullElse(row.preview, ItemStack.EMPTY),
+                  row.parallelUnaffected,
+                  row.minAmount,
+                  row.maxAmount,
+                  row.ignoreOutputCheck))
+          .toList();
     }
 
-    private void addUntimedFluids(JsonObject json, String field, List<FluidRow> rows) {
-      var ordinary = rows.stream().filter(row -> row.triggerTime == 0).map(FluidRow::requirement).toList();
-      if (!ordinary.isEmpty()) {
-        json.add(field, encode(FluidRequirement.CODEC.listOf(), ordinary));
-      }
+    private static List<FluidRequirement> ordinaryFluids(List<FluidRow> rows) {
+      return rows.stream().filter(row -> row.triggerTime == 0).map(FluidRow::requirement).toList();
     }
 
     private TriggeredResourceData triggeredRows() {

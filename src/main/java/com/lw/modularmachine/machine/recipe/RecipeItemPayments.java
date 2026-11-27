@@ -1,5 +1,6 @@
 package com.lw.modularmachine.machine.recipe;
 
+import com.lw.modularmachine.api.recipe.ItemAmount;
 import com.lw.modularmachine.api.recipe.ItemPaymentData;
 import com.lw.modularmachine.machine.PortKind;
 import java.util.ArrayList;
@@ -215,12 +216,24 @@ public final class RecipeItemPayments {
     return slots;
   }
 
+  /**
+   * A direct item-only first row takes what remains after exact group selections.
+   */
+  static int ordinaryPaymentRow(List<ItemAmount> inputs, int index) {
+    if (!inputs.getFirst().ignoresComponents()) {
+      return index;
+    }
+    return index + 1 == inputs.size() ? 0 : index + 1;
+  }
+
   private static boolean reserveOrdinaryInputs(MachineRecipe recipe, Batch batch, List<Slot> slots) {
-    for (int row = 0; row < recipe.inputs().size(); row++) {
+    var inputs = recipe.inputs();
+    for (int index = 0; index < inputs.size(); index++) {
+      int row = ordinaryPaymentRow(inputs, index);
       if (recipe.itemPayments().isTool(row)) {
         continue;
       }
-      var input = recipe.inputs().get(row);
+      var input = inputs.get(row);
       long remaining = batch.quantity(input.amount(), input.parallelUnaffected());
       var prototype = input.ingredientStack();
       for (var slot : slots) {
@@ -268,7 +281,7 @@ public final class RecipeItemPayments {
     return true;
   }
 
-  private static Optional<List<ToolOperation>> reserveTool(MachineRecipe.ItemAmount input, ItemPaymentData.Tool tool, long required, List<Slot> slots, List<RecipeItemCallbackService.InputItem> slices) {
+  private static Optional<List<ToolOperation>> reserveTool(ItemAmount input, ItemPaymentData.Tool tool, long required, List<Slot> slots, List<RecipeItemCallbackService.InputItem> slices) {
     var operations = new ArrayList<ToolOperation>();
     var prototype = input.ingredientStack();
     for (var slot : slots) {

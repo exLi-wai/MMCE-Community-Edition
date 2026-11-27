@@ -6,7 +6,8 @@ import com.lw.modularmachine.machine.recipe.resource.RecipeResourceExecutionRegi
 import com.lw.modularmachine.machine.upgrade.UpgradeRecipeCheckHandlers;
 import com.lw.modularmachine.api.recipe.RecipeModifier;
 import com.lw.modularmachine.api.recipe.adapter.RecipeAdapterTags;
-import com.google.gson.JsonElement;
+import com.lw.modularmachine.api.recipe.MachineRecipeDeclaration;
+import com.lw.modularmachine.api.recipe.RegisterMachineRecipesEvent;
 import com.lw.modularmachine.blockentity.FactoryControllerBlockEntity;
 import com.lw.modularmachine.blockentity.MachineControllerBlockEntity;
 import com.lw.modularmachine.config.MachineConfig;
@@ -33,6 +34,7 @@ import net.minecraft.server.level.ServerLevel;
 import net.minecraft.world.item.crafting.RecipeHolder;
 import net.minecraft.world.item.crafting.RecipeManager;
 import net.neoforged.bus.api.SubscribeEvent;
+import net.neoforged.neoforge.common.NeoForge;
 import net.neoforged.neoforge.event.AddReloadListenerEvent;
 import net.neoforged.neoforge.event.OnDatapackSyncEvent;
 import net.neoforged.neoforge.event.server.ServerStartedEvent;
@@ -55,7 +57,7 @@ public final class MachineRecipeService {
       Map<ResourceLocation, RecipeCatalog> catalogs,
       Map<ResourceLocation, MachineRecipe> definitions,
       Map<ResourceLocation, RecipeModifierTemplate> templates,
-      MachineRecipeJson.Defaults defaults,
+      MachineRecipeCompiler.Defaults defaults,
       long recipeAdapterScriptRevision,
       RecipeScriptCallbacks.Snapshot itemCallbacks,
       Map<ResourceLocation, ResourceLocation> nativeOwners,
@@ -89,8 +91,14 @@ public final class MachineRecipeService {
   private MachineRecipeService() {
   }
 
-  static void stage(RecipeManager manager, Map<ResourceLocation, MachineRecipe> expected, Map<ResourceLocation, JsonElement> sources, HolderLookup.Provider registries, RecipeAdapterTags tags, RecipeDeclarationOwners nativeOwners, RecipeDeclarationOwners scriptOwners, Map<ResourceLocation, RecipeHolder<?>> ordinaryFallbacks, List<ResourceLocation> recipeOrder, long callbackGeneration, Set<ResourceLocation> acceptedScriptIds, Set<ResourceLocation> correctedMissingHolders) {
-    var defaults = MachineRecipeJson.currentDefaults();
+  record DeclaredRecipe(MachineRecipeDeclaration source, MachineRecipe definition) {
+    static DeclaredRecipe compile(MachineRecipeDeclaration source) {
+      return new DeclaredRecipe(source, MachineRecipeCompiler.compile(source));
+    }
+  }
+
+  static void stage(RecipeManager manager, Map<ResourceLocation, DeclaredRecipe> resourceRecipes, HolderLookup.Provider registries, RecipeAdapterTags tags, RecipeDeclarationOwners nativeOwners, RecipeDeclarationOwners scriptOwners, Map<ResourceLocation, RecipeHolder<?>> ordinaryFallbacks, List<ResourceLocation> recipeOrder, long callbackGeneration, Set<ResourceLocation> acceptedScriptIds, Set<ResourceLocation> suppliedHolders) {
+    var defaults = MachineRecipeCompiler.currentDefaults();
     var server = ServerLifecycleHooks.getCurrentServer();
     if (server != null) {
       ServerThreadGuard.require(server, "Machine recipe catalog accessed");
@@ -108,9 +116,32 @@ public final class MachineRecipeService {
     // Existing script holders are compared against their validated declarations
     // below.
     skippedIds.removeAll(acceptedScriptIds);
-    skippedIds.addAll(correctedMissingHolders);
-    var recipeCandidates = recipeCandidates(originalRecipes, expected, skippedIds, ordinaryFallbacks, recipeOrder);
-    var actual = validateNativeCandidates(recipeCandidates, expected, sources);
+    skippedIds.addAll(suppliedHolders);
+    var recipeCandidates = recipeCandidates(
+        originalRecipes,
+        resourceRecipes,
+        skippedIds,
+        ordinaryFallbacks,
+        recipeOrder);
+    var actual = validateNativeCandidates(recipeCandidates, resourceRecipes);
+    var sources = new LinkedHashMap<ResourceLocation, MachineRecipeDeclaration>();
+    resourceRecipes.forEach((id, entry) -> sources.put(id, entry.source()));
+    var javaRecipes = RegisterMachineRecipesEvent.collect(registries, NeoForge.EVENT_BUS::post);
+    if (!javaRecipes.isEmpty()) {
+      var usedIds = new LinkedHashSet<ResourceLocation>();
+      recipeCandidates.forEach(holder -> usedIds.add(holder.id()));
+      var combined = new ArrayList<>(recipeCandidates);
+      javaRecipes.forEach((id, source) -> {
+        if (!usedIds.add(id)) {
+          throw new IllegalArgumentException(id + ": Java machine recipe collides with an existing recipe");
+        }
+        var recipe = MachineRecipeCompiler.compile(source);
+        combined.add(new RecipeHolder<>(id, recipe));
+        sources.put(id, source);
+        actual.put(id, recipe);
+      });
+      recipeCandidates = combined;
+    }
     var machines = StructureService.definitionsSnapshot();
     var omittedMachines = new LinkedHashMap<ResourceLocation, Set<ResourceLocation>>();
     var resolvedNative = nativeOwners
@@ -129,42 +160,31 @@ public final class MachineRecipeService {
         skippedDeclarations,
         omittedMachines,
         unattributed);
-    var declarations = new LinkedHashMap<>(expected);
-    var originalSources = new LinkedHashMap<>(sources);
     for (var entry : imports.recipes().entrySet()) {
-      if (declarations.putIfAbsent(entry.getKey(), entry.getValue()) != null) {
+      if (actual.putIfAbsent(entry.getKey(), entry.getValue()) != null) {
         throw new IllegalArgumentException(entry.getKey() + ": Imported recipe collides with a native declaration");
       }
-      actual.put(entry.getKey(), entry.getValue());
-      originalSources.put(entry.getKey(), imports.sources().get(entry.getKey()));
+      sources.put(entry.getKey(), imports.sources().get(entry.getKey()));
     }
     var candidates = new HashMap<ResourceLocation, List<RecipeCandidate<ItemResourceKey>>>();
     var effective = new LinkedHashMap<ResourceLocation, MachineRecipe>();
     var templates = new LinkedHashMap<ResourceLocation, RecipeModifierTemplate>();
-    for (var entry : declarations.entrySet()) {
-      var original = actual.get(entry.getKey());
-      if (!entry.getValue().sameDefinition(original)) {
-        throw new IllegalArgumentException(entry.getKey() + ": Native recipe differs from validated resource");
-      }
+    for (var entry : actual.entrySet()) {
+      var original = entry.getValue();
       var machine = StructureService.definition(original.machineId());
       if (machine == null) {
         throw new IllegalArgumentException(entry.getKey() + ": Unknown machine " + original.machineId());
       }
       var recipe = original;
-      var source = originalSources.get(entry.getKey());
-      if (source == null || !source.isJsonObject()) {
-        throw new IllegalArgumentException(entry.getKey() + ": Missing original recipe declaration");
-      }
-      var template = new RecipeModifierTemplate(
-          source.getAsJsonObject(),
-          machine.recipeModifiers(),
-          machine.failureAction());
+      var source = sources.get(entry.getKey());
+      var template = new RecipeModifierTemplate(source, machine.recipeModifiers(), machine.failureAction());
       templates.put(entry.getKey(), template);
+      var inheritedFailure = machine.failureAction() == null ? defaults.failureAction() : machine.failureAction();
       if (!machine.recipeModifiers().isEmpty()
-          || !source.getAsJsonObject().has("parallelized")
-          || !source.getAsJsonObject().has("failure_action")) {
+          || original.parallelized() != source.parallelized().orElse(defaults.parallelized())
+          || original.failureAction() != source.failureAction().orElse(inheritedFailure)) {
         try {
-          var resolved = template.resolve(List.of(), registries, false, defaults);
+          var resolved = template.resolve(List.of(), false, defaults);
           if (!resolved.sameDefinition(original)) {
             recipe = resolved;
           }
@@ -230,7 +250,7 @@ public final class MachineRecipeService {
    * The same candidate view feeds strict validation, adapter imports and
    * publication.
    */
-  private static Collection<RecipeHolder<?>> recipeCandidates(Collection<RecipeHolder<?>> originals, Map<ResourceLocation, MachineRecipe> expected, Set<ResourceLocation> skippedIds, Map<ResourceLocation, RecipeHolder<?>> ordinaryFallbacks, List<ResourceLocation> recipeOrder) {
+  private static Collection<RecipeHolder<?>> recipeCandidates(Collection<RecipeHolder<?>> originals, Map<ResourceLocation, DeclaredRecipe> expected, Set<ResourceLocation> skippedIds, Map<ResourceLocation, RecipeHolder<?>> ordinaryFallbacks, List<ResourceLocation> recipeOrder) {
     if (skippedIds.isEmpty()) {
       return originals;
     }
@@ -251,7 +271,7 @@ public final class MachineRecipeService {
       }
       var nativeRecipe = expected.get(id);
       if (nativeRecipe != null) {
-        candidates.put(id, new RecipeHolder<>(id, nativeRecipe));
+        candidates.put(id, new RecipeHolder<>(id, nativeRecipe.definition()));
       } else {
         var fallback = ordinaryFallbacks.get(id);
         if (fallback != null) {
@@ -279,16 +299,20 @@ public final class MachineRecipeService {
     return ordered;
   }
 
-  private static Map<ResourceLocation, MachineRecipe> validateNativeCandidates(Collection<RecipeHolder<?>> candidates, Map<ResourceLocation, MachineRecipe> expected, Map<ResourceLocation, JsonElement> sources) {
+  private static Map<ResourceLocation, MachineRecipe> validateNativeCandidates(Collection<RecipeHolder<?>> candidates, Map<ResourceLocation, DeclaredRecipe> expected) {
     var actual = new LinkedHashMap<ResourceLocation, MachineRecipe>();
     var machineType = MachineRecipeRegistries.ITEM_TYPE.get();
     for (var holder : candidates) {
       if (holder.value().getType() != machineType) {
         continue;
       }
-      if (!(holder.value() instanceof MachineRecipe machine) || !sources.containsKey(holder.id())) {
+      var declaration = expected.get(holder.id());
+      if (!(holder.value() instanceof MachineRecipe machine) || declaration == null) {
         throw new IllegalArgumentException(
             holder.id() + ": Machine recipes require a validated native resource or script declaration");
+      }
+      if (!declaration.definition().sameDefinition(machine)) {
+        throw new IllegalArgumentException(holder.id() + ": Native recipe differs from validated declaration");
       }
       actual.put(holder.id(), machine);
     }
@@ -529,7 +553,7 @@ public final class MachineRecipeService {
     }
     var rules = new ArrayList<>(context);
     rules.addAll(extraRules);
-    var result = template.resolve(rules, level.registryAccess(), published.durationMultiplier, published.defaults);
+    var result = template.resolve(rules, published.durationMultiplier, published.defaults);
     return catalog.isCurrent() && result.machineId().equals(owner.structureMachineId()) ? Optional.of(result) : Optional
         .empty();
   }
@@ -607,7 +631,7 @@ public final class MachineRecipeService {
       return null;
     }
     boolean durationMultiplier = MachineConfig.durationMultiplierEnabled();
-    var defaults = MachineRecipeJson.currentDefaults();
+    var defaults = MachineRecipeCompiler.currentDefaults();
     if (alreadyPublished
         && published.recipeView == view
         && published.durationMultiplier == durationMultiplier
@@ -629,14 +653,14 @@ public final class MachineRecipeService {
     final Prepared prepared;
     final Collection<RecipeHolder<?>> recipeView;
     final boolean durationMultiplier;
-    final MachineRecipeJson.Defaults defaults;
+    final MachineRecipeCompiler.Defaults defaults;
     final Map<ResourceLocation, RecipeCatalog> catalogs;
     final LinkedHashMap<ModifierCatalogKey, ModifiedRecipeCatalogCompiler> modifiedCatalogs = new LinkedHashMap<>(
         16,
         0.75F,
         true);
 
-    Published(MinecraftServer server, RecipeManager manager, Prepared prepared, Collection<RecipeHolder<?>> recipeView, boolean durationMultiplier, MachineRecipeJson.Defaults defaults) {
+    Published(MinecraftServer server, RecipeManager manager, Prepared prepared, Collection<RecipeHolder<?>> recipeView, boolean durationMultiplier, MachineRecipeCompiler.Defaults defaults) {
       this.server = server;
       this.manager = manager;
       this.prepared = prepared;
@@ -655,7 +679,7 @@ public final class MachineRecipeService {
           && server.getRecipeManager() == manager
           && manager.getRecipes() == recipeView
           && MachineConfig.durationMultiplierEnabled() == durationMultiplier
-          && MachineRecipeJson.currentDefaults().equals(defaults)
+          && MachineRecipeCompiler.currentDefaults().equals(defaults)
           && StructureService.definitionEpoch() == prepared.structureEpoch();
     }
   }

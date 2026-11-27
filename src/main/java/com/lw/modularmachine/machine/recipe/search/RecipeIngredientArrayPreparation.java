@@ -7,12 +7,15 @@ import com.lw.modularmachine.blockentity.FactoryControllerBlockEntity;
 import com.lw.modularmachine.blockentity.MachineControllerBlockEntity;
 import com.lw.modularmachine.machine.recipe.ItemResourceKey;
 import com.lw.modularmachine.machine.recipe.MachineRecipe;
+import com.lw.modularmachine.machine.recipe.MachineRecipeJson;
 import com.lw.modularmachine.machine.recipe.MachineRecipeService;
 import com.lw.modularmachine.machine.recipe.PatternProductionService;
 import com.lw.modularmachine.machine.recipe.RecipeExecutionTicket;
 import com.lw.modularmachine.machine.recipe.RecipeIngredientArrayResolution;
 import com.lw.modularmachine.machine.recipe.RecipeItemCallbackService;
+import com.lw.modularmachine.machine.recipe.RecipeItemInputAllocation;
 import com.lw.modularmachine.machine.recipe.RecipeItemPreparation;
+import com.lw.modularmachine.machine.recipe.RecipePreparationHandlers;
 import com.lw.modularmachine.machine.recipe.RecipeStartPlan;
 import com.lw.modularmachine.machine.recipe.resource.RecipeResourceExecutionRegistry;
 import com.lw.modularmachine.machine.upgrade.UpgradeRecipeCheckHandlers;
@@ -41,6 +44,7 @@ final class RecipeIngredientArrayPreparation {
     RESOURCE_OUTPUTS,
     INPUT_CHECK,
     PARALLEL,
+    PARALLEL_INPUT_CHECK,
     FINISHED
   }
 
@@ -51,6 +55,7 @@ final class RecipeIngredientArrayPreparation {
   private final List<RecipeSearchResource.Captured> resources;
   private final String thread;
   private final RecipeCatalog catalog;
+  private final int preparationLimit;
   private final int[] choices;
   private final RecipeIngredientItemExpansion expansion;
   private final long epoch = RecipeItemCallbackService.epoch();
@@ -64,13 +69,16 @@ final class RecipeIngredientArrayPreparation {
   private int resourceCursor;
   private RecipeResourcePlanning output;
   private RecipeStartPlan parallel;
+  private RecipeItemInputAllocation.Cursor inputAllocation;
+  private int parallelCount;
   private MachineRecipe best;
   private MachineRecipe waiting;
   private boolean waitingForInputs;
   private int bestCount;
+  private int bestParallelLimit = Integer.MAX_VALUE;
   private int workUsed;
 
-  RecipeIngredientArrayPreparation(RecipeExecutionTicket ticket, MachineRecipe source, RecipeCandidate<ItemResourceKey> original, ResourceSnapshot<ItemResourceKey> snapshot, List<RecipeSearchResource.Captured> resources, String thread, RecipeCatalog catalog) {
+  RecipeIngredientArrayPreparation(RecipeExecutionTicket ticket, MachineRecipe source, RecipeCandidate<ItemResourceKey> original, ResourceSnapshot<ItemResourceKey> snapshot, List<RecipeSearchResource.Captured> resources, String thread, RecipeCatalog catalog, int preparationLimit) {
     this.ticket = ticket;
     this.source = source;
     this.original = original;
@@ -78,6 +86,7 @@ final class RecipeIngredientArrayPreparation {
     this.resources = resources;
     this.thread = thread;
     this.catalog = catalog;
+    this.preparationLimit = preparationLimit;
     choices = new int[source.ingredientArrays().inputs().size()];
     expansion = new RecipeIngredientItemExpansion(ticket, source);
   }
@@ -88,6 +97,10 @@ final class RecipeIngredientArrayPreparation {
 
   Optional<MachineRecipe> prepared() {
     return finished() ? Optional.ofNullable(best == null ? waiting : best) : Optional.empty();
+  }
+
+  int preparedParallelLimit() {
+    return bestParallelLimit;
   }
 
   long epoch() {
@@ -128,7 +141,9 @@ final class RecipeIngredientArrayPreparation {
    * remaining work before returning to the caller's branch budget gate.
    */
   private boolean advanceCurrentBranch(int budget, HolderLookup.Provider registries, DynamicOps<JsonElement> ops) {
-    if (branchTicket != null && !branchTicket.dependenciesCurrent()) {
+    // Reservations only read the captured ticket. Revalidate once before the
+    // checker runs.
+    if (branchTicket != null && inputAllocation == null && !branchTicket.dependenciesCurrent()) {
       workUsed++;
       advanceBranch();
       return true;
@@ -143,6 +158,7 @@ final class RecipeIngredientArrayPreparation {
         case RESOURCE_OUTPUTS -> advanceResourceOutputs(budget);
         case INPUT_CHECK -> checkSingleInput(budget, registries);
         case PARALLEL -> advanceParallel(budget, registries);
+        case PARALLEL_INPUT_CHECK -> checkParallelInputs(budget, registries);
         case FINISHED -> false;
       };
       if (!canContinue) {
@@ -260,11 +276,11 @@ final class RecipeIngredientArrayPreparation {
   }
 
   private boolean checkSingleInput(int budget, HolderLookup.Provider registries) {
-    if (workUsed >= budget) {
+    var check = advanceInputCheck(1, budget, registries);
+    if (check == null) {
       return false;
     }
-    workUsed++;
-    if (!acceptsInputs(1, registries)) {
+    if (check != RecipeItemCallbackService.InputCheck.ALLOWED) {
       advanceBranch();
     } else if (waitingForInputs) {
       if (waiting == null) {
@@ -289,30 +305,46 @@ final class RecipeIngredientArrayPreparation {
       return false;
     }
     if (count > 1) {
-      if (workUsed >= budget) {
-        return false;
-      }
-      workUsed++;
-      if (!acceptsInputs(count, registries)) {
-        advanceBranch();
-        return true;
-      }
+      parallelCount = count;
+      stage = Stage.PARALLEL_INPUT_CHECK;
+    } else {
+      finishBranch(count, Integer.MAX_VALUE);
     }
+    return true;
+  }
+
+  private boolean checkParallelInputs(int budget, HolderLookup.Provider registries) {
+    var check = advanceInputCheck(parallelCount, budget, registries);
+    if (check == null) {
+      return false;
+    }
+    if (check == RecipeItemCallbackService.InputCheck.ALLOWED) {
+      finishBranch(parallelCount, Integer.MAX_VALUE);
+    } else if (check == RecipeItemCallbackService.InputCheck.REJECTED) {
+      // The single run passed this branch. A checker can depend on the count,
+      // so intermediate batch sizes cannot be assumed to pass.
+      finishBranch(1, 1);
+    } else {
+      advanceBranch();
+    }
+    return true;
+  }
+
+  private void finishBranch(int count, int checkerLimit) {
     if (count > bestCount) {
       bestCount = count;
       best = definition;
+      bestParallelLimit = checkerLimit;
     }
-    if (bestCount >= limit) {
+    if (bestCount >= parallelLimit()) {
       stage = Stage.FINISHED;
     } else {
       advanceBranch();
     }
-
-    return true;
   }
 
   private int parallelLimit() {
-    int limit = ticket.parallelLimit();
+    int limit = Math.min(preparationLimit, RecipePreparationHandlers.parallelLimit(ticket, thread));
     if (ticket.owner() instanceof MachineControllerBlockEntity ordinary) {
       limit = Math.min(limit, UpgradeStartCosts.maxRuns(ordinary));
     }
@@ -331,7 +363,7 @@ final class RecipeIngredientArrayPreparation {
           .orElseThrow(UpgradeRecipeCheckHandlers.StaleException::new);
     }
     var declaration = RecipeIngredientArrayResolution.resolve(contextual, selectedChoices, registries);
-    var selected = MachineRecipe.CODEC.codec().parse(ops, declaration).getOrThrow();
+    var selected = MachineRecipeJson.compileResolved(declaration, ops);
     modifiers = RecipeItemCallbackService.beginInputs(selected, () -> declaration, callbackContext(1), registries);
   }
 
@@ -355,14 +387,34 @@ final class RecipeIngredientArrayPreparation {
     return true;
   }
 
-  private boolean acceptsInputs(int instances, HolderLookup.Provider registries) {
-    var slices = RecipeIngredientArrayResolution.checkerSlices(definition, ticket, instances);
+  private RecipeItemCallbackService.InputCheck advanceInputCheck(int instances, int budget, HolderLookup.Provider registries) {
+    if (workUsed >= budget) {
+      return null;
+    }
+    if (inputAllocation == null) {
+      inputAllocation = RecipeItemInputAllocation
+          .begin(definition, branchTicket, instances, ticket.owner() instanceof MachineControllerBlockEntity);
+    }
+    workUsed += inputAllocation.advance(budget - workUsed);
+    if (!inputAllocation.complete() || workUsed >= budget) {
+      return null;
+    }
+    workUsed++;
+    if (!branchTicket.dependenciesCurrent()) {
+      inputAllocation = null;
+      return RecipeItemCallbackService.InputCheck.STALE;
+    }
+    var slices = inputAllocation.allocation().flatMap(
+        allocation -> RecipeIngredientArrayResolution.checkerSlices(definition, branchTicket, instances, allocation));
+    inputAllocation = null;
+    if (slices.isEmpty()) {
+      return RecipeItemCallbackService.InputCheck.REJECTED;
+    }
     var check = RecipeItemCallbackService
-        .checkInputs(definition.scriptOptions(), callbackContext(instances), slices, registries, epoch);
+        .checkInputs(definition.scriptOptions(), callbackContext(instances), slices.orElseThrow(), registries, epoch);
 
     return switch (check) {
-      case ALLOWED -> true;
-      case REJECTED -> false;
+      case ALLOWED, REJECTED -> check;
       case STALE -> throw new UpgradeRecipeCheckHandlers.StaleException();
       case ERROR -> throw new UpgradeRecipeCheckHandlers.FailedException();
     };
@@ -371,9 +423,15 @@ final class RecipeIngredientArrayPreparation {
   private void prepareParallel(HolderLookup.Provider registries) {
     var exact = RecipeItemCallbackService
         .compilePrepared(definition, ResourceLocation.parse(original.id()), registries);
-    parallel = RecipeStartPlan
-        .prepared(branchTicket, catalog, exact, List.of(), List.of(), RecipeStartPlan.newInputChanceSeed(), null)
-        .withOutputPreparationContext(thread).withPreparedInputs(definition, original, epoch);
+    parallel = RecipeStartPlan.prepared(
+        branchTicket,
+        catalog,
+        exact,
+        List.of(),
+        List.of(),
+        RecipeStartPlan.newInputChanceSeed(),
+        null,
+        snapshot).withOutputPreparationContext(thread).withPreparedInputs(definition, original, epoch);
   }
 
   private RecipeItemCallbacks.Context callbackContext(int instances) {
@@ -396,6 +454,7 @@ final class RecipeIngredientArrayPreparation {
     resourceInputs = null;
     waitingForInputs = false;
     parallel = null;
+    inputAllocation = null;
     for (int group = choices.length - 1; group >= 0; group--) {
       var declaration = source.ingredientArrays().inputs().get(group);
       if (choices[group] == -1) {

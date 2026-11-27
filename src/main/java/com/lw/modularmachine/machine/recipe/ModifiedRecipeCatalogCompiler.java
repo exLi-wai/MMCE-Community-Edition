@@ -25,7 +25,7 @@ final class ModifiedRecipeCatalogCompiler {
   private final Map<ResourceLocation, RecipeModifierTemplate> templates;
   private final List<RecipeModifier> rules;
   private final boolean durationMultiplier;
-  private final MachineRecipeJson.Defaults defaults;
+  private final MachineRecipeCompiler.Defaults defaults;
   private final BooleanSupplier authority;
   private final List<String> ids;
   private final List<RecipeCandidate<ItemResourceKey>> candidates = new ArrayList<>();
@@ -44,10 +44,10 @@ final class ModifiedRecipeCatalogCompiler {
   }
 
   ModifiedRecipeCatalogCompiler(RecipeCatalog base, MachineDefinition machine, Map<ResourceLocation, RecipeModifierTemplate> templates, List<RecipeModifier> rules, boolean durationMultiplier, BooleanSupplier authority) {
-    this(base, machine, templates, rules, durationMultiplier, authority, MachineRecipeJson.currentDefaults());
+    this(base, machine, templates, rules, durationMultiplier, authority, MachineRecipeCompiler.currentDefaults());
   }
 
-  ModifiedRecipeCatalogCompiler(RecipeCatalog base, MachineDefinition machine, Map<ResourceLocation, RecipeModifierTemplate> templates, List<RecipeModifier> rules, boolean durationMultiplier, BooleanSupplier authority, MachineRecipeJson.Defaults defaults) {
+  ModifiedRecipeCatalogCompiler(RecipeCatalog base, MachineDefinition machine, Map<ResourceLocation, RecipeModifierTemplate> templates, List<RecipeModifier> rules, boolean durationMultiplier, BooleanSupplier authority, MachineRecipeCompiler.Defaults defaults) {
     this.base = base;
     this.machine = machine;
     this.templates = templates;
@@ -71,7 +71,7 @@ final class ModifiedRecipeCatalogCompiler {
         if (template == null) {
           throw new IllegalArgumentException("Missing original modifier template: " + id);
         }
-        var recipe = template.resolve(rules, registries, durationMultiplier, defaults);
+        var recipe = template.resolve(rules, durationMultiplier, defaults);
         MachineRecipeService.validatePorts(id, recipe, machine);
         RecipeResourceExecutionRegistry.validateDefinition(id, recipe.resourceData(), registries);
         candidates.add(recipe.compile(id, registries));

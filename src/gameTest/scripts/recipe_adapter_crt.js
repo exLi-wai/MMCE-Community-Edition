@@ -29,6 +29,11 @@ MMCECERecipeAdapterEvents.register(event => {
 })
 
 ServerEvents.recipes(event => {
+  RecipeBuilder.newBuilder(event, 'typed_test:kjs', 'mmcece:test_missing_resource_ports', 20)
+    .addEnergyPerTickInput(32)
+    .addItemInput('minecraft:dirt')
+    .addItemOutput('minecraft:iron_ingot')
+    .build()
   if (typeof event.recipes.mmcece.machine === 'function' || typeof event.recipes.machine === 'function'
       || typeof event.recipes['mmcece:machine'] === 'function') {
     throw new Error('Machine object recipe functions must not be exposed')

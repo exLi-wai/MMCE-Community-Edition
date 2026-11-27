@@ -3,8 +3,13 @@ package com.lw.modularmachine.integration.kubejs;
 import com.google.gson.JsonElement;
 import com.google.gson.JsonObject;
 import com.lw.modularmachine.ModularMachine;
+import com.lw.modularmachine.api.recipe.MachineRecipeDeclaration;
 import com.lw.modularmachine.machine.recipe.MachineRecipeJson;
+import com.lw.modularmachine.machine.recipe.RecipeScriptCallbacks;
 import com.lw.modularmachine.machine.recipe.RecipeScriptSources;
+import dev.latvian.mods.kubejs.recipe.RecipesKubeEvent;
+import dev.latvian.mods.kubejs.util.KubeResourceLocation;
+import dev.latvian.mods.rhino.Context;
 import java.math.BigDecimal;
 import java.util.LinkedHashMap;
 import java.util.LinkedHashSet;
@@ -33,8 +38,50 @@ public final class MachineItemRecipeKubeJSSources {
   }
 
   /** Implemented on each KubeJS recipe event by its mixin. */
-  public interface Replacements {
-    Replacement MMCECE$replacement(ResourceLocation id);
+  public interface RecipeEvent {
+    Registration MMCECE$registration();
+  }
+
+  /**
+   * Tracks the event's registration window and fallback recipes shadowed at its
+   * final merge.
+   */
+  public static final class Registration {
+    private Map<ResourceLocation, Replacement> replacements = Map.of();
+    private boolean open;
+
+    void begin(RecipeManager manager, Map<ResourceLocation, JsonElement> recipes) {
+      capture(manager, recipes, id -> replacements.get(id), this::release);
+      open = true;
+    }
+
+    void submit(Context context, RecipesKubeEvent event, ResourceLocation id, MachineRecipeDeclaration declaration, RecipeScriptCallbacks.Bindings bindings) {
+      if (!open) {
+        throw new IllegalStateException("Machine recipe registration requires an open recipe event");
+      }
+      var json = MachineRecipeJson.encode(declaration, event.registries.access());
+      var entry = event.custom(context, json);
+      if (entry == null || entry.creationError) {
+        throw new IllegalStateException("KubeJS rejected the native machine recipe declaration");
+      }
+      entry.id(new KubeResourceLocation(id));
+      try {
+        RecipeScriptCallbacks.capture(id, entry.json, bindings);
+      } catch (RuntimeException failure) {
+        entry.remove();
+        throw failure;
+      }
+    }
+
+    public void finish(Map<ResourceLocation, JsonElement> surviving, Map<ResourceLocation, JsonElement> additions) {
+      replacements = machineReplacements(surviving, additions);
+      open = false;
+    }
+
+    private void release() {
+      open = false;
+      replacements = Map.of();
+    }
   }
 
   private MachineItemRecipeKubeJSSources() {
@@ -53,6 +100,11 @@ public final class MachineItemRecipeKubeJSSources {
   }
 
   static void capture(RecipeManager manager, Map<ResourceLocation, JsonElement> recipes, Function<ResourceLocation, Replacement> replacementAt) {
+    capture(manager, recipes, replacementAt, () -> {
+    });
+  }
+
+  private static void capture(RecipeManager manager, Map<ResourceLocation, JsonElement> recipes, Function<ResourceLocation, Replacement> replacementAt, Runnable release) {
     var originals = new LinkedHashMap<ResourceLocation, JsonElement>();
     for (var entry : recipes.entrySet()) {
       if (isMachineRecipe(entry.getValue())) {
@@ -63,7 +115,8 @@ public final class MachineItemRecipeKubeJSSources {
     RecipeScriptSources.capture(
         manager,
         recipes::get,
-        generation -> snapshot(recipes, originalMachineRecipes, replacementAt, generation));
+        generation -> snapshot(recipes, originalMachineRecipes, replacementAt, generation),
+        release);
   }
 
   /**

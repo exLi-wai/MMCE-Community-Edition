@@ -40,33 +40,38 @@ public final class RecipeResourceBuilderDeclarations {
     requireFields(type, declaration);
     var ops = Objects.requireNonNull(registries, "registries").createSerializationContext(JsonOps.INSTANCE);
     var parsed = capture(type, type.nativeCodec().codec().parse(ops, declaration).getOrThrow());
-    var normalized = encode(parsed, registries);
-
-    return capture(type, type.nativeCodec().codec().parse(ops, normalized).getOrThrow());
+    return snapshot(parsed, registries);
   }
 
-  public static void apply(JsonObject target, RecipeResources.Entry<?> entry, HolderLookup.Provider registries) {
-    var declaration = encode(entry, registries);
-    for (var field : RecipeResourceDefinitions.fields(entry.type())) {
-      target.remove(field);
-    }
-    declaration.entrySet().forEach(field -> target.add(field.getKey(), field.getValue().deepCopy()));
+  /**
+   * A custom descriptor owns its field validation and detached data
+   * representation.
+   */
+  public static <D> RecipeResources.Entry<D> snapshot(RecipeResources.Entry<D> entry, HolderLookup.Provider registries) {
+    return roundTrip(entry, registries).entry();
   }
 
   public static <D> JsonObject encode(RecipeResources.Entry<D> entry, HolderLookup.Provider registries) {
+    return roundTrip(entry, registries).fields();
+  }
+
+  private record Validated<D>(RecipeResources.Entry<D> entry, JsonObject fields) {
+  }
+
+  private static <D> Validated<D> roundTrip(RecipeResources.Entry<D> entry, HolderLookup.Provider registries) {
     var type = entry.type();
     capture(type, entry.data());
     var ops = Objects.requireNonNull(registries, "registries").createSerializationContext(JsonOps.INSTANCE);
     var declaration = type.nativeCodec().codec().encodeStart(ops, entry.data()).getOrThrow().getAsJsonObject();
     requireFields(type, declaration);
-    var restored = capture(type, type.nativeCodec().codec().parse(ops, declaration).getOrThrow());
+    var restored = capture(type, type.nativeCodec().codec().parse(ops, declaration.deepCopy()).getOrThrow());
     var normalized = type.nativeCodec().codec().encodeStart(ops, restored.data()).getOrThrow().getAsJsonObject();
     requireFields(type, normalized);
     if (!declaration.equals(normalized)) {
       throw new IllegalArgumentException("Lossy resource declaration codec: " + type.id());
     }
 
-    return normalized;
+    return new Validated<>(restored, normalized);
   }
 
   private static void requireFields(RecipeResourceType<?> type, JsonObject declaration) {

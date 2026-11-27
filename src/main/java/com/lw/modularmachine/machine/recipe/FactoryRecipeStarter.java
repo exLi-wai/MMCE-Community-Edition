@@ -175,7 +175,7 @@ public final class FactoryRecipeStarter {
       }
       resources.enlistAdditional(additionalResources);
       var inputCheck = RecipeItemPreparation
-          .checkInputs(nativeRecipe.orElseThrow(), ticket, Optional.of(threadId), 1, run);
+          .checkInputs(nativeRecipe.orElseThrow(), ticket, Optional.of(threadId), 1, run, plan.inputAllocation());
       if (inputCheck != RecipeItemCallbackService.InputCheck.ALLOWED) {
         if (!plan.factoryAdmissionCurrent(factory, threadId) || !startCosts.current() || !plan.catalog().isCurrent()) {
           return Result.STALE;

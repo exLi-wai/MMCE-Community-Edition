@@ -7,6 +7,8 @@ import com.lw.modularmachine.machine.recipe.ResourceSelector;
 import java.util.List;
 import java.util.Objects;
 import java.util.Optional;
+import net.minecraft.core.HolderLookup;
+import net.minecraft.nbt.NbtOps;
 import net.minecraft.resources.ResourceLocation;
 import net.minecraft.world.item.ItemStack;
 import net.neoforged.neoforge.fluids.FluidStack;
@@ -41,31 +43,56 @@ public record TriggeredResourceData(List<Row> rows) {
       long amount,
       double chance,
       String selector,
-      Optional<ItemStack> item,
-      Optional<FluidStack> fluid,
+      RecipeStackPrototype prototype,
       Optional<ResourceLocation> chemical,
       boolean parallelUnaffected,
       String match) {
     public static final Codec<Row> CODEC = RecordCodecBuilder.create(
-        instance -> instance.group(
-            Codec.STRING.fieldOf("resource").forGetter(Row::resource),
-            Codec.STRING.xmap(RecipeModifier.Io::parse, RecipeModifier.Io::serialized).fieldOf("io").forGetter(Row::io),
-            Codec.INT.fieldOf("tick").forGetter(Row::tick),
-            Codec.BOOL.optionalFieldOf("repeatable", false).forGetter(Row::repeatable),
-            Codec.LONG.fieldOf("amount").forGetter(Row::amount),
-            Codec.DOUBLE.optionalFieldOf("chance", 1D).forGetter(Row::chance),
-            Codec.STRING.optionalFieldOf("selector", "").forGetter(Row::selector),
-            Codec.lazyInitialized(() -> ItemStack.SINGLE_ITEM_CODEC).optionalFieldOf("item").forGetter(Row::item),
-            Codec.lazyInitialized(() -> FluidStack.CODEC).optionalFieldOf("fluid").forGetter(Row::fluid),
-            ResourceLocation.CODEC.optionalFieldOf("chemical").forGetter(Row::chemical),
-            Codec.BOOL.optionalFieldOf("parallel_unaffected", false).forGetter(Row::parallelUnaffected),
-            Codec.STRING.optionalFieldOf("match", "exact").forGetter(Row::match)).apply(instance, Row::new));
+        instance -> instance
+            .group(
+                Codec.STRING.fieldOf("resource").forGetter(Row::resource),
+                Codec.STRING.xmap(RecipeModifier.Io::parse, RecipeModifier.Io::serialized).fieldOf("io")
+                    .forGetter(Row::io),
+                Codec.INT.fieldOf("tick").forGetter(Row::tick),
+                Codec.BOOL.optionalFieldOf("repeatable", false).forGetter(Row::repeatable),
+                Codec.LONG.fieldOf("amount").forGetter(Row::amount),
+                Codec.DOUBLE.optionalFieldOf("chance", 1D).forGetter(Row::chance),
+                Codec.STRING.optionalFieldOf("selector", "").forGetter(Row::selector),
+                Codec.lazyInitialized(() -> ItemStack.SINGLE_ITEM_CODEC).optionalFieldOf("item").forGetter(Row::item),
+                Codec.lazyInitialized(() -> FluidStack.CODEC).optionalFieldOf("fluid").forGetter(Row::fluid),
+                ResourceLocation.CODEC.optionalFieldOf("chemical").forGetter(Row::chemical),
+                Codec.BOOL.optionalFieldOf("parallel_unaffected", false).forGetter(Row::parallelUnaffected),
+                Codec.STRING.optionalFieldOf("match", "exact").forGetter(Row::match),
+                RecipeStackPrototype.COMPONENT_OPS.forGetter(ignored -> NbtOps.INSTANCE))
+            .apply(
+                instance,
+                (resource, io, tick, repeatable, amount, chance, selector, item, fluid, chemical, fixed, match, ops) -> new Row(
+                    resource,
+                    io,
+                    tick,
+                    repeatable,
+                    amount,
+                    chance,
+                    selector,
+                    unitPrototype(item, fluid).capture(ops),
+                    chemical,
+                    fixed,
+                    match)));
+
+    public Row(String resource, RecipeModifier.Io io, int tick, boolean repeatable, long amount, double chance, String selector, Optional<ItemStack> item, Optional<FluidStack> fluid, Optional<ResourceLocation> chemical, boolean parallelUnaffected, String match) {
+      this(resource, io, tick, repeatable, amount, chance, selector, unitPrototype(item, fluid), chemical,
+          parallelUnaffected, match);
+    }
+
+    private static RecipeStackPrototype unitPrototype(Optional<ItemStack> item, Optional<FluidStack> fluid) {
+      return RecipeStackPrototype
+          .of(item.map(stack -> stack.copyWithCount(1)), fluid.map(stack -> stack.copyWithAmount(1)));
+    }
 
     public Row {
       Objects.requireNonNull(resource, "resource");
       Objects.requireNonNull(match, "match");
-      item = Objects.requireNonNull(item, "item").map(stack -> stack.copyWithCount(1));
-      fluid = Objects.requireNonNull(fluid, "fluid").map(stack -> stack.copyWithAmount(1));
+      Objects.requireNonNull(prototype, "prototype");
       Objects.requireNonNull(chemical, "chemical");
       if (io == null || tick < 1 || amount < 1 || !Double.isFinite(chance) || chance < 0 || chance > 1) {
         throw new IllegalArgumentException("Triggered IO needs positive time/quantity and probability within 0..1");
@@ -76,13 +103,9 @@ public record TriggeredResourceData(List<Row> rows) {
         throw new IllegalArgumentException("Only triggered item inputs may ignore components");
       }
       boolean validPrototype = switch (resource) {
-        case "item" -> item.isPresent() && !item.orElseThrow().isEmpty() && fluid.isEmpty() && chemical.isEmpty();
-        case "fluid" -> fluid.isPresent()
-            && !fluid.orElseThrow().isEmpty()
-            && item.isEmpty()
-            && chemical.isEmpty()
-            && amount <= Integer.MAX_VALUE;
-        case "chemical" -> chemical.isPresent() && item.isEmpty() && fluid.isEmpty() && !parallelUnaffected;
+        case "item" -> prototype.hasItem() && chemical.isEmpty();
+        case "fluid" -> prototype.unitFluid() && chemical.isEmpty() && amount <= Integer.MAX_VALUE;
+        case "chemical" -> chemical.isPresent() && !prototype.hasItem() && !prototype.hasFluid() && !parallelUnaffected;
         default -> false;
       };
       if (!validPrototype) {
@@ -90,14 +113,28 @@ public record TriggeredResourceData(List<Row> rows) {
       }
     }
 
-    @Override
-    public Optional<ItemStack> item() {
-      return item.map(ItemStack::copy);
+    public Row capture(HolderLookup.Provider registries) {
+      var captured = prototype.capture(registries);
+      return captured == prototype ? this : new Row(
+          resource,
+          io,
+          tick,
+          repeatable,
+          amount,
+          chance,
+          selector,
+          captured,
+          chemical,
+          parallelUnaffected,
+          match);
     }
 
-    @Override
+    public Optional<ItemStack> item() {
+      return prototype.item();
+    }
+
     public Optional<FluidStack> fluid() {
-      return fluid.map(FluidStack::copy);
+      return prototype.fluid();
     }
 
     @Override
@@ -113,14 +150,11 @@ public record TriggeredResourceData(List<Row> rows) {
           && chemical.equals(row.chemical)
           && parallelUnaffected == row.parallelUnaffected
           && match.equals(row.match)
-          && ItemStack.matches(item.orElse(ItemStack.EMPTY), row.item.orElse(ItemStack.EMPTY))
-          && FluidStack.matches(fluid.orElse(FluidStack.EMPTY), row.fluid.orElse(FluidStack.EMPTY));
+          && prototype.equals(row.prototype);
     }
 
     @Override
     public int hashCode() {
-      var stack = item.orElse(ItemStack.EMPTY);
-      var liquid = fluid.orElse(FluidStack.EMPTY);
       return Objects.hash(
           resource,
           io,
@@ -132,10 +166,7 @@ public record TriggeredResourceData(List<Row> rows) {
           chemical,
           parallelUnaffected,
           match,
-          stack.getItem(),
-          stack.getComponents(),
-          liquid.getFluid(),
-          liquid.getComponents());
+          prototype);
     }
   }
 }
